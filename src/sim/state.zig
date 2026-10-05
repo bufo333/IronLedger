@@ -26,6 +26,7 @@ const market_mod = @import("../econ/market.zig");
 const meklab = @import("../domain/meklab.zig");
 const actor_mod = @import("../domain/actor.zig");
 const rival_mod = @import("../domain/rival.zig");
+const merc_company_mod = @import("../domain/merc_company.zig");
 const world_state_mod = @import("../domain/world_state.zig");
 const officer_mod = @import("../domain/officer.zig");
 const hull_instance_mod = @import("../domain/hull_instance.zig");
@@ -317,6 +318,10 @@ pub const GameState = struct {
     /// Persistent rival companies (P4i).
     rivals: std.AutoArrayHashMapUnmanaged(types.RivalId, rival_mod.Rival) = .empty,
 
+    /// Persistent world merc companies (P3e entity split, docs/p3c-economy-design.md §8).
+    /// Empty until P3e.5 seeds it — no producer this increment.
+    merc_companies: std.AutoArrayHashMapUnmanaged(types.MercCompanyId, merc_company_mod.MercCompany) = .empty,
+
     /// Persistent officer arcs (P4i).
     officer_arcs: std.AutoArrayHashMapUnmanaged(types.OfficerArcId, officer_mod.OfficerArc) = .empty,
 
@@ -344,11 +349,11 @@ pub const GameState = struct {
     /// producers added in P3e.4/P3e.5 (rule 20).
     faction_rosters: std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.HullInstanceId)) = .empty,
 
-    /// Living rival-company hull pools (P3e.3). Keyed by RivalId (FK into
-    /// GameState.rivals); value is the ordered set of owned HullInstance ids.
+    /// Living merc-company hull pools (P3e entity split). Keyed by MercCompanyId (FK into
+    /// GameState.merc_companies); value is the ordered set of owned HullInstance ids.
     /// Same empty-pool-is-absence invariant and canonical-owner role as
-    /// faction_rosters. Empty until P3e.4 seeds it.
-    rival_rosters: std.AutoArrayHashMapUnmanaged(types.RivalId, std.ArrayListUnmanaged(types.HullInstanceId)) = .empty,
+    /// faction_rosters. Empty until P3e.5 — no producer this increment.
+    merc_company_rosters: std.AutoArrayHashMapUnmanaged(types.MercCompanyId, std.ArrayListUnmanaged(types.HullInstanceId)) = .empty,
 
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
@@ -364,6 +369,7 @@ pub const GameState = struct {
     next_operation_id: u32 = 1,
     next_actor_id: u32 = 1,
     next_rival_id: u32 = 1,
+    next_merc_company_id: u32 = 1,
     next_officer_arc_id: u32 = 1,
     next_hull_instance_id: u32 = 1,
 
@@ -1029,6 +1035,8 @@ pub const GameState = struct {
         .{ "next_actor_id", .persisted },
         .{ "rivals", .persisted },
         .{ "next_rival_id", .persisted },
+        .{ "merc_companies", .persisted },
+        .{ "next_merc_company_id", .persisted },
         .{ "officer_arcs", .persisted },
         .{ "next_officer_arc_id", .persisted },
         .{ "hull_instances", .persisted },
@@ -1037,7 +1045,7 @@ pub const GameState = struct {
         .{ "hull_ownership_history", .persisted },
         .{ "next_hull_instance_id", .persisted },
         .{ "faction_rosters", .persisted },
-        .{ "rival_rosters", .persisted },
+        .{ "merc_company_rosters", .persisted },
         .{ "world_states", .persisted },
     };
 

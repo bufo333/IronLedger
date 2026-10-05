@@ -10,19 +10,20 @@ const types = @import("types.zig");
 
 /// Who owns this hull right now. One of five kinds (docs/p3c-economy-design.md §2).
 /// Persisted as three typed columns: owner_type (tag name), owner_faction_key
-/// (FactionRow.key when .faction, else ""), owner_rival_id (RivalId int when
-/// .rival, else 0).
-pub const OwnerType = enum { player, faction, rival, market, destroyed };
+/// (FactionRow.key when .faction, else ""), owner_merc_company_id (MercCompanyId int
+/// when .merc_company, else 0). Stores migrated from ≤v53 carry a dead owner_rival_id
+/// column (SQLite cannot drop columns); the live read/write path uses owner_merc_company_id.
+pub const OwnerType = enum { player, faction, merc_company, market, destroyed };
 
 /// Current owner of a HullInstance. Illegal states are unrepresentable: you
-/// cannot hold owner_type=faction with a rival id (rule 20, no-partial-truth).
+/// cannot hold owner_type=faction with a merc_company id (rule 20, no-partial-truth).
 /// - .player / .market / .destroyed: no id payload
 /// - .faction: payload is the faction stable string key (FactionRow.key, e.g. "LC")
-/// - .rival: payload is types.RivalId (FK into GameState.rivals)
+/// - .merc_company: payload is types.MercCompanyId (FK into GameState.merc_companies)
 pub const HullOwner = union(OwnerType) {
     player,
     faction: []const u8,
-    rival: types.RivalId,
+    merc_company: types.MercCompanyId,
     market,
     destroyed,
 };

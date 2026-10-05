@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 52. The executable DDL and its column migrations
+-- Matches schema_version 54. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -993,6 +993,9 @@ CREATE TABLE rival (
     last_cause          TEXT    NOT NULL DEFAULT '', -- markup-safe label for last standing change
     last_cause_day      INTEGER NOT NULL DEFAULT 0,  -- day_index of last change
     recurring           INTEGER NOT NULL DEFAULT 0,  -- boolean: carried forward from prior contract
+    -- P3e entity split: FK to the world MercCompany this rivalry overlay belongs to (§8.B).
+    -- .none (0) until P3e.5 attaches rivals to companies.
+    merc_company_id     INTEGER NOT NULL DEFAULT 0,  -- MercCompanyId int; 0 = none
     PRIMARY KEY (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
@@ -1034,10 +1037,13 @@ CREATE TABLE hull_instance (
     status          TEXT    NOT NULL DEFAULT 'active', -- HullStatus tag: active | permanently_destroyed
     intro_year      INTEGER NOT NULL DEFAULT 0,      -- TUNE: sourced from base chassis intro_year
     pre_campaign    INTEGER NOT NULL DEFAULT 0 CHECK (pre_campaign IN (0,1)), -- bool: acquired before campaign start
-    -- P3e.2: current-owner fields (HullOwner union; OwnerType tags: player|faction|rival|market|destroyed)
+    -- P3e.2/P3e entity split: current-owner fields
+    -- (HullOwner union; OwnerType tags: player|faction|merc_company|market|destroyed)
     owner_type      TEXT    NOT NULL DEFAULT 'player', -- OwnerType tag name (active union tag)
     owner_faction_key TEXT  NOT NULL DEFAULT '',       -- FactionRow.key when owner_type='faction'; else ''
-    owner_rival_id  INTEGER NOT NULL DEFAULT 0,        -- RivalId int when owner_type='rival'; else 0
+    owner_rival_id  INTEGER NOT NULL DEFAULT 0,        -- DEAD column (≤v53: RivalId; v54+: superseded by
+                                                       --   owner_merc_company_id; SQLite cannot drop columns)
+    owner_merc_company_id INTEGER NOT NULL DEFAULT 0,  -- MercCompanyId int when owner_type='merc_company'; else 0
     PRIMARY KEY (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
@@ -1136,17 +1142,36 @@ CREATE TABLE faction_roster (
 );
 CREATE INDEX IF NOT EXISTS ix_faction_roster_cid ON faction_roster(cid);
 
--- rival_roster: living rival-company hull pools (P3e.3).
--- One row per owned hull per rival. Same ord/order semantics as faction_roster.
--- rival_id is a validated containment FK into rival; hull_instance_id likewise.
--- Column order matches runtime (saveRivalRosters/loadRivalRosters).
-CREATE TABLE rival_roster (
+-- merc_company: world mercenary company entities (P3e entity split, §8).
+-- Identity record for an independent merc outfit operating in the same theatre as the player.
+-- No producer until P3e.5; collection is empty until then.
+CREATE TABLE merc_company (
+    cid              INTEGER NOT NULL,
+    ord              INTEGER NOT NULL,                  -- stable insertion order for deterministic digest
+    id               INTEGER NOT NULL,                  -- MercCompanyId enum value (u32); nonzero
+    archetype_key    TEXT    NOT NULL DEFAULT '',       -- -> data/tables/rival_archetypes.zon
+    commander_first  TEXT    NOT NULL DEFAULT '',
+    commander_last   TEXT    NOT NULL DEFAULT '',
+    unit_name        TEXT    NOT NULL DEFAULT '',       -- markup-safe display name
+    faction_key      TEXT    NOT NULL DEFAULT '',       -- -> factions catalog
+    side             TEXT    NOT NULL DEFAULT 'employer', -- FactionSide tag
+    doctrine         TEXT    NOT NULL DEFAULT 'cautious', -- RivalDoctrine tag
+    PRIMARY KEY (cid, id),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_merc_company_cid ON merc_company(cid);
+
+-- merc_company_roster: living merc-company hull pools (P3e entity split; replaces rival_roster).
+-- One row per owned hull per merc company. Same ord/order semantics as faction_roster.
+-- merc_company_id is a validated containment FK into merc_company; hull_instance_id likewise.
+-- Column order matches runtime (saveMercCompanyRosters/loadMercCompanyRosters).
+CREATE TABLE merc_company_roster (
     cid              INTEGER NOT NULL,
     ord              INTEGER NOT NULL,                  -- global insertion order
-    rival_id         INTEGER NOT NULL,                  -- -> rival.id (validated)
+    merc_company_id  INTEGER NOT NULL,                  -- -> merc_company.id (validated)
     hull_instance_id INTEGER NOT NULL,                  -- -> hull_instance.id (validated)
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (cid, rival_id) REFERENCES rival(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, merc_company_id) REFERENCES merc_company(cid, id) DEFERRABLE INITIALLY DEFERRED,
     FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
 );
-CREATE INDEX IF NOT EXISTS ix_rival_roster_cid ON rival_roster(cid);
+CREATE INDEX IF NOT EXISTS ix_merc_company_roster_cid ON merc_company_roster(cid);

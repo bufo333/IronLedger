@@ -96,6 +96,10 @@ pub const ActorId = enum(u32) { none = 0, _ };
 /// One persistent rival company (P4i); typed so a rival reference cannot be
 /// passed where an actor or operation index is expected (rule 56).
 pub const RivalId = enum(u32) { none = 0, _ };
+/// One persistent world merc company (P3e entity split, docs/p3c-economy-design.md §8);
+/// typed so a merc company reference cannot be passed where a rival or actor index is
+/// expected (rule 56).
+pub const MercCompanyId = enum(u32) { none = 0, _ };
 /// One persistent officer arc (P4i); typed so an officer arc reference cannot
 /// be passed where a rival or actor index is expected (rule 56).
 pub const OfficerArcId = enum(u32) { none = 0, _ };

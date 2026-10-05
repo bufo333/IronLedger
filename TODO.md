@@ -70,6 +70,7 @@ above is complete.
     - [x] P3e.2: HullInstance current-owner fields (owner_type/owner_id; schema change). <!-- sim/p3e-2 -->
     - [x] P3e.3: FactionRoster + RivalRoster persistence (new collections, digest, round-trip). <!-- sim/p3e-3 -->
     - [x] P3e.4: campaign-start roster seeding (deterministic gen/ from the RAT). <!-- sim/p3e-4 -->
+    - [x] Pre-P3e.5 entity split: MercCompany/MercCompanyId, merc_company_rosters, schema v53→v54. <!-- sim/p3e-entity-split -->
     - [ ] P3e.5: battle aftermath integration (OpFor draw from roster; destroyed/salvaged/survivor updates).
     - [ ] P3e.6: market surplus throughput (monthly surplus to listings, throttled by world_state conflict).
     - [ ] P3e.7: rival insolvency (fieldable BV below threshold → inactive).

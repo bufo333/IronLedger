@@ -105,6 +105,9 @@ pub const Rival = struct {
 
     /// True when this rival recurs from a prior contract (carried forward).
     recurring: bool = false,
+    /// FK to the world merc company this status overlay belongs to
+    /// (docs/p3c-economy-design.md §8.B); .none until P3e.5 attaches rivals to companies.
+    merc_company_id: types.MercCompanyId = .none,
 };
 
 // ---- Comptime validation ---------------------------------------------------
@@ -226,4 +229,5 @@ test "Rival defaults and standing constants" {
     try std.testing.expectEqualStrings("active", RivalStatus.active.label());
     try std.testing.expectEqualStrings("allied", RivalStatus.allied.label());
     try std.testing.expectEqualStrings("cautious", RivalDoctrine.cautious.label());
+    try std.testing.expectEqual(types.MercCompanyId.none, r.merc_company_id);
 }
