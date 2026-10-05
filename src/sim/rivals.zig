@@ -13,6 +13,7 @@ const rng_mod = @import("rng.zig");
 const person_gen = @import("../gen/person_gen.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
+const merc_company_mod = @import("../domain/merc_company.zig");
 
 /// Generate rival names and identity using the `.rivals` RNG stream (rule 57).
 /// Deterministic per seed; drawing does not perturb `.actors`, `.battle`, or `.generation`.
@@ -214,6 +215,13 @@ pub fn instantiateRivals(gs: *GameState, c: *contract_mod.Contract, id_start: u3
             rv = try generateRival(gs, arch_key, faction_key, id);
             rv.contract = c.id;
             // encounters = 1 is set by generateRival
+        }
+        // Draw a merc company from the world pool (docs/p3c-economy-design.md §8.B).
+        // Guard: uintLessThan with a zero bound is illegal; leave .none when the
+        // pool is empty so no partial truth is written (rule 1).
+        if (gs.merc_companies.count() > 0) {
+            const idx = gs.rng.random(.rivals).uintLessThan(usize, gs.merc_companies.count());
+            rv.merc_company_id = gs.merc_companies.keys()[idx];
         }
         prepared[prep_count] = rv;
         prep_count += 1;
@@ -527,5 +535,118 @@ test "asset-safety: adjustRival and instantiateRivals never touch funds, forces,
     // Force local_funds unchanged.
     if (gs.forces.getPtr(fid)) |f| {
         try std.testing.expectEqual(@as(i64, 100_000), f.local_funds);
+    }
+}
+
+test "instantiateRivals: links each rival to an existing merc company, deterministically" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 11 });
+    defer gs.deinit();
+
+    // Insert three merc companies into the pool (via the arena so deinit frees them).
+    const alloc = gs.allocator();
+    for ([_]u32{ 1, 2, 3 }) |raw| {
+        const mcid: types.MercCompanyId = @enumFromInt(raw);
+        try gs.merc_companies.put(alloc, mcid, merc_company_mod.MercCompany{
+            .id = mcid,
+            .archetype_key = "enemy_raiders",
+            .commander_first = "Ann",
+            .commander_last = "Smith",
+            .unit_name = "Smith Raiders",
+            .faction_key = "DC",
+            .side = .enemy,
+            .doctrine = .aggressive,
+        });
+    }
+
+    const cid: types.ContractId = @enumFromInt(1);
+    var c = contract_mod.Contract{
+        .id = cid,
+        .arc_key = "fracturing_garrison",
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .kind = .garrison_duty,
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+    };
+    try instantiateRivals(&gs, &c, 1);
+
+    // Every rival must have a non-.none merc_company_id that resolves.
+    try std.testing.expect(gs.rivals.count() > 0);
+    var it = gs.rivals.iterator();
+    while (it.next()) |entry| {
+        const rv = entry.value_ptr;
+        try std.testing.expect(rv.merc_company_id != .none);
+        try std.testing.expect(gs.merc_companies.getPtr(rv.merc_company_id) != null);
+    }
+
+    // Collect assignments from first run.
+    var first_ids: std.ArrayListUnmanaged(types.RivalId) = .empty;
+    defer first_ids.deinit(a);
+    var first_mcids: std.ArrayListUnmanaged(types.MercCompanyId) = .empty;
+    defer first_mcids.deinit(a);
+    it = gs.rivals.iterator();
+    while (it.next()) |entry| {
+        try first_ids.append(a, entry.value_ptr.id);
+        try first_mcids.append(a, entry.value_ptr.merc_company_id);
+    }
+
+    // Second GameState with the same seed and the same pool.
+    var gs2 = GameState.init(a, .{ .seed = 11 });
+    defer gs2.deinit();
+    const alloc2 = gs2.allocator();
+    for ([_]u32{ 1, 2, 3 }) |raw| {
+        const mcid: types.MercCompanyId = @enumFromInt(raw);
+        try gs2.merc_companies.put(alloc2, mcid, merc_company_mod.MercCompany{
+            .id = mcid,
+            .archetype_key = "enemy_raiders",
+            .commander_first = "Ann",
+            .commander_last = "Smith",
+            .unit_name = "Smith Raiders",
+            .faction_key = "DC",
+            .side = .enemy,
+            .doctrine = .aggressive,
+        });
+    }
+    var c2 = contract_mod.Contract{
+        .id = cid,
+        .arc_key = "fracturing_garrison",
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .kind = .garrison_duty,
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+    };
+    try instantiateRivals(&gs2, &c2, 1);
+    try std.testing.expectEqual(gs.rivals.count(), gs2.rivals.count());
+
+    // Per-rival assignments must be identical (determinism).
+    for (first_ids.items, first_mcids.items) |rid, mcid| {
+        const rv2 = gs2.rivals.getPtr(rid) orelse return error.TestFailed;
+        try std.testing.expectEqual(mcid, rv2.merc_company_id);
+    }
+}
+
+test "instantiateRivals: empty merc-company pool leaves merc_company_id none" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 5 });
+    defer gs.deinit();
+    // gs.merc_companies is empty — the guard must fire and no draw is made.
+
+    const cid: types.ContractId = @enumFromInt(1);
+    var c = contract_mod.Contract{
+        .id = cid,
+        .arc_key = "fracturing_garrison",
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .kind = .garrison_duty,
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+    };
+    try instantiateRivals(&gs, &c, 1);
+
+    try std.testing.expect(gs.rivals.count() > 0);
+    var it = gs.rivals.iterator();
+    while (it.next()) |entry| {
+        try std.testing.expectEqual(types.MercCompanyId.none, entry.value_ptr.merc_company_id);
     }
 }

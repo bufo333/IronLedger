@@ -106,7 +106,8 @@ pub const Rival = struct {
     /// True when this rival recurs from a prior contract (carried forward).
     recurring: bool = false,
     /// FK to the world merc company this status overlay belongs to
-    /// (docs/p3c-economy-design.md §8.B); .none until P3e.5 attaches rivals to companies.
+    /// (docs/p3c-economy-design.md §8.B); set by instantiateRivals when
+    /// gs.merc_companies is non-empty, .none when the pool is empty.
     merc_company_id: types.MercCompanyId = .none,
 };
 
