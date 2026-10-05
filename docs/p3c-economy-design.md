@@ -354,11 +354,14 @@ No new faction key is invented and no separate pirate entity is needed. The thir
 category is drawn from the `PER` faction pool exactly like a house faction, with a different
 *lifecycle*: because PER manufactures nothing, its pool is replenished only by salvage, never
 by manufacturing. Because P3e.4 seeds only factions with nonzero
-`replenishment_hulls_per_year`, PER is **not seeded** at campaign start today. Open
-decision, `// TBD`: whether PER (and other zero-replenishment thin factions) receive a
-seeded starting pool so pirate OpFor can be drawn from persisted hulls, or whether pirate
-OpFor continues to be RAT-rolled on demand (`opfor.roll`) and never persisted as a pool.
-This is settled at P3e.5.
+`replenishment_hulls_per_year`, PER was not seeded at campaign start until P3e.5b-1.
+
+**Resolved — owner decision 3 (P3e.5b-1):** PER receives a flat-constant seeded starting
+pool at campaign creation (`pirate_pool_hulls` in `tuning.generation`, currently 16 `// TUNE`),
+seeded by `src/sim/roster_seed.zig` `seedPirateRoster` in the same `execCreateCommander`
+founding path as faction and merc-company seeding. Other zero-replenishment factions (TC,
+MOC, OA, MH, CIR, OBR, CS) remain unseeded; whether they receive a starting pool is an open
+owner decision to be resolved before P3e.5b-3 (empty-roster OpFor default path).
 
 ### §8.D Campaign-start merc-company seeding
 
@@ -397,8 +400,9 @@ OpFor has three sources; a contract draws from one per its kind and arc (`Contra
   "rival" contract, i.e. `arc_key`/`rival_ids` populated): drawn from that company's pool
   in `merc_company_rosters`.
 - **Pirates / bandits / non-aligned** — `pirate_hunting`, and any contract whose
-  `enemy_key == "PER"`: drawn from the `PER` faction, per §8.C (persisted pool vs on-demand
-  RAT roll is the §8.C `// TBD`).
+  `enemy_key == "PER"`: drawn from the `PER` faction pool in `faction_rosters["PER"]`, which
+  is seeded at campaign creation by `seedPirateRoster` (P3e.5b-1, §8.C; the pool is persisted
+  and will be drawn at battle-start in P3e.5b-3).
 
 Today `opfor.roll` RAT-rolls the enemy force rather than drawing from a persisted roster.
 Replacing that draw with a roster draw (and the destroyed/salvaged/survivor ownership

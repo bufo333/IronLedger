@@ -582,5 +582,211 @@ test "seedMercCompanies: atomicity — any allocation failure leaves stateHash u
     }
 }
 
+/// Seed the Periphery/pirates (PER) faction hull pool at campaign creation
+/// (P3e.5b-1, docs/p3c-economy-design.md §8.C; owner decision 3).
+/// Failure-atomic (rules 7, 11–13):
+///   Prepare  — locate PER in faction.table; if absent, return without error.
+///              If pirate_pool_hulls == 0, return without seeding.
+///   Reserve  — ensureUnusedCapacity on hull_instances, hull_ownership_history,
+///              and faction_rosters; pre-build roster ID list; construct every
+///              HullInstance (including loadout) into a flat arena slice.
+///              All fallible; on any error gs.* entries are unchanged.
+///   Commit   — insert pre-built records into gs.* (infallible); gs.rng and
+///              gs.next_hull_instance_id updated last.
+///
+/// Draws on the .rosters stream only; does not touch .rivals, .generation,
+/// or .battle. Appended after seedMercCompanies to minimise golden-hash churn
+/// (stream-consumption order is fixed: faction seeding, merc seeding, PER seeding).
+pub fn seedPirateRoster(gs: *GameState) !void {
+    const alloc = gs.allocator();
+    const total: u32 = @as(u32, tuning.generation.pirate_pool_hulls);
+    if (total == 0) return;
+
+    // ---- Prepare ----
+    // Locate PER in the static faction table.  If a mod removed PER, return
+    // without seeding — fail-closed, matching seedFactionRosters' omit behaviour.
+    const per_key: []const u8 = blk: {
+        for (faction.table) |*f| {
+            if (std.mem.eql(u8, f.key, "PER")) break :blk f.key;
+        }
+        return; // PER absent — no seeding, no error
+    };
+
+    // ---- Reserve ----
+    // All fallible touches happen here, before any gs.* entry is written.
+    try gs.hull_instances.ensureUnusedCapacity(alloc, total);
+    try gs.hull_ownership_history.ensureUnusedCapacity(alloc, total);
+    try gs.faction_rosters.ensureUnusedCapacity(alloc, 1);
+
+    var roster_list = std.ArrayListUnmanaged(types.HullInstanceId).empty;
+    try roster_list.ensureTotalCapacity(alloc, total);
+
+    // Draw from rng_copy so gs.rng is updated only on success.
+    var rng_copy = gs.rng;
+    var next_id = gs.next_hull_instance_id;
+    const year = gs.clock.date.year;
+
+    // Pre-build every HullInstance — loadout append is fallible, placed here.
+    const built_hulls = try alloc.alloc(hull_mod.HullInstance, total);
+    var hull_idx: usize = 0;
+    for (0..total) |_| {
+        const hid: types.HullInstanceId = @enumFromInt(next_id);
+        next_id += 1;
+
+        const ch = roster_gen.rollFactionPoolOne(&rng_copy, .rosters, per_key, year);
+        var inst: hull_mod.HullInstance = .{
+            .id = hid,
+            .base_key = ch.key, // static catalogue memory
+            .status = .active,
+            .intro_year = ch.intro_year,
+            .pre_campaign = true,
+            .owner = .{ .faction = per_key }, // static catalogue key
+        };
+        // Copy design loadout (docs/p3c-economy-design.md §2).
+        for (ch.loadout) |slot| {
+            try inst.loadout.append(alloc, .{ .part_key = slot.part });
+        }
+        roster_list.appendAssumeCapacity(hid);
+        built_hulls[hull_idx] = inst;
+        hull_idx += 1;
+    }
+
+    // ---- Commit ----
+    // All operations here are infallible; gs.* is only mutated in this phase.
+    hull_idx = 0;
+    for (roster_list.items) |hid| {
+        gs.hull_instances.putAssumeCapacity(hid, built_hulls[hull_idx]);
+        hull_idx += 1;
+
+        // Open one .initial ownership interval per hull (rule 1 — owner without
+        // interval is partial truth).
+        gs.hull_ownership_history.appendAssumeCapacity(.{
+            .hull_instance_id = hid,
+            .from_day = 0,
+            .to_day = 0,
+            .acquisition_type = .initial,
+            .prior_owner_key = per_key, // static catalogue memory
+        });
+    }
+
+    // Insert the roster list under PER's stable key.
+    gs.faction_rosters.putAssumeCapacity(per_key, roster_list);
+
+    // Update counters last (infallible).
+    gs.next_hull_instance_id = next_id;
+    gs.rng = rng_copy;
+}
+
+test "seedPirateRoster: PER gets the flat pool, owner .faction PER, one open .initial interval each" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7020 });
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .line_officer);
+    gs.clock.date.year = 3025;
+    try seedPirateRoster(&gs);
+
+    const tg = tuning.generation;
+    const roster = gs.faction_rosters.get("PER") orelse {
+        std.debug.print("seedPirateRoster: no roster for PER\n", .{});
+        return error.TestUnexpectedResult;
+    };
+    try std.testing.expectEqual(@as(usize, tg.pirate_pool_hulls), roster.items.len);
+
+    for (roster.items) |hid| {
+        const inst = gs.hull_instances.getPtr(hid) orelse {
+            std.debug.print("seedPirateRoster: hull {d} not in hull_instances\n", .{@intFromEnum(hid)});
+            return error.TestUnexpectedResult;
+        };
+        try std.testing.expectEqualStrings("PER", switch (inst.owner) {
+            .faction => |k| k,
+            else => return error.TestUnexpectedResult,
+        });
+        try std.testing.expect(inst.pre_campaign);
+        try std.testing.expectEqual(hull_mod.HullStatus.active, inst.status);
+        // Exactly one open .initial ownership interval.
+        var found: usize = 0;
+        for (gs.hull_ownership_history.items) |h| {
+            if (h.hull_instance_id != hid) continue;
+            found += 1;
+            try std.testing.expectEqual(hull_mod.AcquisitionType.initial, h.acquisition_type);
+            try std.testing.expectEqual(@as(u32, 0), h.from_day);
+            try std.testing.expectEqual(@as(u32, 0), h.to_day);
+            try std.testing.expectEqualStrings("PER", h.prior_owner_key);
+        }
+        try std.testing.expectEqual(@as(usize, 1), found);
+    }
+    // next_hull_instance_id is past all seeded ids.
+    var max_id: u32 = 0;
+    var hit = gs.hull_instances.iterator();
+    while (hit.next()) |e| {
+        const raw: u32 = @intFromEnum(e.key_ptr.*);
+        if (raw > max_id) max_id = raw;
+    }
+    try std.testing.expect(gs.next_hull_instance_id > max_id);
+}
+
+test "seedPirateRoster: determinism and stream isolation" {
+    var gs1 = GameState.init(std.testing.allocator, .{ .seed = 7021 });
+    defer gs1.deinit();
+    var gs2 = GameState.init(std.testing.allocator, .{ .seed = 7021 });
+    defer gs2.deinit();
+
+    _ = try @import("founding.zig").createCommander(&gs1, "T", .LC, .line_officer);
+    _ = try @import("founding.zig").createCommander(&gs2, "T", .LC, .line_officer);
+    gs1.clock.date.year = 3025;
+    gs2.clock.date.year = 3025;
+
+    // Sample .generation and .battle streams before seeding on both.
+    const gen_before_1 = gs1.rng.random(.generation).int(u64);
+    const gen_before_2 = gs2.rng.random(.generation).int(u64);
+    try std.testing.expectEqual(gen_before_1, gen_before_2);
+    const battle_before_1 = gs1.rng.random(.battle).int(u64);
+    const battle_before_2 = gs2.rng.random(.battle).int(u64);
+    try std.testing.expectEqual(battle_before_1, battle_before_2);
+
+    try seedPirateRoster(&gs1);
+    try seedPirateRoster(&gs2);
+
+    try std.testing.expectEqual(digest.stateHash(&gs1), digest.stateHash(&gs2));
+
+    // Stream isolation: seeding on .rosters must not perturb .generation or .battle.
+    for (0..10) |_| {
+        try std.testing.expectEqual(
+            gs1.rng.random(.generation).int(u64),
+            gs2.rng.random(.generation).int(u64),
+        );
+        try std.testing.expectEqual(
+            gs1.rng.random(.battle).int(u64),
+            gs2.rng.random(.battle).int(u64),
+        );
+    }
+}
+
+test "seedPirateRoster: atomicity — any allocation failure leaves stateHash unchanged" {
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 7022 });
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .line_officer);
+    gs.clock.date.year = 3025;
+
+    const before = digest.stateHash(&gs);
+
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
+        gs.arena.child_allocator = failing.allocator();
+
+        if (seedPirateRoster(&gs)) |_| {
+            // All allocations succeeded; state must have changed.
+            try std.testing.expect(digest.stateHash(&gs) != before);
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+        }
+    }
+}
+
 // Round-trip test lives in src/persist/store.zig (rule 5: sim does not import
 // persist; the test is "seeded campaign round-trips with identical stateHash").

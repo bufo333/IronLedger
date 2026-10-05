@@ -746,6 +746,12 @@ pub const Tuning = struct {
         /// Hull pool size for each world merc company at campaign creation
         /// (docs/p3c-economy-design.md §8.D). // TUNE
         merc_company_hulls_each: u16,
+        /// Flat starting hull-pool size for the Periphery/pirates faction (PER)
+        /// at campaign creation. PER manufactures nothing
+        /// (replenishment_hulls_per_year = 0) and is salvage-replenished only, so
+        /// it is seeded by a flat constant rather than years × rate
+        /// (docs/p3c-economy-design.md §8.C; owner decision 3). // TUNE
+        pirate_pool_hulls: u16,
     },
     /// Real loss: how hulls die, what a rebuild needs, and when one is not
     /// worth it (TechManual hull destruction; CamOps salvage).

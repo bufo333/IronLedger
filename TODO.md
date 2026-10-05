@@ -71,7 +71,10 @@ above is complete.
     - [x] P3e.3: FactionRoster + RivalRoster persistence (new collections, digest, round-trip). <!-- sim/p3e-3 -->
     - [x] P3e.4: campaign-start roster seeding (deterministic gen/ from the RAT). <!-- sim/p3e-4 -->
     - [x] Pre-P3e.5 entity split: MercCompany/MercCompanyId, merc_company_rosters, schema v53→v54. <!-- sim/p3e-entity-split -->
-    - [ ] P3e.5: battle aftermath integration (OpFor draw from roster; destroyed/salvaged/survivor updates).
+    - [x] P3e.5a: campaign-start merc-company seeding (12 companies × 8 hulls). <!-- sim/p3e-5a-merc-seed -->
+    - [x] P3e.5b-1: PER/pirate campaign-start hull-pool seeding (flat pirate_pool_hulls = 16). <!-- sim/p3e-5b-pirate-pool -->
+    - [ ] P3e.5b-2: Rival ↔ MercCompany link (Rival gains MercCompanyId FK; instantiateRivals selects an existing merc company).
+    - [ ] P3e.5b-3: OpFor roster draw + battle aftermath (draw from pool at battle start; destroyed/salvaged/survivor ownership updates; SalvageCandidate hull_instance_id; takeSalvage; combat_ineffective HullStatus; empty-roster default path).
     - [ ] P3e.6: market surplus throughput (monthly surplus to listings, throttled by world_state conflict).
     - [ ] P3e.7: rival insolvency (fieldable BV below threshold → inactive).
 

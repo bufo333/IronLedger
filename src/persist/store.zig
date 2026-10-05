@@ -4797,8 +4797,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P3e.5a merc-company seeding (12 companies × 8 hulls at campaign start).
-    try std.testing.expectEqual(@as(u64, 9433690443265264857), hash_before);
+    // Re-pinned by P3e.5b-1 PER pool seeding (flat pirate_pool_hulls at campaign start).
+    try std.testing.expectEqual(@as(u64, 10557097851009095035), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5293,9 +5293,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P3e.5a merc-company seeding
-    // (12 companies × 8 hulls at campaign start).
-    try std.testing.expectEqual(@as(u64, 9433690443265264857), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3e.5b-1 PER pool seeding
+    // (flat pirate_pool_hulls at campaign start).
+    try std.testing.expectEqual(@as(u64, 10557097851009095035), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -8019,8 +8019,8 @@ test "seeded faction hull pool survives a save/load round-trip with identical st
     } });
 
     const before = digest.stateHash(&gs);
-    // Five manufacturing factions must have rosters.
-    try std.testing.expectEqual(@as(usize, 5), gs.faction_rosters.count());
+    // Five manufacturing factions plus PER (P3e.5b-1) must have rosters.
+    try std.testing.expectEqual(@as(usize, 6), gs.faction_rosters.count());
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -8031,7 +8031,7 @@ test "seeded faction hull pool survives a save/load round-trip with identical st
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
     try std.testing.expectEqual(before, digest.stateHash(&loaded));
-    try std.testing.expectEqual(@as(usize, 5), loaded.faction_rosters.count());
+    try std.testing.expectEqual(@as(usize, 6), loaded.faction_rosters.count());
 }
 
 test "seeded merc company hull pool survives a save/load round-trip with identical stateHash (P3e.5a)" {

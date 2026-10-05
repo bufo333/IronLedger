@@ -243,6 +243,8 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
     try roster_seed.seedFactionRosters(gs);
     // Seed world merc company hull pools (P3e.5a).
     try roster_seed.seedMercCompanies(gs);
+    // Seed the Periphery/pirates (PER) salvage pool (P3e.5b-1, §8.C).
+    try roster_seed.seedPirateRoster(gs);
     return .{};
 }
 

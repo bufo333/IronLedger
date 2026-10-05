@@ -472,6 +472,7 @@
         .faction_roster_seed_years = 2, // TUNE
         .merc_company_count = 12, // TUNE — docs/p3c-economy-design.md §8.D
         .merc_company_hulls_each = 8, // TUNE — docs/p3c-economy-design.md §8.D
+        .pirate_pool_hulls = 16, // TUNE — docs/p3c-economy-design.md §8.C
     },
     // Real loss. TechManual "Destroying a 'Mech": a cored
     // centre torso, a destroyed engine (three engine criticals) or an
