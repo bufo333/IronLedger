@@ -21,10 +21,12 @@ const max_factions = 32;
 /// Seed every manufacturing faction's hull pool at campaign creation.
 /// Failure-atomic (rules 7, 11–13):
 ///   Prepare  — count needed capacity; no gs.* mutation.
-///   Reserve  — ensureUnusedCapacity on all three collections (all fallible);
-///              on any error gs.* entries are unchanged.
-///   Commit   — build and insert all records; gs.rng and
-///              gs.next_hull_instance_id updated last (infallible).
+///   Reserve  — ensureUnusedCapacity on all three collections, pre-build
+///              per-faction roster ID lists, and construct every HullInstance
+///              value (including its loadout) into a flat arena slice; all
+///              fallible; on any error gs.* entries are unchanged.
+///   Commit   — insert pre-built records into gs.* (infallible); gs.rng and
+///              gs.next_hull_instance_id updated last.
 ///
 /// Factions with replenishment_hulls_per_year == 0 are skipped (rule 4,
 /// docs/p3c-economy-design.md §4 "empty manufacturing = no roster").
@@ -51,28 +53,32 @@ pub fn seedFactionRosters(gs: *GameState) !void {
     if (num_seeded == 0) return; // nothing to do
 
     // ---- Reserve ----
-    // All fallible touches to gs.* happen here, before any entry is written.
+    // All fallible touches happen here, before any gs.* entry is written.
     // A failure here leaves gs.hull_instances, gs.hull_ownership_history,
     // gs.faction_rosters, gs.rng, and gs.next_hull_instance_id unchanged.
     try gs.hull_instances.ensureUnusedCapacity(alloc, total_hulls);
     try gs.hull_ownership_history.ensureUnusedCapacity(alloc, total_hulls);
     try gs.faction_rosters.ensureUnusedCapacity(alloc, num_seeded);
 
-    // Pre-build per-faction roster lists (still in reserve; no gs.* map
-    // entries yet).  On failure, any partially-reserved lists are orphaned
-    // arena memory — harmless (arena lifetime = campaign lifetime).
+    // Pre-build per-faction roster ID lists; capacity reserved above.
+    // On failure, partially-reserved lists are orphaned arena memory —
+    // harmless (arena lifetime = campaign lifetime).
     var roster_lists: [max_factions]std.ArrayListUnmanaged(types.HullInstanceId) =
         .{std.ArrayListUnmanaged(types.HullInstanceId).empty} ** max_factions;
     for (0..num_seeded) |ri| {
         try roster_lists[ri].ensureTotalCapacity(alloc, seeded_counts[ri]);
     }
 
-    // ---- Commit ----
     // Draw from a rng copy so gs.rng is only updated on success.
     var rng_copy = gs.rng;
     var next_id = gs.next_hull_instance_id;
     const year = gs.clock.date.year;
 
+    // Pre-build every HullInstance value — including its loadout — before
+    // touching gs.*.  Loadout append is fallible; placing it here (Reserve)
+    // ensures a failure leaves gs.* untouched (rules 7, 11–13, 1).
+    const built_hulls = try alloc.alloc(hull_mod.HullInstance, total_hulls);
+    var hull_idx: usize = 0;
     for (0..num_seeded) |ri| {
         const f = &faction.table[seeded_idx[ri]];
         const count = seeded_counts[ri];
@@ -94,7 +100,20 @@ pub fn seedFactionRosters(gs: *GameState) !void {
             for (ch.loadout) |slot| {
                 try inst.loadout.append(alloc, .{ .part_key = slot.part });
             }
-            gs.hull_instances.putAssumeCapacity(hid, inst);
+            roster_lists[ri].appendAssumeCapacity(hid);
+            built_hulls[hull_idx] = inst;
+            hull_idx += 1;
+        }
+    }
+
+    // ---- Commit ----
+    // All operations here are infallible; gs.* is only mutated in this phase.
+    hull_idx = 0;
+    for (0..num_seeded) |ri| {
+        const f = &faction.table[seeded_idx[ri]];
+        for (roster_lists[ri].items) |hid| {
+            gs.hull_instances.putAssumeCapacity(hid, built_hulls[hull_idx]);
+            hull_idx += 1;
 
             // Open one .initial ownership interval (rule 1 — owner without
             // interval is partial truth).
@@ -105,8 +124,6 @@ pub fn seedFactionRosters(gs: *GameState) !void {
                 .acquisition_type = .initial,
                 .prior_owner_key = f.key, // static catalogue memory
             });
-
-            roster_lists[ri].appendAssumeCapacity(hid);
         }
 
         // Insert the roster list under the faction's stable key.
@@ -231,6 +248,37 @@ test "seedFactionRosters: atomicity — reserve-phase failure leaves stateHash u
 
     try std.testing.expectError(error.OutOfMemory, seedFactionRosters(&gs));
     try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "seedFactionRosters: atomicity — any allocation failure leaves stateHash unchanged" {
+    // Iterate fail_index from 0 upward, covering reserve-phase capacity
+    // reservations AND prepare-phase loadout copies.  Every OOM must leave
+    // gs.* bit-identical to the pre-call state; success must change it.
+    // Pattern from src/sim/field_supply.zig.
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 7005 });
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .line_officer);
+    gs.clock.date.year = 3025;
+
+    const before = digest.stateHash(&gs);
+
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
+        gs.arena.child_allocator = failing.allocator();
+
+        if (seedFactionRosters(&gs)) |_| {
+            // All allocations succeeded; state must have changed.
+            try std.testing.expect(digest.stateHash(&gs) != before);
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+        }
+    }
 }
 
 // Round-trip test lives in src/persist/store.zig (rule 5: sim does not import
