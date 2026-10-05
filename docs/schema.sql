@@ -1041,8 +1041,6 @@ CREATE TABLE hull_instance (
     -- (HullOwner union; OwnerType tags: player|faction|merc_company|market|destroyed)
     owner_type      TEXT    NOT NULL DEFAULT 'player', -- OwnerType tag name (active union tag)
     owner_faction_key TEXT  NOT NULL DEFAULT '',       -- FactionRow.key when owner_type='faction'; else ''
-    owner_rival_id  INTEGER NOT NULL DEFAULT 0,        -- DEAD column (≤v53: RivalId; v54+: superseded by
-                                                       --   owner_merc_company_id; SQLite cannot drop columns)
     owner_merc_company_id INTEGER NOT NULL DEFAULT 0,  -- MercCompanyId int when owner_type='merc_company'; else 0
     PRIMARY KEY (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED

@@ -99,7 +99,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS world_state (cid INTEGER NOT NULL, ord INTEGER NOT NULL, planet_key TEXT NOT NULL, security INTEGER NOT NULL DEFAULT 0, civilian_support INTEGER NOT NULL DEFAULT 0, infrastructure_strain INTEGER NOT NULL DEFAULT 0, employer_control INTEGER NOT NULL DEFAULT 0, enemy_influence INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, planet_key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS rival (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, standing INTEGER NOT NULL DEFAULT 0, encounters INTEGER NOT NULL DEFAULT 1, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), merc_company_id INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS officer_arc (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, person INTEGER NOT NULL, contract INTEGER NOT NULL DEFAULT 0, seat TEXT NOT NULL, performance INTEGER NOT NULL DEFAULT 0, encounters INTEGER NOT NULL DEFAULT 1, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS hull_instance (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, base_key TEXT, name TEXT, nickname TEXT, status TEXT NOT NULL DEFAULT 'active', intro_year INTEGER NOT NULL DEFAULT 0, pre_campaign INTEGER NOT NULL DEFAULT 0 CHECK (pre_campaign IN (0,1)), owner_type TEXT NOT NULL DEFAULT 'player', owner_faction_key TEXT NOT NULL DEFAULT '', owner_rival_id INTEGER NOT NULL DEFAULT 0, owner_merc_company_id INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS hull_instance (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, base_key TEXT, name TEXT, nickname TEXT, status TEXT NOT NULL DEFAULT 'active', intro_year INTEGER NOT NULL DEFAULT 0, pre_campaign INTEGER NOT NULL DEFAULT 0 CHECK (pre_campaign IN (0,1)), owner_type TEXT NOT NULL DEFAULT 'player', owner_faction_key TEXT NOT NULL DEFAULT '', owner_merc_company_id INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hull_loadout (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, slot_index INTEGER NOT NULL, part_key TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hull_combat_record (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, battle_id INTEGER NOT NULL DEFAULT 0, contract_id INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, hits_taken INTEGER NOT NULL DEFAULT 0, armor_lost INTEGER NOT NULL DEFAULT 0, slots_damaged INTEGER NOT NULL DEFAULT 0, slots_destroyed INTEGER NOT NULL DEFAULT 0, destroyed INTEGER NOT NULL DEFAULT 0 CHECK (destroyed IN (0,1)), cause TEXT NOT NULL DEFAULT 'none', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS maintenance_entry (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER NOT NULL DEFAULT 0, tech INTEGER NOT NULL DEFAULT 0, action TEXT NOT NULL DEFAULT 'repair', description TEXT NOT NULL DEFAULT '', battle_id INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
@@ -207,6 +207,11 @@ pub const Store = struct {
     /// store that predates the version key still upgrades cleanly. Array is
     /// ordered ascending by `to` (then by declaration order for equal `to`).
     pub const Migration = struct { from: u32, to: u32, table: []const u8, column: []const u8, sql: [*:0]const u8 };
+    /// Migration patterns: ADD COLUMN with NOT NULL DEFAULT is correct for new columns.
+    /// To remove or rename a column: RENAME the table to `<table>__bak`, CREATE the table
+    /// with the correct final schema, INSERT SELECT with any necessary CASE expressions, then
+    /// DROP `<table>__bak`. Never leave a dead column. The v53→v54 hull_instance entry below
+    /// is the canonical example.
     pub const migrations = [_]Migration{
         .{ .from = 1, .to = 2, .table = "campaign", .column = "player_id", .sql = "ALTER TABLE campaign ADD COLUMN player_id INTEGER NOT NULL DEFAULT 0" },
         .{ .from = 2, .to = 3, .table = "person", .column = "admitted", .sql = "ALTER TABLE person ADD COLUMN admitted INTEGER NOT NULL DEFAULT 0" },
@@ -329,10 +334,10 @@ pub const Store = struct {
         // v54 (P3e entity split): MercCompany/MercCompanyId, merc_company_rosters, owner kind rename.
         // rival: add merc_company_id FK column (soft FK, validated in loader; 0 = none).
         .{ .from = 53, .to = 54, .table = "rival", .column = "merc_company_id", .sql = "ALTER TABLE rival ADD COLUMN merc_company_id INTEGER NOT NULL DEFAULT 0" },
-        // hull_instance: add owner_merc_company_id column and relabel owner_type='rival'→'merc_company'.
-        // Multi-statement exec: ADD COLUMN then UPDATE. The dead owner_rival_id column stays
-        // (SQLite cannot drop columns — same reality as the v52 ADD COLUMN precedent).
-        .{ .from = 53, .to = 54, .table = "hull_instance", .column = "owner_merc_company_id", .sql = "ALTER TABLE hull_instance ADD COLUMN owner_merc_company_id INTEGER NOT NULL DEFAULT 0; UPDATE hull_instance SET owner_merc_company_id = owner_rival_id, owner_type = 'merc_company' WHERE owner_type = 'rival'" },
+        // hull_instance: rebuild-table to add owner_merc_company_id, remove owner_rival_id, and
+        // relabel owner_type='rival'→'merc_company'. Guard: owner_merc_company_id absent on v53 stores.
+        // v53 hull_instance__bak has owner_rival_id (added v52) but no owner_merc_company_id yet.
+        .{ .from = 53, .to = 54, .table = "hull_instance", .column = "owner_merc_company_id", .sql = "ALTER TABLE hull_instance RENAME TO hull_instance__bak; CREATE TABLE hull_instance (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, base_key TEXT, name TEXT, nickname TEXT, status TEXT NOT NULL DEFAULT 'active', intro_year INTEGER NOT NULL DEFAULT 0, pre_campaign INTEGER NOT NULL DEFAULT 0 CHECK (pre_campaign IN (0,1)), owner_type TEXT NOT NULL DEFAULT 'player', owner_faction_key TEXT NOT NULL DEFAULT '', owner_merc_company_id INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED); INSERT INTO hull_instance SELECT cid, ord, id, base_key, name, nickname, status, intro_year, pre_campaign, CASE WHEN owner_type='rival' THEN 'merc_company' ELSE owner_type END, owner_faction_key, CASE WHEN owner_type='rival' THEN owner_rival_id ELSE 0 END FROM hull_instance__bak; DROP TABLE hull_instance__bak" },
         // Drop the deprecated rival_roster table (renamed to merc_company_roster).
         // No producer ever wrote rival_rosters between P3e.3 and this increment, so every
         // shipped v53 store has an empty rival_roster; DROP IF EXISTS is fresh-safe and idempotent.
@@ -425,12 +430,15 @@ pub const Store = struct {
             _ = std.fmt.bufPrintZ(&create_buf, "{s}{s}__new{s}", .{ marker, t, suffix }) catch return error.SqliteError;
             try db.exec(&create_buf);
 
-            // --- build explicit column list from PRAGMA table_info ---
+            // --- build explicit column list from the DDL target schema (t__new) ---
+            // Using the target schema rather than the source table ensures that any columns
+            // added by migrations that no longer belong in the DDL (e.g. removed by a later
+            // rebuild-table migration) are dropped during the rebuild rather than copied.
             var cols_buf: [2048]u8 = undefined;
             var cols_len: usize = 0;
             {
                 var sq_buf: [80]u8 = undefined;
-                const sq = std.fmt.bufPrint(&sq_buf, "PRAGMA table_info({s})", .{t}) catch return error.SqliteError;
+                const sq = std.fmt.bufPrint(&sq_buf, "PRAGMA table_info({s}__new)", .{t}) catch return error.SqliteError;
                 const st = try db.prepare(sq);
                 defer st.finalize();
                 var name_buf: [64]u8 = undefined;
@@ -864,9 +872,7 @@ pub const Store = struct {
     }
 
     fn saveHullInstances(self: Store, gs: *GameState, cid: i64) !void {
-        // Named-column INSERT: migrated stores carry a dead owner_rival_id column (added by v52
-        // migration, superseded by v54); explicit names keep the write correct on both fresh and
-        // migrated stores without binding to the dead column (SQLite cannot drop columns).
+        // Named-column INSERT: explicit column list keeps the write correct across schema changes.
         const st = try self.db.prepare("INSERT INTO hull_instance (cid,ord,id,base_key,name,nickname,status,intro_year,pre_campaign,owner_type,owner_faction_key,owner_merc_company_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)");
         defer st.finalize();
         const ld = try self.db.prepare("INSERT INTO hull_loadout VALUES (?1,?2,?3,?4)");
@@ -7081,9 +7087,9 @@ test "a duplicate hull_instance id rejects the load as corrupt (P3c.1)" {
     // We recreate the table without the PK constraint, then insert the duplicate.
     try std.testing.expectError(error.CorruptSave, loadHullInstanceAfterTampering(
         "ALTER TABLE hull_instance RENAME TO hull_instance_bak;" ++
-            "CREATE TABLE hull_instance (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, base_key TEXT, name TEXT, nickname TEXT, status TEXT NOT NULL DEFAULT 'active', intro_year INTEGER NOT NULL DEFAULT 0, pre_campaign INTEGER NOT NULL DEFAULT 0, owner_type TEXT NOT NULL DEFAULT 'player', owner_faction_key TEXT NOT NULL DEFAULT '', owner_rival_id INTEGER NOT NULL DEFAULT 0, owner_merc_company_id INTEGER NOT NULL DEFAULT 0);" ++
-            "INSERT INTO hull_instance SELECT cid, ord, id, base_key, name, nickname, status, intro_year, pre_campaign, owner_type, owner_faction_key, owner_rival_id, owner_merc_company_id FROM hull_instance_bak;" ++
-            "INSERT INTO hull_instance SELECT cid, 999, id, base_key, name, nickname, status, intro_year, pre_campaign, owner_type, owner_faction_key, owner_rival_id, owner_merc_company_id FROM hull_instance_bak LIMIT 1;" ++
+            "CREATE TABLE hull_instance (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, base_key TEXT, name TEXT, nickname TEXT, status TEXT NOT NULL DEFAULT 'active', intro_year INTEGER NOT NULL DEFAULT 0, pre_campaign INTEGER NOT NULL DEFAULT 0, owner_type TEXT NOT NULL DEFAULT 'player', owner_faction_key TEXT NOT NULL DEFAULT '', owner_merc_company_id INTEGER NOT NULL DEFAULT 0);" ++
+            "INSERT INTO hull_instance SELECT cid, ord, id, base_key, name, nickname, status, intro_year, pre_campaign, owner_type, owner_faction_key, owner_merc_company_id FROM hull_instance_bak;" ++
+            "INSERT INTO hull_instance SELECT cid, 999, id, base_key, name, nickname, status, intro_year, pre_campaign, owner_type, owner_faction_key, owner_merc_company_id FROM hull_instance_bak LIMIT 1;" ++
             "DROP TABLE hull_instance_bak",
     ));
 }
@@ -7921,8 +7927,8 @@ test "a v53 store migrates to v54 with merc_company/merc_company_roster created 
     try std.testing.expectEqual(@as(i64, 0), rr_check.int(0));
 
     // The relabelled hull (id=777) has owner_type='merc_company' and owner_merc_company_id=7;
-    // the dead owner_rival_id column still reads 7 (SQLite cannot drop columns).
-    const relabel_q = try s2.db.prepare("SELECT owner_type, owner_merc_company_id, owner_rival_id FROM hull_instance WHERE id = 777");
+    // owner_rival_id is gone — the rebuild-table migration removed it.
+    const relabel_q = try s2.db.prepare("SELECT owner_type, owner_merc_company_id FROM hull_instance WHERE id = 777");
     defer relabel_q.finalize();
     try std.testing.expect(try relabel_q.next());
     var buf: [32]u8 = undefined;
@@ -7930,7 +7936,6 @@ test "a v53 store migrates to v54 with merc_company/merc_company_roster created 
     const ot = try relabel_q.text(0, fba.allocator());
     try std.testing.expectEqualStrings("merc_company", ot);
     try std.testing.expectEqual(@as(i64, 7), relabel_q.int(1));
-    try std.testing.expectEqual(@as(i64, 7), relabel_q.int(2));
 }
 
 test "v50→v51 migration seeds one .initial ownership interval per owned hull (P3c.4)" {
