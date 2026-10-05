@@ -11,8 +11,8 @@ const types = @import("types.zig");
 /// Who owns this hull right now. One of five kinds (docs/p3c-economy-design.md §2).
 /// Persisted as three typed columns: owner_type (tag name), owner_faction_key
 /// (FactionRow.key when .faction, else ""), owner_merc_company_id (MercCompanyId int
-/// when .merc_company, else 0). Stores migrated from ≤v53 carry a dead owner_rival_id
-/// column (SQLite cannot drop columns); the live read/write path uses owner_merc_company_id.
+/// when .merc_company, else 0). owner_rival_id does not exist in any store at v54+;
+/// the v54 rebuild-table migration removed it from migrated stores.
 pub const OwnerType = enum { player, faction, merc_company, market, destroyed };
 
 /// Current owner of a HullInstance. Illegal states are unrepresentable: you

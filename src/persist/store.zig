@@ -381,7 +381,7 @@ pub const Store = struct {
     pub fn fromDb(db: sqlite.Db) !Store {
         const stored_opt = try readStoreVersion(db);
         if (stored_opt) |s| if (s > schema_version) return error.StoreNewerThanGame;
-        const stored: u32 = stored_opt orelse 0;
+        var stored: u32 = stored_opt orelse 0;
         const store: Store = .{ .db = db };
         // Disable FK enforcement before the transaction: DDL and the rebuild
         // require it off; it is re-enabled after COMMIT (rule 50).
@@ -390,6 +390,10 @@ pub const Store = struct {
         // best-effort: rolling back a failed transaction; the original error propagates.
         errdefer db.exec("ROLLBACK") catch {};
         try db.exec(ddl);
+        // A fresh store (stored == 0) is fully created by the current DDL and needs
+        // no historical migrations. Mark it as already at schema_version so the loop
+        // below skips every migration (all have m.to <= schema_version).
+        if (stored == 0) stored = schema_version;
         try db.exec(index_ddl);
         for (migrations) |m| {
             if (m.to <= stored) continue;
@@ -3984,6 +3988,16 @@ test "a brand-new empty :memory: store opens (new-vs-corrupt distinction)" {
     const store = try Store.open(":memory:");
     defer store.close();
     try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
+}
+
+test "a fresh store has no owner_rival_id column in hull_instance (P3e entity split)" {
+    // Regression: historical migrations must not run against a fresh store.
+    // The v52 migration adds owner_rival_id; the v54 rebuild removes it.
+    // A fresh store created entirely by the current DDL must never carry owner_rival_id.
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try std.testing.expect(!try Store.hasColumnRt(store.db, "hull_instance", "owner_rival_id"));
+    try std.testing.expect(try Store.hasColumnRt(store.db, "hull_instance", "owner_merc_company_id"));
 }
 
 test "a future-version store is refused with no DDL mutation" {
