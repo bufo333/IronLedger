@@ -278,7 +278,7 @@ const TextBuf = struct {
     }
 };
 
-const Placement = struct { x: u16, y: u16, cols: u16, rows: u16 };
+const Placement = struct { x: u16, y: u16, cols: u16, rows: u16, kitty_id: u32 = 0, bytes: []const u8 = &.{} };
 
 pub const App = struct {
     gpa: std.mem.Allocator,
@@ -307,19 +307,23 @@ pub const App = struct {
     // emblem display
     graphics: emblem_mod.Graphics = .none,
     emblem: ?emblem_mod.Emblem = null,
-    placements: [8]Placement = undefined,
+    placements: [64]Placement = undefined,
     n_placements: usize = 0,
     /// The cell editor's canvas, cursor and undo snapshot.
     ed_art: [3][8]u8 = @splat(@splat(' ')),
     ed_undo: [3][8]u8 = @splat(@splat(' ')),
     ed_x: u8 = 0,
     ed_y: u8 = 0,
-    // wizard import
-    w_src: u8 = 0, // 0 presets · 1 import
+    // wizard catalog grid
     logos: []const []const u8 = &.{},
     w_logo: usize = 0,
-    w_png: ?[]u8 = null,
-    w_preview: ?emblem_mod.Emblem = null,
+    /// Decoded thumbnails, one per entry in `logos`, each with a unique kitty
+    /// id in the range 100..100+logos.len so they don't collide with the
+    /// in-game emblem (id 1).  Allocated from `gpa`; freed in `deinit`.
+    w_thumbs: []?emblem_mod.Emblem = &.{},
+    /// First visible grid row (in units of 5-logo rows); updated by gridMove
+    /// so the selected row stays inside the visible window.
+    w_logo_top: usize = 0,
     /// When true the outfit name auto-fills from the selected catalog logo;
     /// set false once the player types to prevent clobbering a manual edit.
     w_outfit_auto: bool = true,
@@ -361,7 +365,6 @@ pub const App = struct {
     w_profession: usize = 0,
     /// Index into `start_years`.
     w_year: usize = 2,
-    w_emblem: usize = 0,
     w_seed: u64 = 0,
     // screens
     ledger_sel: usize = 0,
@@ -408,8 +411,8 @@ pub const App = struct {
         if (self.music) |*m| m.deinit();
         if (self.session) |*session| session.close();
         if (self.emblem) |*e| e.deinit(self.gpa);
-        if (self.w_preview) |*e| e.deinit(self.gpa);
-        if (self.w_png) |p| self.gpa.free(p);
+        for (self.w_thumbs) |*slot| if (slot.*) |*e| e.deinit(self.gpa);
+        if (self.w_thumbs.len > 0) self.gpa.free(self.w_thumbs);
         self.screen.deinit();
         self.frame.deinit();
         self.lobby.deinit();
@@ -565,8 +568,8 @@ pub const App = struct {
             // Pictures sit above text; keep them off while a modal is up.
             if (!modal_open) {
                 for (self.placements[0..self.n_placements]) |p| {
-                    const e = self.currentEmblem() orelse break;
-                    try emblem_mod.kittyPlace(self.term.out, e.kitty_id, p.x, p.y, p.cols, p.rows);
+                    if (p.kitty_id == 0) continue;
+                    try emblem_mod.kittyPlace(self.term.out, p.kitty_id, p.x, p.y, p.cols, p.rows);
                 }
             }
             try self.term.out.flush();
@@ -575,8 +578,8 @@ pub const App = struct {
             // picture is re-sent with every frame it is visible in.
             if (!modal_open) {
                 for (self.placements[0..self.n_placements]) |p| {
-                    const e = self.currentEmblem() orelse break;
-                    try emblem_mod.itermPlace(self.term.out, self.gpa, e.bytes, p.x, p.y, p.cols, p.rows);
+                    if (p.bytes.len == 0) continue;
+                    try emblem_mod.itermPlace(self.term.out, self.gpa, p.bytes, p.x, p.y, p.cols, p.rows);
                 }
             }
             try self.term.out.flush();
@@ -584,7 +587,12 @@ pub const App = struct {
     }
 
     fn currentEmblem(self: *App) ?*emblem_mod.Emblem {
-        if (self.mode == .wizard) return if (self.w_preview) |*e| e else null;
+        if (self.mode == .wizard) {
+            if (self.w_logo < self.w_thumbs.len) {
+                if (self.w_thumbs[self.w_logo] != null) return &self.w_thumbs[self.w_logo].?;
+            }
+            return null;
+        }
         return if (self.emblem) |*e| e else null;
     }
 
@@ -605,6 +613,8 @@ pub const App = struct {
                     .y = r.y + @as(u16, @intCast((r.h - rows) / 2)),
                     .cols = @intCast(cols),
                     .rows = @intCast(rows),
+                    .kitty_id = e.kitty_id,
+                    .bytes = e.bytes,
                 };
                 self.n_placements += 1;
             }
@@ -851,63 +861,109 @@ pub const App = struct {
     fn drawWizardOutfit(self: *App) !void {
         const al = self.a();
         const b = self.body();
-        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        try rows.append(al, try std.fmt.allocPrint(al, "outfit name      {s}{s}{s}{{/}}", .{ if (self.w_field == 0) "{s}" else "", try q.plain(al, self.w_outfit.slice()), if (self.w_field == 0) "_" else "" }));
-        try rows.append(al, try std.fmt.allocPrint(al, "first company    {s}{s}{s}{{/}}", .{ if (self.w_field == 1) "{s}" else "", try q.plain(al, self.w_company.slice()), if (self.w_field == 1) "_" else "" }));
-        try rows.append(al, "");
-        try rows.append(al, try std.fmt.allocPrint(al, "emblem source    {s}{s}{{/}}   {s}{s}{{/}}", .{ if (self.w_src == 0) (if (self.w_field == 2) "{s}" else "{a}") else "{d}", try keyHint(OutfitAction, al, &outfit_bindings, .source_prev, "presets"), if (self.w_src == 1) (if (self.w_field == 2) "{s}" else "{a}") else "{d}", try keyHint(OutfitAction, al, &outfit_bindings, .source_next, "import a picture") }));
-        try rows.append(al, "");
-        if (self.w_src == 1) {
-            try rows.append(al, try std.fmt.allocPrint(al, "PNG files in {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}));
-            if (self.logos.len == 0) try rows.append(al, "  {d}none found — drop a .png in the project root or a logos/ directory{/}");
-            for (self.logos, 0..) |name, i| {
-                const sel = i == self.w_logo;
-                try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s} {s}{{/}}", .{ if (sel and self.w_field == 2) "{s}" else if (sel) "{a}" else "", if (sel) ">" else " ", try q.plain(al, name) }));
-            }
-            try rows.append(al, "");
-            try rows.append(al, try std.fmt.allocPrint(al, "display          {s}", .{switch (self.graphics) {
-                .kitty => "{g}kitty graphics protocol{/} — the picture itself, placed over cells",
-                .iterm2 => "{g}iTerm2 inline images{/} — the picture itself, re-sent each frame",
-                .none => if (self.screen.truecolor) "{a}half-block colour{/} — two pixels per cell (no graphics protocol detected)" else "{a}256-colour half-blocks{/}",
-            }}));
-            if (self.w_preview) |*e| {
-                try rows.append(al, try std.fmt.allocPrint(al, "loaded           {d} × {d} px · {d} KB", .{ e.img.width, e.img.height, e.bytes.len / 1024 }));
-            } else if (self.logos.len > 0) {
-                try rows.append(al, try std.fmt.allocPrint(al, "{{d}}{s} · it previews on the right and is stored with the campaign{{/}}", .{try keyHint(OutfitAction, al, &outfit_bindings, .down, "pick a file")}));
+
+        // Top pane: outfit name + company name fields (4 rows: border + 2 content + border).
+        const top_h: u16 = 4;
+        var top_rows: std.ArrayListUnmanaged([]const u8) = .empty;
+        try top_rows.append(al, try std.fmt.allocPrint(al, "outfit name      {s}{s}{s}{{/}}", .{ if (self.w_field == 0) "{s}" else "", try q.plain(al, self.w_outfit.slice()), if (self.w_field == 0) "_" else "" }));
+        try top_rows.append(al, try std.fmt.allocPrint(al, "first company    {s}{s}{s}{{/}}", .{ if (self.w_field == 1) "{s}" else "", try q.plain(al, self.w_company.slice()), if (self.w_field == 1) "_" else "" }));
+        _ = self.listPane(.{ .x = 0, .y = b.y, .w = b.w, .h = top_h }, "OUTFIT", top_rows.items, 0, self.w_field < 2, false);
+
+        // Grid pane: 5-column catalog thumbnail grid.
+        const grid_y: u16 = b.y + top_h;
+        const grid_h: u16 = b.h -| top_h;
+        if (grid_h < 3) {
+            self.footer(try keys.footer(al, &.{&outfit_legend}));
+            return;
+        }
+        const grid_rect: Rect = .{ .x = 0, .y = grid_y, .w = b.w, .h = grid_h };
+        const grid_inner = self.screen.pane(grid_rect, .{ .title = "CATALOG", .focused = self.w_field == 2 });
+
+        if (self.logos.len == 0) {
+            const hint = [_][]const u8{"{d}no logos found — drop a .png into a logos/ directory{/}"};
+            self.screen.lines(grid_inner, &hint, 0, null);
+            self.footer(try keys.footer(al, &.{&outfit_legend}));
+            return;
+        }
+
+        // Grid geometry: fixed 5 columns; cell height capped at 9 terminal rows.
+        const cols: u16 = 5;
+        const cell_w: u16 = @max(1, grid_inner.w / cols);
+        const cell_h: u16 = @max(3, @min(9, grid_inner.h));
+        const visible_rows: usize = if (cell_h > 0) grid_inner.h / cell_h else 0;
+        if (visible_rows == 0) {
+            self.footer(try keys.footer(al, &.{&outfit_legend}));
+            return;
+        }
+
+        // Keep selected row in the visible window.
+        const selected_row: usize = self.w_logo / cols;
+        if (selected_row < self.w_logo_top) self.w_logo_top = selected_row;
+        if (selected_row >= self.w_logo_top + visible_rows) self.w_logo_top = selected_row - visible_rows + 1;
+
+        // Lazy thumbnail loading: decode one unloaded visible logo per draw call
+        // so the event loop is never blocked for more than a single PNG decode.
+        outer: for (0..visible_rows) |vr| {
+            const row = self.w_logo_top + vr;
+            for (0..@as(usize, cols)) |col| {
+                const idx = row * cols + col;
+                if (idx >= self.w_thumbs.len) break :outer;
+                if (self.w_thumbs[idx] == null) {
+                    self.loadThumbAt(idx);
+                    break :outer; // one per frame
+                }
             }
         }
-        for (0..3) |r| {
-            if (self.w_src == 1) break;
-            var line: std.ArrayListUnmanaged(u8) = .empty;
-            try line.appendSlice(al, "  ");
-            for (emblems, 0..) |e, i| {
-                if (i == self.w_emblem) try line.appendSlice(al, "{a}");
-                try line.appendSlice(al, e.art[r]);
-                if (i == self.w_emblem) try line.appendSlice(al, "{/}");
-                try line.appendSlice(al, "   ");
+
+        // Draw each visible cell.
+        for (0..visible_rows) |vr| {
+            const row = self.w_logo_top + vr;
+            for (0..@as(usize, cols)) |col| {
+                const idx = row * cols + col;
+                if (idx >= self.logos.len) break;
+                const cx: u16 = grid_inner.x + @as(u16, @intCast(col)) * cell_w;
+                const cy: u16 = grid_inner.y + @as(u16, @intCast(vr)) * cell_h;
+                const selected = idx == self.w_logo;
+
+                // Name label: last row of the cell.
+                const name_y: i32 = @as(i32, cy) + @as(i32, cell_h) - 1;
+                var name_buf: [128]u8 = undefined;
+                const title_name = game.logo_name.titleCaseLogoKey(self.logos[idx], &name_buf);
+                const display_name = title_name[0..@min(title_name.len, cell_w)];
+                const lbl: Style = if (selected) .sel else .dim;
+                self.screen.textPad(@intCast(cx), name_y, cell_w, display_name, lbl);
+
+                // Thumbnail image: rows above the name label.
+                const img_h: u16 = cell_h - 1;
+                if (img_h > 0) {
+                    const img_rect: Rect = .{ .x = cx, .y = cy, .w = cell_w, .h = img_h };
+                    if (idx < self.w_thumbs.len) {
+                        if (self.w_thumbs[idx]) |*e| {
+                            if (self.graphics != .none) {
+                                var irows: u32 = img_h;
+                                var icols: u32 = @min(@as(u32, cell_w), irows * 2 * e.img.width / @max(1, e.img.height));
+                                if (icols == 0) icols = 1;
+                                irows = @min(irows, @max(1, icols * e.img.height / @max(1, 2 * e.img.width)));
+                                if (self.n_placements < self.placements.len) {
+                                    self.placements[self.n_placements] = .{
+                                        .x = cx + @as(u16, @intCast((cell_w - icols) / 2)),
+                                        .y = cy + @as(u16, @intCast((img_h - irows) / 2)),
+                                        .cols = @intCast(icols),
+                                        .rows = @intCast(irows),
+                                        .kitty_id = e.kitty_id,
+                                        .bytes = e.bytes,
+                                    };
+                                    self.n_placements += 1;
+                                }
+                            } else {
+                                self.screen.blit(img_rect, &e.img);
+                            }
+                        }
+                    }
+                }
             }
-            try rows.append(al, try line.toOwnedSlice(al));
         }
-        if (self.w_src == 0) {
-            var names: std.ArrayListUnmanaged(u8) = .empty;
-            try names.appendSlice(al, "  ");
-            for (emblems, 0..) |e, i| {
-                try names.appendSlice(al, if (i == self.w_emblem) "{a}" else "{d}");
-                try names.appendSlice(al, try std.fmt.allocPrint(al, "{s: <11}", .{e.name}));
-                try names.appendSlice(al, "{/}");
-            }
-            try rows.append(al, try names.toOwnedSlice(al));
-            try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keyHint(OutfitAction, al, &outfit_bindings, .down, "choose a preset")}));
-        }
-        const lw: u16 = if (layout.wide(b.w)) layout.half.of(b.w) else b.w;
-        _ = self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = b.h }, "OUTFIT", rows.items, 0, true, false);
-        if (lw < b.w) {
-            const inner = self.screen.pane(.{ .x = lw, .y = b.y, .w = b.w - lw, .h = b.h }, .{ .title = "PREVIEW" });
-            if (!self.drawEmblem(inner)) {
-                const hint = [_][]const u8{ "", "  {d}pick a picture to preview it here{/}" };
-                self.screen.lines(inner, &hint, 0, null);
-            }
-        }
+
         self.footer(try keys.footer(al, &.{&outfit_legend}));
     }
 
@@ -961,14 +1017,13 @@ pub const App = struct {
         const al = self.a();
         const b = self.body();
         var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        const has_picture = self.w_src == 1 and self.w_preview != null;
+        const has_picture = self.w_thumbs.len > 0 and self.w_logo < self.w_thumbs.len and self.w_thumbs[self.w_logo] != null;
         if (self.stateOrNull()) |g| {
             const st = try q.status(al, g);
-            const e = emblems[self.w_emblem];
             const pad_art = "        ";
-            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {{a}}{s}{{/}}", .{ if (has_picture) pad_art else e.art[0], try q.plain(al, self.w_outfit.slice()) }));
-            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {s} · {s} · {s} ({s})", .{ if (has_picture) pad_art else e.art[1], try q.plain(al, self.w_name.slice()), factions[self.w_faction].fullName(), @tagName(professions[self.w_profession]), professions[self.w_profession].description() }));
-            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {{d}}{s} · day 0{{/}}", .{ if (has_picture) pad_art else e.art[2], st.date }));
+            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {{a}}{s}{{/}}", .{ pad_art, try q.plain(al, self.w_outfit.slice()) }));
+            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {s} · {s} · {s} ({s})", .{ pad_art, try q.plain(al, self.w_name.slice()), factions[self.w_faction].fullName(), @tagName(professions[self.w_profession]), professions[self.w_profession].description() }));
+            try rows.append(al, try std.fmt.allocPrint(al, "{s}   {{d}}{s} · day 0{{/}}", .{ pad_art, st.date }));
             try rows.append(al, "");
             for (try q.hqList(al, g)) |h| {
                 try rows.append(al, try std.fmt.allocPrint(al, "starter HQ    {{a}}{s}{{/}} on {s} · {s} · ring {d} LY · staff {d}/{d}", .{ try h.name.markup(al), h.world, h.tier, h.ring_ly, h.staff_assigned, h.staff_required }));
@@ -1724,18 +1779,18 @@ pub const App = struct {
         .{ .match = .{ .key = .enter }, .action = .next, .label = "next step", .group = .act },
         .{ .match = .{ .key = .escape }, .action = .back, .label = "back to welcome", .group = .misc },
     };
-    const OutfitAction = enum { back, next_field, prev_field, next, erase, source_prev, source_next, down, up, type };
+    const OutfitAction = enum { back, next_field, prev_field, next, erase, left, right, down, up, type };
     pub const outfit_bindings = [_]keys.Binding(OutfitAction){
         .{ .match = .{ .key = .tab }, .action = .next_field, .label = "next field", .group = .navigate },
         .{ .match = .{ .key = .backtab }, .action = .prev_field, .label = "previous field", .group = .navigate, .show_footer = false, .show_help = false },
-        .{ .match = keys.Match.char('h'), .action = .source_prev, .label = "presets", .group = .navigate },
-        .{ .match = .{ .key = .left }, .action = .source_prev, .label = "presets", .group = .navigate, .show_footer = false, .show_help = false },
-        .{ .match = keys.Match.char('l'), .action = .source_next, .label = "import a picture", .group = .navigate },
-        .{ .match = .{ .key = .right }, .action = .source_next, .label = "import", .group = .navigate, .show_footer = false, .show_help = false },
-        .{ .match = keys.Match.char('j'), .action = .down, .label = "choose", .group = .navigate, .shown = "j/k" },
-        .{ .match = .{ .key = .down }, .action = .down, .label = "down", .group = .navigate, .show_footer = false, .show_help = false },
-        .{ .match = keys.Match.char('k'), .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
-        .{ .match = .{ .key = .up }, .action = .up, .label = "up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('h'), .action = .left, .label = "logo", .group = .navigate, .shown = "h/j/k/l" },
+        .{ .match = .{ .key = .left }, .action = .left, .label = "logo left", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('l'), .action = .right, .label = "logo right", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .right }, .action = .right, .label = "logo right", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('j'), .action = .down, .label = "logo down", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .down }, .action = .down, .label = "logo down", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('k'), .action = .up, .label = "logo up", .group = .navigate, .show_footer = false, .show_help = false },
+        .{ .match = .{ .key = .up }, .action = .up, .label = "logo up", .group = .navigate, .show_footer = false, .show_help = false },
         .{ .match = .text, .action = .type, .label = "type the outfit's name", .group = .act, .pane = 0, .show_footer = false },
         .{ .match = .text, .action = .type, .label = "type the company's name", .group = .act, .pane = 1, .show_footer = false },
         .{ .match = .{ .key = .backspace }, .action = .erase, .label = "erase", .group = .act, .pane = 0, .show_footer = false },
@@ -1784,6 +1839,17 @@ pub const App = struct {
                         }
                         self.step = .outfit;
                         self.w_field = 0;
+                        // Load catalog logo names the first time the outfit step is entered.
+                        // Thumbnails are decoded lazily (one per draw call) to avoid blocking.
+                        if (self.logos.len == 0) {
+                            try self.loadLogoList();
+                            if (self.logos.len > 0) {
+                                const thumbs = try self.gpa.alloc(?emblem_mod.Emblem, self.logos.len);
+                                @memset(thumbs, null);
+                                self.w_thumbs = thumbs;
+                            }
+                        }
+                        self.adoptLogoName();
                     },
                     .erase => self.w_name.pop(),
                     .down => self.wizardList(1),
@@ -1812,10 +1878,10 @@ pub const App = struct {
                         self.w_outfit_auto = false;
                         self.w_outfit.pop();
                     } else self.w_company.pop(),
-                    .source_prev => try self.setEmblemSource(0),
-                    .source_next => try self.setEmblemSource(1),
-                    .down => try self.emblemMove(1),
-                    .up => try self.emblemMove(-1),
+                    .left => self.gridMove(-1),
+                    .right => self.gridMove(1),
+                    .down => self.gridMove(5),
+                    .up => self.gridMove(-5),
                     .type => if (self.w_field == 0) {
                         self.w_outfit_auto = false;
                         self.w_outfit.push(key.char);
@@ -1892,73 +1958,41 @@ pub const App = struct {
     /// player has manually edited the name (w_outfit_auto == false).
     fn adoptLogoName(self: *App) void {
         if (!self.w_outfit_auto) return;
-        if (self.w_src != 1 or self.logos.len == 0) return;
+        if (self.logos.len == 0) return;
         const path = self.logos[@min(self.w_logo, self.logos.len - 1)];
         var buf: [128]u8 = undefined;
         self.w_outfit.set(game.logo_name.titleCaseLogoKey(path, &buf));
         self.w_outfit_auto = true;
     }
 
-    fn setEmblemSource(self: *App, src: u8) !void {
-        self.w_src = src;
-        if (src == 1 and self.logos.len == 0) {
-            try self.loadLogoList();
-            self.w_logo = 0;
-            try self.loadPreview();
-        }
-        if (src == 1) self.adoptLogoName();
-    }
-
-    fn emblemMove(self: *App, delta: i32) !void {
-        if (self.w_src == 0) {
-            self.w_emblem = @intCast(@mod(@as(i32, @intCast(self.w_emblem)) + delta, @as(i32, emblems.len)));
-            return;
-        }
+    /// Move the grid cursor by `delta` steps (±1 for left/right, ±5 for up/down).
+    /// Clamped to [0, logos.len). Adopts the logo name on every move.
+    fn gridMove(self: *App, delta: i32) void {
         if (self.logos.len == 0) return;
-        self.w_logo = @intCast(@mod(@as(i32, @intCast(self.w_logo)) + delta, @as(i32, @intCast(self.logos.len))));
-        try self.loadPreview();
+        const new_idx = @max(0, @min(@as(i32, @intCast(self.logos.len - 1)), @as(i32, @intCast(self.w_logo)) + delta));
+        self.w_logo = @intCast(new_idx);
         self.adoptLogoName();
     }
 
-    /// Read and decode the selected picture; keep the bytes for the campaign.
-    /// Reads and decodes into locals first; only on success frees the old
-    /// preview and assigns the new one (rule 63).
-    fn loadPreview(self: *App) !void {
-        if (self.logos.len == 0) {
-            if (self.w_preview) |*e| {
-                // best-effort: freeing an optional graphics image.
-                if (self.graphics == .kitty) emblem_mod.kittyForget(self.term.out, e.kitty_id) catch {};
-                e.deinit(self.gpa);
-                self.w_preview = null;
-            }
-            if (self.w_png) |p| {
-                self.gpa.free(p);
-                self.w_png = null;
-            }
-            return;
-        }
-        const path = self.logos[@min(self.w_logo, self.logos.len - 1)];
-        const new_bytes = emblem_mod.readFile(self.io, self.gpa, path) catch |err| {
-            self.say(.crit, "could not read {s}: {s}", .{ try q.plain(self.a(), path), game.cli.errorText(err) });
+    /// Decode one catalog logo into `w_thumbs[idx]` if not already loaded.
+    /// Silently skips logos that cannot be read or decoded (stores null).
+    /// Transmits decoded bytes to kitty once on first load.
+    /// Called lazily from the draw path: one logo per draw call so the
+    /// event loop is never blocked for more than one file-read + decode.
+    fn loadThumbAt(self: *App, idx: usize) void {
+        if (idx >= self.w_thumbs.len) return;
+        if (self.w_thumbs[idx] != null) return; // already loaded
+        const kitty_id: u32 = @intCast(100 + idx);
+        // best-effort: a missing or unreadable logo is skipped; others still load.
+        const file_bytes = emblem_mod.readFile(self.io, self.gpa, self.logos[idx]) catch return;
+        const e = emblem_mod.Emblem.load(self.gpa, file_bytes, kitty_id) catch {
+            self.gpa.free(file_bytes);
             return;
         };
-        const new_e = emblem_mod.Emblem.load(self.gpa, new_bytes, 2) catch |err| {
-            self.gpa.free(new_bytes);
-            self.say(.crit, "{s}: {s} (8-bit non-interlaced PNG only)", .{ try q.plain(self.a(), path), game.cli.errorText(err) });
-            return;
-        };
-        // Replacement ready: free the old resources and assign the new (rule 63).
-        if (self.w_preview) |*e| {
-            // best-effort: freeing an optional graphics image.
-            if (self.graphics == .kitty) emblem_mod.kittyForget(self.term.out, e.kitty_id) catch {};
-            e.deinit(self.gpa);
-        }
-        if (self.w_png) |p| self.gpa.free(p);
-        self.w_png = new_bytes;
-        self.w_preview = new_e;
-        // best-effort: an optional graphics image; the half-block emblem still draws.
-        if (self.graphics == .kitty) emblem_mod.kittyTransmit(self.term.out, self.gpa, 2, new_bytes) catch {};
-        self.say(.good, "{s}: {d}×{d}", .{ try q.plain(self.a(), path), new_e.img.width, new_e.img.height });
+        self.gpa.free(file_bytes); // Emblem.load dups; original no longer needed.
+        self.w_thumbs[idx] = e;
+        // best-effort: an optional graphics image; the half-block fallback or name label still draws.
+        if (self.graphics == .kitty) emblem_mod.kittyTransmit(self.term.out, self.gpa, kitty_id, self.w_thumbs[idx].?.bytes) catch {};
     }
 
     fn wizardList(self: *App, delta: i32) void {
@@ -1974,8 +2008,15 @@ pub const App = struct {
         // Build the replacement session fully before touching the current one
         // (rule 63): on failure the open session stays valid.
         const seed: u64 = 3025 + self.w_seed * 7919 + @as(u64, @intCast(self.w_faction)) * 13;
-        const image: []const u8 = if (self.w_src == 1 and self.w_png != null) self.w_png.? else emblems[self.w_emblem].name;
-        const logo_key: []const u8 = if (self.w_src == 1 and self.logos.len > 0)
+        // Use the selected catalog thumbnail's bytes as the campaign emblem image.
+        // When no logos are available (should not happen: comptime guard ensures the
+        // catalog exists), an empty slice is passed so the campaign starts without an
+        // image emblem.
+        const image: []const u8 = if (self.w_logo < self.w_thumbs.len)
+            if (self.w_thumbs[self.w_logo]) |e| e.bytes else &.{}
+        else
+            &.{};
+        const logo_key: []const u8 = if (self.logos.len > 0)
             std.fs.path.stem(self.logos[@min(self.w_logo, self.logos.len - 1)])
         else
             "";
@@ -5088,32 +5129,56 @@ test "mech-detail modal: pressing h on a hull opens the mech modal and sub-views
     try std.testing.expect(c.app.modal == .none);
 }
 
-test "wizard logo picker auto-fills the outfit name until the player edits it" {
+test "wizard grid navigation moves w_logo correctly and clamps at bounds" {
     const c = try clientForTest(std.testing.allocator);
     defer deinitForTest(c, std.testing.allocator);
 
-    // Put the wizard into import-logo mode with two known catalog paths.
-    c.app.w_src = 1;
-    c.app.logos = &.{ "data/logos/ashfall_lancers.png", "data/logos/balance_point_mercenaries.png" };
+    // Seed the wizard with a 7-logo catalog (two full rows + 2 extra).
+    c.app.logos = &.{
+        "data/logos/ashfall_lancers.png",
+        "data/logos/balance_point_mercenaries.png",
+        "data/logos/c.png",
+        "data/logos/d.png",
+        "data/logos/e.png",
+        "data/logos/f.png",
+        "data/logos/g.png",
+    };
     c.app.w_logo = 0;
     c.app.w_outfit_auto = true;
 
-    // First logo: auto-fill should produce "Ashfall Lancers".
+    // Auto-fill from first logo.
     c.app.adoptLogoName();
     try std.testing.expectEqualStrings("Ashfall Lancers", c.app.w_outfit.slice());
     try std.testing.expect(c.app.w_outfit_auto);
 
-    // Move to second logo (manual w_logo update, bypass loadPreview): should auto-fill.
-    c.app.w_logo = 1;
-    c.app.adoptLogoName();
+    // Right: 0 → 1.
+    c.app.gridMove(1);
+    try std.testing.expectEqual(@as(usize, 1), c.app.w_logo);
     try std.testing.expectEqualStrings("Balance Point Mercenaries", c.app.w_outfit.slice());
-    try std.testing.expect(c.app.w_outfit_auto);
 
-    // Simulate a manual edit: freeze the name.
+    // Down (5 steps): 1 → 6.
+    c.app.gridMove(5);
+    try std.testing.expectEqual(@as(usize, 6), c.app.w_logo);
+
+    // Right past end: clamps at 6 (logos.len - 1).
+    c.app.gridMove(1);
+    try std.testing.expectEqual(@as(usize, 6), c.app.w_logo);
+
+    // Left: 6 → 5.
+    c.app.gridMove(-1);
+    try std.testing.expectEqual(@as(usize, 5), c.app.w_logo);
+
+    // Up (−5): 5 → 0.
+    c.app.gridMove(-5);
+    try std.testing.expectEqual(@as(usize, 0), c.app.w_logo);
+
+    // Left past beginning: clamps at 0.
+    c.app.gridMove(-1);
+    try std.testing.expectEqual(@as(usize, 0), c.app.w_logo);
+
+    // Freeze auto-fill; move should not change the name.
     c.app.w_outfit_auto = false;
-    // Move back to first logo; name must not change because auto is frozen.
-    c.app.w_logo = 0;
-    c.app.adoptLogoName();
-    try std.testing.expectEqualStrings("Balance Point Mercenaries", c.app.w_outfit.slice());
+    c.app.gridMove(1);
+    try std.testing.expectEqualStrings("Ashfall Lancers", c.app.w_outfit.slice());
     try std.testing.expect(!c.app.w_outfit_auto);
 }

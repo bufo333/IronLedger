@@ -147,18 +147,12 @@ send("D", 0.6); send("nobody\r", 0.8)     # delete player: the typed name must m
 assert "name did not match" in plain()[-800:], plain()[-1200:]
 send("n")                      # new campaign
 assert "NEW CAMPAIGN" in plain()
-send("\r")                     # commander → outfit (defaults)
-send("\t"); send("\t")         # emblem field
-send("l", 3.0)                 # import: lists PNGs and previews the first
-p = plain()
-assert "PNG files in" in p, p[-3000:]
-if "loaded" in p:
-    # The display line names the render path: half-blocks (truecolor or 256-colour
-    # under a bare pty), the kitty protocol or iTerm2 images.
-    assert "half-block" in p or "graphics protocol" in p or "inline images" in p, p[-3000:]
+send("\r")                      # commander → outfit (catalog grid renders immediately; thumbnails load lazily)
+assert wait_for("CATALOG"), plain()[-3000:]   # catalog grid pane appeared
 assert wait_for("Ashfall Lancers"), plain()[-3000:]   # auto-fill from first catalog logo
-send("j", 1.5)                 # move to the second catalog logo (j = down)
-assert wait_for("Balance Point Mercenaries"), plain()[-3000:]  # auto-fill from second
+send("\t\t", 0.3)              # Tab×2: field 0 → 1 → 2 (grid navigation mode)
+send("l", 1.5)                 # right: w_logo 0 → 1 (Balance Point Mercenaries)
+assert wait_for("Balance Point Mercenaries"), plain()[-3000:]  # auto-fill from second logo
 send("\r", 3.0)                # outfit → company (generates)
 assert "GENERATED COMPANY" in plain()
 assert "BACK OFFICE" in plain(), plain()[-3000:]   # sizing pane, wide or narrow

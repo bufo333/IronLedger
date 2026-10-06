@@ -14,7 +14,7 @@ that talks to the campaign registry directly (`persist/store.zig`):
 |---|---|---|
 | Welcome | Players · Campaigns (emblem mark + outfit + commander + day) · Emblem of the selected campaign · Snapshot | `Enter` load · `n` new campaign · `d` delete campaign (typed-name confirm) · `p` new player · `D` delete player · `q` quit |
 | New campaign 1 · Commander | Form (name, faction of origin, profession, start year) · What this means | Values are collected for generation |
-| New campaign 2 · Outfit & emblem | Outfit form + emblem source (presets / import) · Preview | `Enter` generates the fresh campaign and first company |
+| New campaign 2 · Outfit & emblem | Outfit name + company name fields · 5-column catalog logo thumbnail grid (scrolling) | `Enter` generates the fresh campaign and first company |
 | New campaign 3 · Company & back office | Generated company (reroll = new seed) · Back office headcount per admin role with payroll and effect | `r` regenerates; `+`/`-` execute `set_office_staff` immediately |
 | New campaign 4 · Review | The generated campaign, with the emblem | `Enter` saves and opens the Desk on day 0 |
 
@@ -27,10 +27,10 @@ without saving · stay). Saving writes under the current player.
 
 **Emblems.** Emblems are stored on company forces. The wizard sets the first
 generated company's emblem; the in-campaign outfit action applies a replacement
-to every company. Two sources appear in the wizard:
+to every company. The wizard shows a 5-column grid of PNG thumbnails from the
+catalog:
 
-- *presets* — the built-in heraldic marks;
-- *import* — PNG files found in an asset root's `logos/` directory (the
+- PNG files found in an asset root's `logos/` directory (the
   installed catalog under `share/iron-ledger/logos/` is sourced from
   `data/logos/` at build time), then `./`, `logos/`, and `docs/logos/`.
   Selecting a catalog logo auto-fills the outfit name (title-cased from the
@@ -353,9 +353,7 @@ titles and the help modal come from the same tables.
 | Key | Does |
 |---|---|
 | `Tab` | next field |
-| `h` | presets |
-| `l` | import a picture |
-| `j/k` | choose |
+| `h/j/k/l` | logo |
 | `type` | type the outfit's name |
 | `type` | type the company's name |
 | `Backspace` | erase |
