@@ -49,7 +49,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 | Rotation fatigue (accrues per contract, decays only at regional HQ) | `src/domain/person.zig` (`contractFatigueGain`, `fatigueDecayPerWeek`) + `force.zig` rotation tracking | 8 |
 | HQ-only skill training (XP earned anywhere, converted at home) | `src/sim/medical.zig` daily completion + `src/domain/person.zig` progression/state | 8 |
 | Site markets w/ rarity rolls (MekHQ's UnitMarket is global; ours are per-place) | `src/econ/market.zig` (`SiteKind`, `Rarity`, `listingAppears`) | 5 |
-| AtB black market / `market/UnitMarket` grey-market offers (battle-lost hulls surfacing on known trading hubs) | `src/sim/black_market.zig` (`buyerEligible`, `makeDispersedListing`); `planet.black_market` flag; `Listing.planet_key` + `available_after` (P3f.1) | P3f |
+| AtB black market / `market/UnitMarket` grey-market offers (battle-lost hulls surfacing on known trading hubs) | `src/sim/black_market.zig` (`buyerEligible`, `makeDispersedListing`, `disperseEnemyWrecks`); `planet.black_market` flag; `Listing.planet_key` + `available_after` (P3f.1); lost-field enemy recovery + dispersal (P3f.2) | P3f |
 | Structural-parts guarantee for owned chassis at regional HQs | `market.SiteKind.guaranteesStructural` + fabrication consts | 5 |
 | Per-hull carry cost + cold storage (extends MekHQ mothballing w/ reactivation time) | `src/domain/unit.zig` (`monthlyBill`, `reactivationDays`) | 5 |
 | Local operating funds for deployed companies | `force.local_funds` + `fund_transfer` txn category | 9 |

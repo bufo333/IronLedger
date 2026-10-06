@@ -719,16 +719,22 @@ an unsold listing that ages out returns its hull to the faction pool (market
 (`runMonthly`); abstraction-path listings (house board, black market,
 contract world) are unaffected and keep minting at buy time unchanged.
 
-**Black-market dispersed listings (P3f.1 data foundation).** `domain.Planet`
-carries a static `black_market: bool` flag; eight known trading hubs are
-flagged in `data/planets.zon`. `econ/market.Listing` carries two new fields:
-`planet_key` (the surfacing world for a dispersed offer; empty for HQ-board
-and contract-world listings) and `available_after` (the `day_index` from which
-the listing is visible; 0 = already available; fail-closed migration default).
+**Black-market dispersed listings (P3f.1–P3f.2).** `domain.Planet` carries a
+static `black_market: bool` flag; eight known trading hubs are flagged in
+`data/planets.zon`. `econ/market.Listing` carries two fields: `planet_key`
+(the surfacing world for a dispersed offer; empty for HQ-board and
+contract-world listings) and `available_after` (the `day_index` from which the
+listing is visible; 0 = already available; fail-closed migration default).
 `src/sim/black_market.zig` is the single rule owner for the "can buyer X take
-listing Y" predicate (`buyerEligible`); per-buyer reach gating lands in P3f.3.
-Schema v57 adds both columns to the `listing` table with `ADD COLUMN NOT NULL
-DEFAULT` migrations (docs/p3f-faction-loop-design.md §2.3).
+listing Y" predicate (`buyerEligible`) and for lost-field wreck dispersal
+(`disperseEnemyWrecks`). When the battle field is lost on the pool path,
+`disperseEnemyWrecks` gives every drawn destroyed enemy hull a terminal
+disposition: up to `tuning.market.enemy_recovery_capacity` hulls re-home into
+the enemy faction roster; the remainder transfer to `.market` and surface as
+dispersed black-market listings on black-market worlds other than the battle
+world. Per-buyer reach gating lands in P3f.3. Schema v57 adds both columns to
+the `listing` table with `ADD COLUMN NOT NULL DEFAULT` migrations
+(docs/p3f-faction-loop-design.md §2.3, §3).
 
 **Merc-company insolvency (P3e.7).** A world merc company whose fieldable
 battle value — the sum of chassis BV across all `.active` hulls in its pool

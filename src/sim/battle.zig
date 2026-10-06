@@ -30,6 +30,7 @@ const held_hulls_m = @import("held_hulls.zig");
 const operations_m = @import("operations.zig");
 const operation_mod = @import("../domain/operation.zig");
 const readiness_m = @import("readiness.zig");
+const black_market = @import("black_market.zig");
 
 /// Salvage trucks (SVT-1) a company can work a battlefield: operational
 /// (fit crew, not parked or busy) SVT-1s only (ARCH §9.3 active capability).
@@ -1554,6 +1555,20 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         hit_log.items,
         resolution,
     );
+
+    // P3f.2: a lost field leaves the drawn destroyed enemy hulls pool-removed
+    // but .active and enemy-owned. Give each a terminal disposition: enemy
+    // recovery up to capacity, remainder dispersed to the black market
+    // (docs/p3f-faction-loop-design.md §3). black_market owns the rule (rule 76).
+    if (pool_path and !held_field) {
+        var destroyed_wrecks: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+        for (drawn, opfor_outcomes) |hid, oc| if (oc == .destroyed) try destroyed_wrecks.append(gs.allocator(), hid);
+        if (destroyed_wrecks.items.len > 0) {
+            var rng_copy = gs.rng;
+            try black_market.disperseEnemyWrecks(gs, gs.allocator(), destroyed_wrecks.items, c.enemy_key, gs.clock.day_index, c.planet_key, &rng_copy);
+            gs.rng = rng_copy;
+        }
+    }
 }
 
 /// A bloodless win: the enemy's pool is absent or fully depleted (all

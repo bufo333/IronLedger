@@ -268,7 +268,9 @@ against a new hull and says when it is not worth doing.
 Losing the field is worse. Whoever holds it keeps the wrecks: without a
 salvage lance, trucks or a DropShip on-world, a rout leaves hulls to the
 enemy — gone — and their pilots may walk out or be taken, a ransom to pay
-or a prisoner to trade. The enemy is a force of its own, posted with the
+or a prisoner to trade. Enemy wrecks left on a lost field are not idle:
+the enemy recovers what it can, and the rest quietly surface as grey-market
+offers at trading hubs across the Inner Sphere, days or weeks later. The enemy is a force of its own, posted with the
 offer (the board says what the intel can read, `candidates` gives each
 company's odds), and it does not shrink as your company wears down. A
 company's **rules of engagement** decide how it takes a turning fight:

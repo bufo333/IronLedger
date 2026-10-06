@@ -4822,8 +4822,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P3f.1 black-market data foundation — two new Listing fields in the digest.
-    try std.testing.expectEqual(@as(u64, 678860154598026402), hash_before);
+    // Re-pinned by P3f.2 lost-field wreck dispersal — disperseEnemyWrecks runs during the played year.
+    try std.testing.expectEqual(@as(u64, 5324402808007654713), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5318,9 +5318,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P3f.1 black-market data foundation —
-    // two new Listing fields in the digest.
-    try std.testing.expectEqual(@as(u64, 678860154598026402), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3f.2 lost-field wreck dispersal —
+    // disperseEnemyWrecks runs during the played year.
+    try std.testing.expectEqual(@as(u64, 5324402808007654713), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
