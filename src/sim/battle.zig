@@ -415,11 +415,11 @@ fn opforPool(gs: *GameState, c: *const contract_mod.Contract) PoolResolution {
 
 /// Fisher-Yates partial draw of n hulls from the filtered candidate list.
 /// Uses gs.rng .battle stream. Returns an arena-allocated slice of the
-/// first n drawn ids (arena lifetime = GameState). Does not mutate any
-/// gs collection — selection only.
-fn drawOpforHulls(gs: *GameState, candidates: []const types.HullInstanceId, n: usize) []types.HullInstanceId {
-    // Copy into arena, then partial Fisher-Yates for n picks.
-    var buf = gs.allocator().alloc(types.HullInstanceId, candidates.len) catch return &.{};
+/// first n drawn ids (arena lifetime = GameState). Fallible: propagates OOM
+/// from the arena allocation. Does not mutate any gs collection — selection only.
+fn drawOpforHulls(gs: *GameState, candidates: []const types.HullInstanceId, n: usize) ![]types.HullInstanceId {
+    // Copy into arena (arena lifetime = GameState), then partial Fisher-Yates for n picks.
+    var buf = try gs.allocator().alloc(types.HullInstanceId, candidates.len);
     @memcpy(buf, candidates);
     var i: usize = 0;
     while (i < n) : (i += 1) {
@@ -983,6 +983,124 @@ fn takePrisoners(gs: *GameState, c: *const contract_mod.Contract, player: *const
     return captured;
 }
 
+/// Failure-atomic hull combat record writes for one engagement.
+/// PREPARE: count opfor records needed; RESERVE (only fallible step):
+/// ensureUnusedCapacity; COMMIT (infallible): append records, mutate
+/// destroyed-hull state and pool.
+/// `alloc` is used only for the reserve step — pass gs.allocator() in
+/// production and a failing allocator in tests to verify atomicity under
+/// reserve failure.
+fn writeHullCombatRecords(
+    gs: *GameState,
+    alloc: std.mem.Allocator,
+    engaged: []const types.UnitId,
+    opfor_outcomes: []const opfor.OpforHullOutcome,
+    drawn: []const types.HullInstanceId,
+    report_id: types.BattleId,
+    contract_id: types.ContractId,
+    per_unit_kills: []const @import("personnel.zig").UnitKills,
+    hit_log: []const battle_report.HullHit,
+    resolution: PoolResolution,
+) !void {
+    // PREPARE: count opfor records needed.
+    var opfor_record_count: usize = 0;
+    for (opfor_outcomes) |oc| {
+        if (oc == .destroyed or oc == .combat_ineffective) opfor_record_count += 1;
+    }
+    // RESERVE: widen to cover both player and opfor records (only fallible step).
+    try gs.hull_combat_records.ensureUnusedCapacity(alloc, engaged.len + opfor_record_count);
+    // COMMIT (infallible from here): player records first.
+    for (engaged) |uid| {
+        const u = gs.unit(uid) orelse continue;
+        if (u.hull_instance_id == .none) continue;
+        // Kills from the per_unit_kills tally built by creditKills.
+        var kills: u16 = 0;
+        for (per_unit_kills) |pk| {
+            if (pk.unit == uid) {
+                kills = pk.kills;
+                break;
+            }
+        }
+        // Damage summary folded from hit_log entries for this unit.
+        var rec_hits_taken: u16 = 0;
+        var first_armor: ?i32 = null;
+        var last_armor: i32 = 0;
+        var rec_slots_damaged: u8 = 0;
+        var rec_slots_destroyed: u8 = 0;
+        var rec_destroyed: bool = false;
+        var rec_cause: unit_mod.WreckCause = .none;
+        for (hit_log) |h| {
+            if (h.unit != uid) continue;
+            rec_hits_taken +|= 1;
+            if (first_armor == null) first_armor = h.armor_before;
+            last_armor = h.armor_after;
+            if (h.slot_result == .damaged) rec_slots_damaged +|= 1;
+            if (h.slot_result == .destroyed) rec_slots_destroyed +|= 1;
+            if (h.destroyed) {
+                rec_destroyed = true;
+                rec_cause = h.cause;
+            }
+        }
+        const armor_diff: i32 = if (first_armor) |fa| @max(0, fa - last_armor) else 0;
+        gs.hull_combat_records.appendAssumeCapacity(.{
+            .hull_instance_id = u.hull_instance_id,
+            .battle_id = report_id,
+            .contract_id = contract_id,
+            .kills = kills,
+            .hits_taken = rec_hits_taken,
+            .armor_lost = @intCast(@min(std.math.maxInt(u16), armor_diff)),
+            .slots_damaged = rec_slots_damaged,
+            .slots_destroyed = rec_slots_destroyed,
+            .destroyed = rec_destroyed,
+            .cause = rec_cause,
+        });
+    }
+    // COMMIT (continued): OpFor records for destroyed and combat_ineffective hulls.
+    // destroyed == false records are the exclusion signal for the next battle of
+    // this contract (combat_ineffective pre-draw exclusion, docs/p3c-economy-design.md §8.E).
+    // surviving hulls get no record and remain in the pool unchanged.
+    for (drawn, opfor_outcomes) |hid, oc| {
+        if (oc == .surviving) continue;
+        gs.hull_combat_records.appendAssumeCapacity(.{
+            .hull_instance_id = hid,
+            .battle_id = report_id,
+            .contract_id = contract_id,
+            .kills = 0,
+            .hits_taken = 0,
+            .armor_lost = 0,
+            .slots_damaged = 0,
+            .slots_destroyed = 0,
+            .destroyed = (oc == .destroyed),
+            .cause = if (oc == .destroyed) .cored else .none,
+        });
+        if (oc != .destroyed) continue;
+        // Destroyed hull: mark permanently_destroyed, set owner .destroyed,
+        // close the open ownership interval, remove from the pool.
+        const inst = gs.hull_instances.getPtr(hid) orelse continue;
+        inst.status = .permanently_destroyed;
+        inst.owner = .destroyed;
+        // Close the open ownership interval in place (terminal; no new row).
+        for (gs.hull_ownership_history.items) |*h| {
+            if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = gs.clock.day_index;
+        }
+        // Remove from pool by id-match (orderedRemove preserves remaining order
+        // for future draws; the pool pointer from opforPool is still valid —
+        // no map key was deleted, only a value element removed).
+        switch (resolution) {
+            .pool => |pool| {
+                var pi: usize = 0;
+                while (pi < pool.items.len) : (pi += 1) {
+                    if (pool.items[pi] == hid) {
+                        _ = pool.orderedRemove(pi);
+                        break;
+                    }
+                }
+            },
+            else => {},
+        }
+    }
+}
+
 pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Where and in what: the world's ground, the day's weather.
     const env: terrain_mod.Environment = blk: {
@@ -1039,7 +1157,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             if (filtered.len == 0) return forfeit(gs, c); // all remaining hulls combat_ineffective
             const garrison_probe = c.kind.isGarrisonClass();
             const n = opfor.drawSize(filtered.len, c.enemy_lances, garrison_probe);
-            drawn = drawOpforHulls(gs, filtered, n);
+            drawn = try drawOpforHulls(gs, filtered, n);
             // Fielded BV = Σ drawn-hull BVs (B2: opposed roll uses real hull BVs).
             var fielded_bv: i64 = 0;
             for (drawn) |hid| {
@@ -1405,108 +1523,21 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Write one HullCombatRecord per engaged owned unit that has a linked hull
     // instance (P3c.2), and one per drawn OpFor hull that was destroyed or
     // combat_ineffective (surviving hulls get no record). Failure-atomically
-    // (rules 7/13): PREPARE opfor record values, RESERVE (only fallible step)
-    // by widening ensureUnusedCapacity, then COMMIT infallibly.
+    // via writeHullCombatRecords (rules 7/13): PREPARE → RESERVE → COMMIT.
     // A pre-reservation failure leaves hull_combat_records, hull_instances,
     // the pool and hull_ownership_history untouched.
-    //
-    // PREPARE: count opfor records needed and build the destroyed-hull list.
-    var opfor_record_count: usize = 0;
-    for (opfor_outcomes) |oc| {
-        if (oc == .destroyed or oc == .combat_ineffective) opfor_record_count += 1;
-    }
-    // RESERVE: widen to cover both player and opfor records (only fallible step).
-    try gs.hull_combat_records.ensureUnusedCapacity(gs.allocator(), engaged.len + opfor_record_count);
-    // COMMIT (infallible from here): player records first.
-    for (engaged) |uid| {
-        const u = gs.unit(uid) orelse continue;
-        if (u.hull_instance_id == .none) continue;
-        // Kills from the per_unit_kills tally built by creditKills.
-        var kills: u16 = 0;
-        for (per_unit_kills.items) |pk| {
-            if (pk.unit == uid) {
-                kills = pk.kills;
-                break;
-            }
-        }
-        // Damage summary folded from hit_log entries for this unit.
-        var rec_hits_taken: u16 = 0;
-        var first_armor: ?i32 = null;
-        var last_armor: i32 = 0;
-        var rec_slots_damaged: u8 = 0;
-        var rec_slots_destroyed: u8 = 0;
-        var rec_destroyed: bool = false;
-        var rec_cause: unit_mod.WreckCause = .none;
-        for (hit_log.items) |h| {
-            if (h.unit != uid) continue;
-            rec_hits_taken +|= 1;
-            if (first_armor == null) first_armor = h.armor_before;
-            last_armor = h.armor_after;
-            if (h.slot_result == .damaged) rec_slots_damaged +|= 1;
-            if (h.slot_result == .destroyed) rec_slots_destroyed +|= 1;
-            if (h.destroyed) {
-                rec_destroyed = true;
-                rec_cause = h.cause;
-            }
-        }
-        const armor_diff: i32 = if (first_armor) |fa| @max(0, fa - last_armor) else 0;
-        gs.hull_combat_records.appendAssumeCapacity(.{
-            .hull_instance_id = u.hull_instance_id,
-            .battle_id = report.id,
-            .contract_id = c.id,
-            .kills = kills,
-            .hits_taken = rec_hits_taken,
-            .armor_lost = @intCast(@min(std.math.maxInt(u16), armor_diff)),
-            .slots_damaged = rec_slots_damaged,
-            .slots_destroyed = rec_slots_destroyed,
-            .destroyed = rec_destroyed,
-            .cause = rec_cause,
-        });
-    }
-    // COMMIT (continued): OpFor records for destroyed and combat_ineffective hulls.
-    // destroyed == false records are the exclusion signal for the next battle of
-    // this contract (combat_ineffective pre-draw exclusion, docs/p3c-economy-design.md §8.E).
-    // surviving hulls get no record and remain in the pool unchanged.
-    for (drawn, opfor_outcomes) |hid, oc| {
-        if (oc == .surviving) continue;
-        gs.hull_combat_records.appendAssumeCapacity(.{
-            .hull_instance_id = hid,
-            .battle_id = report.id,
-            .contract_id = c.id,
-            .kills = 0,
-            .hits_taken = 0,
-            .armor_lost = 0,
-            .slots_damaged = 0,
-            .slots_destroyed = 0,
-            .destroyed = (oc == .destroyed),
-            .cause = if (oc == .destroyed) .cored else .none,
-        });
-        if (oc != .destroyed) continue;
-        // Destroyed hull: mark permanently_destroyed, set owner .destroyed,
-        // close the open ownership interval, remove from the pool.
-        const inst = gs.hull_instances.getPtr(hid) orelse continue;
-        inst.status = .permanently_destroyed;
-        inst.owner = .destroyed;
-        // Close the open ownership interval in place (terminal; no new row).
-        for (gs.hull_ownership_history.items) |*h| {
-            if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = gs.clock.day_index;
-        }
-        // Remove from pool by id-match (orderedRemove preserves remaining order
-        // for future draws; the pool pointer from opforPool is still valid —
-        // no map key was deleted, only a value element removed).
-        switch (resolution) {
-            .pool => |pool| {
-                var pi: usize = 0;
-                while (pi < pool.items.len) : (pi += 1) {
-                    if (pool.items[pi] == hid) {
-                        _ = pool.orderedRemove(pi);
-                        break;
-                    }
-                }
-            },
-            else => {},
-        }
-    }
+    try writeHullCombatRecords(
+        gs,
+        gs.allocator(),
+        engaged,
+        opfor_outcomes,
+        drawn,
+        report.id,
+        c.id,
+        per_unit_kills.items,
+        hit_log.items,
+        resolution,
+    );
 }
 
 /// A bloodless win: the enemy's pool is absent or fully depleted (all
@@ -4129,4 +4160,56 @@ test "pool draw atomicity: hull_combat_records and hull_instances are consistent
     }
     // Verify we ran at least some pool-path battles (faction_rosters had an entry).
     try testing.expect(gs.faction_rosters.count() > 0);
+}
+
+test "pool draw atomicity: OpFor tail is all-or-nothing under ensureUnusedCapacity failure" {
+    // Rule 69: atomicity tested with injected failure.
+    // The whole-command stateHash injection is infeasible: resolveEngagement
+    // commits prior mutations (score, AAR, transactions, etc.) before the tail
+    // reserve. This test directly calls writeHullCombatRecords with a failing
+    // allocator to prove the new OpFor tail writes are atomic under reserve failure.
+    const testing = std.testing;
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9001 });
+    defer gs.deinit();
+    gs.clock.day_index = 1;
+
+    // Seed 3 hulls into a pool; opfor_outcomes has destroyed + combat_ineffective
+    // entries so opfor_record_count > 0 and ensureUnusedCapacity must allocate.
+    const pool_ids = try seedOpforHulls(&gs, "DC", 3);
+    const pool = gs.faction_rosters.getPtr("DC").?;
+    const opfor_outcomes: []const opfor.OpforHullOutcome = &.{ .destroyed, .surviving, .combat_ineffective };
+
+    // hull_combat_records starts empty (capacity 0). The failing allocator with
+    // fail_index = 0 triggers OOM at the first ensureUnusedCapacity call.
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    try testing.expectError(error.OutOfMemory, writeHullCombatRecords(
+        &gs,
+        failing.allocator(),
+        &.{}, // no engaged units — player record loop produces nothing
+        opfor_outcomes,
+        pool_ids,
+        @enumFromInt(1), // report_id
+        @enumFromInt(1), // contract_id
+        &.{}, // per_unit_kills
+        &.{}, // hit_log
+        .{ .pool = pool },
+    ));
+
+    // Assert: no OpFor tail writes happened.
+    // No HullCombatRecord was appended.
+    try testing.expectEqual(@as(usize, 0), gs.hull_combat_records.items.len);
+    // Pool length is unchanged.
+    try testing.expectEqual(@as(usize, 3), pool.items.len);
+    // No hull has permanently_destroyed status or .destroyed owner.
+    for (pool.items) |pid| {
+        const inst = gs.hull_instances.getPtr(pid) orelse {
+            try testing.expect(false); // hull vanished — violation
+            continue;
+        };
+        try testing.expect(inst.status != .permanently_destroyed);
+        try testing.expectEqual(
+            @import("../domain/hull_instance.zig").OwnerType.faction,
+            std.meta.activeTag(inst.owner),
+        );
+    }
 }
