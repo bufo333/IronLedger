@@ -925,13 +925,19 @@ pub const App = struct {
                 const cy: u16 = grid_inner.y + @as(u16, @intCast(vr)) * cell_h;
                 const selected = idx == self.w_logo;
 
-                // Name label: last row of the cell.
+                // Name label: last row of the cell, centered within the cell width.
                 const name_y: i32 = @as(i32, cy) + @as(i32, cell_h) - 1;
                 var name_buf: [128]u8 = undefined;
                 const title_name = game.logo_name.titleCaseLogoKey(self.logos[idx], &name_buf);
                 const display_name = title_name[0..@min(title_name.len, cell_w)];
                 const lbl: Style = if (selected) .sel else .dim;
-                self.screen.textPad(@intCast(cx), name_y, cell_w, display_name, lbl);
+                // Center: pad leading spaces so the name sits in the middle of the cell.
+                // padding = (cell_cols - name_display_width) / 2, clamped to 0.
+                const padding: usize = @as(usize, (cell_w -| @as(u16, @truncate(display_name.len))) / 2);
+                var center_buf: [256]u8 = undefined;
+                @memset(center_buf[0..padding], ' ');
+                @memcpy(center_buf[padding..][0..display_name.len], display_name);
+                self.screen.textPad(@intCast(cx), name_y, cell_w, center_buf[0 .. padding + display_name.len], lbl);
 
                 // Thumbnail image: rows above the name label.
                 const img_h: u16 = cell_h - 1;
@@ -2009,9 +2015,10 @@ pub const App = struct {
         // (rule 63): on failure the open session stays valid.
         const seed: u64 = 3025 + self.w_seed * 7919 + @as(u64, @intCast(self.w_faction)) * 13;
         // Use the selected catalog thumbnail's bytes as the campaign emblem image.
-        // When no logos are available (should not happen: comptime guard ensures the
-        // catalog exists), an empty slice is passed so the campaign starts without an
-        // image emblem.
+        // Force-load the selected cell before reading its bytes: the draw loop decodes
+        // lazily (one cell per frame) so navigating down and immediately pressing next
+        // can leave the selected cell null. loadThumbAt is idempotent and best-effort.
+        self.loadThumbAt(self.w_logo);
         const image: []const u8 = if (self.w_logo < self.w_thumbs.len)
             if (self.w_thumbs[self.w_logo]) |e| e.bytes else &.{}
         else
@@ -5181,4 +5188,48 @@ test "wizard grid navigation moves w_logo correctly and clamps at bounds" {
     c.app.gridMove(1);
     try std.testing.expectEqualStrings("Ashfall Lancers", c.app.w_outfit.slice());
     try std.testing.expect(!c.app.w_outfit_auto);
+}
+
+test "generateCampaign force-loads selected thumbnail before reading its bytes (down-then-generate)" {
+    // Regression for the lazy-load gap: if the user navigates down to a cell
+    // that the draw loop has not yet decoded and immediately presses next,
+    // generateCampaign must still produce a non-empty emblem image.
+    const gpa = std.testing.allocator;
+    var sink = std.Io.Writer.Discarding.init(&.{});
+    var term: Term = .{ .in_fd = -1, .orig = undefined, .out = &sink.writer };
+    const store = try game.lobby.Lobby.open(":memory:");
+    defer store.close();
+    var app = try App.init(gpa, std.testing.io, &term, store);
+    defer app.deinit();
+    app.player_id = try store.createPlayer("Test");
+    app.w_name.set("Erik Kalmar");
+    app.w_outfit.set("Down Then Generate");
+    app.w_company.set("Alpha Company");
+
+    // Seed the catalog with real on-disk logos (6 entries: two rows at 5 cols each,
+    // so index 5 sits in the second row and is never in the initial visible window).
+    const logos = [_][]const u8{
+        "data/logos/ashfall_lancers.png",
+        "data/logos/balance_point_mercenaries.png",
+        "data/logos/blackstar_company.png",
+        "data/logos/broken_sky_company.png",
+        "data/logos/cerberus_contracting.png",
+        "data/logos/dawnbreak_mercenaries.png", // idx 5 — second row, not lazily loaded yet
+    };
+    app.logos = &logos;
+    const thumbs = try gpa.alloc(?emblem_mod.Emblem, logos.len);
+    @memset(thumbs, null);
+    app.w_thumbs = thumbs;
+
+    // Navigate down one row (5 steps right) to select index 5.
+    app.w_logo = 5;
+    // w_thumbs[5] is null — it has never been drawn (simulates the bug path).
+    try std.testing.expect(app.w_thumbs[5] == null);
+
+    // generateCampaign must force-load index 5 before reading its bytes.
+    try app.generateCampaign();
+
+    // After generateCampaign the thumbnail should be decoded (PNG is on disk).
+    try std.testing.expect(app.w_thumbs[5] != null);
+    try std.testing.expect(app.w_thumbs[5].?.bytes.len > 0);
 }
