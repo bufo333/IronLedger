@@ -1121,14 +1121,14 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     switch (resolution) {
         .abstraction => {}, // leave both defaults: existing RAT/BV abstraction behaviour
         .forfeit => return forfeit(gs, c),
-        .pool => |pool| pool_blk: {
+        .pool => |pool| {
             // Exclusion set: hulls that were combat_ineffective in an earlier
             // battle of this contract (derived from committed records, no new column).
             // destroyed == false records signal combat_ineffective (not simply surviving,
             // because surviving hulls get no record). Player-hull ids are harmless: they
             // are never pool members.
             // Use scratch for the transient filter buffers; free before leaving the block.
-            const excl_buf_raw = gs.scratch().alloc(types.HullInstanceId, gs.hull_combat_records.items.len) catch break :pool_blk;
+            const excl_buf_raw = try gs.scratch().alloc(types.HullInstanceId, gs.hull_combat_records.items.len);
             defer gs.scratch().free(excl_buf_raw);
             var excl_len: usize = 0;
             for (gs.hull_combat_records.items) |rec| {
@@ -1139,7 +1139,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             }
             const excluded = excl_buf_raw[0..excl_len];
             // Filtered candidates: pool members not in the exclusion set.
-            const filt_buf_raw = gs.scratch().alloc(types.HullInstanceId, pool.items.len) catch break :pool_blk;
+            const filt_buf_raw = try gs.scratch().alloc(types.HullInstanceId, pool.items.len);
             defer gs.scratch().free(filt_buf_raw);
             var filt_len: usize = 0;
             for (pool.items) |hid| {
