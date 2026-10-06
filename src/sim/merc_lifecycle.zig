@@ -98,6 +98,7 @@ pub fn liquidateMercCompany(
         const roster = gs.merc_company_rosters.getPtr(company_id).?;
         for (roster.items, 0..) |hid, i| {
             const inst = gs.hull_instances.getPtr(hid) orelse continue;
+            _ = chassis_mod.find(inst.base_key) orelse continue;
             // Transfer ownership: merc_company → market.
             inst.owner = .market;
             // Close the open ownership interval.
