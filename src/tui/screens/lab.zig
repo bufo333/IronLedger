@@ -11,81 +11,158 @@ const layout = app.layout;
 const q = app.q;
 const meklab = game.meklab;
 
+/// Return the screen rect for a location box within the spatial mech diagram.
+/// base_x / base_y: top-left corner of the diagram area (after the budget pane).
+/// Diagram columns (relative to base_x):
+///   HEAD:        [torso_w .. torso_w*2)      — centered above CT
+///   LT / CT / RT: [0..torso_w), [torso_w..torso_w*2), [torso_w*2..torso_w*3)
+///   LA / RA:      [0..arm_w), [torso_w*3-arm_w..torso_w*3)
+///   LL / RL:      same x-bands as LA/RA, one arm_h lower
+fn boxRect(
+    loc: meklab.Location,
+    base_x: u16,
+    base_y: u16,
+    torso_w: u16,
+    arm_w: u16,
+    head_h: u16,
+    torso_h: u16,
+    arm_h: u16,
+) struct { x: u16, y: u16, w: u16, h: u16 } {
+    const t2: u16 = torso_w *% 2;
+    const t3: u16 = torso_w *% 3;
+    const ra_x: u16 = t3 -% arm_w;
+    return switch (loc) {
+        .hd => .{ .x = base_x +% torso_w, .y = base_y, .w = torso_w, .h = head_h },
+        .ct => .{ .x = base_x +% torso_w, .y = base_y +% head_h, .w = torso_w, .h = torso_h },
+        .lt => .{ .x = base_x, .y = base_y +% head_h, .w = torso_w, .h = torso_h },
+        .rt => .{ .x = base_x +% t2, .y = base_y +% head_h, .w = torso_w, .h = torso_h },
+        .la => .{ .x = base_x, .y = base_y +% head_h +% torso_h, .w = arm_w, .h = arm_h },
+        .ra => .{ .x = base_x +% ra_x, .y = base_y +% head_h +% torso_h, .w = arm_w, .h = arm_h },
+        .ll => .{ .x = base_x, .y = base_y +% head_h +% torso_h +% arm_h, .w = arm_w, .h = arm_h },
+        .rl => .{ .x = base_x +% ra_x, .y = base_y +% head_h +% torso_h +% arm_h, .w = arm_w, .h = arm_h },
+    };
+}
+
+/// Format one crit slot row for rendering inside a location box.
+/// Staged installs (slot_key == "" and kind != fixed/free) render in amber
+/// to show they are pending.
+fn slotLine(al: std.mem.Allocator, row: q.LayoutRow) ![]const u8 {
+    const staged = row.slot_key.len == 0 and
+        row.kind != .fixed and row.kind != .free;
+    const mark: []const u8 = switch (row.kind) {
+        .fixed => "{d}■{/}",
+        .missile => if (staged) "{a}M{/}" else "{p}M{/}",
+        .energy => "{a}E{/}",
+        .ballistic => if (staged) "{a}B{/}" else "{c}B{/}",
+        .equipment => if (staged) "{a}Q{/}" else "{g}Q{/}",
+        .ammo => if (staged) "{a}A{/}" else "{g}A{/}",
+        .free => "{d}·{/}",
+    };
+    const text: []const u8 = switch (row.kind) {
+        .fixed => try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{row.text}),
+        .free => "{d}────────{/}",
+        else => if (staged)
+            try std.fmt.allocPrint(al, "{{a}}{s}{{/}}", .{row.text})
+        else
+            row.text,
+    };
+    return std.fmt.allocPrint(al, "{s} {s}", .{ mark, text });
+}
+
+/// Map the flat linear cursor (which counts header + rows + blank per box)
+/// to (box_index, row_index_within_box).  row index is null when the cursor
+/// is on a header or blank separator row.
+fn cursorBoxRow(boxes: []const q.LocationBox, cursor: usize) struct { bi: usize, ri: ?usize } {
+    var idx: usize = 0;
+    for (boxes, 0..) |box, bi| {
+        if (idx == cursor) return .{ .bi = bi, .ri = null }; // header
+        idx += 1;
+        for (box.rows, 0..) |_, ri| {
+            if (idx == cursor) return .{ .bi = bi, .ri = ri };
+            idx += 1;
+        }
+        if (idx == cursor) return .{ .bi = bi, .ri = null }; // blank
+        idx += 1;
+    }
+    return .{ .bi = 0, .ri = null };
+}
+
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
     const g = self.state();
     const b = self.body();
     const meks = try q.labMeks(al, g);
     if (meks.len == 0) {
-        const rows = [_][]const u8{"{d}no meks to work on{/}"};
-        self.listPane(b, "LAB", &rows, 0, false, false);
+        const focused = self.paneFocused(0);
+        self.listPane(b, "LAB", &.{"{d}no meks to work on{/}"}, 0, focused, false);
         return;
     }
     App.clampIdx(&self.lab_sel, meks.len);
     const uid = meks[self.lab_sel];
     const view = try q.lab(al, g, uid);
     const boxes = try q.labLayout(al, g, uid);
-    const lw: u16 = if (self.narrow()) 0 else @max(30, layout.lab_hulls.of(b.w));
-    const mw: u16 = if (self.narrow()) layout.major.of(b.w) else @max(40, layout.lab_mounts.of(b.w));
 
-    // Left pane: budget summary + per-location crit boxes.
+    // Left pane: budget summary + staged plan (wide only).
+    const lw: u16 = if (self.narrow()) 0 else @max(30, layout.lab_hulls.of(b.w));
     if (lw > 0) {
         var budget_rows: std.ArrayListUnmanaged([]const u8) = .empty;
         for (view.budget) |line| try budget_rows.append(al, line);
-        if (boxes.len > 0) {
+        if (view.plan.len > 0) {
             try budget_rows.append(al, "");
-            try budget_rows.append(al, "{d}── locations ─────────────────────{/}");
-            for (boxes) |box| {
-                // Summary: "LA  fixed 2  free 10 [actuator note]"
-                var fixed_n: u8 = 0;
-                var free_n: u8 = 0;
-                for (box.rows) |row| {
-                    if (row.kind == .fixed) fixed_n += 1;
-                    if (row.kind == .free) free_n += 1;
-                }
-                try budget_rows.append(al, try std.fmt.allocPrint(al, "{s: <4} {d: >2} fixed · {d: >2} free{s}", .{
-                    box.title,                                                                                                  fixed_n, free_n,
-                    if (box.actuator_note.len > 0) try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{box.actuator_note}) else "",
-                }));
-            }
+            try budget_rows.append(al, "{d}── staged plan ────────────────────{/}");
+            for (view.plan) |line| try budget_rows.append(al, line);
         }
         self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, view.title, budget_rows.items, 1, false, false);
     }
 
-    // Middle pane: per-location crit layout (the construction editor).
-    var layout_rows: std.ArrayListUnmanaged([]const u8) = .empty;
-    for (boxes) |box| {
-        // Location header.
-        const hdr = if (box.actuator_note.len > 0)
-            try std.fmt.allocPrint(al, "{{a}}── {s} ──{{/}} {{d}}{s}{{/}}", .{ box.title, box.actuator_note })
-        else
-            try std.fmt.allocPrint(al, "{{a}}── {s} ──{{/}}", .{box.title});
-        try layout_rows.append(al, hdr);
-        for (box.rows) |row| {
-            const mark: []const u8 = switch (row.kind) {
-                .fixed => "{d}■{/}",
-                .missile => "{b}M{/}",
-                .energy => "{g}E{/}",
-                .ballistic => "{a}B{/}",
-                .equipment => "{s}Q{/}",
-                .ammo => "{a}A{/}",
-                .free => "{d}·{/}",
-            };
-            const text_col: []const u8 = switch (row.kind) {
-                .fixed => try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{row.text}),
-                .free => "{d}──────────{/}",
-                else => try std.fmt.allocPrint(al, "{s}", .{row.text}),
-            };
-            try layout_rows.append(al, try std.fmt.allocPrint(al, " {s} {s}", .{ mark, text_col }));
-        }
-        try layout_rows.append(al, "");
-    }
-    if (layout_rows.items.len == 0) try layout_rows.append(al, "{d}no layout{/}");
-    const focused_pane: bool = self.paneFocused(0);
-    self.listPane(.{ .x = b.x + lw, .y = b.y, .w = mw, .h = b.h }, try std.fmt.allocPrint(al, "LAYOUT · hull {d} of {d}", .{ self.lab_sel + 1, meks.len }), layout_rows.items, 0, focused_pane, true);
+    // Spatial mech diagram — all remaining width.
+    const dx: u16 = b.x + lw;
+    const focused_overall = self.paneFocused(0);
 
-    // Right pane: plan & rules.
-    self.listPane(.{ .x = b.x + lw + mw, .y = b.y, .w = b.w - lw - mw, .h = b.h }, if (view.legal) "PLAN" else "PLAN · {c}illegal{/}", view.plan, 2, false, false);
+    // Box dimensions.  physicalTotal(loc) + 2 for the border; derived from
+    // the actual row counts so the identity holds for any chassis.
+    const torso_w: u16 = 16; // inner_w = 12: mark + space + 10-char label
+    const arm_w: u16 = 13; // inner_w =  9: mark + space +  7-char label
+    var head_h: u16 = 8;
+    var torso_h: u16 = 14;
+    var arm_h: u16 = 14;
+    for (boxes) |box| switch (box.loc) {
+        .hd => head_h = @intCast(box.rows.len + 2),
+        .ct => torso_h = @intCast(box.rows.len + 2),
+        .la => arm_h = @intCast(box.rows.len + 2),
+        else => {},
+    };
+
+    // Map the cursor to the selected box and row.
+    const sel = cursorBoxRow(boxes, self.cur(0).*);
+
+    // Render each location box at its spatial position within the diagram.
+    for (boxes, 0..) |box, bi| {
+        const r = boxRect(box.loc, dx, b.y, torso_w, arm_w, head_h, torso_h, arm_h);
+        const is_sel = (bi == sel.bi);
+        const inner = self.screen.pane(
+            .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h },
+            .{ .title = box.title, .focused = is_sel and focused_overall },
+        );
+        var items: std.ArrayListUnmanaged([]const u8) = .empty;
+        for (box.rows) |row| {
+            try items.append(al, try slotLine(al, row));
+        }
+        self.screen.lines(inner, items.items, 0, if (is_sel) sel.ri else null);
+    }
+
+    // Actuator note: rendered in the gap between the LA and RA boxes when
+    // the arm has reduced actuators (box.actuator_note != "").
+    for (boxes) |box| {
+        if (box.actuator_note.len == 0 or box.loc != .la) continue;
+        const gap_x: i32 = @as(i32, dx) + arm_w;
+        const gap_w: u16 = torso_w * 3 - arm_w * 2;
+        const arm_y: i32 = @as(i32, b.y) + @as(i32, head_h) + @as(i32, torso_h);
+        // Centre the note vertically in the arm row band.
+        const mid: i32 = arm_y + @divTrunc(@as(i32, arm_h), 2) - 1;
+        self.screen.textPad(gap_x, mid, gap_w, "no lower arm /", .dim);
+        self.screen.textPad(gap_x, mid + 1, gap_w, " no hand act.", .dim);
+    }
 }
 
 pub fn move(self: *App, delta: i32) anyerror!void {
@@ -93,9 +170,9 @@ pub fn move(self: *App, delta: i32) anyerror!void {
     const g = self.state();
     const uid = (try self.labUnit()) orelse return;
     const boxes = try q.labLayout(al, g, uid);
-    // Count total layout rows across all boxes (plus header rows).
+    // Count total items in the linear cursor model: header + rows + blank per box.
     var total: usize = 0;
-    for (boxes) |box| total += 1 + box.rows.len + 1; // header + rows + blank
+    for (boxes) |box| total += 1 + box.rows.len + 1;
     if (total > 0) self.moveCursor(0, delta, total);
 }
 

@@ -142,7 +142,7 @@ no room.
 | F5 | Ledger | Treasuries · P&L · Ledger |
 | F6 | Supply | Sites · Demand · Order form · Shop |
 | F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall |
-| F8 | Lab | Budget/crits · Mounts · Plan & rules |
+| F8 | Lab | Budget/plan (wide) · Spatial mech diagram: 8 per-location crit boxes (HD / CT / LT / RT / LA / RA / LL / RL) |
 | F9 | People | Personnel (pinned header, role filter) · Person-detail modal (Enter or `r` opens it: file, skills, status, assignment and eligible actions) · Open seats |
 | F10 | Market | Boards · Order catalog · Demand |
 

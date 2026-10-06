@@ -371,7 +371,7 @@ send("\r", 1.0)
 assert wait_for("emblem set to your own crest", tail=2000), plain()[-2000:]
 send("8")                      # lab
 p = plain()
-assert "LAYOUT" in p and "RULES: legal fit" in p, p[-3000:]
+assert "HD" in p and "CT" in p and "RULES: legal fit" in p, p[-3000:]
 send("-", 0.8)                 # stage a removal
 assert "remove" in plain(), plain()[-2000:]
 send("+", 0.8)                 # install picker: part, then location
