@@ -11,6 +11,7 @@ const planet_mod = @import("../domain/planet.zig");
 const hq_mod = @import("../domain/hq.zig");
 const part_mod = @import("../domain/part.zig");
 const person_gen = @import("../gen/person_gen.zig");
+const logo = @import("../domain/logo.zig");
 const GameState = @import("state.zig").GameState;
 const hq_ops = @import("hq_ops.zig");
 const contract_market = @import("contract_market.zig");
@@ -228,6 +229,11 @@ const Command = commands.Command;
 
 pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_commander")) Error!Result {
     if (c.start_year < 3000 or c.start_year > 3060) return Error.BadYear;
+    const reserved_logo: []const u8 = blk: {
+        if (c.logo_key.len == 0) break :blk "";
+        for (logo.all_keys) |k| if (std.mem.eql(u8, k, c.logo_key)) break :blk k; // static catalog memory
+        break :blk ""; // not a catalog key → reserve nothing (fail-closed)
+    };
     _ = try createCommander(gs, c.name, c.origin, c.profession);
     gs.clock.date.year = c.start_year;
     // Until renamed, the outfit carries the commander's name — it
@@ -235,6 +241,8 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
     if (std.mem.eql(u8, gs.outfit_name, "Provisional Mercenary Command")) {
         gs.outfit_name = try std.fmt.allocPrint(gs.allocator(), "{s}'s Command", .{c.name});
     }
+    // Reserve the player's catalog logo before seeding NPC merc companies.
+    gs.player_logo_key = reserved_logo;
     // The boards open the day the shingle goes up.
     try contract_market.refresh(gs);
     try contract_market.refreshListings(gs);

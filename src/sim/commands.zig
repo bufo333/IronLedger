@@ -74,6 +74,9 @@ pub const Command = union(enum) {
         /// Campaign start year: the market, RATs and salvage field
         /// only what exists by then.
         start_year: u16 = 3025,
+        /// The founding outfit's chosen data/logos catalog key, reserved from NPC
+        /// merc companies. "" when the player picked a preset or a non-catalog PNG.
+        logo_key: []const u8 = "",
     },
     /// Accept an offer off the current board and send a company.
     accept_contract: struct { offer: types.ContractId, company: types.ForceId },

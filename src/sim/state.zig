@@ -235,6 +235,10 @@ pub const GameState = struct {
     reputation: i32 = 0,
     /// Player-set identity (ARCH §5); companies carry their own in Force.
     outfit_name: []const u8 = "Provisional Mercenary Command",
+    /// The player's chosen company logo (a data/logos catalog key), reserved so
+    /// no NPC merc company — seeded or spawned — ever uses it. "" = the player
+    /// picked no catalog logo (preset or custom import); nothing is reserved.
+    player_logo_key: []const u8 = "",
     /// The player character (character creation): origin decides where the
     /// outfit stands up; profession grants one 2% edge (commander.zig).
     commander: ?commander_mod.Commander = null,
@@ -1059,6 +1063,7 @@ pub const GameState = struct {
         .{ "funds", .persisted },
         .{ "reputation", .persisted },
         .{ "outfit_name", .persisted },
+        .{ "player_logo_key", .persisted },
         .{ "commander", .persisted },
         .{ "bankrupt", .persisted },
         .{ "auto_admit", .persisted },

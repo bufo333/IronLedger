@@ -147,6 +147,9 @@ pub const Session = struct {
         company_name: []const u8,
         /// If non-null, `set_emblem` is called on the created company.
         emblem_image: ?[]const u8 = null,
+        /// The founding outfit's chosen data/logos catalog key, reserved from NPC
+        /// merc companies. "" when the player picked a preset or a non-catalog PNG.
+        logo_key: []const u8 = "",
     };
 
     /// Build a fresh campaign from the wizard spec: creates commander, renames
@@ -159,7 +162,7 @@ pub const Session = struct {
         var session = try Session.fresh(gpa, seed);
         errdefer session.close();
         const gs = session.gs;
-        _ = try commands.execute(gs, .{ .create_commander = .{ .name = spec.commander_name, .origin = spec.origin, .profession = spec.profession, .start_year = spec.start_year } });
+        _ = try commands.execute(gs, .{ .create_commander = .{ .name = spec.commander_name, .origin = spec.origin, .profession = spec.profession, .start_year = spec.start_year, .logo_key = spec.logo_key } });
         _ = try commands.execute(gs, .{ .rename_outfit = spec.outfit_name });
         const res = try commands.execute(gs, .{ .new_company = spec.company_name });
         if (spec.emblem_image) |img| {

@@ -3,8 +3,9 @@
 //! (ARCH rule 2). No MekHQ counterpart (docs/mekhq-map.md).
 
 const keys = @import("logos_zon");
-/// All logo keys, sorted ascending by byte order (deterministic, required for
-/// seedMercCompanies to produce a reproducible key-by-index assignment).
+/// All logo keys, sorted ascending by byte order (deterministic pool order
+/// for seedMercCompanies, which draws randomly without replacement from this
+/// sorted pool rather than assigning by index).
 pub const all_keys: []const []const u8 = &keys;
 
 // ---- Tests -----------------------------------------------------------------

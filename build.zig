@@ -100,7 +100,7 @@ pub fn build(b: *std.Build) void {
     // build a ZON array literal, and expose it as the anonymous import "logos_zon".
     // The module (src/domain/logo.zig) imports it at comptime — pure, no I/O in the
     // sim core (ARCH rule 2). Sort order is required for determinism: seedMercCompanies
-    // indexes all_keys by company index.
+    // draws logos randomly without replacement from this sorted pool.
     {
         var logos_dir = b.build_root.handle.openDir(b.graph.io, "data/logos", .{ .iterate = true }) catch |err|
             std.process.fatal("data/logos: not a readable directory ({s}); the logo catalog requires the 35 PNGs to be present", .{@errorName(err)});
@@ -181,7 +181,7 @@ pub fn build(b: *std.Build) void {
         .install_subdir = "share/iron-ledger/music",
     });
     b.installDirectory(.{
-        .source_dir = b.path("docs/logos"),
+        .source_dir = b.path("data/logos"),
         .install_dir = .prefix,
         .install_subdir = "share/iron-ledger/logos",
         .include_extensions = &.{".png"},

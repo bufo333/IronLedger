@@ -218,9 +218,9 @@ pub fn buyHullsForCompany(
 /// Single owner of replacement merc company spawn (rule 20/76).
 /// Draws the next archetype and hiring faction in the same order as
 /// `seedMercCompanies`. Picks the first logo from `logo.all_keys` not held
-/// by any active (dissolved_day == 0) company. Sets cbills to
-/// `merc_replacement_cbill_floor` and calls `buyHullsForCompany` to form
-/// the hull pool from market supply.
+/// by any active (dissolved_day == 0) company and never the player's reserved
+/// `player_logo_key`. Sets cbills to `merc_replacement_cbill_floor` and calls
+/// `buyHullsForCompany` to form the hull pool from market supply.
 ///
 /// Does NOT write `gs.rng` — the caller commits the rng copy.
 pub fn spawnReplacementCompany(
@@ -251,9 +251,10 @@ pub fn spawnReplacementCompany(
     // Draw identity.
     const identity = roster_gen.rollMercCompanyIdentity(rng, .rivals, archetype, f.key);
 
-    // Pick the first logo key not held by any active company.
+    // Pick the first logo key not held by any active company and not reserved for the player.
     var chosen_logo: []const u8 = "";
     for (logo.all_keys) |key| {
+        if (gs.player_logo_key.len > 0 and std.mem.eql(u8, key, gs.player_logo_key)) continue; // reserved for the player
         var held = false;
         var mc_it = gs.merc_companies.iterator();
         while (mc_it.next()) |entry| {
@@ -558,6 +559,26 @@ test "spawnReplacementCompany: unique id, founded_day, dissolved_day==0, cbills=
     try std.testing.expect(!std.mem.eql(u8, spawned.logo_key, logo.all_keys[0]));
     // next_merc_company_id advanced.
     try std.testing.expectEqual(@as(u32, 3), gs.next_merc_company_id);
+}
+
+test "spawnReplacementCompany: never picks the player's reserved logo_key" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 3002 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const alloc = gs.allocator();
+
+    // Reserve the first catalog key for the player (not held by any active company).
+    gs.player_logo_key = logo.all_keys[0];
+    gs.next_merc_company_id = 1;
+
+    var rng = gs.rng;
+    try spawnReplacementCompany(&gs, alloc, 10, &rng);
+
+    const new_id: types.MercCompanyId = @enumFromInt(1);
+    const spawned = gs.merc_companies.getPtr(new_id) orelse return error.TestFailed;
+    // Spawned company must not use the player's reserved logo.
+    try std.testing.expect(!std.mem.eql(u8, spawned.logo_key, logo.all_keys[0]));
 }
 
 test "runMercLifecycle: (a) insolvent company liquidated+replaced, active count held; dissolved record persists" {

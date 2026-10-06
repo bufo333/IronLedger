@@ -30,8 +30,13 @@ generated company's emblem; the in-campaign outfit action applies a replacement
 to every company. Two sources appear in the wizard:
 
 - *presets* — the built-in heraldic marks;
-- *import* — PNG files found in an asset root's `logos/` directory, then
-  `./`, `logos/`, and `docs/logos/`. The decoder accepts 8-bit
+- *import* — PNG files found in an asset root's `logos/` directory (the
+  installed catalog under `share/iron-ledger/logos/` is sourced from
+  `data/logos/` at build time), then `./`, `logos/`, and `docs/logos/`.
+  Selecting a catalog logo auto-fills the outfit name (title-cased from the
+  filename stem); manually editing the outfit name freezes this auto-fill.
+  The chosen catalog key is reserved from rival merc companies for the
+  campaign's life. The decoder accepts 8-bit
   greyscale/RGB/RGBA/palette non-interlaced PNGs; JPEG is out of scope.
   Validation bounds (rule 64): IHDR must be the first chunk; CRC is
   verified on every chunk; images wider than 2048×2048 pixels are refused;

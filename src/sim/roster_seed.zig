@@ -28,8 +28,8 @@ const max_merc_companies: usize = 256;
 comptime {
     if (tuning.generation.merc_company_count > max_merc_companies)
         @compileError("merc_company_count exceeds max_merc_companies; raise the constant");
-    if (tuning.generation.merc_company_count > logo.all_keys.len)
-        @compileError("merc_company_count exceeds the data/logos catalog; add more PNG files to data/logos/");
+    if (tuning.generation.merc_company_count + 1 > logo.all_keys.len)
+        @compileError("merc_company_count + 1 exceeds the data/logos catalog; add more PNG files to data/logos/");
 }
 
 /// Seed every manufacturing faction's hull pool at campaign creation.
@@ -161,10 +161,12 @@ pub fn seedFactionRosters(gs: *GameState) !void {
 ///   Commit   — insert pre-built records into gs.* (infallible); gs.rng,
 ///              gs.next_merc_company_id, and gs.next_hull_instance_id updated last.
 ///
-/// Draw order: per-company, identity (on .rivals stream) then pool (on .rosters
-/// stream). Within a company, identity draws precede all pool draws, so the
+/// Draw order: per-company, archetype (.rivals), hiring faction (.rivals),
+/// identity (.rivals), logo (.rivals), then pool hulls (.rosters stream).
+/// Within a company, identity/logo draws precede all pool draws, so the
 /// stream-consumption order is fixed for any given seed: company 0 identity,
-/// company 0 pool hull 0..N-1, company 1 identity, company 1 pool hull 0..N-1, …
+/// company 0 logo, company 0 pool hull 0..N-1, company 1 identity, … The
+/// eligible logo pool is the sorted catalog minus gs.player_logo_key (if any).
 /// This order is documented here so any change to it requires a deliberate
 /// re-pin of the golden digest (and the stream-isolation test will catch it).
 ///
@@ -197,6 +199,15 @@ pub fn seedMercCompanies(gs: *GameState) !void {
     var next_hid = gs.next_hull_instance_id;
     const year = gs.clock.date.year;
 
+    // Build eligible logo pool: sorted catalog minus the player's reserved key.
+    var pool: [logo.all_keys.len][]const u8 = undefined;
+    var pool_len: usize = 0;
+    for (logo.all_keys) |k| {
+        if (gs.player_logo_key.len > 0 and std.mem.eql(u8, k, gs.player_logo_key)) continue;
+        pool[pool_len] = k; // static catalog memory
+        pool_len += 1;
+    }
+
     // Pre-build per-company data into stack-local arrays.
     // Draw order: per-company, identity (on .rivals) then pool (on .rosters).
     var built_companies: [max_merc_companies]merc_company_mod.MercCompany = undefined;
@@ -220,6 +231,12 @@ pub fn seedMercCompanies(gs: *GameState) !void {
         // Draw identity (pure, no allocation, on .rivals stream).
         const identity = roster_gen.rollMercCompanyIdentity(&rng_copy, .rivals, archetype, f.key);
 
+        // Draw logo without replacement from the eligible pool (on .rivals stream).
+        const logo_j = rng_copy.random(.rivals).uintLessThan(usize, pool_len);
+        const chosen_logo = pool[logo_j];
+        pool[logo_j] = pool[pool_len - 1];
+        pool_len -= 1;
+
         // Allocate unit_name (fallible, arena lifetime = campaign lifetime).
         const unit_name = try std.fmt.allocPrint(alloc, "{s} {s}", .{ identity.last, archetype.unit_noun });
 
@@ -235,7 +252,7 @@ pub fn seedMercCompanies(gs: *GameState) !void {
             .cbills = tuning.generation.merc_replacement_cbill_floor,
             .founded_day = 0,
             .dissolved_day = 0,
-            .logo_key = logo.all_keys[ci], // first merc_company_count sorted keys reserved for seeds
+            .logo_key = chosen_logo,
         };
 
         // Roll this company's hull pool on .rosters stream.
@@ -586,6 +603,64 @@ test "seedMercCompanies: atomicity — any allocation failure leaves stateHash u
             try std.testing.expectEqual(error.OutOfMemory, err);
             try std.testing.expectEqual(before, digest.stateHash(&gs));
         }
+    }
+}
+
+test "seedMercCompanies: reserves the player's logo and assigns distinct catalog logos" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7013 });
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .line_officer);
+    gs.clock.date.year = 3025;
+    gs.player_logo_key = logo.all_keys[0]; // reserve first key
+    try seedMercCompanies(&gs);
+
+    var seen = std.StringHashMap(void).init(std.testing.allocator);
+    defer seen.deinit();
+    var it = gs.merc_companies.iterator();
+    while (it.next()) |entry| {
+        const mc = entry.value_ptr;
+        // Must be a catalog key.
+        var in_catalog = false;
+        for (logo.all_keys) |k| {
+            if (std.mem.eql(u8, mc.logo_key, k)) {
+                in_catalog = true;
+                break;
+            }
+        }
+        try std.testing.expect(in_catalog);
+        // Must not be the reserved player key.
+        try std.testing.expect(!std.mem.eql(u8, mc.logo_key, logo.all_keys[0]));
+        // Must be distinct across all seeded companies.
+        try std.testing.expect(!seen.contains(mc.logo_key));
+        try seen.put(mc.logo_key, {});
+    }
+}
+
+test "seedMercCompanies: empty player_logo_key draws from the full catalog" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7014 });
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .line_officer);
+    gs.clock.date.year = 3025;
+    // player_logo_key defaults to "" — full pool
+    try seedMercCompanies(&gs);
+
+    var seen = std.StringHashMap(void).init(std.testing.allocator);
+    defer seen.deinit();
+    var it = gs.merc_companies.iterator();
+    while (it.next()) |entry| {
+        const mc = entry.value_ptr;
+        // Must be a catalog key.
+        var in_catalog = false;
+        for (logo.all_keys) |k| {
+            if (std.mem.eql(u8, mc.logo_key, k)) {
+                in_catalog = true;
+                break;
+            }
+        }
+        try std.testing.expect(in_catalog);
+        // Must be distinct across all seeded companies.
+        try std.testing.expect(!seen.contains(mc.logo_key));
+        try seen.put(mc.logo_key, {});
     }
 }
 

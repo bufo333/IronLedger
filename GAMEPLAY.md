@@ -216,6 +216,10 @@ you own reports to you (Stages 9A–9C):
 
 You name the outfit and every company in it, and give each an emblem —
 identity shows up on rosters, contracts, and after-action reports.
+Founding: adopting a catalog logo (the *import* source in the new-campaign
+wizard) auto-fills the outfit name from the file's stem (title-cased) and
+permanently reserves that logo so no rival merc company — seeded at creation
+or spawned as a replacement — ever shares it.
 
 The hangar is a portfolio, not a garage. Every hull you own bills you
 monthly whether it fights or rusts, so the roster screen ranks meks by what

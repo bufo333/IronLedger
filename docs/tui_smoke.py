@@ -156,6 +156,9 @@ if "loaded" in p:
     # The display line names the render path: half-blocks (truecolor or 256-colour
     # under a bare pty), the kitty protocol or iTerm2 images.
     assert "half-block" in p or "graphics protocol" in p or "inline images" in p, p[-3000:]
+assert wait_for("Ashfall Lancers"), plain()[-3000:]   # auto-fill from first catalog logo
+send("j", 1.5)                 # move to the second catalog logo (j = down)
+assert wait_for("Balance Point Mercenaries"), plain()[-3000:]  # auto-fill from second
 send("\r", 3.0)                # outfit → company (generates)
 assert "GENERATED COMPANY" in plain()
 assert "BACK OFFICE" in plain(), plain()[-3000:]   # sizing pane, wide or narrow
@@ -363,7 +366,7 @@ assert "EMBLEM ·" in p and "preset   Wolf's Head" in p, p[-2000:]
 send("j"); send("\r", 1.0)     # pick the second preset
 assert "emblem set to preset" in plain(), plain()[-2000:]
 send("e", 1.0)                 # 12.14: the cell editor is the last row of the picker
-for _ in range(50): send("j", 0.05)  # overshoot; the list clamps to the editor row
+for _ in range(100): send("j", 0.05)  # overshoot; the list clamps to the editor row
 send("\r", 1.0)
 assert wait_for("EMBLEM EDITOR"), plain()[-3000:]
 send("X"); send("Y", 0.5)      # paint two cells, then save
@@ -445,6 +448,7 @@ if has_ops:
     # advance 3 days with force so it fires and opens the after-action.
     send(":"); send("day 3 force\r", 2.0)
     send("\x1b", 0.5)                 # close after-action (marks it read)
+    send("\x1b", 0.5)                 # close any decision modal that auto-opened
 # Layout-boundary smoke: Forces focus must not wedge on a narrow resize.
 # Switch to Forces, Tab to the pool pane (focus 1), shrink to 118 columns
 # (below the 120-column boundary: only pane 0 draws), drain, assert the

@@ -320,6 +320,9 @@ pub const App = struct {
     w_logo: usize = 0,
     w_png: ?[]u8 = null,
     w_preview: ?emblem_mod.Emblem = null,
+    /// When true the outfit name auto-fills from the selected catalog logo;
+    /// set false once the player types to prevent clobbering a manual edit.
+    w_outfit_auto: bool = true,
 
     mode: Mode = .welcome,
     step: WizardStep = .commander,
@@ -1805,12 +1808,18 @@ pub const App = struct {
                         try self.generateCampaign();
                         self.step = .company;
                     },
-                    .erase => if (self.w_field == 0) self.w_outfit.pop() else self.w_company.pop(),
+                    .erase => if (self.w_field == 0) {
+                        self.w_outfit_auto = false;
+                        self.w_outfit.pop();
+                    } else self.w_company.pop(),
                     .source_prev => try self.setEmblemSource(0),
                     .source_next => try self.setEmblemSource(1),
                     .down => try self.emblemMove(1),
                     .up => try self.emblemMove(-1),
-                    .type => if (self.w_field == 0) self.w_outfit.push(key.char) else self.w_company.push(key.char),
+                    .type => if (self.w_field == 0) {
+                        self.w_outfit_auto = false;
+                        self.w_outfit.push(key.char);
+                    } else self.w_company.push(key.char),
                 }
             },
             .company => {
@@ -1879,6 +1888,17 @@ pub const App = struct {
         self.logos = try all.toOwnedSlice(la);
     }
 
+    /// Auto-fill the outfit name from the selected catalog logo, unless the
+    /// player has manually edited the name (w_outfit_auto == false).
+    fn adoptLogoName(self: *App) void {
+        if (!self.w_outfit_auto) return;
+        if (self.w_src != 1 or self.logos.len == 0) return;
+        const path = self.logos[@min(self.w_logo, self.logos.len - 1)];
+        var buf: [128]u8 = undefined;
+        self.w_outfit.set(game.logo_name.titleCaseLogoKey(path, &buf));
+        self.w_outfit_auto = true;
+    }
+
     fn setEmblemSource(self: *App, src: u8) !void {
         self.w_src = src;
         if (src == 1 and self.logos.len == 0) {
@@ -1886,6 +1906,7 @@ pub const App = struct {
             self.w_logo = 0;
             try self.loadPreview();
         }
+        if (src == 1) self.adoptLogoName();
     }
 
     fn emblemMove(self: *App, delta: i32) !void {
@@ -1896,6 +1917,7 @@ pub const App = struct {
         if (self.logos.len == 0) return;
         self.w_logo = @intCast(@mod(@as(i32, @intCast(self.w_logo)) + delta, @as(i32, @intCast(self.logos.len))));
         try self.loadPreview();
+        self.adoptLogoName();
     }
 
     /// Read and decode the selected picture; keep the bytes for the campaign.
@@ -1953,6 +1975,10 @@ pub const App = struct {
         // (rule 63): on failure the open session stays valid.
         const seed: u64 = 3025 + self.w_seed * 7919 + @as(u64, @intCast(self.w_faction)) * 13;
         const image: []const u8 = if (self.w_src == 1 and self.w_png != null) self.w_png.? else emblems[self.w_emblem].name;
+        const logo_key: []const u8 = if (self.w_src == 1 and self.logos.len > 0)
+            std.fs.path.stem(self.logos[@min(self.w_logo, self.logos.len - 1)])
+        else
+            "";
         var new_session = try game.lobby.Session.freshCampaign(self.gpa, seed, .{
             .commander_name = self.w_name.slice(),
             .origin = factions[self.w_faction],
@@ -1961,6 +1987,7 @@ pub const App = struct {
             .outfit_name = self.w_outfit.slice(),
             .company_name = self.w_company.slice(),
             .emblem_image = image,
+            .logo_key = logo_key,
         });
         errdefer new_session.close();
         // Replacement is ready; close the old session and install the new one (rule 63).
@@ -5059,4 +5086,34 @@ test "mech-detail modal: pressing h on a hull opens the mech modal and sub-views
     // Press Esc again — should close the modal.
     try pressForTest(c, .escape);
     try std.testing.expect(c.app.modal == .none);
+}
+
+test "wizard logo picker auto-fills the outfit name until the player edits it" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+
+    // Put the wizard into import-logo mode with two known catalog paths.
+    c.app.w_src = 1;
+    c.app.logos = &.{ "data/logos/ashfall_lancers.png", "data/logos/balance_point_mercenaries.png" };
+    c.app.w_logo = 0;
+    c.app.w_outfit_auto = true;
+
+    // First logo: auto-fill should produce "Ashfall Lancers".
+    c.app.adoptLogoName();
+    try std.testing.expectEqualStrings("Ashfall Lancers", c.app.w_outfit.slice());
+    try std.testing.expect(c.app.w_outfit_auto);
+
+    // Move to second logo (manual w_logo update, bypass loadPreview): should auto-fill.
+    c.app.w_logo = 1;
+    c.app.adoptLogoName();
+    try std.testing.expectEqualStrings("Balance Point Mercenaries", c.app.w_outfit.slice());
+    try std.testing.expect(c.app.w_outfit_auto);
+
+    // Simulate a manual edit: freeze the name.
+    c.app.w_outfit_auto = false;
+    // Move back to first logo; name must not change because auto is frozen.
+    c.app.w_logo = 0;
+    c.app.adoptLogoName();
+    try std.testing.expectEqualStrings("Balance Point Mercenaries", c.app.w_outfit.slice());
+    try std.testing.expect(!c.app.w_outfit_auto);
 }

@@ -782,6 +782,9 @@ pub const Store = struct {
         defer tx.finalize();
         try tx.bindAll(.{ cid, "outfit_name", gs.outfit_name });
         try tx.run();
+        tx.reset();
+        try tx.bindAll(.{ cid, "player_logo_key", gs.player_logo_key });
+        try tx.run();
     }
 
     fn saveRngStream(self: Store, gs: *GameState, cid: i64) !void {
@@ -2198,6 +2201,8 @@ pub const Store = struct {
             if (std.mem.eql(u8, key, "outfit_name")) {
                 gs.outfit_name = try tx.text(1, alloc);
                 saw_outfit_name = true;
+            } else if (std.mem.eql(u8, key, "player_logo_key")) {
+                gs.player_logo_key = try tx.text(1, alloc);
             }
         }
         if (!saw_outfit_name) return error.CorruptSave;
@@ -4836,8 +4841,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P3f.4 merc lifecycle — runMercLifecycle runs during the played year.
-    try std.testing.expectEqual(@as(u64, 7561938388758658149), hash_before);
+    // Re-pinned by P3f.5 (random seed-logo selection + player_logo_key field).
+    try std.testing.expectEqual(@as(u64, 10124860896087128628), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5332,9 +5337,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P3f.4 merc lifecycle —
-    // runMercLifecycle runs during the played year.
-    try std.testing.expectEqual(@as(u64, 7561938388758658149), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3f.5 (random seed-logo
+    // selection + player_logo_key field).
+    try std.testing.expectEqual(@as(u64, 10124860896087128628), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
