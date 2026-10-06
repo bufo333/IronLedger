@@ -839,18 +839,19 @@ ceiling → queued as bay work (§9.4);
 the unit is out of action for the duration. Campaign-owned custom chassis and
 full construction-component editing are Product completion P3.
 
-**The complete P3 lab target.** Each chassis carries its construction facts
-(TechManual): engine rating and weight, gyro, cockpit, internal structure,
-integral heat sinks, jump jets, armor tonnage, and per-location crit slots
-with their fixed occupants — so free tonnage and free crits per location
-are derived, not guessed. Every mountable part carries tonnage, crit count,
-mount type (energy / ballistic / missile / equipment) and location rules.
-A loadout is legal only if it fits by weight, by crits in each location, by
-heat-sink minimum, by ammo for every ammo weapon, and by location rule; the
-lab refuses illegal fits and names the rule. Engines, heat sinks, jump
-jets, gyros, cockpits and actuators are parts — bought, salvaged, or
-fabricated — so a wreck from the market becomes a working hull through the
-same screen that customizes a healthy one.
+**P3d lab (2026-10-06).** Each chassis carries its per-location crit-slot
+count (`Chassis.crit_slots[8]`, TechManual standard-IS values) and an arm
+actuator flag (`ArmActuators`: full / no\_hand / no\_lower\_arm) that drives
+`fixedOccupants` — the pure derivation of cockpit, sensors, life-support,
+engine, gyro, leg and arm actuator slots for every location. The Lab screen
+renders these as a per-location construction grid (LAYOUT pane): fixed
+occupants, mounted equipment, and remaining free slots. The variant marker
+(`variantMarker` in queries) flags a hull whose loadout differs from the
+catalogue baseline. The install path now includes a location-scoped part
+picker (`install_at` modal opened by Enter on a free slot), while `m`
+commits the plan as a bay job. Engines, gyros, cockpits, and actuators are
+fixed derived facts at this stage; full part-level edit of those components
+remains a future target.
 
 ## 11. Economy
 

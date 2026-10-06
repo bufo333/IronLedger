@@ -44,7 +44,7 @@ overlay of each family and checks that every one fails; CI runs it.
 
 | file | typed against | what it holds |
 |---|---|---|
-| `chassis.zon` | `domain/chassis.zig` `Chassis` | every hull: tonnage, BV, cost, rarity, intro year, construction facts, loadout slots |
+| `chassis.zon` | `domain/chassis.zig` `Chassis` | every hull: tonnage, BV, cost, rarity, intro year, construction facts, loadout slots; optional `left_arm_actuators` / `right_arm_actuators` (`.full` / `.no_hand` / `.no_lower_arm`, default `.full`) drive the fixed-occupant derivation for arm crits |
 | `planets.zon` | `domain/planet.zig` `Planet` | the star map: position, faction, industry, optional terrain |
 | `parts.zon` | `domain/part.zig` `PartDef` | weapons, ammo, components, supplies: cost, rarity, availability code, tech base, intro year, mount facts |
 | `tables/tuning.zon` | `domain/tuning.zig` `Tuning` | every balance knob, by subsystem |

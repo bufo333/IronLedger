@@ -93,6 +93,9 @@ const Modal = union(enum) {
     /// Lab install: pick a part, then a location with the rules' verdict.
     install_part: types.UnitId,
     install_loc: struct { unit: types.UnitId, part: []const u8 },
+    /// Lab install: location-scoped part picker (Enter on a free slot in the
+    /// crit layout; shows only parts that legally fit the chosen location).
+    install_at: struct { unit: types.UnitId, location: game.meklab.Location },
     /// Client settings (music).
     settings,
     /// HQ facility upgrade picker.
@@ -1398,7 +1401,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech => try self.drawList(al),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -3070,6 +3073,12 @@ pub const App = struct {
                 for (locs) |l| try rows.append(al, l.text);
                 return .{ .title = try listTitle(al, "INSTALL · pick a location", "stage", "cancel", false), .head = try al.dupe([]const u8, &.{ try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} — where does it go?", .{il.part}), "" }), .rows = rows.items, .n = locs.len, .empty = "{d}no location takes it{/}", .w = layout.modal.install_loc_w, .max_h = full_h };
             },
+            .install_at => |ia| {
+                const cands = try q.partsFittingLocation(al, self.state(), ia.unit, ia.location);
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (cands) |c| try rows.append(al, c.text);
+                return .{ .title = try listTitle(al, try std.fmt.allocPrint(al, "INSTALL · {s} · pick a part", .{@tagName(ia.location)}), "stage", "cancel", false), .right_title = "parts that fit this location", .rows = rows.items, .n = cands.len, .empty = "{d}nothing fits this location{/}", .w = layout.modal.install_part_w, .max_h = full_h };
+            },
             .seat => |id| {
                 const seats = try q.openSeats(al, self.state(), id);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -3895,7 +3904,17 @@ pub const App = struct {
                     return;
                 }
                 self.modal = .none;
-                _ = try self.execSay(.{ .refit_install = .{ .unit = il.unit, .location = l.location, .part_key = il.part } }, .good, "staged: install {s} in {s} — Enter in the Lab commits it to a bay", .{ il.part, @tagName(l.location) });
+                _ = try self.execSay(.{ .refit_install = .{ .unit = il.unit, .location = l.location, .part_key = il.part } }, .good, "staged: install {s} in {s} — [m] in the Lab commits it to a bay", .{ il.part, @tagName(l.location) });
+            },
+            .install_at => |ia| {
+                const cands = try q.partsFittingLocation(al, self.state(), ia.unit, ia.location);
+                if (cands.len == 0) return;
+                const c = cands[@min(self.modal_cursor, cands.len - 1)];
+                self.modal = .none;
+                const res = self.execResult(.{ .refit_install = .{ .unit = ia.unit, .location = ia.location, .part_key = c.key } });
+                if (res != null) {
+                    self.say(.good, "staged: install {s} in {s} — [m] commits it to a bay", .{ c.key, @tagName(ia.location) });
+                }
             },
             .seat => |id| {
                 const seats = try q.openSeats(al, self.state(), id);
@@ -4289,7 +4308,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech => try self.listKey(key),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {

@@ -231,6 +231,31 @@ brigade treasury can't teleport. And when a company rotates home overweight,
 cold storage turns spare hulls into a cheap strategic reserve that takes
 weeks, not hours, to wake back up.
 
+## The Lab: construction editor (P3d)
+
+The **Lab screen** (F8) shows the selected hull's per-location critical-slot
+grid. Each location box lists its fixed occupants (cockpit, sensors, engine,
+gyro, actuators, leg structure — derived from chassis construction facts, not
+editable), then the mounted equipment in that location, then free slots. A `*`
+in the hull title marks a variant — a hull whose loadout differs from the
+catalogue baseline.
+
+Interactions:
+
+- **Move `j`/`k`** to scroll the LAYOUT pane row by row.
+- **Enter on a free slot** opens a location-scoped part picker: only parts
+  that fit this location are listed. Selecting a part stages the install.
+- **`-`** stages removing the mount under the cursor (also works without
+  Enter using the old mounts-list cursor).
+- **`+`** opens the full install picker (part first, then location), for
+  cases where you want to browse all available parts first.
+- **`m`** commits the staged plan as a bay job at the home HQ. The HQ
+  screen (F7) shows bays, queue, and days left.
+- **`c`** clears the staged plan.
+
+A hull whose plan is committed leaves the Lab's queue; the HQ tech queue picks
+it up on the next pass.
+
 ## Losing a lance
 
 Hulls die in the field, and not every death is a depot job (Stage 12D).

@@ -9,6 +9,14 @@ const unit = @import("unit.zig");
 
 pub const WeightClass = enum { light, medium, heavy, assault };
 
+/// Arm actuator complement (TechManual standard-IS construction rules;
+/// the reconciliation identity in meklab.fixedOccupants governs).
+/// .full         = shoulder + upper arm + lower arm + hand  (4 fixed crit slots)
+/// .no_hand      = shoulder + upper arm + lower arm         (3 fixed crit slots)
+/// .no_lower_arm = shoulder + upper arm only                (2 fixed crit slots;
+///                 hand is necessarily absent when lower arm is missing)
+pub const ArmActuators = enum { full, no_hand, no_lower_arm };
+
 pub const LoadoutSlot = struct {
     slot: []const u8, // e.g. "ra.ppc.1"
     part: []const u8, // part catalog key
@@ -37,6 +45,13 @@ pub const Chassis = struct {
     /// arm 8, leg 2. Do NOT import meklab; the index order is a documented
     /// contract.
     crit_slots: [8]u8 = .{ 1, 2, 12, 12, 8, 8, 2, 2 },
+    /// Arm actuator complement for left arm. Default .full (4 fixed slots:
+    /// shoulder + upper arm + lower arm + hand). Set to .no_hand (3) or
+    /// .no_lower_arm (2) for restricted designs; crit_slots[la] must be
+    /// adjusted accordingly (meklab.fixedOccupants identity enforces this).
+    left_arm_actuators: ArmActuators = .full,
+    /// Arm actuator complement for right arm. See left_arm_actuators.
+    right_arm_actuators: ArmActuators = .full,
     // Transport facts (dropships/jumpships only, TRO:3025).
     // A dropship lifts hulls by bay kind; a jumpship carries dropships on
     // its docking collars. Tonnage is nominal for ships (u8).
@@ -122,6 +137,24 @@ test "data: catalog loads from zon with sane values and unique keys" {
             try std.testing.expect(!std.mem.eql(u8, c.key, other.key));
         }
     }
+}
+
+test "arm actuator fields: defaults are .full; CPLT-C1 has .no_lower_arm" {
+    // Every chassis with the default arm actuators is .full.
+    for (catalog) |c| {
+        if (!std.mem.eql(u8, c.key, "CPLT-C1")) {
+            try std.testing.expectEqual(ArmActuators.full, c.left_arm_actuators);
+            try std.testing.expectEqual(ArmActuators.full, c.right_arm_actuators);
+        }
+    }
+    // The Catapult has restricted arms (no lower arm / no hand; verified from
+    // docs/p3d-meklab-location-layout.md lines 94, 103-104, 158-161).
+    const cplt = find("CPLT-C1").?;
+    try std.testing.expectEqual(ArmActuators.no_lower_arm, cplt.left_arm_actuators);
+    try std.testing.expectEqual(ArmActuators.no_lower_arm, cplt.right_arm_actuators);
+    // With no_lower_arm (2 fixed slots), free arm crits = physical 12 - 2 = 10.
+    try std.testing.expectEqual(@as(u8, 10), cplt.crit_slots[4]); // la index 4
+    try std.testing.expectEqual(@as(u8, 10), cplt.crit_slots[5]); // ra index 5
 }
 
 test "the catalogue is broad — TRO:3025 meks, 3026 vehicles, fighters" {

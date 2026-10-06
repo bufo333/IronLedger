@@ -6,21 +6,6 @@ or subsystem outcome. Its source identifiers below preserve the exception,
 test, smoke, data, and product scope it closes. Finished work lives in git
 history, not here.
 
-## Product completion
-
-These product packages begin only after all compliance and focused-test work
-is complete.
-
-- [ ] P3 MekLab depth — data-driven crit capacity/location rules and custom variants:
-  - P3 design approval and content boundary: approved
-    (`docs/p3-meklab-design.md`), grounded in
-    `docs/p3d-meklab-location-layout.md`.
-  - [ ] P3-construction (P3a): data-driven crit capacity and location rules.
-  - P3c hull-lifecycle design approval: approved (`docs/p3c-hull-lifecycle-design.md`).
-    - [ ] P3c.4: ownership chain and provenance (hull ownership history; current owner on the hull). Market supply and the living economy move to P3e.
-    - [ ] P3c.6: mech detail modal, queries, and verbs (queries.zig, TUI modal, cli.zig verbs).
-  - [ ] P3-client (P3d): construction editor and variant lifecycle.
-
 ## Not scheduled
 
 Design ideas, not defects; each needs its design in ROADMAP.md first.

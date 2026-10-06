@@ -277,10 +277,11 @@ titles and the help modal come from the same tables.
 | Key | Pane | Does |
 |---|---|---|
 | `[ ]` | any | previous / next mek in the hangar |
-| `+` | any | stage installing a part from the home HQ's stock |
+| `+` | any | stage installing a part (location picker) |
 | `-` | any | stage removing the mount under the cursor |
 | `c` | any | clear the staged refit plan |
-| `Enter` | any | commit the plan as a bay job at the home HQ |
+| `m` | any | commit the plan as a bay job at the home HQ |
+| `Enter` | any | on a free slot: open location-scoped part picker; on a loaded slot: stage remove |
 | `R` | any | order a replacement for the damaged or destroyed mount under the cursor |
 | `D` | any | queue the hull for depot repair |
 

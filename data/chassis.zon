@@ -7,6 +7,12 @@
 //   (10 come free with a fusion engine); armor_half_tons of standard armor.
 //   Loadouts carry the signature weapons AND their ammunition tons; slot
 //   keys prefix the location (hd/ct/lt/rt/la/ra/ll/rl).
+//   left_arm_actuators / right_arm_actuators (optional, default .full):
+//     .full = shoulder+upper+lower+hand (4 fixed arm crits, 8 free);
+//     .no_hand = shoulder+upper+lower (3 fixed, 9 free);
+//     .no_lower_arm = shoulder+upper only (2 fixed, 10 free).
+//   When overriding, also set crit_slots so the identity
+//   fixedOccupants.len + crit_slots[arm] == 12 holds (meklab enforces this).
 // BV2 and cost values are approximate (// TUNE). Licensing: values
 // re-encoded by hand, no MegaMek files copied.
 .{
@@ -72,7 +78,7 @@
         .{ .slot = "lt.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "rt.ammo_ac5.1", .part = "ammo_ac5", .class = .ammo },
     } },
-    .{ .key = "CPLT-C1", .name = "Catapult", .tonnage = 65, .bv = 1165, .cost = 5_790_375, .rarity = .uncommon, .walk_mp = 4, .jump_mp = 4, .heat_sinks = 15, .armor_half_tons = 20, .loadout = .{
+    .{ .key = "CPLT-C1", .name = "Catapult", .tonnage = 65, .bv = 1165, .cost = 5_790_375, .rarity = .uncommon, .walk_mp = 4, .jump_mp = 4, .heat_sinks = 15, .armor_half_tons = 20, .left_arm_actuators = .no_lower_arm, .right_arm_actuators = .no_lower_arm, .crit_slots = .{ 1, 2, 12, 12, 10, 10, 2, 2 }, .loadout = .{
         .{ .slot = "ra.lrm15.1", .part = "lrm15", .class = .weapon },
         .{ .slot = "la.lrm15.1", .part = "lrm15", .class = .weapon },
         .{ .slot = "rt.mlas.1", .part = "mlas", .class = .weapon },

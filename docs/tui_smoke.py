@@ -363,7 +363,7 @@ assert "EMBLEM ·" in p and "preset   Wolf's Head" in p, p[-2000:]
 send("j"); send("\r", 1.0)     # pick the second preset
 assert "emblem set to preset" in plain(), plain()[-2000:]
 send("e", 1.0)                 # 12.14: the cell editor is the last row of the picker
-for _ in range(12): send("j", 0.15)
+for _ in range(50): send("j", 0.05)  # overshoot; the list clamps to the editor row
 send("\r", 1.0)
 assert wait_for("EMBLEM EDITOR"), plain()[-3000:]
 send("X"); send("Y", 0.5)      # paint two cells, then save
@@ -371,7 +371,7 @@ send("\r", 1.0)
 assert wait_for("emblem set to your own crest", tail=2000), plain()[-2000:]
 send("8")                      # lab
 p = plain()
-assert "MOUNTS" in p and "RULES: legal fit" in p, p[-3000:]
+assert "LAYOUT" in p and "RULES: legal fit" in p, p[-3000:]
 send("-", 0.8)                 # stage a removal
 assert "remove" in plain(), plain()[-2000:]
 send("+", 0.8)                 # install picker: part, then location

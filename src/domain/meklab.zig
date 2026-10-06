@@ -36,6 +36,118 @@ pub fn isLeg(loc: Location) bool {
     return loc == .ll or loc == .rl;
 }
 
+/// Physical crit slots per location on a standard Inner Sphere BattleMech
+/// (TechManual construction tables, same authority as chassis.zig:36-38).
+/// This is the total physical count; free crits = physicalTotal - fixedOccupants.len.
+/// Reconciliation identity: fixedOccupants(design, loc, buf).len + crit_slots[loc] == physicalTotal(loc)
+pub fn physicalTotal(loc: Location) u8 {
+    return switch (loc) {
+        .hd => 6,
+        .ct => 12,
+        .lt, .rt => 12,
+        .la, .ra => 12,
+        .ll, .rl => 6,
+    };
+}
+
+/// A named occupant of a fixed crit slot (cockpit, actuator, etc.).
+/// All render as the dim '■' marker in the layout display.
+pub const FixedOccupant = struct {
+    /// Category for display colour / filtering.
+    kind: Kind,
+    /// Short display text, e.g. "cockpit", "engine", "shoulder", "lower arm".
+    label: []const u8,
+
+    pub const Kind = enum { cockpit, sensors, life_support, engine, gyro, actuator };
+};
+
+/// The named fixed occupants for `loc` on `design`, written into `buf`.
+/// Returns a slice of `buf`; caller supplies a buffer of at least 6 elements
+/// (the maximum for any location is the head with 5 fixed slots).
+///
+/// Standard inner-sphere assumptions (no XL/light engine splits, no triple-
+/// strength myomer): engine 6 CT slots fixed; gyro 4 CT slots fixed.
+/// These are the values consistent with every shipped crit_slots entry and
+/// with the reconciliation identity above (see plan §OC-3 for derivation).
+///
+/// One owner (rule 20): every consumer of "which slots are fixed and what are
+/// they called" calls this function.
+pub fn fixedOccupants(design: *const chassis_mod.Chassis, loc: Location, buf: []FixedOccupant) []FixedOccupant {
+    var n: usize = 0;
+    switch (loc) {
+        .hd => {
+            buf[n] = .{ .kind = .cockpit, .label = "cockpit" };
+            n += 1;
+            buf[n] = .{ .kind = .sensors, .label = "sensors" };
+            n += 1;
+            buf[n] = .{ .kind = .sensors, .label = "sensors" };
+            n += 1;
+            buf[n] = .{ .kind = .life_support, .label = "life support" };
+            n += 1;
+            buf[n] = .{ .kind = .life_support, .label = "life support" };
+            n += 1;
+        },
+        .ct => {
+            buf[n] = .{ .kind = .engine, .label = "engine" };
+            n += 1;
+            buf[n] = .{ .kind = .engine, .label = "engine" };
+            n += 1;
+            buf[n] = .{ .kind = .engine, .label = "engine" };
+            n += 1;
+            buf[n] = .{ .kind = .engine, .label = "engine" };
+            n += 1;
+            buf[n] = .{ .kind = .engine, .label = "engine" };
+            n += 1;
+            buf[n] = .{ .kind = .engine, .label = "engine" };
+            n += 1;
+            buf[n] = .{ .kind = .gyro, .label = "gyro" };
+            n += 1;
+            buf[n] = .{ .kind = .gyro, .label = "gyro" };
+            n += 1;
+            buf[n] = .{ .kind = .gyro, .label = "gyro" };
+            n += 1;
+            buf[n] = .{ .kind = .gyro, .label = "gyro" };
+            n += 1;
+        },
+        .lt, .rt => {
+            // No fixed occupants in standard side torsos.
+        },
+        .la, .ra => {
+            buf[n] = .{ .kind = .actuator, .label = "shoulder" };
+            n += 1;
+            buf[n] = .{ .kind = .actuator, .label = "upper arm" };
+            n += 1;
+            const acts = if (loc == .la) design.left_arm_actuators else design.right_arm_actuators;
+            switch (acts) {
+                .full => {
+                    buf[n] = .{ .kind = .actuator, .label = "lower arm" };
+                    n += 1;
+                    buf[n] = .{ .kind = .actuator, .label = "hand" };
+                    n += 1;
+                },
+                .no_hand => {
+                    buf[n] = .{ .kind = .actuator, .label = "lower arm" };
+                    n += 1;
+                },
+                .no_lower_arm => {
+                    // Only shoulder + upper arm; no lower arm, no hand.
+                },
+            }
+        },
+        .ll, .rl => {
+            buf[n] = .{ .kind = .actuator, .label = "hip" };
+            n += 1;
+            buf[n] = .{ .kind = .actuator, .label = "upper leg" };
+            n += 1;
+            buf[n] = .{ .kind = .actuator, .label = "lower leg" };
+            n += 1;
+            buf[n] = .{ .kind = .actuator, .label = "foot" };
+            n += 1;
+        },
+    }
+    return buf[0..n];
+}
+
 /// Whether a part's location rule permits placement in `loc` (design §2/§4,
 /// rule 20). One owner: the validator and the picker both call this.
 pub fn locationAllowed(rule: part_mod.LocationRule, loc: Location) bool {
@@ -495,6 +607,59 @@ test "data-driven crit capacity: validate reads crit_slots, not a constant" {
     for (good.violations) |v| {
         if (v.rule == .crits and std.mem.indexOf(u8, v.text, "la") != null) {
             return error.TestUnexpectedResult;
+        }
+    }
+}
+
+test "physicalTotal matches TechManual standard-IS totals" {
+    try std.testing.expectEqual(@as(u8, 6), physicalTotal(.hd));
+    try std.testing.expectEqual(@as(u8, 12), physicalTotal(.ct));
+    try std.testing.expectEqual(@as(u8, 12), physicalTotal(.lt));
+    try std.testing.expectEqual(@as(u8, 12), physicalTotal(.rt));
+    try std.testing.expectEqual(@as(u8, 12), physicalTotal(.la));
+    try std.testing.expectEqual(@as(u8, 12), physicalTotal(.ra));
+    try std.testing.expectEqual(@as(u8, 6), physicalTotal(.ll));
+    try std.testing.expectEqual(@as(u8, 6), physicalTotal(.rl));
+}
+
+test "fixedOccupants: arm count varies by actuator flag" {
+    var buf: [6]FixedOccupant = undefined;
+    // A full-actuator chassis.
+    const shd = chassis_mod.find("SHD-2H").?;
+    try std.testing.expectEqual(@as(usize, 4), fixedOccupants(shd, .la, &buf).len);
+    try std.testing.expectEqual(@as(usize, 4), fixedOccupants(shd, .ra, &buf).len);
+    // .no_hand → 3 fixed.
+    var no_hand = shd.*;
+    no_hand.left_arm_actuators = .no_hand;
+    try std.testing.expectEqual(@as(usize, 3), fixedOccupants(&no_hand, .la, &buf).len);
+    // .no_lower_arm → 2 fixed (the Catapult's case).
+    const cplt = chassis_mod.find("CPLT-C1").?;
+    try std.testing.expectEqual(@as(usize, 2), fixedOccupants(cplt, .la, &buf).len);
+    try std.testing.expectEqual(@as(usize, 2), fixedOccupants(cplt, .ra, &buf).len);
+    // Labels for head occupants.
+    const shd_hd = fixedOccupants(shd, .hd, &buf);
+    try std.testing.expectEqual(@as(usize, 5), shd_hd.len);
+    try std.testing.expectEqual(FixedOccupant.Kind.cockpit, shd_hd[0].kind);
+    // CT: 10 fixed (6 engine + 4 gyro) — needs a larger buffer.
+    var ct_buf: [12]FixedOccupant = undefined;
+    try std.testing.expectEqual(@as(usize, 10), fixedOccupants(shd, .ct, &ct_buf).len);
+    // Leg: 4 fixed.
+    try std.testing.expectEqual(@as(usize, 4), fixedOccupants(shd, .ll, &buf).len);
+}
+
+test "reconciliation identity: fixedOccupants.len + crit_slots[loc] == physicalTotal(loc) for every mek" {
+    var buf: [12]FixedOccupant = undefined;
+    for (chassis_mod.catalog) |*design| {
+        if (design.kind != .mek) continue;
+        inline for (@typeInfo(Location).@"enum".fields) |f| {
+            const loc: Location = @enumFromInt(f.value);
+            const fixed = fixedOccupants(design, loc, &buf).len;
+            const free = design.crit_slots[f.value];
+            const total = physicalTotal(loc);
+            if (fixed + free != total) {
+                std.debug.print("{s} {s}: fixed {d} + free {d} = {d}, expected {d}\n", .{ design.key, f.name, fixed, free, fixed + free, total });
+                return error.TestUnexpectedResult;
+            }
         }
     }
 }
