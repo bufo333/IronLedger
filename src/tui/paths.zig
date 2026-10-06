@@ -27,13 +27,11 @@ pub const store_name = "campaigns.db";
 const music_sub = "music";
 const logos_sub = "logos";
 
-/// Pictures the source tree keeps outside `data/`, scanned after the roots.
-const source_logo_dirs = [_][]const u8{ ".", "logos", "docs/logos" };
-
 pub const Roots = struct {
     /// Directory holding the soundtracks, null when no root had one.
     music: ?[]const u8 = null,
-    /// Directories to scan for emblem pictures, nearest first.
+    /// Directory of emblem pictures: the first asset root that has a `logos/`,
+    /// or empty.
     logos: []const []const u8 = &.{},
 };
 
@@ -75,9 +73,8 @@ fn resolveFailing(io: std.Io, al: std.mem.Allocator, env: *const std.process.Env
         const m = try std.fs.path.join(al, &.{ root, music_sub });
         if (music == null and isDir(io, m)) music = m;
         const l = try std.fs.path.join(al, &.{ root, logos_sub });
-        if (isDir(io, l)) try logos.append(al, l);
+        if (logos.items.len == 0 and isDir(io, l)) try logos.append(al, l);
     }
-    for (source_logo_dirs) |d| if (isDir(io, d)) try logos.append(al, try al.dupe(u8, d));
     return .{ .music = music, .logos = try logos.toOwnedSlice(al) };
 }
 

@@ -30,9 +30,8 @@ generated company's emblem; the in-campaign outfit action applies a replacement
 to every company. The wizard shows a 5-column grid of PNG thumbnails from the
 catalog:
 
-- PNG files found in an asset root's `logos/` directory (the
-  installed catalog under `share/iron-ledger/logos/` is sourced from
-  `data/logos/` at build time), then `./`, `logos/`, and `docs/logos/`.
+- PNG files from the first asset root's `logos/` directory (installed as
+  `share/iron-ledger/logos/`, built from `data/logos/` at build time).
   Selecting a catalog logo auto-fills the outfit name (title-cased from the
   filename stem); manually editing the outfit name freezes this auto-fill.
   The chosen catalog key is reserved from rival merc companies for the

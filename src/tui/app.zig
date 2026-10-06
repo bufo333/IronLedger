@@ -901,8 +901,8 @@ pub const App = struct {
         if (selected_row < self.w_logo_top) self.w_logo_top = selected_row;
         if (selected_row >= self.w_logo_top + visible_rows) self.w_logo_top = selected_row - visible_rows + 1;
 
-        // Lazy thumbnail loading: decode one unloaded visible logo per draw call
-        // so the event loop is never blocked for more than a single PNG decode.
+        // Lazy thumbnail loading: decode every unloaded visible logo per draw call
+        // so the visible window fills in a single draw.
         outer: for (0..visible_rows) |vr| {
             const row = self.w_logo_top + vr;
             for (0..@as(usize, cols)) |col| {
@@ -910,7 +910,6 @@ pub const App = struct {
                 if (idx >= self.w_thumbs.len) break :outer;
                 if (self.w_thumbs[idx] == null) {
                     self.loadThumbAt(idx);
-                    break :outer; // one per frame
                 }
             }
         }
@@ -1984,8 +1983,8 @@ pub const App = struct {
     /// Decode one catalog logo into `w_thumbs[idx]` if not already loaded.
     /// Silently skips logos that cannot be read or decoded (stores null).
     /// Transmits decoded bytes to kitty once on first load.
-    /// Called lazily from the draw path: one logo per draw call so the
-    /// event loop is never blocked for more than one file-read + decode.
+    /// Called lazily from the draw path for each unloaded visible cell;
+    /// idempotent — returns immediately if already loaded.
     fn loadThumbAt(self: *App, idx: usize) void {
         if (idx >= self.w_thumbs.len) return;
         if (self.w_thumbs[idx] != null) return; // already loaded

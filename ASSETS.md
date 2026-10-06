@@ -35,17 +35,6 @@ Owner: John Burns (GitHub `bufo333`).
   (`build.zig.zon` leaves it out). It is installed only with
   `-Dbundle-music` or shipped as a separate archive.
 
-## Crest: the Unforgiven emblem
-
-| File | Use |
-|---|---|
-| `docs/logos/unforgiven_240.png` | installed with the game (`share/iron-ledger/logos`) |
-| `docs/logos/unforgiven_800.png` | installed with the game (`share/iron-ledger/logos`) |
-| `docs/logos/unforgiven_400.bmp` | source image, not installed |
-| `unforgiven.png` | original artwork at the repository root |
-
-- **Source:** original artwork by the owner, who holds its copyright.
-
 ## Covered by the GPL with the code
 
 These are part of the source, generated from it, or drawn from the game's

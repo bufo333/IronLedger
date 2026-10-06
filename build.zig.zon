@@ -82,7 +82,6 @@
         "data/planets.zon",
         "data/tables",
         "data/logos",
-        "docs/logos",
         "LICENSE",
     },
 }
