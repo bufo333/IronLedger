@@ -3198,14 +3198,15 @@ pub const App = struct {
                         const unit_text = try rr.unit_name.markup(al);
                         const cause_text = if (rr.last_cause.raw.len > 0) try rr.last_cause.markup(al) else @as([]const u8, "");
                         const recurring_tag: []const u8 = if (rr.recurring) " {a}(returning){/}" else "";
+                        const insolvent_tag: []const u8 = if (rr.insolvent) " {c}(insolvent){/}" else "";
                         const cause_note: []const u8 = if (cause_text.len > 0)
                             try std.fmt.allocPrint(al, "  last:{s}", .{cause_text})
                         else
                             "";
-                        try head_lines.append(al, try std.fmt.allocPrint(al, "{s}  [{s}] {s}  standing:{d}  {s}{s}{s}", .{
+                        try head_lines.append(al, try std.fmt.allocPrint(al, "{s}  [{s}] {s}  standing:{d}  {s}{s}{s}{s}", .{
                             unit_text,     rr.doctrine,    rr.status,
                             rr.standing,   rr.faction_key, cause_note,
-                            recurring_tag,
+                            recurring_tag, insolvent_tag,
                         }));
                     }
                 }

@@ -482,6 +482,7 @@
         .faction_roster_seed_years = 2, // TUNE
         .merc_company_count = 12, // TUNE — docs/p3c-economy-design.md §8.D
         .merc_company_hulls_each = 8, // TUNE — docs/p3c-economy-design.md §8.D
+        .merc_company_insolvency_bv = 2000, // TUNE — below ~a light lance; verify against chassis.zon BV range
         .pirate_pool_hulls = 16, // TUNE — docs/p3c-economy-design.md §8.C
     },
     // Real loss. TechManual "Destroying a 'Mech": a cored

@@ -760,6 +760,10 @@ pub const Tuning = struct {
         /// Hull pool size for each world merc company at campaign creation
         /// (docs/p3c-economy-design.md §8.D). // TUNE
         merc_company_hulls_each: u16,
+        /// Minimum fieldable BV a world merc company must retain to be selected as a
+        /// contract OpFor; below it the company is insolvent/inactive
+        /// (docs/p3c-economy-design.md §4 "Rival insolvency", §8.G). // TUNE
+        merc_company_insolvency_bv: i64,
         /// Flat starting hull-pool size for the Periphery/pirates faction (PER)
         /// at campaign creation. PER manufactures nothing
         /// (replenishment_hulls_per_year = 0) and is salvage-replenished only, so

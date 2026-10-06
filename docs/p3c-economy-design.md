@@ -237,6 +237,9 @@ prerequisite for all of it.
   **Delivered** (schema v56; `src/sim/faction_surplus.zig`; `TODO.md` line 80 checked off).
 - **P3e.7 — Rival insolvency.** The fieldable-BV-below-threshold inactive trigger and its
   surfaced read-only state.
+  **Delivered** (derived predicate, no schema change; `tuning.generation.merc_company_insolvency_bv`;
+  owners `mercCompanyFieldableBv`/`mercCompanyInsolvent` in `src/sim/rivals.zig`;
+  `RivalRow.insolvent` read-only on Operations; branch `sim/p3e-7-rival-insolvency`).
 
 Sub-increment boundaries, exact schema version numbers, and whether P3e.5/P3e.6 touch the
 frontend boundary (and therefore require the smoke scripts) are fixed at each
@@ -271,7 +274,7 @@ This design-approval increment is approved when the owner confirms:
 - [ ] Faction data (§3): manufacturing data extends `factions.zon`; the RAT is the
       existing `rat.zon`; all specific values TBD pending source verification.
 - [x] Lifecycle triggers (§4): campaign-start seeding (P3e.4 ✓), battle draw/attrition/salvage
-      (P3e.5 ✓), monthly conflict-throttled market surplus (P3e.6 ✓), rival insolvency (P3e.7 pending).
+      (P3e.5 ✓), monthly conflict-throttled market surplus (P3e.6 ✓), rival insolvency (P3e.7 ✓).
 - [ ] Delivery order (§5): P3e.0 design approval first, then P3e.1–P3e.7, each
       independently correct, prerequisite P3c.
 - [ ] Hull-lifecycle increments (§6): P3c.3/P3c.5/P3c.6 unblocked; P3c.4 re-scoped to the
@@ -465,8 +468,12 @@ required):
   draws OpFor from the three sources (§8.E), including the PER seeding `// TBD` (§8.C).
 - **P3e.6 (market surplus)** is unaffected by the entity model; it reads faction surplus and
   is keyed by faction string key either way.
-- **P3e.7 (insolvency)** becomes **merc-company** insolvency (fieldable BV below threshold →
-  the company cannot take contracts), not "rival" insolvency.
+- **P3e.7 (insolvency)** is **merc-company** insolvency (fieldable BV below threshold →
+  the company cannot take contracts), not "rival" insolvency. **Delivered:** derived predicate
+  (`mercCompanyInsolvent` in `src/sim/rivals.zig`), threshold constant
+  `tuning.generation.merc_company_insolvency_bv = 2000` (// TUNE), terminal in practice
+  (pools only shrink), no persisted flag, no schema migration; surfaced read-only via
+  `RivalRow.insolvent` on the Operations view.
 - **P3f (new-company formation and insolvency lifecycle)** — out of scope for this design
   update, but the `MercCompany` entity model supports it naturally: formation adds a company
   + pool; insolvency removes/retires one. No entity added by P3f that §8 does not already

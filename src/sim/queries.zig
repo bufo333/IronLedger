@@ -7101,6 +7101,9 @@ pub const RivalRow = struct {
     last_cause: table.Raw,
     /// True when this rival recurs from a prior contract.
     recurring: bool,
+    /// True when the linked world merc company is insolvent (fieldable BV < threshold);
+    /// read-only (P3e.7). False when no merc company is linked.
+    insolvent: bool,
 };
 
 /// One attached officer arc row in the Operations view (P4i).
@@ -7335,6 +7338,7 @@ pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.Contr
             .encounters = rv.encounters,
             .last_cause = .{ .raw = rv.last_cause },
             .recurring = rv.recurring,
+            .insolvent = if (rv.merc_company_id == .none) false else rivals_m.mercCompanyInsolvent(gs, rv.merc_company_id),
         });
     }
 
@@ -7905,6 +7909,49 @@ test "contractOperations: RivalRow populated for arc contract with an attached r
     try std.testing.expectEqual(@as(u16, 2), rr.encounters);
     try std.testing.expect(rr.recurring);
     try std.testing.expectEqualStrings("Smith Raiders", rr.unit_name.raw);
+    // merc_company_id is .none on the seeded rival → insolvent must be false (P3e.7 consumer agreement).
+    try std.testing.expect(!rr.insolvent);
+
+    // P3e.7 consumer agreement: a rival linked to an insolvent company reports insolvent == true.
+    const cid3: types.ContractId = @enumFromInt(3);
+    const rid3: types.RivalId = @enumFromInt(3);
+    const mc_ins: types.MercCompanyId = @enumFromInt(1);
+
+    // Seed hull + roster with BV=432 (LCT-1V) < threshold 2000 → insolvent.
+    const hins: types.HullInstanceId = @enumFromInt(50);
+    try gs.hull_instances.put(gs.allocator(), hins, .{ .id = hins, .base_key = "LCT-1V" });
+    var r_ins: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+    try r_ins.append(gs.allocator(), hins);
+    try gs.merc_company_rosters.put(gs.allocator(), mc_ins, r_ins);
+
+    try gs.contracts.put(gs.allocator(), cid3, .{
+        .id = cid3,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 50_000 },
+        .status = .active,
+        .arc_key = "fracturing_garrison",
+    });
+    const c3 = gs.contracts.getPtr(cid3).?;
+    try c3.rival_ids.append(gs.allocator(), rid3);
+    try gs.rivals.put(gs.allocator(), rid3, .{
+        .id = rid3,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Broken Lances",
+        .commander_first = "Broke",
+        .commander_last = "Down",
+        .faction_key = "DC",
+        .doctrine = .cautious,
+        .standing = 0,
+        .encounters = 1,
+        .contract = cid3,
+        .merc_company_id = mc_ins,
+    });
+    const ops3 = try contractOperations(arena.allocator(), &gs, cid3);
+    try std.testing.expectEqual(@as(usize, 1), ops3.rivals.len);
+    try std.testing.expect(ops3.rivals[0].insolvent); // linked company is below threshold
 }
 
 test "contractOperations: OfficerRow populated for arc contract with an attached officer arc (P4i)" {

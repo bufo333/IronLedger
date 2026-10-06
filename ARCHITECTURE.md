@@ -719,6 +719,19 @@ an unsold listing that ages out returns its hull to the faction pool (market
 (`runMonthly`); abstraction-path listings (house board, black market,
 contract world) are unaffected and keep minting at buy time unchanged.
 
+**Merc-company insolvency (P3e.7).** A world merc company whose fieldable
+battle value — the sum of chassis BV across all `.active` hulls in its pool
+— falls below `tuning.generation.merc_company_insolvency_bv` is inactive and
+can no longer be selected as the OpFor for a new arc contract. The predicate
+is derived, not persisted (no schema change); it is re-evaluated on each read
+and is terminal in practice because merc-company pools only shrink (no
+manufacturing or salvage-in for merc companies). A company without a roster
+entry is not an economy participant and is treated as solvent. The two single
+rule owners are `mercCompanyFieldableBv` and `mercCompanyInsolvent` in
+`src/sim/rivals.zig`; the insolvency filter is enforced in `instantiateRivals`
+and surfaced read-only on the Operations rivals block via `RivalRow.insolvent`
+(docs/p3c-economy-design.md §4, §8.G).
+
 **Hulls are priced by what they are.** A listed mek carries a rolled
 condition — armor, quality grade, damaged and destroyed slots, missing
 structural components — and its price reflects loadout value and that

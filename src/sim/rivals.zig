@@ -14,6 +14,8 @@ const person_gen = @import("../gen/person_gen.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 const merc_company_mod = @import("../domain/merc_company.zig");
+const chassis_mod = @import("../domain/chassis.zig");
+const tuning = @import("../domain/tuning.zig").t;
 
 /// Generate rival names and identity using the `.rivals` RNG stream (rule 57).
 /// Deterministic per seed; drawing does not perturb `.actors`, `.battle`, or `.generation`.
@@ -74,6 +76,31 @@ pub fn statusFor(standing: i16) rival_mod.RivalStatus {
     if (standing <= -40) return .hostile; // TUNE
     if (standing >= 40) return .allied; // TUNE
     return .active;
+}
+
+/// Single named owner: sum of chassis BV over all `.active` hulls in a
+/// merc company's pool (docs/p3c-economy-design.md §4, §8.G; rule 20/24).
+/// Returns 0 when the company has no roster entry (not an economy participant).
+/// Pure, no allocation, no I/O.
+pub fn mercCompanyFieldableBv(gs: *GameState, id: types.MercCompanyId) i64 {
+    const roster = gs.merc_company_rosters.get(id) orelse return 0;
+    var total: i64 = 0;
+    for (roster.items) |hid| {
+        const inst = gs.hull_instances.getPtr(hid) orelse continue;
+        if (inst.status != .active) continue;
+        const ch = chassis_mod.find(inst.base_key) orelse continue;
+        total += @as(i64, ch.bv);
+    }
+    return total;
+}
+
+/// Single named owner: a merc company is insolvent when it HAS a roster
+/// and its fieldable BV is below the insolvency threshold
+/// (docs/p3c-economy-design.md §4 "Rival insolvency", §8.G; rule 20/24).
+/// A company with no roster entry is NOT insolvent (it is a non-economy fixture).
+pub fn mercCompanyInsolvent(gs: *GameState, id: types.MercCompanyId) bool {
+    return gs.merc_company_rosters.getPtr(id) != null and
+        mercCompanyFieldableBv(gs, id) < tuning.generation.merc_company_insolvency_bv;
 }
 
 /// Named outcome→delta owner for operation resolution (P4i, rule 20).
@@ -217,11 +244,27 @@ pub fn instantiateRivals(gs: *GameState, c: *contract_mod.Contract, id_start: u3
             // encounters = 1 is set by generateRival
         }
         // Draw a merc company from the world pool (docs/p3c-economy-design.md §8.B).
-        // Guard: uintLessThan with a zero bound is illegal; leave .none when the
-        // pool is empty so no partial truth is written (rule 1).
-        if (gs.merc_companies.count() > 0) {
-            const idx = gs.rng.random(.rivals).uintLessThan(usize, gs.merc_companies.count());
-            rv.merc_company_id = gs.merc_companies.keys()[idx];
+        // Only solvent companies are eligible (P3e.7): count-then-pick to preserve
+        // RNG-draw count and selection order (rules 1, 7, 11-13).
+        // Guard: leave .none when no solvent company exists (no partial truth, rule 1).
+        {
+            var solvent: usize = 0;
+            for (gs.merc_companies.keys()) |key| {
+                if (!mercCompanyInsolvent(gs, key)) solvent += 1;
+            }
+            if (solvent > 0) {
+                const pick = gs.rng.random(.rivals).uintLessThan(usize, solvent);
+                var seen: usize = 0;
+                for (gs.merc_companies.keys()) |key| {
+                    if (!mercCompanyInsolvent(gs, key)) {
+                        if (seen == pick) {
+                            rv.merc_company_id = key;
+                            break;
+                        }
+                        seen += 1;
+                    }
+                }
+            }
         }
         prepared[prep_count] = rv;
         prep_count += 1;
@@ -648,5 +691,149 @@ test "instantiateRivals: empty merc-company pool leaves merc_company_id none" {
     var it = gs.rivals.iterator();
     while (it.next()) |entry| {
         try std.testing.expectEqual(types.MercCompanyId.none, entry.value_ptr.merc_company_id);
+    }
+}
+
+test "mercCompanyFieldableBv: sums active-pool chassis BV; excludes permanently_destroyed; 0 for absent roster" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 99 });
+    defer gs.deinit();
+    const alloc = gs.allocator();
+
+    const mc1: types.MercCompanyId = @enumFromInt(1);
+    const mc2: types.MercCompanyId = @enumFromInt(2); // no roster entry — absent
+
+    // Three hull instances for mc1: LCT-1V (BV=432), JR7-D (BV=875), PXH-1 (BV=1041).
+    const h1: types.HullInstanceId = @enumFromInt(1);
+    const h2: types.HullInstanceId = @enumFromInt(2);
+    const h3: types.HullInstanceId = @enumFromInt(3);
+    try gs.hull_instances.put(alloc, h1, .{ .id = h1, .base_key = "LCT-1V" }); // active by default
+    try gs.hull_instances.put(alloc, h2, .{ .id = h2, .base_key = "JR7-D" });
+    try gs.hull_instances.put(alloc, h3, .{ .id = h3, .base_key = "PXH-1" });
+
+    // Insert mc1's roster with all three hulls.
+    var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+    try roster.append(alloc, h1);
+    try roster.append(alloc, h2);
+    try roster.append(alloc, h3);
+    try gs.merc_company_rosters.put(alloc, mc1, roster);
+
+    // All active: expect 432 + 875 + 1041 = 2348.
+    try std.testing.expectEqual(@as(i64, 2348), mercCompanyFieldableBv(&gs, mc1));
+
+    // Mark h1 permanently_destroyed — its BV drops out: 875 + 1041 = 1916.
+    gs.hull_instances.getPtr(h1).?.status = .permanently_destroyed;
+    try std.testing.expectEqual(@as(i64, 1916), mercCompanyFieldableBv(&gs, mc1));
+
+    // Absent roster entry → 0 (mc2 has no roster).
+    try std.testing.expectEqual(@as(i64, 0), mercCompanyFieldableBv(&gs, mc2));
+}
+
+test "mercCompanyInsolvent: threshold boundary; absent roster is solvent" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 100 });
+    defer gs.deinit();
+    const alloc = gs.allocator();
+
+    const mc_absent: types.MercCompanyId = @enumFromInt(1); // no roster — solvent
+    const mc_insolvent: types.MercCompanyId = @enumFromInt(2); // roster with BV < threshold
+    const mc_solvent: types.MercCompanyId = @enumFromInt(3); // roster with BV >= threshold
+
+    // mc_insolvent: one hull with LCT-1V (BV=432) — well below 2000.
+    const h1: types.HullInstanceId = @enumFromInt(10);
+    try gs.hull_instances.put(alloc, h1, .{ .id = h1, .base_key = "LCT-1V" });
+    var r_insolvent: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+    try r_insolvent.append(alloc, h1);
+    try gs.merc_company_rosters.put(alloc, mc_insolvent, r_insolvent);
+
+    // mc_solvent: three hulls with LCT-1V+JR7-D+PXH-1 = 432+875+1041 = 2348 ≥ 2000.
+    const h2: types.HullInstanceId = @enumFromInt(11);
+    const h3: types.HullInstanceId = @enumFromInt(12);
+    const h4: types.HullInstanceId = @enumFromInt(13);
+    try gs.hull_instances.put(alloc, h2, .{ .id = h2, .base_key = "LCT-1V" });
+    try gs.hull_instances.put(alloc, h3, .{ .id = h3, .base_key = "JR7-D" });
+    try gs.hull_instances.put(alloc, h4, .{ .id = h4, .base_key = "PXH-1" });
+    var r_solvent: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+    try r_solvent.append(alloc, h2);
+    try r_solvent.append(alloc, h3);
+    try r_solvent.append(alloc, h4);
+    try gs.merc_company_rosters.put(alloc, mc_solvent, r_solvent);
+
+    // Absent roster → not insolvent (solvent by convention).
+    try std.testing.expect(!mercCompanyInsolvent(&gs, mc_absent));
+    // Below threshold → insolvent.
+    try std.testing.expect(mercCompanyInsolvent(&gs, mc_insolvent));
+    // At or above threshold (2348 >= 2000) → not insolvent.
+    try std.testing.expect(!mercCompanyInsolvent(&gs, mc_solvent));
+}
+
+test "instantiateRivals: an insolvent merc company is not selected; a solvent one is" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 77 });
+    defer gs.deinit();
+    const alloc = gs.allocator();
+
+    // Company A: has a roster with BV=432 (one LCT-1V) — insolvent (< 2000).
+    const mc_a: types.MercCompanyId = @enumFromInt(1);
+    const mc_b: types.MercCompanyId = @enumFromInt(2);
+
+    try gs.merc_companies.put(alloc, mc_a, merc_company_mod.MercCompany{
+        .id = mc_a,
+        .archetype_key = "enemy_raiders",
+        .commander_first = "Bad",
+        .commander_last = "Luck",
+        .unit_name = "Bad Luck Raiders",
+        .faction_key = "DC",
+        .side = .enemy,
+        .doctrine = .aggressive,
+    });
+    const ha: types.HullInstanceId = @enumFromInt(20);
+    try gs.hull_instances.put(alloc, ha, .{ .id = ha, .base_key = "LCT-1V" }); // BV=432
+    var ra: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+    try ra.append(alloc, ha);
+    try gs.merc_company_rosters.put(alloc, mc_a, ra);
+
+    // Company B: has a roster with BV=2348 (LCT-1V+JR7-D+PXH-1) — solvent.
+    try gs.merc_companies.put(alloc, mc_b, merc_company_mod.MercCompany{
+        .id = mc_b,
+        .archetype_key = "enemy_raiders",
+        .commander_first = "Good",
+        .commander_last = "Fortune",
+        .unit_name = "Fortune Raiders",
+        .faction_key = "DC",
+        .side = .enemy,
+        .doctrine = .cautious,
+    });
+    const hb1: types.HullInstanceId = @enumFromInt(21);
+    const hb2: types.HullInstanceId = @enumFromInt(22);
+    const hb3: types.HullInstanceId = @enumFromInt(23);
+    try gs.hull_instances.put(alloc, hb1, .{ .id = hb1, .base_key = "LCT-1V" });
+    try gs.hull_instances.put(alloc, hb2, .{ .id = hb2, .base_key = "JR7-D" });
+    try gs.hull_instances.put(alloc, hb3, .{ .id = hb3, .base_key = "PXH-1" });
+    var rb: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+    try rb.append(alloc, hb1);
+    try rb.append(alloc, hb2);
+    try rb.append(alloc, hb3);
+    try gs.merc_company_rosters.put(alloc, mc_b, rb);
+
+    const cid: types.ContractId = @enumFromInt(1);
+    var c = contract_mod.Contract{
+        .id = cid,
+        .arc_key = "fracturing_garrison",
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .kind = .garrison_duty,
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+    };
+    try instantiateRivals(&gs, &c, 1);
+
+    // Every attached rival must link to the solvent company (B), never the insolvent one (A).
+    try std.testing.expect(gs.rivals.count() > 0);
+    var it = gs.rivals.iterator();
+    while (it.next()) |entry| {
+        const rv = entry.value_ptr;
+        try std.testing.expect(rv.merc_company_id != mc_a);
+        try std.testing.expectEqual(mc_b, rv.merc_company_id);
     }
 }
