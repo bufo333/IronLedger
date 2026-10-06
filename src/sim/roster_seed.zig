@@ -16,6 +16,7 @@ const hull_mod = @import("../domain/hull_instance.zig");
 const rival_mod = @import("../domain/rival.zig");
 const merc_company_mod = @import("../domain/merc_company.zig");
 const roster_gen = @import("../gen/roster_gen.zig");
+const logo = @import("../domain/logo.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Maximum entries in faction.table; used for fixed stack arrays.
@@ -27,6 +28,8 @@ const max_merc_companies: usize = 256;
 comptime {
     if (tuning.generation.merc_company_count > max_merc_companies)
         @compileError("merc_company_count exceeds max_merc_companies; raise the constant");
+    if (tuning.generation.merc_company_count > logo.all_keys.len)
+        @compileError("merc_company_count exceeds the data/logos catalog; add more PNG files to data/logos/");
 }
 
 /// Seed every manufacturing faction's hull pool at campaign creation.
@@ -229,6 +232,10 @@ pub fn seedMercCompanies(gs: *GameState) !void {
             .faction_key = f.key, // static catalog memory
             .side = identity.side,
             .doctrine = identity.doctrine,
+            .cbills = tuning.generation.merc_replacement_cbill_floor,
+            .founded_day = 0,
+            .dissolved_day = 0,
+            .logo_key = logo.all_keys[ci], // first merc_company_count sorted keys reserved for seeds
         };
 
         // Roll this company's hull pool on .rosters stream.

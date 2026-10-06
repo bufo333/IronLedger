@@ -1479,6 +1479,19 @@ design-approval entry and delivery order.
 Every constant, faction composition and chassis value is sourced at
 implementation, never invented; new tunables land in `data/tables/tuning.zon`.
 
+P3f.1–P3f.3 delivered: black-market data foundation (planet attr, listing
+fields, schema v57, `buyerEligible`); lost-field wreck dispersal (enemy
+recovery + black-market dispersal); NPC black-market competition + pirate
+replenishment + per-buyer reach gating.
+
+P3f.4 sim core delivered: merc-company lifecycle (`src/sim/merc_lifecycle.zig`:
+`liquidateMercCompany`, `spawnReplacementCompany`, `buyHullsForCompany`,
+`runMercLifecycle`); new `MercCompany` fields (`cbills`, `founded_day`,
+`dissolved_day`, `logo_key`); schema v58; build-time logo catalog from
+`data/logos/` (35 PNGs committed, generated `logos.zon`, `src/domain/logo.zig`
+shim, `src/gen/logo_name.zig`); `mercCompanyEligibleAsOpFor` OpFor gate.
+Leaderboard TUI (P3f.4b) and campaign-wizard logo picker (P3f.5) remain.
+
 ## Product completion P4 — Campaign operations and stories
 
 Begins only after the ordered contract, test, data-verification, and P1–P3

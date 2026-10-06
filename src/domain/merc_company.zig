@@ -30,6 +30,14 @@ pub const MercCompany = struct {
     side: FactionSide = .employer,
     /// Operational doctrine.
     doctrine: RivalDoctrine = .cautious,
+    /// C-bills held by this company (spent on hull purchases; no income in P3f.4).
+    cbills: types.CBills = 0,
+    /// Campaign day this company was founded (0 = pre-campaign seed).
+    founded_day: u32 = 0,
+    /// Campaign day this company dissolved; 0 = active, nonzero = dissolved.
+    dissolved_day: u32 = 0,
+    /// Logo filename stem from data/logos/ (generated catalog); empty = no logo.
+    logo_key: []const u8 = "",
 };
 
 test "MercCompany defaults" {
@@ -39,4 +47,8 @@ test "MercCompany defaults" {
     try std.testing.expectEqualStrings("", mc.unit_name);
     try std.testing.expectEqual(FactionSide.employer, mc.side);
     try std.testing.expectEqual(RivalDoctrine.cautious, mc.doctrine);
+    try std.testing.expectEqual(@as(types.CBills, 0), mc.cbills);
+    try std.testing.expectEqual(@as(u32, 0), mc.founded_day);
+    try std.testing.expectEqual(@as(u32, 0), mc.dissolved_day);
+    try std.testing.expectEqualStrings("", mc.logo_key);
 }

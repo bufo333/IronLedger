@@ -103,6 +103,18 @@ pub fn mercCompanyInsolvent(gs: *GameState, id: types.MercCompanyId) bool {
         mercCompanyFieldableBv(gs, id) < tuning.generation.merc_company_insolvency_bv;
 }
 
+/// Single owner of "may this merc company be a contract OpFor" (rule 20).
+/// Eligible iff active (dissolved_day == 0), solvent (!mercCompanyInsolvent),
+/// and at full strength (roster length >= merc_company_hulls_each). A company
+/// with no roster entry is under strength → ineligible (rule 1).
+pub fn mercCompanyEligibleAsOpFor(gs: *GameState, id: types.MercCompanyId) bool {
+    const mc = gs.merc_companies.getPtr(id) orelse return false;
+    if (mc.dissolved_day != 0) return false;
+    if (mercCompanyInsolvent(gs, id)) return false;
+    const roster = gs.merc_company_rosters.get(id) orelse return false;
+    return roster.items.len >= tuning.generation.merc_company_hulls_each;
+}
+
 /// Named outcome→delta owner for operation resolution (P4i, rule 20).
 /// All values // TUNE.
 pub fn outcomeRivalStandingDelta(band: operation_mod.OutcomeBand) i16 {
@@ -244,19 +256,20 @@ pub fn instantiateRivals(gs: *GameState, c: *contract_mod.Contract, id_start: u3
             // encounters = 1 is set by generateRival
         }
         // Draw a merc company from the world pool (docs/p3c-economy-design.md §8.B).
-        // Only solvent companies are eligible (P3e.7): count-then-pick to preserve
-        // RNG-draw count and selection order (rules 1, 7, 11-13).
-        // Guard: leave .none when no solvent company exists (no partial truth, rule 1).
+        // Only eligible companies (active, solvent, at full strength) are candidates
+        // (P3f.4): count-then-pick to preserve RNG-draw count and selection order
+        // (rules 1, 7, 11-13).
+        // Guard: leave .none when no eligible company exists (no partial truth, rule 1).
         {
-            var solvent: usize = 0;
+            var eligible: usize = 0;
             for (gs.merc_companies.keys()) |key| {
-                if (!mercCompanyInsolvent(gs, key)) solvent += 1;
+                if (mercCompanyEligibleAsOpFor(gs, key)) eligible += 1;
             }
-            if (solvent > 0) {
-                const pick = gs.rng.random(.rivals).uintLessThan(usize, solvent);
+            if (eligible > 0) {
+                const pick = gs.rng.random(.rivals).uintLessThan(usize, eligible);
                 var seen: usize = 0;
                 for (gs.merc_companies.keys()) |key| {
-                    if (!mercCompanyInsolvent(gs, key)) {
+                    if (mercCompanyEligibleAsOpFor(gs, key)) {
                         if (seen == pick) {
                             rv.merc_company_id = key;
                             break;
@@ -587,7 +600,10 @@ test "instantiateRivals: links each rival to an existing merc company, determini
     defer gs.deinit();
 
     // Insert three merc companies into the pool (via the arena so deinit frees them).
+    // Each company must have merc_company_hulls_each hulls to be eligible as OpFor
+    // (mercCompanyEligibleAsOpFor requires full-strength; P3f.4).
     const alloc = gs.allocator();
+    var next_hid: u32 = 1;
     for ([_]u32{ 1, 2, 3 }) |raw| {
         const mcid: types.MercCompanyId = @enumFromInt(raw);
         try gs.merc_companies.put(alloc, mcid, merc_company_mod.MercCompany{
@@ -600,6 +616,14 @@ test "instantiateRivals: links each rival to an existing merc company, determini
             .side = .enemy,
             .doctrine = .aggressive,
         });
+        var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+        for (0..tuning.generation.merc_company_hulls_each) |_| {
+            const hid: types.HullInstanceId = @enumFromInt(next_hid);
+            next_hid += 1;
+            try gs.hull_instances.put(alloc, hid, .{ .id = hid, .base_key = "LCT-1V" });
+            try roster.append(alloc, hid);
+        }
+        try gs.merc_company_rosters.put(alloc, mcid, roster);
     }
 
     const cid: types.ContractId = @enumFromInt(1);
@@ -634,10 +658,11 @@ test "instantiateRivals: links each rival to an existing merc company, determini
         try first_mcids.append(a, entry.value_ptr.merc_company_id);
     }
 
-    // Second GameState with the same seed and the same pool.
+    // Second GameState with the same seed and the same pool (mirror the hull seeding).
     var gs2 = GameState.init(a, .{ .seed = 11 });
     defer gs2.deinit();
     const alloc2 = gs2.allocator();
+    var next_hid2: u32 = 1;
     for ([_]u32{ 1, 2, 3 }) |raw| {
         const mcid: types.MercCompanyId = @enumFromInt(raw);
         try gs2.merc_companies.put(alloc2, mcid, merc_company_mod.MercCompany{
@@ -650,6 +675,14 @@ test "instantiateRivals: links each rival to an existing merc company, determini
             .side = .enemy,
             .doctrine = .aggressive,
         });
+        var roster2: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+        for (0..tuning.generation.merc_company_hulls_each) |_| {
+            const hid2: types.HullInstanceId = @enumFromInt(next_hid2);
+            next_hid2 += 1;
+            try gs2.hull_instances.put(alloc2, hid2, .{ .id = hid2, .base_key = "LCT-1V" });
+            try roster2.append(alloc2, hid2);
+        }
+        try gs2.merc_company_rosters.put(alloc2, mcid, roster2);
     }
     var c2 = contract_mod.Contract{
         .id = cid,
@@ -773,7 +806,7 @@ test "instantiateRivals: an insolvent merc company is not selected; a solvent on
     defer gs.deinit();
     const alloc = gs.allocator();
 
-    // Company A: has a roster with BV=432 (one LCT-1V) — insolvent (< 2000).
+    // Company A: has a roster with BV=432 (one LCT-1V) — insolvent (< 2000) and under strength.
     const mc_a: types.MercCompanyId = @enumFromInt(1);
     const mc_b: types.MercCompanyId = @enumFromInt(2);
 
@@ -793,7 +826,8 @@ test "instantiateRivals: an insolvent merc company is not selected; a solvent on
     try ra.append(alloc, ha);
     try gs.merc_company_rosters.put(alloc, mc_a, ra);
 
-    // Company B: has a roster with BV=2348 (LCT-1V+JR7-D+PXH-1) — solvent.
+    // Company B: has merc_company_hulls_each hulls — solvent and at full strength (eligible).
+    // Use LCT-1V for each hull; total BV = 432 * merc_company_hulls_each (well above 2000).
     try gs.merc_companies.put(alloc, mc_b, merc_company_mod.MercCompany{
         .id = mc_b,
         .archetype_key = "enemy_raiders",
@@ -804,16 +838,12 @@ test "instantiateRivals: an insolvent merc company is not selected; a solvent on
         .side = .enemy,
         .doctrine = .cautious,
     });
-    const hb1: types.HullInstanceId = @enumFromInt(21);
-    const hb2: types.HullInstanceId = @enumFromInt(22);
-    const hb3: types.HullInstanceId = @enumFromInt(23);
-    try gs.hull_instances.put(alloc, hb1, .{ .id = hb1, .base_key = "LCT-1V" });
-    try gs.hull_instances.put(alloc, hb2, .{ .id = hb2, .base_key = "JR7-D" });
-    try gs.hull_instances.put(alloc, hb3, .{ .id = hb3, .base_key = "PXH-1" });
     var rb: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
-    try rb.append(alloc, hb1);
-    try rb.append(alloc, hb2);
-    try rb.append(alloc, hb3);
+    for (0..tuning.generation.merc_company_hulls_each) |i| {
+        const hb: types.HullInstanceId = @enumFromInt(21 + @as(u32, @intCast(i)));
+        try gs.hull_instances.put(alloc, hb, .{ .id = hb, .base_key = "LCT-1V" });
+        try rb.append(alloc, hb);
+    }
     try gs.merc_company_rosters.put(alloc, mc_b, rb);
 
     const cid: types.ContractId = @enumFromInt(1);
@@ -828,7 +858,7 @@ test "instantiateRivals: an insolvent merc company is not selected; a solvent on
     };
     try instantiateRivals(&gs, &c, 1);
 
-    // Every attached rival must link to the solvent company (B), never the insolvent one (A).
+    // Every attached rival must link to the eligible company (B), never the insolvent one (A).
     try std.testing.expect(gs.rivals.count() > 0);
     var it = gs.rivals.iterator();
     while (it.next()) |entry| {
@@ -836,4 +866,105 @@ test "instantiateRivals: an insolvent merc company is not selected; a solvent on
         try std.testing.expect(rv.merc_company_id != mc_a);
         try std.testing.expectEqual(mc_b, rv.merc_company_id);
     }
+}
+
+test "mercCompanyEligibleAsOpFor: active+full-strength=true; dissolved=false; insolvent=false; under-strength=false" {
+    // Rule 20/67: focused table test for the single OpFor eligibility owner.
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 42 });
+    defer gs.deinit();
+    const alloc = gs.allocator();
+
+    const n = tuning.generation.merc_company_hulls_each;
+
+    // mc_active_full: dissolved_day==0, solvent, roster.len >= n → eligible.
+    const mc_full: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(alloc, mc_full, merc_company_mod.MercCompany{
+        .id = mc_full,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Full Company",
+        .faction_key = "DC",
+        .dissolved_day = 0,
+    });
+    {
+        var r: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+        for (0..n) |i| {
+            const hid: types.HullInstanceId = @enumFromInt(100 + @as(u32, @intCast(i)));
+            try gs.hull_instances.put(alloc, hid, .{ .id = hid, .base_key = "LCT-1V" });
+            try r.append(alloc, hid);
+        }
+        try gs.merc_company_rosters.put(alloc, mc_full, r);
+    }
+    try std.testing.expect(mercCompanyEligibleAsOpFor(&gs, mc_full));
+
+    // mc_dissolved: dissolved_day != 0 → ineligible.
+    const mc_dissolved: types.MercCompanyId = @enumFromInt(2);
+    try gs.merc_companies.put(alloc, mc_dissolved, merc_company_mod.MercCompany{
+        .id = mc_dissolved,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Dissolved Co",
+        .faction_key = "DC",
+        .dissolved_day = 30,
+    });
+    {
+        var r: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+        for (0..n) |i| {
+            const hid: types.HullInstanceId = @enumFromInt(200 + @as(u32, @intCast(i)));
+            try gs.hull_instances.put(alloc, hid, .{ .id = hid, .base_key = "LCT-1V" });
+            try r.append(alloc, hid);
+        }
+        try gs.merc_company_rosters.put(alloc, mc_dissolved, r);
+    }
+    try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, mc_dissolved));
+
+    // mc_insolvent: has a roster but BV < threshold → insolvent → ineligible.
+    const mc_insolvent: types.MercCompanyId = @enumFromInt(3);
+    try gs.merc_companies.put(alloc, mc_insolvent, merc_company_mod.MercCompany{
+        .id = mc_insolvent,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Insolvent Co",
+        .faction_key = "DC",
+        .dissolved_day = 0,
+    });
+    {
+        // One hull with LCT-1V (BV=432) — well below insolvency threshold 2000.
+        const hid: types.HullInstanceId = @enumFromInt(300);
+        try gs.hull_instances.put(alloc, hid, .{ .id = hid, .base_key = "LCT-1V" });
+        var r: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+        try r.append(alloc, hid);
+        try gs.merc_company_rosters.put(alloc, mc_insolvent, r);
+    }
+    try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, mc_insolvent));
+
+    // mc_under: active, solvent, but roster.len < n → under-strength → ineligible.
+    const mc_under: types.MercCompanyId = @enumFromInt(4);
+    try gs.merc_companies.put(alloc, mc_under, merc_company_mod.MercCompany{
+        .id = mc_under,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Under Strength Co",
+        .faction_key = "DC",
+        .dissolved_day = 0,
+    });
+    {
+        // n-1 hulls: solvent but under-strength.
+        var r: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+        for (0..n - 1) |i| {
+            const hid: types.HullInstanceId = @enumFromInt(400 + @as(u32, @intCast(i)));
+            try gs.hull_instances.put(alloc, hid, .{ .id = hid, .base_key = "LCT-1V" });
+            try r.append(alloc, hid);
+        }
+        try gs.merc_company_rosters.put(alloc, mc_under, r);
+    }
+    try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, mc_under));
+
+    // mc_absent: active, no roster entry → under-strength → ineligible (rule 1).
+    const mc_absent: types.MercCompanyId = @enumFromInt(5);
+    try gs.merc_companies.put(alloc, mc_absent, merc_company_mod.MercCompany{
+        .id = mc_absent,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Absent Roster Co",
+        .faction_key = "DC",
+        .dissolved_day = 0,
+    });
+    try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, mc_absent));
 }

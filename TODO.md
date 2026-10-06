@@ -24,13 +24,10 @@ reschedule only on explicit dispatch.
   crewing, readiness, and persistence.
 - P2-battle-ui (P2h-P2i): both battle effects and REPL/TUI surfaces.
 
-- P3f-design Faction economic loop design approval (ROADMAP.md P3f): lost-field
-  wreck flow; dispersed black-market listings (`planet_key` + `available_after`,
-  faction-access flag); rival merc-company death and replacement from the
-  `data/logos/` pool; pirate base replenishment and black-market competition;
-  and the campaign-wizard logo picker (title-case name from the filename).
-  Closes the P3e living-roster loop; one coherent stage; needs the design doc
-  fixed before dispatch.
+- P3f.4b Leaderboard TUI screen (separate branch, P3f.4b): NPC merc company
+  status display; uses the lifecycle fields delivered in P3f.4 sim core.
+- P3f.5 Campaign-wizard logo picker: logo catalog picker in `src/tui/app.zig`;
+  `titleCaseLogoKey` auto-fill; runtime serving and install of `data/logos/`.
 - Per-location armor data accuracy (lower priority, after P3f): pull the 8 front
   and 3 rear-torso armor values per mech from the MegaMek 3039u MTF files
   (https://github.com/MegaMek/mm-data/tree/main/data/mekfiles/meks/3039u) for

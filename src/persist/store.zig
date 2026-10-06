@@ -41,7 +41,7 @@ const merc_company_mod = @import("../domain/merc_company.zig");
 const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 
-pub const schema_version = 57;
+pub const schema_version = 58;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -105,7 +105,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS maintenance_entry (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER NOT NULL DEFAULT 0, tech INTEGER NOT NULL DEFAULT 0, action TEXT NOT NULL DEFAULT 'repair', description TEXT NOT NULL DEFAULT '', battle_id INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hull_ownership_history (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, from_day INTEGER NOT NULL DEFAULT 0, to_day INTEGER NOT NULL DEFAULT 0, acquisition_type TEXT NOT NULL DEFAULT 'initial', prior_owner_key TEXT NOT NULL DEFAULT '', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS faction_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction_key TEXT NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS merc_company (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS merc_company (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, cbills INTEGER NOT NULL DEFAULT 0, founded_day INTEGER NOT NULL DEFAULT 0, dissolved_day INTEGER NOT NULL DEFAULT 0, logo_key TEXT NOT NULL DEFAULT '', PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS merc_company_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, merc_company_id INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, merc_company_id) REFERENCES merc_company(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
 ;
 
@@ -354,6 +354,12 @@ pub const Store = struct {
         // v57 (P3f.1): dispersed black-market listing placement.
         .{ .from = 56, .to = 57, .table = "listing", .column = "planet_key", .sql = "ALTER TABLE listing ADD COLUMN planet_key TEXT NOT NULL DEFAULT ''" },
         .{ .from = 56, .to = 57, .table = "listing", .column = "available_after", .sql = "ALTER TABLE listing ADD COLUMN available_after INTEGER NOT NULL DEFAULT 0" },
+        // v58 (P3f.4): merc company lifecycle fields (cbills, founded/dissolved day, logo key).
+        // Default 0/'' = fail-closed legacy values (rule 49).
+        .{ .from = 57, .to = 58, .table = "merc_company", .column = "cbills", .sql = "ALTER TABLE merc_company ADD COLUMN cbills INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 57, .to = 58, .table = "merc_company", .column = "founded_day", .sql = "ALTER TABLE merc_company ADD COLUMN founded_day INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 57, .to = 58, .table = "merc_company", .column = "dissolved_day", .sql = "ALTER TABLE merc_company ADD COLUMN dissolved_day INTEGER NOT NULL DEFAULT 0" },
+        .{ .from = 57, .to = 58, .table = "merc_company", .column = "logo_key", .sql = "ALTER TABLE merc_company ADD COLUMN logo_key TEXT NOT NULL DEFAULT ''" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -1445,7 +1451,7 @@ pub const Store = struct {
 
     // P3e entity split: save and load persistent world merc companies.
     fn saveMercCompanies(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO merc_company VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
+        const st = try self.db.prepare("INSERT INTO merc_company VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)");
         defer st.finalize();
         var it = gs.merc_companies.iterator();
         var ord: i64 = 0;
@@ -1462,6 +1468,10 @@ pub const Store = struct {
                 mc.faction_key,
                 @tagName(mc.side),
                 @tagName(mc.doctrine),
+                mc.cbills,
+                @as(i64, mc.founded_day),
+                @as(i64, mc.dissolved_day),
+                mc.logo_key,
             });
             try st.run();
         }
@@ -1469,7 +1479,7 @@ pub const Store = struct {
 
     fn loadMercCompanies(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT id, archetype_key, commander_first, commander_last, unit_name, faction_key, side, doctrine FROM merc_company WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT id, archetype_key, commander_first, commander_last, unit_name, faction_key, side, doctrine, cbills, founded_day, dissolved_day, logo_key FROM merc_company WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -1490,6 +1500,10 @@ pub const Store = struct {
                 .faction_key = try st.text(5, alloc),
                 .side = side,
                 .doctrine = doctrine,
+                .cbills = st.int(8),
+                .founded_day = try st.intAs(u32, 9),
+                .dissolved_day = try st.intAs(u32, 10),
+                .logo_key = try st.text(11, alloc),
             };
             const gop = try gs.merc_companies.getOrPut(alloc, mc.id);
             if (gop.found_existing) return error.CorruptSave;
@@ -4822,9 +4836,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P3f.3 NPC black-market draw — runNpcBlackMarketDraw and
-    // runPirateReplenishment run during the played year.
-    try std.testing.expectEqual(@as(u64, 2219634081650591605), hash_before);
+    // Re-pinned by P3f.4 merc lifecycle — runMercLifecycle runs during the played year.
+    try std.testing.expectEqual(@as(u64, 7561938388758658149), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5319,9 +5332,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P3f.3 NPC black-market draw —
-    // runNpcBlackMarketDraw and runPirateReplenishment run during the played year.
-    try std.testing.expectEqual(@as(u64, 2219634081650591605), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3f.4 merc lifecycle —
+    // runMercLifecycle runs during the played year.
+    try std.testing.expectEqual(@as(u64, 7561938388758658149), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -8057,6 +8070,107 @@ test "a v53 store migrates to v54 with merc_company/merc_company_roster created 
     const ot = try relabel_q.text(0, fba.allocator());
     try std.testing.expectEqualStrings("merc_company", ot);
     try std.testing.expectEqual(@as(i64, 7), relabel_q.int(1));
+}
+
+// P3f.4: merc company lifecycle — save/load and migration tests.
+
+test "MercCompany save/load round-trip with all four new fields non-default (P3f.4)" {
+    // Rules 45, 46, 53, 67 / P3f.4: a campaign with non-default cbills/founded_day/
+    // dissolved_day/logo_key survives save → load with identical stateHash; the four
+    // new fields round-trip exactly.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 58001 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const a = gs.allocator();
+
+    const mc1: merc_company_mod.MercCompany = .{
+        .id = @enumFromInt(1),
+        .archetype_key = "enemy_raiders",
+        .commander_first = "Bo",
+        .commander_last = "Rex",
+        .unit_name = "Rex Raiders",
+        .faction_key = "DC",
+        .side = .enemy,
+        .doctrine = .aggressive,
+        .cbills = 3_500_000,
+        .founded_day = 42,
+        .dissolved_day = 90,
+        .logo_key = "ashfall_lancers",
+    };
+    try gs.merc_companies.put(a, mc1.id, mc1);
+    gs.next_merc_company_id = 2;
+
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+
+    const lmc = loaded.merc_companies.getPtr(@enumFromInt(1)) orelse return error.TestFailed;
+    try std.testing.expectEqual(@as(types.CBills, 3_500_000), lmc.cbills);
+    try std.testing.expectEqual(@as(u32, 42), lmc.founded_day);
+    try std.testing.expectEqual(@as(u32, 90), lmc.dissolved_day);
+    try std.testing.expectEqualStrings("ashfall_lancers", lmc.logo_key);
+}
+
+test "a v57 store migrates to v58 with four new merc_company columns and legacy defaults (P3f.4)" {
+    // Rules 50, 51 / P3f.4: a store at schema v57 (no cbills/founded_day/dissolved_day/logo_key)
+    // migrates to v58: four new columns exist with fail-closed legacy defaults.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 58002 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const a = gs.allocator();
+
+    const mc1: merc_company_mod.MercCompany = .{
+        .id = @enumFromInt(1),
+        .archetype_key = "enemy_raiders",
+        .commander_first = "Bo",
+        .commander_last = "Rex",
+        .unit_name = "Rex Raiders",
+        .faction_key = "DC",
+        .side = .enemy,
+        .doctrine = .aggressive,
+    };
+    try gs.merc_companies.put(a, mc1.id, mc1);
+    gs.next_merc_company_id = 2;
+
+    const raw = try sqlite.Db.open(":memory:");
+    var s1 = try Store.fromDb(raw);
+    try s1.save(&gs);
+
+    // Simulate a v57 store: drop the four new columns and set schema_version = 57.
+    try raw.exec("PRAGMA foreign_keys = OFF");
+    try raw.exec("ALTER TABLE merc_company RENAME TO merc_company__bak");
+    try raw.exec("CREATE TABLE merc_company (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED)");
+    try raw.exec("INSERT INTO merc_company SELECT cid, ord, id, archetype_key, commander_first, commander_last, unit_name, faction_key, side, doctrine FROM merc_company__bak");
+    try raw.exec("DROP TABLE merc_company__bak");
+    try raw.exec("UPDATE setting SET value = 57 WHERE key = 'schema_version'");
+    try raw.exec("PRAGMA foreign_keys = ON");
+
+    const s2 = try Store.fromDb(raw);
+    defer s2.close();
+    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
+
+    // Four new columns must now exist.
+    try std.testing.expect(try Store.hasColumnRt(raw, "merc_company", "cbills"));
+    try std.testing.expect(try Store.hasColumnRt(raw, "merc_company", "founded_day"));
+    try std.testing.expect(try Store.hasColumnRt(raw, "merc_company", "dissolved_day"));
+    try std.testing.expect(try Store.hasColumnRt(raw, "merc_company", "logo_key"));
+
+    // Load the legacy row — fail-closed defaults.
+    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    const lmc = loaded.merc_companies.getPtr(@enumFromInt(1)) orelse return error.TestFailed;
+    try std.testing.expectEqual(@as(types.CBills, 0), lmc.cbills);
+    try std.testing.expectEqual(@as(u32, 0), lmc.founded_day);
+    try std.testing.expectEqual(@as(u32, 0), lmc.dissolved_day);
+    try std.testing.expectEqualStrings("", lmc.logo_key);
 }
 
 test "v50→v51 migration seeds one .initial ownership interval per owned hull (P3c.4)" {

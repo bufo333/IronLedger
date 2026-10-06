@@ -95,6 +95,46 @@ pub fn build(b: *std.Build) void {
     }
     if (data_dir) |dir| if (overlaid.items.len == 0)
         std.process.fatal("-Ddata={s}: overlays no data file (expected chassis.zon, parts.zon, planets.zon or tables/<name>.zon); see docs/modding.md", .{dir});
+
+    // Logo catalog: scan data/logos/ at configure time, sort basenames ascending,
+    // build a ZON array literal, and expose it as the anonymous import "logos_zon".
+    // The module (src/domain/logo.zig) imports it at comptime — pure, no I/O in the
+    // sim core (ARCH rule 2). Sort order is required for determinism: seedMercCompanies
+    // indexes all_keys by company index.
+    {
+        var logos_dir = b.build_root.handle.openDir(b.graph.io, "data/logos", .{ .iterate = true }) catch |err|
+            std.process.fatal("data/logos: not a readable directory ({s}); the logo catalog requires the 35 PNGs to be present", .{@errorName(err)});
+        defer logos_dir.close(b.graph.io);
+
+        var logo_names: std.ArrayList([]const u8) = .empty;
+        var logo_it = logos_dir.iterate();
+        while (logo_it.next(b.graph.io) catch null) |e| {
+            if (e.kind != .file) continue;
+            if (!std.mem.endsWith(u8, e.name, ".png")) continue;
+            const stem = e.name[0 .. e.name.len - 4]; // strip ".png"
+            logo_names.append(b.allocator, b.dupe(stem)) catch @panic("OOM");
+        }
+        std.mem.sort([]const u8, logo_names.items, {}, struct {
+            fn lt(_: void, a: []const u8, bb: []const u8) bool {
+                return std.mem.lessThan(u8, a, bb);
+            }
+        }.lt);
+        std.log.info("data/logos: {d} logo(s) found", .{logo_names.items.len});
+
+        // Build the ZON array literal: .{ "key0", "key1", ... }
+        var zon_buf: std.ArrayList(u8) = .empty;
+        zon_buf.appendSlice(b.allocator, ".{ ") catch @panic("OOM");
+        for (logo_names.items, 0..) |name, i| {
+            const piece = std.fmt.allocPrint(b.allocator, "\"{s}\"", .{name}) catch @panic("OOM");
+            zon_buf.appendSlice(b.allocator, piece) catch @panic("OOM");
+            if (i + 1 < logo_names.items.len) zon_buf.appendSlice(b.allocator, ", ") catch @panic("OOM");
+        }
+        zon_buf.appendSlice(b.allocator, " }") catch @panic("OOM");
+
+        const gen = b.addWriteFiles();
+        const lp = gen.add("logos.zon", zon_buf.items);
+        mod.addAnonymousImport("logos_zon", .{ .root_source_file = lp });
+    }
     // What the binary can say about its data (settings screen, REPL banner).
     const build_options = b.addOptions();
     build_options.addOption(?[]const u8, "data_dir", data_dir);

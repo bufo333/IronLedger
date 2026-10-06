@@ -54,6 +54,7 @@ pub const operation = @import("domain/operation.zig");
 pub const actor = @import("domain/actor.zig");
 pub const rival = @import("domain/rival.zig");
 pub const merc_company = @import("domain/merc_company.zig");
+pub const logo = @import("domain/logo.zig");
 pub const officer = @import("domain/officer.zig");
 
 // sim/ — state, time, randomness, battle resolution
@@ -72,6 +73,7 @@ pub const queries = @import("sim/queries.zig");
 pub const campaign_scripts = @import("sim/campaign_scripts.zig");
 pub const table = @import("sim/table.zig");
 pub const black_market = @import("sim/black_market.zig");
+pub const merc_lifecycle = @import("sim/merc_lifecycle.zig");
 
 // persist/ — SQLite save files
 pub const sqlite = @import("persist/sqlite.zig");
@@ -95,6 +97,7 @@ pub const contract_market = @import("sim/contract_market.zig");
 // gen/ — procedural generation
 pub const company_gen = @import("gen/company_gen.zig");
 pub const roster_gen = @import("gen/roster_gen.zig");
+pub const logo_name = @import("gen/logo_name.zig");
 pub const starter_company = @import("sim/starter_company.zig");
 pub const roster_seed = @import("sim/roster_seed.zig");
 pub const person_gen = @import("gen/person_gen.zig");

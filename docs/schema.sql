@@ -1158,6 +1158,10 @@ CREATE TABLE merc_company (
     faction_key      TEXT    NOT NULL DEFAULT '',       -- -> factions catalog
     side             TEXT    NOT NULL DEFAULT 'employer', -- FactionSide tag
     doctrine         TEXT    NOT NULL DEFAULT 'cautious', -- RivalDoctrine tag
+    cbills           INTEGER NOT NULL DEFAULT 0,        -- CBills
+    founded_day      INTEGER NOT NULL DEFAULT 0,        -- day_index founded (0 = pre-campaign)
+    dissolved_day    INTEGER NOT NULL DEFAULT 0,        -- 0 = active; nonzero = day_index dissolved
+    logo_key         TEXT    NOT NULL DEFAULT '',       -- logo basename; '' legacy
     PRIMARY KEY (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );

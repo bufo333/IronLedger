@@ -404,95 +404,95 @@ tests.
 
 ---
 
-## §5  Merc-Company Death and Replacement — P3f.4
+## §5  Merc-Company Death and Replacement — P3f.4 (delivered)
 
-### 5.1  Insolvency detection
+### 5.1  Insolvency and bankruptcy detection
 
-**Owner:** `src/sim/rivals.zig` `mercCompanyInsolvent` (delivered in P3e.7,
-verified at base).  P3f.4 adds a monthly driver that calls this predicate.
+**Owners:** `src/sim/rivals.zig` `mercCompanyInsolvent` (BV-based, delivered
+P3e.7) and the `cbills < 0` (bankrupt) check in `runMercLifecycle`.
+`mercCompanyEligibleAsOpFor` (delivered P3f.4) is the single owner of the
+"may this company be an OpFor" rule: active (dissolved_day==0), solvent, and
+at full strength (roster.len >= merc_company_hulls_each).
 
-**Tick hook:** `src/sim/tick.zig` or a new `src/sim/merc_lifecycle.zig` (the
-implementer chooses the cleaner boundary; see rule 76/77), called from
-`runMarkets` after step 3 above.
+**Tick hook:** `src/sim/merc_lifecycle.zig` `runMercLifecycle`, called from
+`tick.zig runMarkets` after `runPirateReplenishment` (lifecycle sees the
+month's fresh listings and pirate trickle).
 
 ```zig
-/// Monthly merc lifecycle pass.
-/// For each merc company: if mercCompanyInsolvent(gs, id) → liquidate, then
-/// spawn a replacement. Holds the company count at
-/// tuning.generation.merc_company_count (12). // TUNE
-/// Draw order: companies iterated in MercCompanyId order; deterministic
-/// on stream .rivals for identity, .rosters for hull pool.
-pub fn runMercLifecycle(
-    gs: *state.GameState,
-    alloc: std.mem.Allocator,
-) !void
+/// Monthly merc lifecycle pass (docs/p3f-faction-loop-design.md §5).
+/// Iterates the initial company set only; replacements appended this pass
+/// are processed next month.
+pub fn runMercLifecycle(gs: *GameState) !void
 ```
 
 ### 5.2  Liquidation
 
 ```zig
-/// Liquidate an insolvent merc company.
+/// Single owner of merc-company liquidation (rule 20/76). No RNG.
 /// Transfers every hull in the company's roster to .market ownership and
-/// appends a regular market listing (black_market=false, hq set to the
-/// nearest regional HQ of the company's home faction // TUNE: "nearest
-/// HQ" heuristic sourced at implementation from existing hq lookup).
-/// Failure-atomic: prepare all transfers, then commit.
-pub fn liquidateCompany(
-    gs: *state.GameState,
+/// appends a regular market listing (black_market=false, planet_key="", hq=.none)
+/// at factory-fresh pricing (avg-weapon + hullPrice, fixed roll 10_000,
+/// expires after faction_surplus_listing_days). Sets dissolved_day=day.
+/// Failure-atomic (rules 7, 11-13): reserve phase is entirely fallible;
+/// commit phase is infallible.
+pub fn liquidateMercCompany(
+    gs: *GameState,
     alloc: std.mem.Allocator,
-    id: types.MercCompanyId,
+    company_id: types.MercCompanyId,
+    day: u32,
 ) !void
 ```
 
 The listing pattern reuses `faction_surplus.runMonthly`'s surplus-listing path
-(owner-transfer to `.market` + listing append).
+(owner-transfer to `.market` + listing append; `hullPrice` cited from
+docs/p3f-faction-loop-design.md §3.4 // TUNE). Dissolved companies are never
+removed from state (D-A): `dissolved_day != 0` is the permanent record.
 
-### 5.3  Replacement spawn
+### 5.3  Replacement spawn and hull buy
 
 ```zig
-/// Spawn a replacement merc company after liquidation.
-/// Draws an unused logo_key from the pool excluding the player's pick and
-/// any currently-active company's logo_key. Derives the company name by
-/// title-casing the logo_key (same helper as P3f.5 § 6.2).
-/// Forms the company by buying hulls from the current market and black
-/// market until 3 lances (≥12 hulls) are formed. If market supply is
-/// short, injects a C-bill floor (tuning.generation.merc_company_spawn_cbills
-/// // TUNE) and mints hulls directly from the RAT on stream .rosters.
-/// Records the new company in gs.merc_companies with next_merc_company_id.
-pub fn spawnReplacementCompany(
-    gs: *state.GameState,
+/// Single owner of "buy eligible hulls toward full strength" (rule 20/76).
+/// Shared by spawnReplacementCompany and the monthly tick.
+/// Does NOT write gs.rng — the caller commits.
+pub fn buyHullsForCompany(
+    gs: *GameState,
     alloc: std.mem.Allocator,
+    company_id: types.MercCompanyId,
+    day: u32,
+    rng: *rng_mod.Rng,
+) !void
+
+/// Single owner of replacement spawn (rule 20/76).
+/// Strength target: tuning.generation.merc_company_hulls_each (market listings only,
+/// no RAT mint — D-B). Starting cbills: tuning.generation.merc_replacement_cbill_floor.
+/// Does NOT write gs.rng — the caller commits.
+pub fn spawnReplacementCompany(
+    gs: *GameState,
+    alloc: std.mem.Allocator,
+    day: u32,
     rng: *rng_mod.Rng,
 ) !void
 ```
 
-### 5.4  `MercCompany.logo_key`
+### 5.4  New `MercCompany` fields (schema v58, P3f.4)
 
-**File:** `src/domain/merc_company.zig`
-**Change:** add `logo_key: []const u8 = ""` field to `MercCompany`.
+Four new fields appended to `MercCompany` after `doctrine` (field order fixes
+digest and column order):
+- `cbills: types.CBills = 0` — C-bills held; seeded to `merc_replacement_cbill_floor`
+- `founded_day: u32 = 0` — day_index founded (0 = pre-campaign seed)
+- `dissolved_day: u32 = 0` — 0 = active; nonzero = day_index dissolved (D-A)
+- `logo_key: []const u8 = ""` — logo basename from data/logos/ catalog; '' = legacy
 
-**Schema:** `src/persist/store.zig` — next free integer after v57 (fixed at
-implementation time).
-
-**Migration:**
-
-```
-Migration{ .from = <prev>, .to = <prev+1>, .table = "merc_company",
-    .column = "logo_key",
-    .sql = "ALTER TABLE merc_company ADD COLUMN logo_key TEXT NOT NULL DEFAULT ''" }
-```
-
-Pre-migration rows backfill to `logo_key = ""` (empty = no logo assigned,
-display falls back to a placeholder — fail-closed per rule 49).
-
-**`saveMercCompany` / `loadMercCompany`:** add `logo_key` to the INSERT/SELECT.
-**`docs/schema.sql` mirror:** add the column.
+Migration v57→v58: four `ALTER TABLE merc_company ADD COLUMN …` rows
+(fail-closed defaults 0/'').  `saveMercCompanies` INSERT uses 14 columns;
+`loadMercCompanies` SELECT reads indices 8-11.
 
 ### 5.5  Determinism
 
-Liquidation and spawning draw on existing named streams (`.rivals` for
-identity, `.rosters` for hull pool) in documented MercCompanyId order.  The
-golden/digest tests in §7 cover any accidental reordering.
+Liquidation is RNG-free. Spawn and buy draw on `.rivals` (identity) and
+`.market` (hull selection) streams; `runMercLifecycle` commits `gs.rng`
+once per company-action (bounded non-atomicity on OOM, matching
+`faction_surplus.runMonthly`). Golden-master tests re-pinned at P3f.4.
 
 ---
 
@@ -519,48 +519,52 @@ with a descriptive comment.
 (`docs/tui_smoke.py` and `docs/repl_smoke.sh`) must run and pass as part of
 the P3f.5 gate (rule 72).
 
-### 6.2  Title-case helper
+### 6.2  Title-case helper (delivered P3f.4)
 
 **File:** `src/gen/logo_name.zig` (new, pure, no I/O — satisfies rule 2)
 
 ```zig
 /// Convert a logo filename stem to a display name.
-/// Algorithm: strip the directory prefix and ".png" suffix, split on "_",
-/// upper-case the first byte of each word (ASCII; non-ASCII bytes are
-/// passed through), join with single spaces.
-/// Examples (verified from data/logos/ listing):
+/// Algorithm: strip a directory prefix (last '/') and ".png" suffix,
+/// replace '_' with space, upper-case the first ASCII byte of each word.
+/// Non-ASCII bytes passed through unchanged. No allocation.
+/// Output length == stripped input length; buf of key.len bytes always suffices.
+/// Examples (verified):
 ///   "vipers_due"                    → "Vipers Due"
 ///   "red_bull_company"              → "Red Bull Company"
-///   "three_spears_company"          → "Three Spears Company"
 ///   "ironledger_mercenary_company"  → "Ironledger Mercenary Company"
 /// Note: apostrophes absent from filenames are NOT recovered.
-/// "vipers_due" yields "Vipers Due", not "Viper's Due". This is accepted.
-pub fn titleCaseLogoKey(alloc: std.mem.Allocator, stem: []const u8) ![]const u8
+pub fn titleCaseLogoKey(key: []const u8, buf: []u8) []u8
 ```
 
-This function is pure and tested in isolation (§7 P3f.5 tests).
+This function is pure, allocation-free, and tested in isolation.
 
-### 6.3  Logo pool and seeded rivals
+### 6.3  Logo catalog — build-time generation (delivered P3f.4)
 
-**File:** `src/sim/roster_seed.zig` `seedMercCompanies`
+The logo catalog is generated at build time, not hand-maintained:
 
-After P3f.5, when seeding NPC merc companies, draw `logo_key` values from the
-35 logos in `data/logos/` (verified count), excluding the player's pick.  The
-player's `logo_key` is available on `GameState` (stored in `outfit_logo_key`
-// TUNE: the exact field name is chosen by the implementer; it is stored
-alongside `outfit_name` and persisted via the `campaign` table or a new column
-— the implementer sources the exact campaign table columns from `store.zig` at
-implementation time).
+- `build.zig` scans `data/logos/` at configure time, collects every `*.png`
+  basename with `.png` stripped, sorts ascending by byte order, formats a ZON
+  array literal, writes it to a generated artifact `logos.zon` via
+  `b.addWriteFiles()`, and exposes it as `mod.addAnonymousImport("logos_zon", …)`.
+- `src/domain/logo.zig` is a checked-in pure shim:
+  `pub const all_keys: []const []const u8 = &@import("logos_zon");`
+  All consumers reference `logo.all_keys`; no hand-maintained key list exists.
+- A comptime guard in `roster_seed.zig` fails the build if
+  `merc_company_count > logo.all_keys.len`.
+- Adding a new `data/logos/<name>.png` and running `zig build test` surfaces
+  `<name>` in `logo.all_keys` with no `.zig` edit.
 
-Draw order: sequential through the sorted logo list, modulo the total count
-after excluding the player's pick, on stream `.rosters`.  Deterministic.
+### 6.4  Committing `data/logos/` (brought forward to P3f.4)
 
-### 6.4  Committing `data/logos/`
+Owner decision: `data/logos/` was brought forward from P3f.5 to P3f.4 so the
+build-time scan produces a reproducible catalog on every machine (tracked PNGs
+are identical everywhere). The 35 PNGs are committed in this branch.
 
-`data/logos/` is currently untracked (verified: `git status` shows
-`?? data/logos/`).  The P3f.5 commit adds all 35 PNG files to the repository.
+The campaign-wizard logo picker (using `titleCaseLogoKey` to auto-fill the
+outfit name) and the `data/logos` runtime serving/install remain P3f.5.
 
-The 35 files (verified from `ls data/logos/` at base):
+The 35 files committed (sorted, from `git ls-files data/logos/`):
 
 ```
 ashfall_lancers.png            balance_point_mercenaries.png

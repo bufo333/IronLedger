@@ -81,6 +81,7 @@
         "data/parts.zon",
         "data/planets.zon",
         "data/tables",
+        "data/logos",
         "docs/logos",
         "LICENSE",
     },
