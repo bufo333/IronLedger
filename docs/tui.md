@@ -284,6 +284,7 @@ titles and the help modal come from the same tables.
 | `Enter` | any | on a free slot: open location-scoped part picker; on a loaded slot: stage remove |
 | `R` | any | order a replacement for the damaged or destroyed mount under the cursor |
 | `D` | any | queue the hull for depot repair |
+| `> <` | any | jump to next / previous location box |
 
 ### F9 People
 

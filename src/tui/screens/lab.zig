@@ -13,11 +13,14 @@ const meklab = game.meklab;
 
 /// Return the screen rect for a location box within the spatial mech diagram.
 /// base_x / base_y: top-left corner of the diagram area (after the budget pane).
-/// Diagram columns (relative to base_x):
-///   HEAD:        [torso_w .. torso_w*2)      — centered above CT
-///   LT / CT / RT: [0..torso_w), [torso_w..torso_w*2), [torso_w*2..torso_w*3)
-///   LA / RA:      [0..arm_w), [torso_w*3-arm_w..torso_w*3)
-///   LL / RL:      same x-bands as LA/RA, one arm_h lower
+/// Diagram layout (record-sheet style):
+///
+///            [HD]
+///   [LA][LT][CT][RT][RA]
+///       [LL]     [RL]
+///
+/// Total width  = arm_w + 3*torso_w + arm_w
+/// Total height = head_h + torso_h + leg_h
 fn boxRect(
     loc: meklab.Location,
     base_x: u16,
@@ -26,20 +29,21 @@ fn boxRect(
     arm_w: u16,
     head_h: u16,
     torso_h: u16,
-    arm_h: u16,
+    leg_h: u16,
 ) struct { x: u16, y: u16, w: u16, h: u16 } {
     const t2: u16 = torso_w *% 2;
     const t3: u16 = torso_w *% 3;
-    const ra_x: u16 = t3 -% arm_w;
+    const ra_x: u16 = arm_w +% t3;
+    const leg_y: u16 = base_y +% head_h +% torso_h;
     return switch (loc) {
-        .hd => .{ .x = base_x +% torso_w, .y = base_y, .w = torso_w, .h = head_h },
-        .ct => .{ .x = base_x +% torso_w, .y = base_y +% head_h, .w = torso_w, .h = torso_h },
-        .lt => .{ .x = base_x, .y = base_y +% head_h, .w = torso_w, .h = torso_h },
-        .rt => .{ .x = base_x +% t2, .y = base_y +% head_h, .w = torso_w, .h = torso_h },
-        .la => .{ .x = base_x, .y = base_y +% head_h +% torso_h, .w = arm_w, .h = arm_h },
-        .ra => .{ .x = base_x +% ra_x, .y = base_y +% head_h +% torso_h, .w = arm_w, .h = arm_h },
-        .ll => .{ .x = base_x, .y = base_y +% head_h +% torso_h +% arm_h, .w = arm_w, .h = arm_h },
-        .rl => .{ .x = base_x +% ra_x, .y = base_y +% head_h +% torso_h +% arm_h, .w = arm_w, .h = arm_h },
+        .hd => .{ .x = base_x +% arm_w +% torso_w, .y = base_y, .w = torso_w, .h = head_h },
+        .lt => .{ .x = base_x +% arm_w, .y = base_y +% head_h, .w = torso_w, .h = torso_h },
+        .ct => .{ .x = base_x +% arm_w +% torso_w, .y = base_y +% head_h, .w = torso_w, .h = torso_h },
+        .rt => .{ .x = base_x +% arm_w +% t2, .y = base_y +% head_h, .w = torso_w, .h = torso_h },
+        .la => .{ .x = base_x, .y = base_y +% head_h, .w = arm_w, .h = torso_h },
+        .ra => .{ .x = base_x +% ra_x, .y = base_y +% head_h, .w = arm_w, .h = torso_h },
+        .ll => .{ .x = base_x +% arm_w, .y = leg_y, .w = torso_w, .h = leg_h },
+        .rl => .{ .x = base_x +% arm_w +% t2, .y = leg_y, .w = torso_w, .h = leg_h },
     };
 }
 
@@ -125,11 +129,11 @@ pub fn draw(self: *App) anyerror!void {
     const arm_w: u16 = 13; // inner_w =  9: mark + space +  7-char label
     var head_h: u16 = 8;
     var torso_h: u16 = 14;
-    var arm_h: u16 = 14;
+    var leg_h: u16 = 8;
     for (boxes) |box| switch (box.loc) {
         .hd => head_h = @intCast(box.rows.len + 2),
         .ct => torso_h = @intCast(box.rows.len + 2),
-        .la => arm_h = @intCast(box.rows.len + 2),
+        .ll => leg_h = @intCast(box.rows.len + 2),
         else => {},
     };
 
@@ -138,7 +142,7 @@ pub fn draw(self: *App) anyerror!void {
 
     // Render each location box at its spatial position within the diagram.
     for (boxes, 0..) |box, bi| {
-        const r = boxRect(box.loc, dx, b.y, torso_w, arm_w, head_h, torso_h, arm_h);
+        const r = boxRect(box.loc, dx, b.y, torso_w, arm_w, head_h, torso_h, leg_h);
         const is_sel = (bi == sel.bi);
         const inner = self.screen.pane(
             .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h },
@@ -151,17 +155,36 @@ pub fn draw(self: *App) anyerror!void {
         self.screen.lines(inner, items.items, 0, if (is_sel) sel.ri else null);
     }
 
-    // Actuator note: rendered in the gap between the LA and RA boxes when
-    // the arm has reduced actuators (box.actuator_note != "").
+    // Actuator note: rendered below the LA box in the arm_w-wide space to
+    // the left of LL (at y = head_h + torso_h) when the arm has reduced
+    // actuators (box.actuator_note != "").
     for (boxes) |box| {
         if (box.actuator_note.len == 0 or box.loc != .la) continue;
-        const gap_x: i32 = @as(i32, dx) + arm_w;
-        const gap_w: u16 = torso_w * 3 - arm_w * 2;
-        const arm_y: i32 = @as(i32, b.y) + @as(i32, head_h) + @as(i32, torso_h);
-        // Centre the note vertically in the arm row band.
-        const mid: i32 = arm_y + @divTrunc(@as(i32, arm_h), 2) - 1;
-        self.screen.textPad(gap_x, mid, gap_w, "no lower arm /", .dim);
-        self.screen.textPad(gap_x, mid + 1, gap_w, " no hand act.", .dim);
+        const note_x: i32 = @as(i32, dx);
+        const note_y: i32 = @as(i32, b.y) + @as(i32, head_h) + @as(i32, torso_h);
+        const note_w: u16 = arm_w;
+        // Split at "/ " for the two-line form; single line for "no hand act."
+        if (std.mem.indexOf(u8, box.actuator_note, "/ ")) |sep| {
+            self.screen.textPad(note_x, note_y, note_w, box.actuator_note[0..sep], .dim);
+            self.screen.textPad(note_x, note_y + 1, note_w, box.actuator_note[sep + 2 ..], .dim);
+        } else {
+            self.screen.textPad(note_x, note_y, note_w, box.actuator_note, .dim);
+        }
+    }
+
+    // Stats panel: render view.budget lines in any remaining width to the
+    // right of the diagram (width = 2*arm_w + 3*torso_w = 74 chars).
+    const diag_w: u16 = arm_w *% 2 +% torso_w *% 3;
+    const stats_x: u16 = dx +% diag_w;
+    const stats_w: u16 = (b.x +% b.w) -| stats_x;
+    if (stats_w >= 18) {
+        var stats_rows: std.ArrayListUnmanaged([]const u8) = .empty;
+        for (view.budget) |line| try stats_rows.append(al, line);
+        const stats_inner = self.screen.pane(
+            .{ .x = stats_x, .y = b.y, .w = stats_w, .h = b.h },
+            .{ .title = "STATS", .focused = false },
+        );
+        self.screen.lines(stats_inner, stats_rows.items, 0, null);
     }
 }
 
@@ -176,7 +199,7 @@ pub fn move(self: *App, delta: i32) anyerror!void {
     if (total > 0) self.moveCursor(0, delta, total);
 }
 
-const Action = enum { prev_hull, next_hull, install, remove, clear, commit, replace, depot, enter_slot };
+const Action = enum { prev_hull, next_hull, install, remove, clear, commit, replace, depot, enter_slot, next_box, prev_box };
 
 pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('['), .action = .prev_hull, .label = "hull", .group = .navigate, .shown = "[ ]", .help = "previous / next mek in the hangar" },
@@ -188,6 +211,8 @@ pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = .{ .key = .enter }, .action = .enter_slot, .label = "select slot", .group = .act, .help = "on a free slot: open location-scoped part picker; on a loaded slot: stage remove" },
     .{ .match = app.keys.Match.char('R'), .action = .replace, .label = "order replacement", .group = .act, .help = "order a replacement for the damaged or destroyed mount under the cursor" },
     .{ .match = app.keys.Match.char('D'), .action = .depot, .label = "depot", .group = .act, .help = "queue the hull for depot repair" },
+    .{ .match = app.keys.Match.char('>'), .action = .next_box, .label = "next loc", .group = .navigate, .shown = "> <", .help = "jump to next / previous location box" },
+    .{ .match = app.keys.Match.char('<'), .action = .prev_box, .label = "prev loc", .group = .navigate, .show_footer = false, .show_help = false },
 };
 pub const legend = app.keys.entries(Action, &bindings);
 
@@ -209,6 +234,16 @@ fn cursorRow(boxes: []const q.LocationBox, cursor: usize) ?struct { box: q.Locat
         idx += 1;
     }
     return null;
+}
+
+/// Return the linear cursor index of box bi's header row.
+fn boxHeaderIndex(boxes: []const q.LocationBox, bi: usize) usize {
+    var idx: usize = 0;
+    for (boxes, 0..) |box, i| {
+        if (i == bi) return idx;
+        idx += 1 + box.rows.len + 1;
+    }
+    return 0;
 }
 
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
@@ -259,6 +294,16 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
         },
         .depot => {
             _ = try self.execSay(.{ .depot = uid }, .good, "#{d} queued for depot repair — see the HQ screen's bays", .{@intFromEnum(uid)});
+        },
+        .next_box => {
+            const sel2 = cursorBoxRow(boxes, self.cur(0).*);
+            const next_bi = (sel2.bi + 1) % boxes.len;
+            self.cur(0).* = boxHeaderIndex(boxes, next_bi);
+        },
+        .prev_box => {
+            const sel2 = cursorBoxRow(boxes, self.cur(0).*);
+            const prev_bi = (sel2.bi + boxes.len - 1) % boxes.len;
+            self.cur(0).* = boxHeaderIndex(boxes, prev_bi);
         },
     }
     return true;

@@ -3797,6 +3797,60 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
     const design = chassis_mod.find(u.chassis_key) orelse return &.{};
     if (u.kind != .mek) return &.{};
 
+    // Loadout crit count per location; needed for derived-equipment distribution below.
+    var loc_loadout_crits: [8]u8 = .{0} ** 8;
+    for (u.slots.items) |s| {
+        if (s.class == .structure) continue;
+        const sloc = meklab.parseLocation(s.slot_key) orelse continue;
+        var removed_pre = false;
+        if (gs.refitPlanFor(uid)) |p| for (p.ops.items) |op| {
+            if (op == .remove and std.mem.eql(u8, op.remove, s.slot_key)) removed_pre = true;
+        };
+        if (removed_pre) continue;
+        const def_pre = part_dom.find(s.part_key);
+        const crits_pre: u8 = if (def_pre) |d| d.crits else 1;
+        loc_loadout_crits[@intFromEnum(sloc)] += crits_pre;
+    }
+    if (gs.refitPlanFor(uid)) |p| for (p.ops.items) |op| {
+        if (op != .install) continue;
+        const def_pre = part_dom.find(op.install.part_key);
+        const crits_pre: u8 = if (def_pre) |d| d.crits else 1;
+        loc_loadout_crits[@intFromEnum(op.install.location)] += crits_pre;
+    };
+
+    // Jump jets: ceil(jj/2) to ll, floor(jj/2) to rl, overflow→ct.
+    var jj_per_loc: [8]u8 = .{0} ** 8;
+    const jj_total: u8 = design.jump_mp;
+    if (jj_total > 0) {
+        const ll_i: usize = @intFromEnum(meklab.Location.ll);
+        const rl_i: usize = @intFromEnum(meklab.Location.rl);
+        const ct_i: usize = @intFromEnum(meklab.Location.ct);
+        const ll_avail: u8 = design.crit_slots[ll_i] -| loc_loadout_crits[ll_i];
+        const rl_avail: u8 = design.crit_slots[rl_i] -| loc_loadout_crits[rl_i];
+        const ct_avail: u8 = design.crit_slots[ct_i] -| loc_loadout_crits[ct_i];
+        const jj_ll: u8 = @min((jj_total + 1) / 2, ll_avail);
+        const jj_rl: u8 = @min(jj_total / 2, rl_avail);
+        jj_per_loc[ll_i] = jj_ll;
+        jj_per_loc[rl_i] = jj_rl;
+        const jj_overflow: u8 = jj_total -| (jj_ll + jj_rl);
+        jj_per_loc[ct_i] += @min(jj_overflow, ct_avail);
+    }
+
+    // Extra heat sinks (above the 10 engine-integrated): fill locations in order.
+    var hs_per_loc: [8]u8 = .{0} ** 8;
+    var remaining_hs: u8 = if (design.heat_sinks > 10) design.heat_sinks - 10 else 0;
+    if (remaining_hs > 0) {
+        const hs_order = [_]meklab.Location{ .ct, .lt, .rt, .la, .ra, .ll, .rl, .hd };
+        for (hs_order) |hs_loc| {
+            if (remaining_hs == 0) break;
+            const li: usize = @intFromEnum(hs_loc);
+            const avail: u8 = design.crit_slots[li] -| loc_loadout_crits[li] -| jj_per_loc[li];
+            const place: u8 = @min(remaining_hs, avail);
+            hs_per_loc[li] = place;
+            remaining_hs -= place;
+        }
+    }
+
     var boxes: std.ArrayListUnmanaged(LocationBox) = .empty;
     inline for (@typeInfo(meklab.Location).@"enum".fields) |f| {
         const loc: meklab.Location = @enumFromInt(f.value);
@@ -3878,9 +3932,39 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
             }
         };
 
+        // Derived equipment: jump jets for this location.
+        const jj_count: u8 = jj_per_loc[@intFromEnum(loc)];
+        var ji: u8 = 0;
+        while (ji < jj_count) : (ji += 1) {
+            try rows.append(alloc, .{
+                .kind = .equipment,
+                .text = "jump jet",
+                .slot_key = "",
+                .part_key = "",
+                .group_index = 0,
+                .group_count = 0,
+                .free_ordinal = 0,
+            });
+        }
+
+        // Derived equipment: extra heat sinks for this location.
+        const hs_count: u8 = hs_per_loc[@intFromEnum(loc)];
+        var hi: u8 = 0;
+        while (hi < hs_count) : (hi += 1) {
+            try rows.append(alloc, .{
+                .kind = .equipment,
+                .text = "heat sink",
+                .slot_key = "",
+                .part_key = "",
+                .group_index = 0,
+                .group_count = 0,
+                .free_ordinal = 0,
+            });
+        }
+
         // Free rows.
         const free_cap = design.crit_slots[@intFromEnum(loc)];
-        const free_count: u8 = free_cap -| loadout_crits;
+        const free_count: u8 = free_cap -| loadout_crits -| jj_count -| hs_count;
         var fi: u8 = 1;
         while (fi <= free_count) : (fi += 1) {
             try rows.append(alloc, .{
