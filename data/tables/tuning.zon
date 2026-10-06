@@ -130,6 +130,7 @@
         .black_market_days = 10,
         .black_market_fraud_target = 4,
         .black_market_standing_loss = 3,
+        .faction_surplus_listing_days = 61, // TUNE: two months so a listing survives the next refresh pass
     },
     // Medical staffing and recovery (MekHQ ratios); project-chosen constants // TUNE.
     .medical = .{

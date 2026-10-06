@@ -41,7 +41,7 @@ const merc_company_mod = @import("../domain/merc_company.zig");
 const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 
-pub const schema_version = 55;
+pub const schema_version = 56;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -82,7 +82,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS faction_standing (cid INTEGER NOT NULL, faction TEXT NOT NULL, value INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS event_memory (cid INTEGER NOT NULL, kind TEXT NOT NULL, last_day INTEGER NOT NULL, last_choice INTEGER NOT NULL, streak INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS rating_snapshot (cid INTEGER NOT NULL, year INTEGER NOT NULL, score INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER CHECK (staple IN (0,1)), listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0 CHECK (black IN (0,1)), company INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER CHECK (staple IN (0,1)), listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0 CHECK (black IN (0,1)), company INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, hull_instance_id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS part_order (cid INTEGER NOT NULL, ord INTEGER NOT NULL, part_key TEXT, qty INTEGER, dest_kind TEXT, dest_id INTEGER, ordered INTEGER, eta INTEGER, cost INTEGER, status TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS event_log (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, text TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, battle INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
@@ -348,6 +348,9 @@ pub const Store = struct {
         // v55 (P3e.5b-3b): hull_instance_id in battle_report_salvage (pool-path salvage link).
         // Default 0 = .none; abstraction-path rows stay 0.
         .{ .from = 54, .to = 55, .table = "battle_report_salvage", .column = "hull_instance_id", .sql = "ALTER TABLE battle_report_salvage ADD COLUMN hull_instance_id INTEGER NOT NULL DEFAULT 0" },
+        // v56 (P3e.6): hull_instance_id in listing (faction surplus listings carry a real HullInstance).
+        // Default 0 = .none; abstraction-path listings (house board, black market, contract world) stay 0.
+        .{ .from = 55, .to = 56, .table = "listing", .column = "hull_instance_id", .sql = "ALTER TABLE listing ADD COLUMN hull_instance_id INTEGER NOT NULL DEFAULT 0" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -1779,7 +1782,7 @@ pub const Store = struct {
     }
 
     fn saveListing(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO listing VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)");
+        const st = try self.db.prepare("INSERT INTO listing VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)");
         defer st.finalize();
         for (gs.market_listings.items, 0..) |l, i| {
             try st.bindAll(.{
@@ -1787,7 +1790,7 @@ pub const Store = struct {
                 l.rarity,                                                             l.price,                                                   @as(i64, l.quantity),                                        l.staple,
                 @as(i64, l.listed_day),                                               @as(i64, l.expires_day),                                   @intFromEnum(l.hq),                                          if (l.condition) |c| @as(?i64, c.armor_pct) else null,
                 if (l.condition) |c| @as(?[]const u8, @tagName(c.quality)) else null, if (l.condition) |c| @as(?i64, c.damaged_slots) else null, if (l.condition) |c| @as(?i64, c.destroyed_slots) else null, if (l.condition) |c| @as(?i64, c.missing_components) else null,
-                @as(i64, @intFromBool(l.black_market)),                               @intFromEnum(l.company),                                   @intFromEnum(l.id),
+                @as(i64, @intFromBool(l.black_market)),                               @intFromEnum(l.company),                                   @intFromEnum(l.id),                                          @intFromEnum(l.hull_instance_id),
             });
             try st.run();
         }
@@ -2885,7 +2888,8 @@ pub const Store = struct {
         const alloc = gs.allocator();
         // v35 added an `id` column to listing; pre-v35 rows carry 0 and are
         // backfilled deterministically in ord order (rule 51).
-        const st = try self.db.prepare("SELECT kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing, black, company, id FROM listing WHERE cid = ?1 ORDER BY ord");
+        // v56 added hull_instance_id; pre-v56 rows carry 0 → .none (abstraction-path listings).
+        const st = try self.db.prepare("SELECT kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing, black, company, id, hull_instance_id FROM listing WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -2897,6 +2901,11 @@ pub const Store = struct {
                 gs.next_listing_id += 1;
                 break :blk bid;
             };
+            const raw_hid = st.int(17);
+            const hull_instance_id: types.HullInstanceId = if (raw_hid != 0)
+                try toId(types.HullInstanceId, raw_hid)
+            else
+                .none;
             const kind_text = try st.text(0, alloc);
             var l: market_mod.Listing = .{
                 .kind = if (std.mem.eql(u8, kind_text, "unit")) .unit else if (std.mem.eql(u8, kind_text, "part")) .part else return error.CorruptSave,
@@ -2911,6 +2920,7 @@ pub const Store = struct {
                 .black_market = st.int(14) != 0,
                 .company = try toId(types.ForceId, st.int(15)),
                 .id = id,
+                .hull_instance_id = hull_instance_id,
             };
             if (st.optInt(9)) |armor| {
                 l.condition = .{
@@ -3619,6 +3629,10 @@ fn validateReferences(gs: *GameState) error{CorruptSave}!void {
     // Held hulls
     for (gs.held_hulls.items) |h| {
         try Ref.inMap(types.ForceId, h.from_force, gs.forces);
+    }
+    // Market listings: a non-.none hull_instance_id must name a live HullInstance (rules 47/48).
+    for (gs.market_listings.items) |l| {
+        try Ref.inMap(types.HullInstanceId, l.hull_instance_id, gs.hull_instances);
     }
     // Ledger transactions
     for (gs.ledger.transactions.items) |t| {
@@ -4801,8 +4815,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P3e.5b-3b salvage-link — real hull transfer, mandatory choice, contract-ending fix.
-    try std.testing.expectEqual(@as(u64, 4463956968827248499), hash_before);
+    // Re-pinned by P3e.6 market-surplus — faction manufacturing flows surplus hulls to market.
+    try std.testing.expectEqual(@as(u64, 5307581209805942604), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5297,9 +5311,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P3e.5b-3b salvage-link — real
-    // hull transfer, mandatory choice, contract-ending salvage fix.
-    try std.testing.expectEqual(@as(u64, 4463956968827248499), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3e.6 market-surplus — faction
+    // manufacturing flows surplus hulls to market, conflict-throttled.
+    try std.testing.expectEqual(@as(u64, 5307581209805942604), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -8155,4 +8169,152 @@ test "seeded merc company hull pool survives a save/load round-trip with identic
     try std.testing.expectEqual(before, digest.stateHash(&loaded));
     try std.testing.expectEqual(gs.merc_companies.count(), loaded.merc_companies.count());
     try std.testing.expectEqual(gs.merc_company_rosters.count(), loaded.merc_company_rosters.count());
+}
+
+test "P3e.6: surplus listing hull_instance_id round-trips through save/load" {
+    // Rules 45, 46, 53: a listing with hull_instance_id set saves and reloads
+    // with the id preserved and the digest unchanged.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 56001 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    gs.clock.day_index = 5;
+
+    // Mint a market-owned HullInstance.
+    const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hid, .{
+        .id = hid,
+        .base_key = "SHD-2H",
+        .owner = .market,
+    });
+    try gs.hull_ownership_history.append(gs.allocator(), .{
+        .hull_instance_id = hid,
+        .from_day = 1,
+        .to_day = 0,
+        .acquisition_type = .transfer,
+        .prior_owner_key = "LC",
+    });
+
+    // Surplus listing with hull_instance_id set.
+    const lid: types.ListingId = @enumFromInt(gs.next_listing_id);
+    gs.next_listing_id += 1;
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = lid,
+        .kind = .unit,
+        .item_key = "SHD-2H",
+        .rarity = .common,
+        .price = 900_000,
+        .listed_day = 1,
+        .expires_day = 62,
+        .hull_instance_id = hid,
+    });
+
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    // hull_instance_id must survive the round-trip.
+    var found = false;
+    for (loaded.market_listings.items) |l| {
+        if (l.id == lid) {
+            try std.testing.expectEqual(hid, l.hull_instance_id);
+            found = true;
+        }
+    }
+    try std.testing.expect(found);
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+}
+
+test "P3e.6: v55 store upgrades to v56, existing listings load with hull_instance_id = .none" {
+    // Rules 50, 51: a v55 store (listing table without hull_instance_id) migrates
+    // to v56 — the column is added with DEFAULT 0 — and existing abstraction-path
+    // listings load with hull_instance_id == .none.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 56002 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+
+    // Add an abstraction-path listing (no hull_instance_id).
+    const lid: types.ListingId = @enumFromInt(gs.next_listing_id);
+    gs.next_listing_id += 1;
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = lid,
+        .kind = .unit,
+        .item_key = "SHD-2H",
+        .rarity = .common,
+        .price = 800_000,
+        .listed_day = 1,
+        .expires_day = 62,
+        // hull_instance_id defaults to .none
+    });
+
+    const raw = try sqlite.Db.open(":memory:");
+    var s1 = try Store.fromDb(raw);
+    try s1.save(&gs);
+
+    // Downgrade to v55: drop hull_instance_id from listing by recreating the table.
+    try raw.exec("PRAGMA foreign_keys = OFF");
+    try raw.exec(
+        \\ALTER TABLE listing RENAME TO listing__bak;
+        \\CREATE TABLE listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER CHECK (staple IN (0,1)), listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0 CHECK (black IN (0,1)), company INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+        \\INSERT INTO listing SELECT cid, ord, kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing, black, company, id FROM listing__bak;
+        \\DROP TABLE listing__bak;
+        \\UPDATE setting SET value = 55 WHERE key = 'schema_version';
+        \\UPDATE campaign SET schema_version = 55;
+    );
+    try raw.exec("PRAGMA foreign_keys = ON");
+
+    // Re-open: sees v55, runs migration to add hull_instance_id.
+    const s2 = try Store.fromDb(raw);
+    defer s2.close();
+    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
+    try std.testing.expect(try Store.hasColumnRt(raw, "listing", "hull_instance_id"));
+
+    // Load and verify existing listing has hull_instance_id == .none.
+    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var found = false;
+    for (loaded.market_listings.items) |l| {
+        if (l.id == lid) {
+            try std.testing.expectEqual(types.HullInstanceId.none, l.hull_instance_id);
+            found = true;
+        }
+    }
+    try std.testing.expect(found);
+}
+
+test "P3e.6: a listing with hull_instance_id naming no hull is rejected as corrupt" {
+    // Rules 47/48/70: a listing row whose hull_instance_id names no hull instance
+    // must be rejected with CorruptSave by validateReferences.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 56003 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+
+    // Add a surplus listing with hull_instance_id pointing to a non-existent instance.
+    const bad_hid: types.HullInstanceId = @enumFromInt(99999);
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = @enumFromInt(gs.next_listing_id),
+        .kind = .unit,
+        .item_key = "SHD-2H",
+        .rarity = .common,
+        .price = 900_000,
+        .listed_day = 1,
+        .expires_day = 62,
+        .hull_instance_id = bad_hid,
+    });
+    gs.next_listing_id += 1;
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+
+    // Tamper: the hull_instance 99999 does not exist in hull_instances.
+    // validateReferences must detect this and return CorruptSave.
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
 }

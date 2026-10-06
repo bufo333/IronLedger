@@ -227,10 +227,20 @@ pub fn refresh(gs: *GameState) !void {
 pub fn refreshListings(gs: *GameState) !void {
     const day = gs.clock.day_index;
     // Age out: expired hulls vanish; all part lines are regenerated.
+    // For surplus listings backed by a real HullInstance still owned by .market,
+    // return the hull to its originating faction pool before removing the listing
+    // (rule 1 — no orphaned market-owned hulls without a backing listing).
     var i: usize = 0;
     while (i < gs.market_listings.items.len) {
         const l = gs.market_listings.items[i];
         if (l.kind == .part or l.expires_day <= day or l.company != .none) {
+            if (l.kind == .unit and l.hull_instance_id != .none) {
+                if (gs.hull_instances.get(l.hull_instance_id)) |inst| {
+                    if (std.meta.activeTag(inst.owner) == .market) {
+                        try gs.returnMarketHullToFaction(l.hull_instance_id);
+                    }
+                }
+            }
             _ = gs.market_listings.orderedRemove(i);
         } else i += 1;
     }
@@ -1144,8 +1154,18 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
             if (listing.staple and l.quantity > 1) l.quantity -= 1 else _ = gs.market_listings.orderedRemove(index);
             const uid = try gs.addUnit(listing.item_key);
             const bought_hq = gs.unit(uid).?;
-            if (listing.condition) |cond| market.applyHullCondition(bought_hq, cond, gs.rng.random(.market));
-            try gs.recordHullAcquisition(bought_hq, .purchase, "unknown");
+            if (listing.hull_instance_id != .none) {
+                // Surplus listing: a real HullInstance already exists — link it and
+                // transfer ownership market → player (pattern from takeSalvage).
+                // Condition and acquisition record are on the pre-existing instance.
+                bought_hq.hull_instance_id = listing.hull_instance_id;
+                try gs.transferHullOwnership(listing.hull_instance_id, .player, "market");
+            } else {
+                // Abstraction-path listing: no pre-existing instance; apply condition
+                // and record acquisition as usual.
+                if (listing.condition) |cond| market.applyHullCondition(bought_hq, cond, gs.rng.random(.market));
+                try gs.recordHullAcquisition(bought_hq, .purchase, "unknown");
+            }
             if (berth_kind != null) bought_hq.berth_hq = hq_id;
             try gs.log(.market, .{ .hq = hq_id }, "[market] bought {s} ({s}) for {d}{s}", .{
                 listing.item_key, if (listing.condition) |c| c.label() else "new", price,
@@ -1671,4 +1691,128 @@ test "a funds-short buy refusal creates no HullInstance and no ownership row" {
     try std.testing.expectEqual(before_count, gs.hull_ownership_history.items.len);
     // No new unit added.
     for (gs.units.values()) |u| try std.testing.expectEqual(@import("../domain/types.zig").HullInstanceId.none, u.hull_instance_id);
+}
+
+test "buying a surplus listing transfers the pre-existing HullInstance to the player" {
+    // A surplus listing has hull_instance_id set; buying it must link the existing
+    // instance to the new unit (no fresh instance minted) and set owner to .player.
+    const hull_mod = @import("../domain/hull_instance.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7401 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
+    gs.hqs.values()[0].funds = 50_000_000;
+    gs.clock.day_index = 5;
+
+    // Mint a HullInstance owned by .market (as faction_surplus.runMonthly would produce).
+    const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hid, .{
+        .id = hid,
+        .base_key = "SHD-2H",
+        .owner = .market,
+    });
+    try gs.hull_ownership_history.append(gs.allocator(), .{
+        .hull_instance_id = hid,
+        .from_day = 1,
+        .to_day = 0,
+        .acquisition_type = .transfer,
+        .prior_owner_key = "LC",
+    });
+
+    // Create a surplus listing with hull_instance_id set.
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = @enumFromInt(gs.next_listing_id),
+        .kind = .unit,
+        .item_key = "SHD-2H",
+        .rarity = .common,
+        .price = 900_000,
+        .listed_day = 0,
+        .expires_day = 90,
+        .hull_instance_id = hid,
+    });
+    gs.next_listing_id += 1;
+    const lid = gs.market_listings.items[gs.market_listings.items.len - 1].id;
+
+    const unit_count_before = gs.units.count();
+    _ = try commands.execute(&gs, .{ .buy_listing = lid });
+
+    // A unit was created.
+    try std.testing.expectEqual(unit_count_before + 1, gs.units.count());
+    // The bought unit must be linked to the pre-existing instance (not a fresh one).
+    var found_unit = false;
+    for (gs.units.values()) |u| {
+        if (u.hull_instance_id == hid) {
+            found_unit = true;
+            break;
+        }
+    }
+    try std.testing.expect(found_unit);
+    // The instance must be owned by the player.
+    const inst = gs.hull_instances.getPtr(hid).?;
+    try std.testing.expectEqual(hull_mod.OwnerType.player, std.meta.activeTag(inst.owner));
+    // The listing must be gone.
+    for (gs.market_listings.items) |l| {
+        try std.testing.expect(l.id != lid);
+    }
+}
+
+test "surplus listing age-out returns hull to originating faction pool" {
+    // An unsold surplus listing expiring during refreshListings must return
+    // the hull to the faction pool (owner .faction, re-present in faction_rosters).
+    const hull_mod = @import("../domain/hull_instance.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7402 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
+    gs.clock.day_index = 100;
+
+    // Mint a market-owned HullInstance.
+    const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hid, .{
+        .id = hid,
+        .base_key = "SHD-2H",
+        .owner = .market,
+    });
+    try gs.hull_ownership_history.append(gs.allocator(), .{
+        .hull_instance_id = hid,
+        .from_day = 50,
+        .to_day = 0,
+        .acquisition_type = .transfer,
+        .prior_owner_key = "LC",
+    });
+
+    // Create a surplus listing that has already expired (expires_day < day_index=100).
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = @enumFromInt(gs.next_listing_id),
+        .kind = .unit,
+        .item_key = "SHD-2H",
+        .rarity = .common,
+        .price = 900_000,
+        .listed_day = 50,
+        .expires_day = 80, // expired at day 80
+        .hull_instance_id = hid,
+    });
+    gs.next_listing_id += 1;
+
+    try refreshListings(&gs);
+
+    // The expired surplus listing must be gone (refreshBoard may have added new board listings).
+    for (gs.market_listings.items) |l| {
+        if (l.hull_instance_id == hid) {
+            return error.SurplusListingNotRemoved; // must not still be present
+        }
+    }
+    // The hull must be back in the LC faction pool.
+    const inst = gs.hull_instances.getPtr(hid).?;
+    try std.testing.expectEqual(hull_mod.OwnerType.faction, std.meta.activeTag(inst.owner));
+    if (gs.faction_rosters.get("LC")) |roster| {
+        var found = false;
+        for (roster.items) |rid| if (rid == hid) {
+            found = true;
+            break;
+        };
+        try std.testing.expect(found);
+    } else {
+        try std.testing.expect(false); // roster must exist
+    }
 }

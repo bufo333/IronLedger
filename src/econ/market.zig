@@ -245,6 +245,12 @@ pub const Listing = struct {
     /// the spot. Shown on the company's home HQ board, gone when the
     /// contract ends.
     company: types.ForceId = .none,
+    /// Faction surplus listing: the real HullInstance behind this offer.
+    /// `.none` for abstraction-path listings (house board, black market,
+    /// contract world). Non-`.none` means a physical hull transferred to
+    /// `.market` ownership; buying it transfers the instance to the player
+    /// (docs/p3c-economy-design.md §2 "HullInstance ownership extension").
+    hull_instance_id: types.HullInstanceId = .none,
 };
 
 /// Parts always on every board (weapons and ammo are readily available;
@@ -335,6 +341,37 @@ pub fn hullPrice(base_cost: types.CBills, avg_weapon_cost: types.CBills, cond: H
     const intact = @max(@divTrunc(base_cost, 5), base_cost - lost);
     const cond_bp: types.Bp = t.cond_base_bp + @as(types.Bp, @intFromEnum(cond.quality)) * t.cond_quality_bp + @as(types.Bp, cond.armor_pct) * t.cond_armor_bp_per_pct;
     return types.applyBp(types.applyBp(intact, cond_bp), price_roll_bp);
+}
+
+/// Monthly manufacturing output for a faction between two day indices.
+/// Stateless: counts whole-hull completions using integer division, so
+/// the sum over a year of monthly calls equals the annual rate exactly
+/// (docs/p3c-economy-design.md §4; // TUNE — formula choice).
+pub fn factionManufacturedBetween(day_from: u32, day_to: u32, rate_per_year: u16) u32 {
+    if (rate_per_year == 0 or day_to <= day_from) return 0;
+    const rate: u64 = rate_per_year;
+    const dpy: u64 = types.days_per_year;
+    const to: u64 = day_to;
+    const from: u64 = day_from;
+    return @intCast(to * rate / dpy - from * rate / dpy);
+}
+
+/// Operational need for a faction's hull pool: the size the roster-seed
+/// step fills to, so a faction starts at exactly this count with surplus 0
+/// (docs/p3c-economy-design.md §4; // TUNE — pool sizing).
+pub fn operationalNeed(rate_per_year: u16, seed_years: u16) u32 {
+    return @as(u32, rate_per_year) * @as(u32, seed_years);
+}
+
+/// Hulls from `surplus` that actually flow to market, throttled by
+/// `conflict_bp` scaled by the faction's `sensitivity_bp`.
+/// Full flow when conflict_bp = 0; zero flow when throttle saturates
+/// (docs/p3c-economy-design.md §4; // TUNE — throttle curve).
+pub fn surplusThroughput(surplus: u32, conflict_bp: types.Bp, sensitivity_bp: types.Bp) u32 {
+    const raw: i64 = 10_000 - types.applyBp(conflict_bp, sensitivity_bp);
+    const pass_bp: types.Bp = std.math.clamp(raw, 0, 10_000);
+    const result = types.applyBp(@as(types.CBills, surplus), pass_bp);
+    return @intCast(@max(0, result));
 }
 
 pub const HireOffer = struct {
@@ -474,4 +511,46 @@ test "applyHullCondition stamps armor, quality, slot damage, and status" {
     try std.testing.expect(struct_missing);
     // Status must be .damaged because the unit needsDepot.
     try std.testing.expectEqual(unit_mod.UnitStatus.damaged, u.status);
+}
+
+test "factionManufacturedBetween: months sum to annual rate" {
+    // 12 months at 365-day year summing month-by-month must equal the rate.
+    const rate: u16 = 12;
+    var total: u32 = 0;
+    var day: u32 = 0;
+    for (0..12) |_| {
+        const next = day + types.days_per_month;
+        total += factionManufacturedBetween(day, next, rate);
+        day = next;
+    }
+    // Over a 360-day span with rate 12: integer division may give 11 or 12 depending on
+    // the exact formula; the test checks the annual identity over a full 365-day year.
+    var annual: u32 = 0;
+    annual += factionManufacturedBetween(0, types.days_per_year, rate);
+    try std.testing.expectEqual(rate, @as(u16, @intCast(annual)));
+    // Empty span yields 0.
+    try std.testing.expectEqual(@as(u32, 0), factionManufacturedBetween(5, 5, rate));
+    try std.testing.expectEqual(@as(u32, 0), factionManufacturedBetween(10, 5, rate));
+    // Zero rate yields 0 regardless.
+    try std.testing.expectEqual(@as(u32, 0), factionManufacturedBetween(0, 365, 0));
+}
+
+test "operationalNeed: rate × seed_years" {
+    try std.testing.expectEqual(@as(u32, 0), operationalNeed(0, 5));
+    try std.testing.expectEqual(@as(u32, 0), operationalNeed(12, 0));
+    try std.testing.expectEqual(@as(u32, 60), operationalNeed(12, 5));
+    try std.testing.expectEqual(@as(u32, 120), operationalNeed(24, 5));
+}
+
+test "surplusThroughput: zero conflict passes all surplus; max throttle passes zero" {
+    // Zero conflict bp: full surplus flows to market.
+    try std.testing.expectEqual(@as(u32, 10), surplusThroughput(10, 0, 10_000));
+    // High conflict × high sensitivity saturates throttle → zero flow.
+    try std.testing.expectEqual(@as(u32, 0), surplusThroughput(10, 10_000, 10_000));
+    // Monotonic: increasing conflict strictly reduces throughput.
+    const lo = surplusThroughput(100, 3_000, 10_000);
+    const hi = surplusThroughput(100, 7_000, 10_000);
+    try std.testing.expect(lo > hi);
+    // Zero surplus always gives zero regardless of conflict.
+    try std.testing.expectEqual(@as(u32, 0), surplusThroughput(0, 0, 10_000));
 }

@@ -12,6 +12,7 @@ const posture = @import("posture.zig");
 const treasury = @import("treasury.zig");
 const types = @import("../domain/types.zig");
 const contract_market = @import("contract_market.zig");
+const faction_surplus = @import("faction_surplus.zig");
 const maintenance = @import("maintenance.zig");
 const contract_events = @import("contract_events.zig");
 const battle = @import("battle.zig");
@@ -531,6 +532,7 @@ fn runMarkets(gs: *GameState) !void {
     if (gs.clock.date.day != 1) return;
     try contract_market.refresh(gs);
     try contract_market.refreshListings(gs);
+    try faction_surplus.runMonthly(gs);
 }
 
 /// contract lifecycle: transit arrivals and completions, checked daily.

@@ -191,6 +191,9 @@ pub const Tuning = struct {
         black_market_days: u32,
         black_market_fraud_target: u8,
         black_market_standing_loss: i32,
+        /// Days a faction surplus listing stays on the board before returning
+        /// its hull to the faction pool (docs/p3c-economy-design.md §4). // TUNE
+        faction_surplus_listing_days: u32,
     },
     /// Medical staffing and recovery (MekHQ ratios); project-chosen constants // TUNE.
     medical: struct {

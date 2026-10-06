@@ -234,6 +234,7 @@ prerequisite for all of it.
   existing failure-atomic aftermath path.
 - **P3e.6 — Market surplus throughput.** Monthly surplus calculation flowing faction
   surplus to market listings, throttled by `world_state` conflict intensity.
+  **Delivered** (schema v56; `src/sim/faction_surplus.zig`; `TODO.md` line 80 checked off).
 - **P3e.7 — Rival insolvency.** The fieldable-BV-below-threshold inactive trigger and its
   surfaced read-only state.
 
@@ -269,8 +270,8 @@ This design-approval increment is approved when the owner confirms:
       extension (distinct from P3c.4 provenance), and market-source integration.
 - [ ] Faction data (§3): manufacturing data extends `factions.zon`; the RAT is the
       existing `rat.zon`; all specific values TBD pending source verification.
-- [ ] Lifecycle triggers (§4): campaign-start seeding, battle draw/attrition/salvage,
-      monthly conflict-throttled market surplus, rival insolvency.
+- [x] Lifecycle triggers (§4): campaign-start seeding (P3e.4 ✓), battle draw/attrition/salvage
+      (P3e.5 ✓), monthly conflict-throttled market surplus (P3e.6 ✓), rival insolvency (P3e.7 pending).
 - [ ] Delivery order (§5): P3e.0 design approval first, then P3e.1–P3e.7, each
       independently correct, prerequisite P3c.
 - [ ] Hull-lifecycle increments (§6): P3c.3/P3c.5/P3c.6 unblocked; P3c.4 re-scoped to the

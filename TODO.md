@@ -77,7 +77,7 @@ above is complete.
     - [x] P3e.5b prerequisite: minor-Periphery manufacturing data (TC/MOC/OA/MH/CIR/OBR get replenishment_hulls_per_year=4 + provisional RAT rows; resolves §8.C open owner decision). <!-- sim/p3e-5b-periphery-manufacturing -->
     - [x] P3e.5b-3a: OpFor roster draw, attrition, and forfeit default (pool-path draw; destroyed/combat_ineffective hull bookkeeping; empty/absent pool → bloodless forfeit win). <!-- sim/p3e-5b-opfor-draw -->
     - [x] P3e.5b-3b: SalvageCandidate hull_instance_id + takeSalvage hull transfer (OpFor salvage link; ownership moves to player on takeSalvage; pool removal for salvaged hulls). <!-- sim/p3e-5b-3b-salvage-link -->
-    - [ ] P3e.6: market surplus throughput (monthly surplus to listings, throttled by world_state conflict).
+    - [x] P3e.6: market surplus throughput (monthly surplus to listings, throttled by world_state conflict). <!-- sim/p3e-6-market-surplus -->
     - [ ] P3e.7: rival insolvency (fieldable BV below threshold → inactive).
 
 ## Not scheduled
@@ -100,5 +100,5 @@ reschedule only on explicit dispatch.
 
 - A mobile field base as a buyable Repair support lance, adding to the repair
   push beyond the Logistics lance's workshop.
-- Help overlay UX: design a scrollable overlay or contextual help filtered to
-  the current screen's active bindings; this touches C12's key infrastructure.
+- Contracts difficulty display — replace skull/half-skull glyphs (☠/◐) with filled circles (●), keep color coding, rename the column header from 'skulls' to 'difficulty'; touches `src/sim/queries.zig` and `src/tui/app.zig`, smokes required.
+- Help overlay UX — screen-specific contextual help filtered to the current screen's active bindings (expand existing stub); design in ROADMAP.md first before scheduling.

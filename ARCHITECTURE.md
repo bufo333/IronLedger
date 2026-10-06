@@ -705,6 +705,20 @@ always there, priced by local industry) and a few **rare slots** that may
 or may not hold uncommon items — structural components, heavy weapons,
 jump jets, engines — this month.
 
+**Faction surplus flow (P3e.6).** Each month, every manufacturing faction
+mints new hulls from its annual replenishment rate and adds them to its hull
+pool. When the pool exceeds the faction's operational need, surplus hulls
+flow onto the market board as listings backed by real `HullInstance` records
+(`hull_instance_id` != `.none`). The flow is throttled by the faction's
+world-conflict pressure (`enemy_influence + infrastructure_strain −
+employer_control` across the faction's owned planets, scaled by
+`conflict_sensitivity_bp`). Ownership moves faction → market when listed;
+buying transfers the same instance to the player (faction → market → player);
+an unsold listing that ages out returns its hull to the faction pool (market
+→ faction). `src/sim/faction_surplus.zig` is the single rule owner
+(`runMonthly`); abstraction-path listings (house board, black market,
+contract world) are unaffected and keep minting at buy time unchanged.
+
 **Hulls are priced by what they are.** A listed mek carries a rolled
 condition — armor, quality grade, damaged and destroyed slots, missing
 structural components — and its price reflects loadout value and that
