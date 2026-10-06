@@ -139,22 +139,50 @@ test "data: catalog loads from zon with sane values and unique keys" {
     }
 }
 
-test "arm actuator fields: defaults are .full; CPLT-C1 has .no_lower_arm" {
-    // Every chassis with the default arm actuators is .full.
+test "arm actuator fields: identity crit_slots[arm] + fixed_count == 12" {
+    // Chassis with .no_lower_arm (2 fixed: shoulder + upper arm) → arm free crits = 10.
+    const no_lower_arm_keys = [_][]const u8{
+        "CPLT-C1", "MAD-3R", "WHM-6R", "ARC-2R", "AWS-8Q", "AS7-D", "UM-R60",
+    };
+    for (no_lower_arm_keys) |key| {
+        const c = find(key).?;
+        try std.testing.expectEqual(ArmActuators.no_lower_arm, c.left_arm_actuators);
+        try std.testing.expectEqual(ArmActuators.no_lower_arm, c.right_arm_actuators);
+        try std.testing.expectEqual(@as(u8, 10), c.crit_slots[4]); // la index 4
+        try std.testing.expectEqual(@as(u8, 10), c.crit_slots[5]); // ra index 5
+    }
+    // Chassis with .no_hand (3 fixed: shoulder + upper arm + lower arm) → arm free crits = 9.
+    const no_hand_keys = [_][]const u8{"RFL-3N"};
+    for (no_hand_keys) |key| {
+        const c = find(key).?;
+        try std.testing.expectEqual(ArmActuators.no_hand, c.left_arm_actuators);
+        try std.testing.expectEqual(ArmActuators.no_hand, c.right_arm_actuators);
+        try std.testing.expectEqual(@as(u8, 9), c.crit_slots[4]); // la index 4
+        try std.testing.expectEqual(@as(u8, 9), c.crit_slots[5]); // ra index 5
+    }
+    // All remaining mek chassis default to .full (4 fixed) → arm free crits = 8.
     for (catalog) |c| {
-        if (!std.mem.eql(u8, c.key, "CPLT-C1")) {
+        if (c.kind != .mek) continue;
+        var is_restricted = false;
+        for (no_lower_arm_keys) |key| {
+            if (std.mem.eql(u8, c.key, key)) {
+                is_restricted = true;
+                break;
+            }
+        }
+        for (no_hand_keys) |key| {
+            if (std.mem.eql(u8, c.key, key)) {
+                is_restricted = true;
+                break;
+            }
+        }
+        if (!is_restricted) {
             try std.testing.expectEqual(ArmActuators.full, c.left_arm_actuators);
             try std.testing.expectEqual(ArmActuators.full, c.right_arm_actuators);
+            try std.testing.expectEqual(@as(u8, 8), c.crit_slots[4]); // la index 4
+            try std.testing.expectEqual(@as(u8, 8), c.crit_slots[5]); // ra index 5
         }
     }
-    // The Catapult has restricted arms (no lower arm / no hand; verified from
-    // docs/p3d-meklab-location-layout.md lines 94, 103-104, 158-161).
-    const cplt = find("CPLT-C1").?;
-    try std.testing.expectEqual(ArmActuators.no_lower_arm, cplt.left_arm_actuators);
-    try std.testing.expectEqual(ArmActuators.no_lower_arm, cplt.right_arm_actuators);
-    // With no_lower_arm (2 fixed slots), free arm crits = physical 12 - 2 = 10.
-    try std.testing.expectEqual(@as(u8, 10), cplt.crit_slots[4]); // la index 4
-    try std.testing.expectEqual(@as(u8, 10), cplt.crit_slots[5]); // ra index 5
 }
 
 test "the catalogue is broad — TRO:3025 meks, 3026 vehicles, fighters" {

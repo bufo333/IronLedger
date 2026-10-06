@@ -3797,60 +3797,6 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
     const design = chassis_mod.find(u.chassis_key) orelse return &.{};
     if (u.kind != .mek) return &.{};
 
-    // Loadout crit count per location; needed for derived-equipment distribution below.
-    var loc_loadout_crits: [8]u8 = .{0} ** 8;
-    for (u.slots.items) |s| {
-        if (s.class == .structure) continue;
-        const sloc = meklab.parseLocation(s.slot_key) orelse continue;
-        var removed_pre = false;
-        if (gs.refitPlanFor(uid)) |p| for (p.ops.items) |op| {
-            if (op == .remove and std.mem.eql(u8, op.remove, s.slot_key)) removed_pre = true;
-        };
-        if (removed_pre) continue;
-        const def_pre = part_dom.find(s.part_key);
-        const crits_pre: u8 = if (def_pre) |d| d.crits else 1;
-        loc_loadout_crits[@intFromEnum(sloc)] += crits_pre;
-    }
-    if (gs.refitPlanFor(uid)) |p| for (p.ops.items) |op| {
-        if (op != .install) continue;
-        const def_pre = part_dom.find(op.install.part_key);
-        const crits_pre: u8 = if (def_pre) |d| d.crits else 1;
-        loc_loadout_crits[@intFromEnum(op.install.location)] += crits_pre;
-    };
-
-    // Jump jets: ceil(jj/2) to ll, floor(jj/2) to rl, overflow→ct.
-    var jj_per_loc: [8]u8 = .{0} ** 8;
-    const jj_total: u8 = design.jump_mp;
-    if (jj_total > 0) {
-        const ll_i: usize = @intFromEnum(meklab.Location.ll);
-        const rl_i: usize = @intFromEnum(meklab.Location.rl);
-        const ct_i: usize = @intFromEnum(meklab.Location.ct);
-        const ll_avail: u8 = design.crit_slots[ll_i] -| loc_loadout_crits[ll_i];
-        const rl_avail: u8 = design.crit_slots[rl_i] -| loc_loadout_crits[rl_i];
-        const ct_avail: u8 = design.crit_slots[ct_i] -| loc_loadout_crits[ct_i];
-        const jj_ll: u8 = @min((jj_total + 1) / 2, ll_avail);
-        const jj_rl: u8 = @min(jj_total / 2, rl_avail);
-        jj_per_loc[ll_i] = jj_ll;
-        jj_per_loc[rl_i] = jj_rl;
-        const jj_overflow: u8 = jj_total -| (jj_ll + jj_rl);
-        jj_per_loc[ct_i] += @min(jj_overflow, ct_avail);
-    }
-
-    // Extra heat sinks (above the 10 engine-integrated): fill locations in order.
-    var hs_per_loc: [8]u8 = .{0} ** 8;
-    var remaining_hs: u8 = if (design.heat_sinks > 10) design.heat_sinks - 10 else 0;
-    if (remaining_hs > 0) {
-        const hs_order = [_]meklab.Location{ .ct, .lt, .rt, .la, .ra, .ll, .rl, .hd };
-        for (hs_order) |hs_loc| {
-            if (remaining_hs == 0) break;
-            const li: usize = @intFromEnum(hs_loc);
-            const avail: u8 = design.crit_slots[li] -| loc_loadout_crits[li] -| jj_per_loc[li];
-            const place: u8 = @min(remaining_hs, avail);
-            hs_per_loc[li] = place;
-            remaining_hs -= place;
-        }
-    }
-
     var boxes: std.ArrayListUnmanaged(LocationBox) = .empty;
     inline for (@typeInfo(meklab.Location).@"enum".fields) |f| {
         const loc: meklab.Location = @enumFromInt(f.value);
@@ -3932,8 +3878,12 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
             }
         };
 
-        // Derived equipment: jump jets for this location.
-        const jj_count: u8 = jj_per_loc[@intFromEnum(loc)];
+        // Derived equipment: jump jets and loose heat sinks for this location.
+        // Counts come from meklab (rule 20 single owner); same formula and fill
+        // order as meklab.validate's implicit-occupant pass.
+        const jj_count: u8 = meklab.jumpJetsAt(design, loc);
+        const implicit_count: u8 = meklab.implicitOccupants(design, loc);
+        const hs_count: u8 = implicit_count - jj_count;
         var ji: u8 = 0;
         while (ji < jj_count) : (ji += 1) {
             try rows.append(alloc, .{
@@ -3946,9 +3896,6 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
                 .free_ordinal = 0,
             });
         }
-
-        // Derived equipment: extra heat sinks for this location.
-        const hs_count: u8 = hs_per_loc[@intFromEnum(loc)];
         var hi: u8 = 0;
         while (hi < hs_count) : (hi += 1) {
             try rows.append(alloc, .{
@@ -3964,7 +3911,7 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
 
         // Free rows.
         const free_cap = design.crit_slots[@intFromEnum(loc)];
-        const free_count: u8 = free_cap -| loadout_crits -| jj_count -| hs_count;
+        const free_count: u8 = free_cap -| loadout_crits -| implicit_count;
         var fi: u8 = 1;
         while (fi <= free_count) : (fi += 1) {
             try rows.append(alloc, .{
@@ -4023,7 +3970,7 @@ pub fn partsFittingLocation(alloc: Alloc, gs: *GameState, uid: types.UnitId, loc
     const candidates = try installCandidates(alloc, gs, uid);
     var out: std.ArrayListUnmanaged(InstallCandidate) = .empty;
     for (candidates) |c| {
-        const r = refit_m.tryInstall(gs, alloc, uid, loc, c.key) catch continue; // best-effort: skip candidate on OOM; the list simply omits it
+        const r = try refit_m.tryInstall(gs, alloc, uid, loc, c.key);
         if (r.legal) try out.append(alloc, c);
     }
     return out.toOwnedSlice(alloc);
@@ -4044,7 +3991,11 @@ pub fn variantMarker(gs: *GameState, uid: types.UnitId) bool {
     // For each catalogue entry, check that a matching live slot exists
     // (same location prefix, same part_key). Track which live slots have been
     // matched to handle duplicate part/location pairs correctly.
-    var matched: [64]bool = @splat(false);
+    // Size from the physical crit total across all locations (max 78 for a standard
+    // IS BattleMech); 128 leaves room for any future extension without a panic.
+    const max_slots = 128;
+    std.debug.assert(u.slots.items.len <= max_slots);
+    var matched: [max_slots]bool = @splat(false);
     outer: for (design.loadout) |l| {
         const base_loc = meklab.parseLocation(l.slot) orelse continue;
         for (u.slots.items, 0..) |s, i| {
@@ -9038,4 +8989,41 @@ test "partsFittingLocation: a part legal at one location but not another is corr
         if (def.loc_rule == .torso_or_leg) found_torso_part = true;
     }
     try std.testing.expect(found_torso_part);
+}
+
+test "labLayout implicit occupants match meklab for every catalogue mek" {
+    // Verifies rule-20 single-owner invariant: the diagram and the validator use
+    // the same formula for jump jet and loose heat sink slot counts per location.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 13 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .CC, .profession = .paymaster } });
+    _ = try commands.execute(&gs, .{ .new_company = "Foxtrot" });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const meks = try labMeks(al, &gs);
+    try std.testing.expect(meks.len > 0);
+    for (meks) |uid| {
+        const u = gs.unit(uid) orelse continue;
+        const design = chassis_mod.find(u.chassis_key) orelse continue;
+        const boxes = try labLayout(al, &gs, uid);
+        for (boxes) |box| {
+            // Count rows that are implicit occupants (equipment rows with no slot/part key).
+            var implicit_rows: u8 = 0;
+            for (box.rows) |row| {
+                if (row.kind == .equipment and row.slot_key.len == 0 and row.part_key.len == 0) {
+                    implicit_rows += 1;
+                }
+            }
+            const expected = meklab.implicitOccupants(design, box.loc);
+            if (implicit_rows != expected) {
+                std.debug.print(
+                    "implicit mismatch: chassis={s} loc={s} diagram={d} meklab={d}\n",
+                    .{ u.chassis_key, @tagName(box.loc), implicit_rows, expected },
+                );
+                return error.TestUnexpectedResult;
+            }
+        }
+    }
 }
