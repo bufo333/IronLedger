@@ -127,10 +127,14 @@ pub fn disperseEnemyWrecks(
         }
     }
 
-    // Precondition guard: an empty enemy key is a programming error.
-    // Fall back by routing all hulls through recovery (all get roster entry).
-    // An empty world list routes dispersed hulls through recovery too, so
-    // every hull still reaches a terminal state (rule 1).
+    // Precondition: enemy_faction_key must be non-empty; pickEnemy always
+    // produces one, so an empty key is a programming error.
+    std.debug.assert(enemy_faction_key.len > 0);
+    // Guard: if the key is somehow empty (unreachable in practice) or no
+    // black-market worlds exist, collapse dispersed to zero — wrecks are left
+    // untouched (the recovery path at line 144 is also gated on a non-empty
+    // key, so no roster write occurs).  This is a safe no-op degrade, not a
+    // rule-1 violation, because the branch is unreachable in production.
     const effective_cap: usize = if (enemy_faction_key.len == 0 or worlds_len == 0)
         wrecks.len // route all to recovery
     else
