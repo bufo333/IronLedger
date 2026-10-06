@@ -73,10 +73,10 @@ above is complete.
     - [x] Pre-P3e.5 entity split: MercCompany/MercCompanyId, merc_company_rosters, schema v53→v54. <!-- sim/p3e-entity-split -->
     - [x] P3e.5a: campaign-start merc-company seeding (12 companies × 8 hulls). <!-- sim/p3e-5a-merc-seed -->
     - [x] P3e.5b-1: PER/pirate campaign-start hull-pool seeding (flat pirate_pool_hulls = 16). <!-- sim/p3e-5b-pirate-pool -->
-    - [ ] P3e.5b-2: Rival ↔ MercCompany link (Rival gains MercCompanyId FK; instantiateRivals selects an existing merc company).
+    - [x] P3e.5b-2: Rival ↔ MercCompany link (Rival gains MercCompanyId FK; instantiateRivals selects an existing merc company). <!-- sim/p3e-5b-rival-link -->
     - [x] P3e.5b prerequisite: minor-Periphery manufacturing data (TC/MOC/OA/MH/CIR/OBR get replenishment_hulls_per_year=4 + provisional RAT rows; resolves §8.C open owner decision). <!-- sim/p3e-5b-periphery-manufacturing -->
     - [x] P3e.5b-3a: OpFor roster draw, attrition, and forfeit default (pool-path draw; destroyed/combat_ineffective hull bookkeeping; empty/absent pool → bloodless forfeit win). <!-- sim/p3e-5b-opfor-draw -->
-    - [ ] P3e.5b-3b: SalvageCandidate hull_instance_id + takeSalvage hull transfer (OpFor salvage link; ownership moves to player on takeSalvage; pool removal for salvaged hulls).
+    - [x] P3e.5b-3b: SalvageCandidate hull_instance_id + takeSalvage hull transfer (OpFor salvage link; ownership moves to player on takeSalvage; pool removal for salvaged hulls). <!-- sim/p3e-5b-3b-salvage-link -->
     - [ ] P3e.6: market surplus throughput (monthly surplus to listings, throttled by world_state conflict).
     - [ ] P3e.7: rival insolvency (fieldable BV below threshold → inactive).
 

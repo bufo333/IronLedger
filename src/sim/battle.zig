@@ -1074,18 +1074,15 @@ fn writeHullCombatRecords(
             .cause = if (oc == .destroyed) .cored else .none,
         });
         if (oc != .destroyed) continue;
-        // Destroyed hull: mark permanently_destroyed, set owner .destroyed,
-        // close the open ownership interval, remove from the pool.
-        const inst = gs.hull_instances.getPtr(hid) orelse continue;
-        inst.status = .permanently_destroyed;
-        inst.owner = .destroyed;
-        // Close the open ownership interval in place (terminal; no new row).
-        for (gs.hull_ownership_history.items) |*h| {
-            if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = gs.clock.day_index;
-        }
-        // Remove from pool by id-match (orderedRemove preserves remaining order
-        // for future draws; the pool pointer from opforPool is still valid —
-        // no map key was deleted, only a value element removed).
+        // Destroyed hull: remove from the pool so the enemy cannot field it
+        // again. The final disposition — permanently_destroyed (unchosen
+        // wreck) or transferred to the player / employer — is deferred to
+        // takeSalvage / gs.finalizeDestroyedWreck / the exchange branch,
+        // which run after the salvage decision is made. Until then the hull
+        // stays active, enemy-owned, pool-removed (a wreck on the field).
+        // Remove from pool by id-match (orderedRemove preserves remaining
+        // order for future draws; the pool pointer from opforPool is still
+        // valid — no map key was deleted, only a value element removed).
         switch (resolution) {
             .pool => |pool| {
                 var pi: usize = 0;
@@ -1270,6 +1267,8 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Salvage exchange: the employer keeps every wreck and part and
     // pays the claim in cash into the company's local funds.
     var exchange_cash: types.CBills = 0;
+    // Pool path: real drawn hulls were fielded (enemy_bv_override is set).
+    const pool_path = enemy_bv_override != null;
     const spoils = if (c.terms.salvage_exchange) blk: {
         exchange_cash = types.applyBp(salvage_bv * tuning.contract.salvage_cbills_per_bv, tuning.contract.salvage_exchange_bp);
         if (exchange_cash > 0) try gs.postTreasury(.{ .company = c.assigned_company }, .{
@@ -1280,12 +1279,29 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             .contract = c.id,
             .note = "salvage exchange",
         });
+        // Pool path, held field: employer takes every destroyed drawn hull
+        // immediately (B6). No inbox, no player unit; cash already posted.
+        if (pool_path and held_field) {
+            for (drawn, opfor_outcomes) |hid, oc| {
+                if (oc == .destroyed) try gs.transferHullOwnership(hid, .{ .faction = c.employer_key }, c.enemy_key);
+            }
+        }
         break :blk if (exchange_cash > 0) try std.fmt.allocPrint(gs.allocator(), "salvage exchange — the employer keeps the wrecks and pays {s} c-bills for your {d} BV claim", .{ try types.moneyText(gs.allocator(), exchange_cash), salvage_bv }) else "";
     } else blk: {
-        // Roll what is out there once, then see whether the claim
-        // buys a real choice. If it does, nothing is taken yet — the
-        // commander divides the haul from the inbox.
+        // Roll (or build from drawn hulls) what is out there once, then see
+        // whether the claim buys a real choice. If it does, nothing is taken
+        // yet — the commander divides the haul from the inbox.
         if (salvage_bv <= 0) break :blk ""; // nothing to divide, nothing to roll
+        if (pool_path) {
+            // Pool path: candidates ARE the drawn destroyed hulls. ALWAYS defer
+            // to the inbox — the salvage_priority decision is mandatory and
+            // turn-holding (events.zig:77/181; checklist.zig:170; tick.zig:807).
+            salvage_candidates = try poolSalvageCandidates(gs, drawn, opfor_outcomes);
+            salvage_unclaimed = salvage_bv;
+            break :blk "";
+        }
+        // Abstraction path: roll fictional wrecks and offer a choice only when
+        // the claim spans more than one plan.
         salvage_candidates = try rollSalvageCandidates(gs, c);
         if (salvageWorthAsking(salvage_candidates, salvage_bv)) {
             salvage_unclaimed = salvage_bv;
@@ -1810,6 +1826,35 @@ pub fn salvageWorthAsking(candidates: []const battle_report.SalvageCandidate, cl
     return !heavy.sameHullsAs(salvagePlan(candidates, claim_bv, .most_hulls));
 }
 
+/// Build the salvage candidate list from drawn enemy hulls that were
+/// destroyed this engagement (pool path only). Each candidate names the
+/// existing HullInstance by id so `takeSalvage` can transfer it rather
+/// than mint a fresh hull. Condition fields are rolled here (in the
+/// `.battle` stream) in the same bands `rollSalvageCandidates` uses, so
+/// the AAR and condition code are unchanged. Offers ALL destroyed drawn
+/// hulls regardless of haul reach; `takeSalvage` finalizes every
+/// unchosen one. Arena-allocated.
+fn poolSalvageCandidates(gs: *GameState, drawn: []const types.HullInstanceId, opfor_outcomes: []const opfor.OpforHullOutcome) ![]battle_report.SalvageCandidate {
+    var out: std.ArrayListUnmanaged(battle_report.SalvageCandidate) = .empty;
+    for (drawn, opfor_outcomes) |hid, oc| {
+        if (oc != .destroyed) continue;
+        const inst = gs.hull_instances.getPtr(hid) orelse continue;
+        const ch = chassis_mod.find(inst.base_key) orelse continue;
+        try out.append(gs.allocator(), .{
+            .hull_instance_id = hid,
+            .key = inst.base_key,
+            .name = ch.name,
+            .bv = ch.bv,
+            .armor_pct = @intCast(@as(u32, gs.rng.roll2d6(.battle)) * 3), // 2d6-derived armour band
+            .quality = if (gs.rng.random(.battle).boolean()) .c else .d, // TUNE: salvage-wreck condition bands
+            .damaged_slots = 1,
+            .destroyed_slots = gs.rng.random(.battle).intRangeAtMost(u8, 1, 3), // TUNE: salvage-wreck condition bands
+            .missing_components = gs.rng.random(.battle).intRangeAtMost(u8, 1, 2), // TUNE: salvage-wreck condition bands
+        });
+    }
+    return out.toOwnedSlice(gs.allocator());
+}
+
 /// Roll the wrecks this fight left worth dragging home, off the
 /// enemy house's table with a condition each. Rolled once, when
 /// the fight ends, and then kept in the record: rolling again at claim
@@ -1861,7 +1906,14 @@ pub fn takeSalvage(
         const uid = try gs.addUnit(cand.key);
         const u = gs.unit(uid).?;
         u.purchase_price = 0; // salvage owes nothing
-        try gs.recordHullAcquisition(u, .salvage, c.enemy_key);
+        if (cand.hull_instance_id != .none) {
+            // Pool path: link the existing instance; do not mint a new one.
+            u.hull_instance_id = cand.hull_instance_id;
+            try gs.transferHullOwnership(cand.hull_instance_id, .player, c.enemy_key);
+        } else {
+            // Abstraction path: mint a new instance as before.
+            try gs.recordHullAcquisition(u, .salvage, c.enemy_key);
+        }
         const cond: market.HullCondition = .{
             .armor_pct = cand.armor_pct,
             .quality = cand.quality,
@@ -1876,6 +1928,19 @@ pub fn takeSalvage(
         try text.appendSlice(gs.allocator(), try std.fmt.allocPrint(gs.allocator(), "wreck #{d} {s} {s} (armor {d}%, {d} destroyed, {d} missing) → home depot in {d} days; ", .{
             @intFromEnum(uid), cand.key, cand.name, cond.armor_pct, cond.destroyed_slots, cond.missing_components, days,
         }));
+    }
+    // Finalize every unchosen pool-path candidate (wrecks nobody took or
+    // could not reach): permanently destroyed, owner .destroyed, interval
+    // closed. Abstraction (.none) candidates are skipped — they were never
+    // real instances and own no state to finalize. Infallible pass.
+    for (candidates, 0..) |cand, ci| {
+        if (cand.hull_instance_id == .none) continue;
+        var was_taken = false;
+        for (plan.take[0..plan.hulls]) |ti| if (ti == ci) {
+            was_taken = true;
+            break;
+        };
+        if (!was_taken) gs.finalizeDestroyedWreck(cand.hull_instance_id);
     }
 
     // Parts: components, then weapons, then armor, at BV prices.
@@ -3796,9 +3861,14 @@ fn seedOpforHulls(gs: *GameState, faction_key: []const u8, n: usize) ![]types.Hu
     return ids;
 }
 
-test "pool draw: destroyed hulls are permanently marked, removed, and their BV is the enemy_destroyed_bv" {
-    // Tests plan 3+4: destroyed and non-destroyed invariants.
+test "pool draw: destroyed hulls are pool-removed and have a valid final disposition" {
+    // Tests plan 3+4 (updated for 3b): pool removal and no-partial-state invariants.
+    // Destroyed hulls are pool-removed immediately (writeHullCombatRecords).
+    // Final disposition (permanently_destroyed or player/employer owned) happens
+    // via takeSalvage / finalizeDestroyedWreck after the salvage decision resolves.
+    // Lost-field hulls stay active, enemy-owned (B6) — not permanently_destroyed.
     const testing = std.testing;
+    const hull_instance_mod = @import("../domain/hull_instance.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 3001 });
     defer gs.deinit();
     gs.clock.day_index = 1; // non-zero so closed intervals are detectable
@@ -3830,22 +3900,27 @@ test "pool draw: destroyed hulls are permanently marked, removed, and their BV i
     }
 
     // Invariant A: for every HullCombatRecord with destroyed == true on this contract:
-    //   hull.status == .permanently_destroyed, hull.owner == .destroyed,
-    //   not in the pool, open ownership interval closed.
+    //   - hull is NOT in the pool (pool removal is always immediate)
+    //   - if permanently_destroyed: owner must be .destroyed and all intervals closed
+    //     (no partial state — owner/status must be consistent)
+    //   - if not permanently_destroyed: hull is active (player-owned from salvage
+    //     or enemy-owned from a lost field — both are valid transient states)
     for (gs.hull_combat_records.items) |rec| {
         if (rec.contract_id != @as(types.ContractId, @enumFromInt(1))) continue;
         if (!rec.destroyed) continue;
         const inst = gs.hull_instances.getPtr(rec.hull_instance_id) orelse return error.TestFailed;
-        try testing.expectEqual(@import("../domain/hull_instance.zig").HullStatus.permanently_destroyed, inst.status);
-        try testing.expectEqual(@import("../domain/hull_instance.zig").OwnerType.destroyed, std.meta.activeTag(inst.owner));
-        // Not in pool.
+        // Not in pool (always: writeHullCombatRecords removes from pool on destroy).
         if (gs.faction_rosters.getPtr("DC")) |pool| {
             for (pool.items) |pid| try testing.expect(pid != rec.hull_instance_id);
         }
-        // Open interval closed.
-        for (gs.hull_ownership_history.items) |h| {
-            if (h.hull_instance_id == rec.hull_instance_id) {
-                try testing.expect(h.to_day != 0); // closed
+        // No partial state: if permanently_destroyed, owner must be .destroyed
+        // and all ownership intervals must be closed.
+        if (inst.status == hull_instance_mod.HullStatus.permanently_destroyed) {
+            try testing.expectEqual(hull_instance_mod.OwnerType.destroyed, std.meta.activeTag(inst.owner));
+            for (gs.hull_ownership_history.items) |h| {
+                if (h.hull_instance_id == rec.hull_instance_id) {
+                    try testing.expect(h.to_day != 0); // closed
+                }
             }
         }
     }
@@ -4103,11 +4178,13 @@ test "pool draw determinism: two same-seed campaigns with equal seeded pools pro
 }
 
 test "pool draw atomicity: hull_combat_records and hull_instances are consistent after pool-path battles" {
-    // Tests plan 8: rule 7/13 atomicity invariant — a destroyed hull has a
-    // hull_combat_record with destroyed=true, and every such record implies the
-    // hull has status permanently_destroyed and is absent from the pool.
-    // This verifies the PREPARE → RESERVE → COMMIT tail is all-or-nothing.
+    // Tests plan 8 (updated for 3b): rule 7/13 atomicity invariant.
+    // A destroyed hull has a hull_combat_record with destroyed=true, is absent
+    // from the pool, and has a consistent owner/status (no partial state).
+    // Final disposition depends on salvage resolution (held field vs lost field);
+    // this test resolves all decisions via answerBattleDecisions.
     const testing = std.testing;
+    const hull_instance_mod = @import("../domain/hull_instance.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
     defer gs.deinit();
     gs.clock.day_index = 1;
@@ -4138,17 +4215,25 @@ test "pool draw atomicity: hull_combat_records and hull_instances are consistent
         try answerBattleDecisions(&gs);
     }
 
-    // For each HullCombatRecord with destroyed=true: hull must be
-    // permanently_destroyed and absent from the pool. No half-states.
+    // For each HullCombatRecord with destroyed=true: hull must be absent from
+    // the pool and have a consistent state. No partial state (permanently_destroyed
+    // without .destroyed owner, or .destroyed owner without permanently_destroyed).
     for (gs.hull_combat_records.items) |rec| {
         if (!rec.destroyed) continue;
         const inst = gs.hull_instances.getPtr(rec.hull_instance_id) orelse {
-            try testing.expect(false); // hull vanished without a record — violation
+            try testing.expect(false); // hull vanished — violation
             continue;
         };
-        try testing.expectEqual(@import("../domain/hull_instance.zig").HullStatus.permanently_destroyed, inst.status);
+        // Always absent from pool.
         if (gs.faction_rosters.getPtr("DC")) |pool| {
             for (pool.items) |pid| try testing.expect(pid != rec.hull_instance_id);
+        }
+        // No partial state: permanently_destroyed ↔ .destroyed owner.
+        if (inst.status == hull_instance_mod.HullStatus.permanently_destroyed) {
+            try testing.expectEqual(hull_instance_mod.OwnerType.destroyed, std.meta.activeTag(inst.owner));
+        }
+        if (std.meta.activeTag(inst.owner) == hull_instance_mod.OwnerType.destroyed) {
+            try testing.expectEqual(hull_instance_mod.HullStatus.permanently_destroyed, inst.status);
         }
     }
     // No hull in the pool has status permanently_destroyed.
@@ -4213,3 +4298,271 @@ test "pool draw atomicity: OpFor tail is all-or-nothing under ensureUnusedCapaci
         );
     }
 }
+
+// ---------- P3e.5b-3b: salvage link — hull transfer, mandatory hold, guard fix --------
+
+test "pool-path takeSalvage: chosen hull transfers, unchosen is finalized" {
+    // Tests 3b invariants 1+2: transfer + finalization (direct function test).
+    // WSP-1A BV = 192. claim_bv = 200. most_hulls plan: candidate 0 (192 BV)
+    // fits; candidate 1 (192+192=384 > 200) is unchosen and finalized.
+    const testing = std.testing;
+    const hull_instance_mod = @import("../domain/hull_instance.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4001 });
+    defer gs.deinit();
+    gs.clock.day_index = 10;
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 100 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .enemy_lances = 1,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+
+    // Seed two WSP-1A hull instances owned by DC (enemy).
+    const hid0: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    const hid1: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    for ([_]types.HullInstanceId{ hid0, hid1 }) |hid| {
+        try gs.hull_instances.put(gs.allocator(), hid, .{
+            .id = hid,
+            .base_key = "WSP-1A",
+            .owner = .{ .faction = "DC" },
+        });
+        try gs.hull_ownership_history.append(gs.allocator(), .{
+            .hull_instance_id = hid,
+            .from_day = 0,
+            .to_day = 0,
+            .acquisition_type = .initial,
+            .prior_owner_key = "",
+        });
+    }
+
+    // Two pool-path candidates (hull_instance_id set). claim_bv = 200 ≥ bv[0] = 192.
+    const cands: []const battle_report.SalvageCandidate = &.{
+        .{ .hull_instance_id = hid0, .key = "WSP-1A", .name = "Wasp", .bv = 192, .armor_pct = 60, .quality = .c, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 },
+        .{ .hull_instance_id = hid1, .key = "WSP-1A", .name = "Wasp", .bv = 192, .armor_pct = 40, .quality = .d, .damaged_slots = 1, .destroyed_slots = 2, .missing_components = 1 },
+    };
+    _ = try takeSalvage(&gs, c, cands, 200, .most_hulls);
+
+    // Test 1: chosen hull (hid0) is player-owned, active, linked to a player unit.
+    const inst0 = gs.hull_instances.getPtr(hid0).?;
+    try testing.expectEqual(hull_instance_mod.OwnerType.player, std.meta.activeTag(inst0.owner));
+    try testing.expectEqual(hull_instance_mod.HullStatus.active, inst0.status);
+    // A unit links the existing hid0 (no new mint — existing instance reused).
+    var found_link = false;
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| if (e.value_ptr.hull_instance_id == hid0) {
+        found_link = true;
+        break;
+    };
+    try testing.expect(found_link);
+    // A .salvage ownership row is open for hid0.
+    var found_salvage = false;
+    for (gs.hull_ownership_history.items) |h| {
+        if (h.hull_instance_id == hid0 and h.acquisition_type == .salvage and h.to_day == 0) {
+            found_salvage = true;
+            break;
+        }
+    }
+    try testing.expect(found_salvage);
+
+    // Test 2: unchosen hull (hid1) is permanently_destroyed, .destroyed owner.
+    const inst1 = gs.hull_instances.getPtr(hid1).?;
+    try testing.expectEqual(hull_instance_mod.HullStatus.permanently_destroyed, inst1.status);
+    try testing.expectEqual(hull_instance_mod.OwnerType.destroyed, std.meta.activeTag(inst1.owner));
+    // All ownership intervals for hid1 are closed (terminal state).
+    for (gs.hull_ownership_history.items) |h| {
+        if (h.hull_instance_id == hid1) try testing.expect(h.to_day != 0);
+    }
+}
+
+test "pool-path salvage decision holds the turn until resolved" {
+    // Test 3: mandatory turn-hold (events.zig:77/181, checklist.zig:170, tick.zig:807).
+    // After a pool-path held-field win, the salvage_priority event is queued;
+    // advance_days returns error.DecisionPending until the decision is resolved.
+    const testing = std.testing;
+    const checklist = @import("checklist.zig");
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4002 });
+    defer gs.deinit();
+    gs.clock.day_index = 1;
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    // 32 hulls give many pool-path engagements; over 60 iterations the player
+    // wins and holds the field at least once (salvage_bv > 0 on any held win).
+    _ = try seedOpforHulls(&gs, "DC", 32);
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 100 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .enemy_lances = 2,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
+
+    // Run engagements until a salvage_priority event is queued (pool-path held-field
+    // win with salvage_bv > 0; any held-field pool-path win qualifies since
+    // salvage_bv = salvage_pct% of enemy_destroyed_bv > 0 when held_field = true).
+    var found_salvage_hold = false;
+    var iter: u32 = 0;
+    while (iter < 60 and c.status == .active) : (iter += 1) {
+        try resolveEngagement(&gs, c);
+        var has_salvage = false;
+        for (gs.event_queue.pending.items) |*ev| {
+            if (ev.kind == .salvage_priority) {
+                has_salvage = true;
+                break;
+            }
+        }
+        if (has_salvage) {
+            found_salvage_hold = true;
+            // Read ALL unread battle reports so only the salvage decision holds the turn.
+            while (gs.battle_reports.unread()) |rep| {
+                _ = try commands.execute(&gs, .{ .read_report = rep.id });
+            }
+            // turnHold must now be .battle_decision (salvage_priority is blocking).
+            try testing.expectEqual(@as(?checklist.Hold, .battle_decision), checklist.turnHold(&gs));
+            // advance_days is refused while the decision is pending.
+            try testing.expectError(error.DecisionPending, commands.execute(&gs, .{ .advance_days = 1 }));
+            // Resolve all decisions.
+            try answerBattleDecisions(&gs);
+            // Turn is free; advance_days succeeds.
+            _ = try commands.execute(&gs, .{ .advance_days = 1 });
+            break;
+        }
+        try answerBattleDecisions(&gs);
+    }
+    // Assert we exercised the invariant (not vacuous).
+    try testing.expect(found_salvage_hold);
+}
+
+test "contract-ending held-field battle still queues and holds on salvage" {
+    // Test 4: the queueSalvage guard relaxation (contract_events.zig:857).
+    // Old code: if (c.status != .active) return — drops salvage on completed contract.
+    // New code: queues when held_field and salvage.unclaimed_bv > 0, even if completed.
+    const testing = std.testing;
+    const ce = @import("contract_events.zig");
+    const checklist = @import("checklist.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4003 });
+    defer gs.deinit();
+    gs.clock.day_index = 5;
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const cid: types.ContractId = @enumFromInt(1);
+    // Contract already .completed (as if recordBattle completed it this engagement).
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 100 },
+        .status = .completed,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .enemy_lances = 1,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+
+    // Battle report: held field, salvage pending.
+    const bid: types.BattleId = @enumFromInt(1);
+    try gs.battle_reports.record(gs.allocator(), .{
+        .id = bid,
+        .day = 5,
+        .contract = cid,
+        .company = co,
+        .kind = "recon_raid",
+        .enemy_key = "DC",
+        .scenario = "standup",
+        .terrain = "plains",
+        .weather = "clear",
+        .outcome = autoresolve.Outcome.victory,
+        .held_field = true,
+        .salvage = .{ .unclaimed_bv = 200 },
+        .acknowledged = true,
+    });
+
+    // queueSalvage must NOT drop the decision because held_field and pending > 0.
+    try ce.queueSalvage(&gs, c, bid);
+
+    // Decision is queued.
+    var found = false;
+    for (gs.event_queue.pending.items) |*ev| {
+        if (ev.kind == .salvage_priority) {
+            found = true;
+            break;
+        }
+    }
+    try testing.expect(found);
+    // The turn is held (battle_decision due to salvage_priority).
+    try testing.expectEqual(@as(?checklist.Hold, .battle_decision), checklist.turnHold(&gs));
+}
+
+test "transferHullOwnership: employer exchange routes hull to faction, active, salvage interval open" {
+    // Test 5: B6 exchange clause. gs.transferHullOwnership with faction owner.
+    // The exchange branch (resolveEngagement) calls this for each destroyed drawn
+    // hull. The employer gets the hull: faction-owned, active, .salvage interval.
+    const testing = std.testing;
+    const hull_instance_mod = @import("../domain/hull_instance.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4004 });
+    defer gs.deinit();
+    gs.clock.day_index = 5;
+
+    // One WSP-1A instance owned by DC.
+    const hid: types.HullInstanceId = @enumFromInt(1);
+    gs.next_hull_instance_id = 2;
+    try gs.hull_instances.put(gs.allocator(), hid, .{
+        .id = hid,
+        .base_key = "WSP-1A",
+        .owner = .{ .faction = "DC" },
+    });
+    try gs.hull_ownership_history.append(gs.allocator(), .{
+        .hull_instance_id = hid,
+        .from_day = 0,
+        .to_day = 0,
+        .acquisition_type = .initial,
+        .prior_owner_key = "",
+    });
+
+    // The exchange branch transfers to employer (LC = employer_key).
+    try gs.transferHullOwnership(hid, .{ .faction = "LC" }, "DC");
+
+    const inst = gs.hull_instances.getPtr(hid).?;
+    // Faction-owned by employer, active (not permanently_destroyed).
+    try testing.expectEqual(hull_instance_mod.OwnerType.faction, std.meta.activeTag(inst.owner));
+    try testing.expectEqualStrings("LC", inst.owner.faction);
+    try testing.expectEqual(hull_instance_mod.HullStatus.active, inst.status);
+    // Prior interval closed; one new .salvage interval open.
+    var open_count: usize = 0;
+    var salvage_row = false;
+    for (gs.hull_ownership_history.items) |h| {
+        if (h.hull_instance_id != hid) continue;
+        if (h.to_day == 0) open_count += 1;
+        if (h.acquisition_type == .salvage and h.to_day == 0) salvage_row = true;
+    }
+    try testing.expectEqual(@as(usize, 1), open_count);
+    try testing.expect(salvage_row);
+}
+
+// Test 6: persistence round-trip lives in src/persist/store.zig (rule 5:
+// sim does not import persist). See:
+// "pool-path salvage: hull_instance_id round-trips through save/load"

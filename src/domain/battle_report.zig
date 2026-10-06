@@ -101,11 +101,14 @@ pub const AmmoLine = struct {
     left: u32 = 0,
 };
 
-/// A wreck the crews could get a chain around, rolled once off
-/// the enemy's RAT when the fight ends and then left alone. The roll
-/// lives in the record rather than happening again at claim time,
-/// because the manifest the player is offered and the manifest the
-/// command materialises have to be the same wrecks.
+/// A wreck the crews could get a chain around. On the abstraction path,
+/// rolled once off the enemy's RAT when the fight ends and then left
+/// alone. On the pool path, this IS the drawn enemy hull that was
+/// destroyed — `hull_instance_id` names the existing instance. The
+/// condition fields and chassis metadata live in the record rather than
+/// being re-derived at claim time, because the manifest the player is
+/// offered and the manifest the command materialises have to be the
+/// same wrecks (save/reload included).
 pub const SalvageCandidate = struct {
     key: []const u8,
     name: []const u8,
@@ -115,6 +118,10 @@ pub const SalvageCandidate = struct {
     damaged_slots: u8,
     destroyed_slots: u8,
     missing_components: u8,
+    /// `.none` on the abstraction path (a RAT-rolled wreck that owns no
+    /// instance); the drawn enemy hull's id on the pool path, so the
+    /// claim transfers that very hull rather than minting a new one.
+    hull_instance_id: types.HullInstanceId = .none,
 };
 
 /// What the claim became: things crated home, or cash under a salvage

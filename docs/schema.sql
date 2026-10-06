@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 54. The executable DDL and its column migrations
+-- Matches schema_version 55. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -838,6 +838,7 @@ CREATE TABLE battle_report_salvage (
     damaged         INTEGER,                         -- damaged slots
     destroyed       INTEGER,                         -- destroyed slots
     missing         INTEGER,                         -- missing components
+    hull_instance_id INTEGER NOT NULL DEFAULT 0,     -- .none (0) on abstraction path; real drawn hull id on pool path (P3e.5b-3b)
     FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED,
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );

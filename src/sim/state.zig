@@ -911,6 +911,45 @@ pub const GameState = struct {
         });
     }
 
+    /// The one writer for a salvage hull transfer (rule 20/3): change the existing
+    /// hull's owner and status to `.active`, close any open ownership interval,
+    /// and open a new `.salvage` interval naming the prior owner. `prior_owner_key`
+    /// is duped into the campaign arena. Pool-path only — the hull instance must
+    /// already exist. Used by both the player-salvage and employer-exchange paths.
+    pub fn transferHullOwnership(self: *GameState, hid: types.HullInstanceId, new_owner: hull_instance_mod.HullOwner, prior_owner_key: []const u8) !void {
+        const alloc = self.allocator();
+        const inst = self.hull_instances.getPtr(hid) orelse return;
+        inst.owner = new_owner;
+        inst.status = .active;
+        const owned_key = try alloc.dupe(u8, prior_owner_key);
+        // Close any open interval for this hull (to_day == 0 → stamp it).
+        for (self.hull_ownership_history.items) |*h| {
+            if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = self.clock.day_index;
+        }
+        try self.hull_ownership_history.append(alloc, .{
+            .hull_instance_id = hid,
+            .from_day = self.clock.day_index,
+            .to_day = 0,
+            .acquisition_type = .salvage,
+            .prior_owner_key = owned_key,
+        });
+    }
+
+    /// The one writer for discarding an unchosen pool-path wreck (rule 20/3):
+    /// mark the hull permanently destroyed, set owner to `.destroyed`, and close
+    /// any open ownership interval. Infallible — no allocation (terminal, no new
+    /// ownership row). Called by `takeSalvage` after the chosen hulls are
+    /// transferred; every remaining pool-path candidate calls this.
+    pub fn finalizeDestroyedWreck(self: *GameState, hid: types.HullInstanceId) void {
+        const inst = self.hull_instances.getPtr(hid) orelse return;
+        inst.status = .permanently_destroyed;
+        inst.owner = .destroyed;
+        // Close the open ownership interval in place (terminal; no new row).
+        for (self.hull_ownership_history.items) |*h| {
+            if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = self.clock.day_index;
+        }
+    }
+
     /// The one writer for pre-campaign hull seeding (rule 20): link a HullInstance
     /// if the unit has none, open one `.initial` ownership interval, then append
     /// `inspections` scheduled-inspection entries (P3c.5). prior_owner_key is duped

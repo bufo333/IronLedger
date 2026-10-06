@@ -41,7 +41,7 @@ const merc_company_mod = @import("../domain/merc_company.zig");
 const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 
-pub const schema_version = 54;
+pub const schema_version = 55;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -91,7 +91,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)), salvage_unclaimed INTEGER NOT NULL DEFAULT 0, operation TEXT NOT NULL DEFAULT '', operation_intent TEXT NOT NULL DEFAULT '', operation_tempo TEXT NOT NULL DEFAULT '', operation_interventions TEXT NOT NULL DEFAULT '', UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_hit (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, chassis_key TEXT, chassis_name TEXT, armor_before INTEGER, armor_after INTEGER, slot TEXT, slot_part TEXT, slot_result TEXT, destroyed INTEGER, cause TEXT, pilot INTEGER, crew_name TEXT, wound_severity INTEGER, wound_location TEXT, wound_permanent INTEGER, fate TEXT, recovery_roll INTEGER, recovery_target INTEGER, lost INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_ammo (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, family TEXT, burned INTEGER, reserve INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS battle_report_salvage (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, key TEXT, name TEXT, bv INTEGER, armor_pct INTEGER, quality TEXT, damaged INTEGER, destroyed INTEGER, missing INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS battle_report_salvage (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, key TEXT, name TEXT, bv INTEGER, armor_pct INTEGER, quality TEXT, damaged INTEGER, destroyed INTEGER, missing INTEGER, hull_instance_id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS operation_task (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, operation_id INTEGER NOT NULL, ord INTEGER NOT NULL, lance_id INTEGER NOT NULL, task TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS operation_intervention (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, operation_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_task (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, lance_id INTEGER NOT NULL, lance_name TEXT NOT NULL, task TEXT NOT NULL, succeeded INTEGER NOT NULL CHECK (succeeded IN (0,1)), note TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
@@ -345,6 +345,9 @@ pub const Store = struct {
         // merc_company table: NO migration row — ddl's CREATE TABLE IF NOT EXISTS covers fresh
         // and upgraded stores. Old saves open with an empty merc_companies map and
         // next_merc_company_id=1 (safe default), exactly the v44/v45/v46 new-table precedent.
+        // v55 (P3e.5b-3b): hull_instance_id in battle_report_salvage (pool-path salvage link).
+        // Default 0 = .none; abstraction-path rows stay 0.
+        .{ .from = 54, .to = 55, .table = "battle_report_salvage", .column = "hull_instance_id", .sql = "ALTER TABLE battle_report_salvage ADD COLUMN hull_instance_id INTEGER NOT NULL DEFAULT 0" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -1829,7 +1832,7 @@ pub const Store = struct {
         defer bh.finalize();
         const ba = try self.db.prepare("INSERT INTO battle_report_ammo VALUES (?1,?2,?3,?4,?5,?6)");
         defer ba.finalize();
-        const bs = try self.db.prepare("INSERT INTO battle_report_salvage VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
+        const bs = try self.db.prepare("INSERT INTO battle_report_salvage VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)");
         defer bs.finalize();
         // P4e: per-engagement task results.
         const bt = try self.db.prepare("INSERT INTO battle_report_task VALUES (?1,?2,?3,?4,?5,?6,?7,?8)");
@@ -1884,7 +1887,7 @@ pub const Store = struct {
                 try bs.bindAll(.{
                     cid,                        ord,                          @as(i64, @intCast(si)),          sc.key,
                     sc.name,                    sc.bv,                        @as(i64, sc.armor_pct),          @tagName(sc.quality),
-                    @as(i64, sc.damaged_slots), @as(i64, sc.destroyed_slots), @as(i64, sc.missing_components),
+                    @as(i64, sc.damaged_slots), @as(i64, sc.destroyed_slots), @as(i64, sc.missing_components), @as(i64, @intFromEnum(sc.hull_instance_id)),
                 });
                 try bs.run();
             }
@@ -3174,7 +3177,7 @@ pub const Store = struct {
     /// The wrecks a report's salvage claim was divided over, in order.
     fn loadReportSalvage(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64) ![]battle_report_mod.SalvageCandidate {
         var candidates: std.ArrayListUnmanaged(battle_report_mod.SalvageCandidate) = .empty;
-        const bs = try self.db.prepare("SELECT key, name, bv, armor_pct, quality, damaged, destroyed, missing FROM battle_report_salvage WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
+        const bs = try self.db.prepare("SELECT key, name, bv, armor_pct, quality, damaged, destroyed, missing, hull_instance_id FROM battle_report_salvage WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
         defer bs.finalize();
         try bs.bindAll(.{ cid, ord });
         while (try bs.next()) try candidates.append(alloc, .{
@@ -3186,6 +3189,7 @@ pub const Store = struct {
             .damaged_slots = try bs.intAs(u8, 5),
             .destroyed_slots = try bs.intAs(u8, 6),
             .missing_components = try bs.intAs(u8, 7),
+            .hull_instance_id = @enumFromInt(try bs.intAs(u32, 8)),
         });
         return candidates.items;
     }
@@ -4797,8 +4801,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P3e.5b-3a OpFor roster draw, attrition, and forfeit default.
-    try std.testing.expectEqual(@as(u64, 13419776122292486650), hash_before);
+    // Re-pinned by P3e.5b-3b salvage-link — real hull transfer, mandatory choice, contract-ending fix.
+    try std.testing.expectEqual(@as(u64, 4463956968827248499), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5293,9 +5297,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P3e.5b-3a OpFor roster draw,
-    // attrition, and forfeit default.
-    try std.testing.expectEqual(@as(u64, 13419776122292486650), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3e.5b-3b salvage-link — real
+    // hull transfer, mandatory choice, contract-ending salvage fix.
+    try std.testing.expectEqual(@as(u64, 4463956968827248499), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5307,6 +5311,88 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     const commands = @import("../sim/commands.zig");
     for ([_]*GameState{ &gs, &loaded }) |g| _ = try commands.execute(g, .{ .advance_days = 60 });
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &buf) orelse "");
+}
+
+test "pool-path salvage: hull_instance_id round-trips through save/load" {
+    // P3e.5b-3b: pool-path candidates carry the drawn hull's id so the deferred
+    // salvage decision claims the real wreck, not a freshly minted one.
+    // Rule 5: this test lives in persist (store.zig), not sim/battle.zig.
+    const testing = std.testing;
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4005 });
+    defer gs.deinit();
+    gs.clock.day_index = 5;
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 100 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .enemy_lances = 1,
+    });
+
+    // Two WSP-1A hull instances owned by DC (enemy).
+    const hid0: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    const hid1: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    for ([_]types.HullInstanceId{ hid0, hid1 }) |hid| {
+        try gs.hull_instances.put(gs.allocator(), hid, .{
+            .id = hid,
+            .base_key = "WSP-1A",
+            .owner = .{ .faction = "DC" },
+        });
+        try gs.hull_ownership_history.append(gs.allocator(), .{
+            .hull_instance_id = hid,
+            .from_day = 0,
+            .to_day = 0,
+            .acquisition_type = .initial,
+            .prior_owner_key = "",
+        });
+    }
+
+    // Battle report with pool-path candidates (hull_instance_id != .none).
+    const bid: types.BattleId = gs.nextBattleId();
+    const cands = try gs.allocator().dupe(battle_report_mod.SalvageCandidate, &[_]battle_report_mod.SalvageCandidate{
+        .{ .hull_instance_id = hid0, .key = "WSP-1A", .name = "Wasp", .bv = 192, .armor_pct = 60, .quality = .c, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 },
+        .{ .hull_instance_id = hid1, .key = "WSP-1A", .name = "Wasp", .bv = 192, .armor_pct = 40, .quality = .d, .damaged_slots = 1, .destroyed_slots = 2, .missing_components = 1 },
+    });
+    try gs.battle_reports.record(gs.allocator(), .{
+        .id = bid,
+        .day = 5,
+        .contract = cid,
+        .company = co,
+        .kind = "recon_raid",
+        .enemy_key = "DC",
+        .scenario = "standup",
+        .terrain = "plains",
+        .weather = "clear",
+        .outcome = autoresolve_mod.Outcome.victory,
+        .held_field = true,
+        .salvage = .{ .unclaimed_bv = 200, .candidates = cands },
+        .acknowledged = true,
+    });
+
+    // Save and reload.
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    // hull_instance_id survives the round-trip (columns hull_instance_id, schema v55).
+    const rep = loaded.battle_reports.find(bid) orelse return error.TestFailed;
+    try testing.expectEqual(@as(usize, 2), rep.salvage.candidates.len);
+    try testing.expectEqual(hid0, rep.salvage.candidates[0].hull_instance_id);
+    try testing.expectEqual(hid1, rep.salvage.candidates[1].hull_instance_id);
+    // Abstraction-path candidates keep hull_instance_id = .none (column default 0).
+    // (Pool-path candidates carry the real drawn hull id, tested above.)
 }
 
 test "the table registry matches the tables the executable schema creates" {

@@ -176,7 +176,12 @@ document. All such values are TBD pending verification against the owner's cited
   transfers ownership to the salvaging company (player or rival); a surviving hull
   returns to its owner's roster. This layers onto the existing OpFor model
   (`src/domain/opfor.zig`, 12D.5) and salvage recovery (12D.3); the design does not add a
-  parallel battle or salvage path.
+  parallel battle or salvage path. On the pool path the salvage decision is mandatory
+  (turn-blocking `salvage_priority`); a held-field win always defers salvage to the
+  inbox so the player chooses which drawn wreck to take; the unchosen wrecks are
+  finalised as permanently_destroyed. Lost-field destroyed hulls stay enemy-owned and
+  active (pool-removed only). The exchange clause routes all destroyed drawn hulls to
+  the employer faction immediately, with no inbox decision.
 - **Market — monthly surplus.** Monthly, each faction computes its surplus: hulls owned
   beyond its operational need. Surplus hulls flow to the open market as listings (§2),
   ownership moving faction → market. The flow is throttled by the faction's conflict
@@ -417,7 +422,7 @@ draws on the same contract via `HullCombatRecord`. An empty or absent pool for a
 faction is a bloodless forfeit win (score += forfeit, no hull mutations). State falls back to
 abstract RAT-roll when no faction rosters are seeded (existing tests unaffected).
 
-P3e.5b-3b (SalvageCandidate hull_instance_id + takeSalvage hull transfer) is open.
+P3e.5b-3b (sim/p3e-5b-3b-salvage-link): `SalvageCandidate.hull_instance_id` links pool-path candidates to real drawn hulls; `takeSalvage` transfers the existing instance to the player (chosen) or finalises it as permanently_destroyed (unchosen); salvage decision is mandatory on the pool path (turn-blocking); exchange clause routes destroyed drawn hulls to employer faction immediately; contract-ending held-field salvage queues even when the contract completed in the same engagement. Shipped schema v55.
 
 ### §8.F What P3e.3's `rival_rosters` becomes (rename/rekey inventory)
 

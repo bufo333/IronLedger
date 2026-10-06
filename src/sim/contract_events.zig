@@ -855,7 +855,11 @@ pub fn salvageEntry() Entry {
 
 /// Ask how to divide a haul, after a field held.
 pub fn queueSalvage(gs: *GameState, c: *const contract_mod.Contract, battle: types.BattleId) !void {
-    if (c.status != .active) return;
+    // Allow queueing even on a completed contract when the held-field salvage
+    // is still pending — the contract can complete and leave salvage in the
+    // same engagement (P3e.5b-3b).
+    const pending = if (gs.battle_reports.find(battle)) |r| r.held_field and r.salvage.unclaimed_bv > 0 else false;
+    if (c.status != .active and !pending) return;
     const e = salvageEntry();
     try gs.event_queue.push(gs.allocator(), .{
         .day = gs.clock.day_index,
