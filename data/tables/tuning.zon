@@ -241,7 +241,7 @@
         .wound_serious_severity = 10,
         .wound_target = 8,
         .wound_target_mash = 9,
-        .score = .{ .decisive_victory = 2, .victory = 1, .draw = 0, .rout = -2, .concede = -2 }, // concede: an objective given up without a shot scores as a rout
+        .score = .{ .decisive_victory = 2, .victory = 1, .draw = 0, .rout = -2, .concede = -2, .forfeit = 1 }, // concede: an objective given up without a shot scores as a rout; forfeit: bloodless win from empty/absent OpFor pool // TUNE
         .morale = .{ .decisive_victory = 5, .victory = 3, .draw = -1, .defeat = -5, .rout = -10, .mess_relief = 2 },
         .fatigue_base = 4,
         .xp_scored = 3,
@@ -268,6 +268,15 @@
         .consolidate_morale = 2, // TUNE: a night off the line
         .consolidate_escalation = -3, // TUNE: consolidating relieves escalation pressure (P4h)
         .contact_warning_days = 3, // TUNE: long enough to change ROE or recall before the fight
+        // Per-drawn-OpFor-hull outcome bands: destroyed_pct non-increasing from decisive_victory to rout;
+        // destroyed_pct + ineffective_pct <= 100 per band. // TUNE
+        .opfor_outcome = .{
+            .decisive_victory = .{ .destroyed_pct = 50, .ineffective_pct = 30 }, // TUNE
+            .victory          = .{ .destroyed_pct = 35, .ineffective_pct = 35 }, // TUNE
+            .draw             = .{ .destroyed_pct = 20, .ineffective_pct = 30 }, // TUNE
+            .defeat           = .{ .destroyed_pct = 10, .ineffective_pct = 20 }, // TUNE
+            .rout             = .{ .destroyed_pct =  5, .ineffective_pct = 15 }, // TUNE
+        },
     },
     // Field supply plan sizing constants. // TUNE
     .field_supply = .{

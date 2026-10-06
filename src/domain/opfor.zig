@@ -12,6 +12,8 @@ const chassis = @import("chassis.zig");
 const contract = @import("contract.zig");
 const rat = @import("rat.zig");
 const rng_mod = @import("../sim/rng.zig");
+const tuning = @import("tuning.zig").t;
+const autoresolve = @import("autoresolve.zig");
 
 pub const KindRow = struct { kind: []const u8, lances_min: u8, lances_max: u8, quality_mod: i8 };
 
@@ -97,6 +99,73 @@ pub fn roll(rng: *rng_mod.Rng, stream: rng_mod.Stream, kind: contract.ContractKi
 pub fn poolBv(force_bv: i64, length_months: u8) i64 {
     const months: types.Bp = @min(length_months, table.reinforcement_months_cap);
     return types.applyBp(force_bv, 10_000 + table.reinforcement_bp_per_month * months);
+}
+
+/// B1 (docs/p3c-economy-design.md §8.E): number of OpFor hulls to draw from the
+/// filtered pool. For a garrison probe, cap at one lance; otherwise scale by
+/// the contract's enemy lance count (floored at 1).
+pub fn drawSize(pool_len: usize, enemy_lances: u8, garrison_probe: bool) usize {
+    const lances: usize = if (garrison_probe) 1 else @max(1, enemy_lances);
+    return @min(pool_len, lances * table.lance_size);
+}
+
+/// Per-hull engagement outcome for a drawn OpFor hull (docs/p3c-economy-design.md §8.E).
+/// combat_ineffective is an engagement outcome, NOT a HullStatus member;
+/// HullStatus stays { active, permanently_destroyed } — no new member.
+pub const OpforHullOutcome = enum { destroyed, combat_ineffective, surviving };
+
+/// Draw one outcome for a drawn OpFor hull on the given stream, keyed on the
+/// engagement outcome band (docs/p3c-economy-design.md §8.E).
+/// One .battle draw: uintLessThan(u8, 100).
+pub fn hullOutcome(rng: *rng_mod.Rng, stream: rng_mod.Stream, outcome: autoresolve.Outcome) OpforHullOutcome {
+    // Extract the two thresholds for this band. Each opfor_outcome field is an
+    // anonymous struct of the same shape; use inline else to index by tag name
+    // and extract each u8 field (avoids nominal-type mismatch across branches).
+    const destroyed_pct: u8 = switch (outcome) {
+        inline else => |o| @field(tuning.battle.opfor_outcome, @tagName(o)).destroyed_pct,
+    };
+    const ineffective_pct: u8 = switch (outcome) {
+        inline else => |o| @field(tuning.battle.opfor_outcome, @tagName(o)).ineffective_pct,
+    };
+    const pct_roll = rng.random(stream).uintLessThan(u8, 100);
+    if (pct_roll < destroyed_pct) return .destroyed;
+    if (pct_roll < destroyed_pct + ineffective_pct) return .combat_ineffective;
+    return .surviving;
+}
+
+test "drawSize: B1 formula — non-garrison scales lances, garrison caps at one lance, pool_len clamp, lances floor" {
+    // Non-garrison: pool_len large enough, result = lances * lance_size.
+    try std.testing.expectEqual(@as(usize, 2 * table.lance_size), drawSize(100, 2, false));
+    // Lances floored at 1 when enemy_lances == 0.
+    try std.testing.expectEqual(@as(usize, 1 * table.lance_size), drawSize(100, 0, false));
+    // Garrison probe caps at 1 lance regardless of enemy_lances.
+    try std.testing.expectEqual(@as(usize, 1 * table.lance_size), drawSize(100, 3, true));
+    // pool_len clamp: smaller pool wins.
+    try std.testing.expectEqual(@as(usize, 2), drawSize(2, 4, false));
+    // Garrison probe also clamped by pool.
+    try std.testing.expectEqual(@as(usize, 1), drawSize(1, 3, true));
+}
+
+test "hullOutcome: each outcome is one of three; tuning bands are well-formed" {
+    // Verify each tuning band has destroyed_pct + ineffective_pct <= 100 and
+    // destroyed_pct non-increasing from decisive_victory to rout.
+    const bands = tuning.battle.opfor_outcome;
+    const ordered = [_]struct { d: u8, i: u8 }{
+        .{ .d = bands.decisive_victory.destroyed_pct, .i = bands.decisive_victory.ineffective_pct },
+        .{ .d = bands.victory.destroyed_pct, .i = bands.victory.ineffective_pct },
+        .{ .d = bands.draw.destroyed_pct, .i = bands.draw.ineffective_pct },
+        .{ .d = bands.defeat.destroyed_pct, .i = bands.defeat.ineffective_pct },
+        .{ .d = bands.rout.destroyed_pct, .i = bands.rout.ineffective_pct },
+    };
+    for (ordered) |b| try std.testing.expect(@as(u16, b.d) + b.i <= 100);
+    for (1..ordered.len) |j| try std.testing.expect(ordered[j].d <= ordered[j - 1].d);
+    // Every outcome is one of three.
+    var rng = rng_mod.Rng.init(42);
+    inline for (@typeInfo(autoresolve.Outcome).@"enum".fields) |f| {
+        const oc: autoresolve.Outcome = @enumFromInt(f.value);
+        const result = hullOutcome(&rng, .battle, oc);
+        try std.testing.expect(result == .destroyed or result == .combat_ineffective or result == .surviving);
+    }
 }
 
 test "data: every contract kind has an opfor row and rolls within it" {

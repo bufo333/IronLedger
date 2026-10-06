@@ -408,9 +408,16 @@ OpFor has three sources; a contract draws from one per its kind and arc (`Contra
   is seeded at campaign creation by `seedPirateRoster` (P3e.5b-1, §8.C; the pool is persisted
   and will be drawn at battle-start in P3e.5b-3).
 
-Today `opfor.roll` RAT-rolls the enemy force rather than drawing from a persisted roster.
-Replacing that draw with a roster draw (and the destroyed/salvaged/survivor ownership
-updates) is P3e.5's scope; this section fixes only *which pool* each kind draws from.
+**P3e.5b-3a (sim/p3e-5b-opfor-draw, shipped):** `resolveEngagement` now routes through
+`opforPool` to draw real `HullInstance`s from the enemy's pool (faction or PER). Each drawn
+hull gets a per-hull outcome (destroyed / combat_ineffective / surviving) from `hullOutcome`.
+Destroyed hulls are permanently marked, removed from the pool, and their BV is the
+`enemy_destroyed_bv` in the report. Combat-ineffective hulls are excluded from subsequent
+draws on the same contract via `HullCombatRecord`. An empty or absent pool for a would-be
+faction is a bloodless forfeit win (score += forfeit, no hull mutations). State falls back to
+abstract RAT-roll when no faction rosters are seeded (existing tests unaffected).
+
+P3e.5b-3b (SalvageCandidate hull_instance_id + takeSalvage hull transfer) is open.
 
 ### §8.F What P3e.3's `rival_rosters` becomes (rename/rekey inventory)
 

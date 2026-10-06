@@ -155,6 +155,9 @@ fn hasTech(gs: *GameState, u: *const @import("../domain/unit.zig").Unit) bool {
 
 const terrain_mod = @import("../domain/terrain.zig");
 const planet_mod = @import("../domain/planet.zig");
+const faction_mod = @import("../domain/faction.zig");
+const opfor = @import("../domain/opfor.zig");
+const rival_mod = @import("../domain/rival.zig");
 
 /// Gather the company's combat lances into engaged units + summed power.
 fn playerSide(gs: *GameState, c: *const contract_mod.Contract) !SideState {
@@ -360,6 +363,73 @@ pub fn engagementEnemyBv(c: *const contract_mod.Contract, player_bv: i64, varian
     else
         types.applyBp(player_bv, contract_mod.enemyStrengthBp(c.kind) + variance);
     return types.applyBp(types.applyBp(base, scenario_bp), difficulty_bp);
+}
+
+/// Maps a contract to a decision about how to resolve the OpFor:
+/// .pool (real hull draw), .forfeit (would-be pool is absent/empty → bloodless win),
+/// or .abstraction (no would-be pool → existing RAT/BV behaviour unchanged).
+/// Single owner of this routing rule (rule 20, docs/p3c-economy-design.md §8.E).
+const PoolResolution = union(enum) {
+    pool: *std.ArrayListUnmanaged(types.HullInstanceId), // present and non-empty
+    forfeit, // would-be pool but absent or empty
+    abstraction, // no would-be pool
+};
+
+fn opforPool(gs: *GameState, c: *const contract_mod.Contract) PoolResolution {
+    // If no campaign-start seeding has happened (faction_rosters and
+    // merc_company_rosters are both empty), every contract takes the
+    // abstraction path unchanged — this preserves existing test behaviour
+    // for tests that do not call execCreateCommander (which seeds rosters).
+    // In a real campaign, execCreateCommander seeds all would-be factions
+    // before the first engagement, so this branch never fires in production.
+    if (gs.faction_rosters.count() == 0 and gs.merc_company_rosters.count() == 0) return .abstraction;
+    // PER / pirate_hunting → target gs.faction_rosters["PER"]; would-be iff pirate_pool_hulls > 0.
+    const is_pirate = std.mem.eql(u8, c.enemy_key, "PER") or c.kind == .pirate_hunting;
+    if (is_pirate) {
+        const would_be = tuning.generation.pirate_pool_hulls > 0;
+        if (!would_be) return .abstraction;
+        if (gs.faction_rosters.getPtr("PER")) |roster| {
+            if (roster.items.len > 0) return .{ .pool = roster };
+        }
+        return .forfeit;
+    }
+    // Rival contract: first enemy-side rival with a linked merc_company_id.
+    for (c.rival_ids.items) |rid| {
+        const rv = gs.rivals.getPtr(rid) orelse continue;
+        if (rv.side != .enemy) continue;
+        if (rv.merc_company_id == .none) continue;
+        // Seeded merc companies always have a roster: would-be = true.
+        if (gs.merc_company_rosters.getPtr(rv.merc_company_id)) |roster| {
+            if (roster.items.len > 0) return .{ .pool = roster };
+        }
+        return .forfeit;
+    }
+    // Otherwise: faction roster; would-be iff replenishment_hulls_per_year > 0.
+    const faction = faction_mod.find(c.enemy_key) orelse return .abstraction;
+    if (faction.replenishment_hulls_per_year == 0) return .abstraction;
+    if (gs.faction_rosters.getPtr(c.enemy_key)) |roster| {
+        if (roster.items.len > 0) return .{ .pool = roster };
+    }
+    return .forfeit;
+}
+
+/// Fisher-Yates partial draw of n hulls from the filtered candidate list.
+/// Uses gs.rng .battle stream. Returns an arena-allocated slice of the
+/// first n drawn ids (arena lifetime = GameState). Does not mutate any
+/// gs collection — selection only.
+fn drawOpforHulls(gs: *GameState, candidates: []const types.HullInstanceId, n: usize) []types.HullInstanceId {
+    // Copy into arena, then partial Fisher-Yates for n picks.
+    var buf = gs.allocator().alloc(types.HullInstanceId, candidates.len) catch return &.{};
+    @memcpy(buf, candidates);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const remaining = buf.len - i;
+        const j = i + gs.rng.random(.battle).uintLessThan(usize, remaining);
+        const tmp = buf[i];
+        buf[i] = buf[j];
+        buf[j] = tmp;
+    }
+    return buf[0..n];
 }
 
 pub fn ratioBonus(player_power: i64, enemy_power: i64) i32 {
@@ -643,21 +713,27 @@ const FieldLoss = struct {
 /// company's rules of engagement, re-rolled once if a pilot spends Edge.
 /// Returns everything downstream needs to know about how it
 /// went, so no later phase re-derives the odds.
-fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const SideState, env: terrain_mod.Environment) Opening {
+/// Pool-path .battle draw order: scenario roll → opposed roll → (edge re-roll).
+/// No variance draw on the pool path; force size is already reflected by
+/// drawOpforHulls (garrison via drawSize) and pool depletion/exclusion.
+fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const SideState, env: terrain_mod.Environment, enemy_bv_override: ?i64) Opening {
     // What kind of fight this is (AtB scenario table): it scales
     // the enemy, tilts the roll, weights the score and decides what a
     // held field is worth.
     const scenario = @import("../domain/scenario.zig").roll(&gs.rng, .battle, c.kind);
 
-    // Enemy: strength relative to the player's committed BV, pirate rabble
-    // to house regulars by employer's foe.
-    const variance: types.Bp = (@as(types.Bp, gs.rng.roll2d6(.battle)) - 7) * 500;
-    var enemy_bv = engagementEnemyBv(c, player.bv, variance, scenario.enemy_bp, gs.diff().enemy_bp);
-    // A garrison probe is a lance or so of the enemy's, not the lot.
-    if (c.kind.isGarrisonClass() and c.hasOpfor()) enemy_bv = @divTrunc(enemy_bv * @min(tuning.battle.garrison_probe_lances, c.enemy_lances), c.enemy_lances);
-    // Attrition contracts: the enemy can only field what's left
-    // of their pool.
-    if (c.objective == .attrition and c.enemy_pool_remaining > 0) enemy_bv = @min(enemy_bv, c.enemy_pool_remaining);
+    // Pool path: enemy BV is the sum of drawn-hull BVs (passed in); skip the
+    // variance 2d6 draw, garrison-probe divisor, and attrition clamp.
+    // Abstraction path: the existing engagementEnemyBv / variance / divisor / clamp behaviour.
+    const enemy_bv: i64 = if (enemy_bv_override) |ov| ov else blk: {
+        const variance: types.Bp = (@as(types.Bp, gs.rng.roll2d6(.battle)) - 7) * 500;
+        var bv = engagementEnemyBv(c, player.bv, variance, scenario.enemy_bp, gs.diff().enemy_bp);
+        // A garrison probe is a lance or so of the enemy's, not the lot.
+        if (c.kind.isGarrisonClass() and c.hasOpfor()) bv = @divTrunc(bv * @min(tuning.battle.garrison_probe_lances, c.enemy_lances), c.enemy_lances);
+        // Attrition contracts: the enemy can only field what's left of their pool.
+        if (c.objective == .attrition and c.enemy_pool_remaining > 0) bv = @min(bv, c.enemy_pool_remaining);
+        break :blk bv;
+    };
     const pirates = std.mem.eql(u8, c.enemy_key, "PER");
     // Their skill: the rolled level, else pirates green, houses regular.
     const enemy_skills: [2]u8 = if (c.hasOpfor()) @import("../domain/opfor.zig").skills(c.enemy_quality) else if (pirates) .{ 5, 6 } else .{ 4, 5 };
@@ -919,7 +995,62 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     defer player.ammo_reserved.deinit(gs.scratch());
     if (player.engaged.items.len == 0) return concede(gs, c);
 
-    const open = openingRoll(gs, c, &player, env);
+    // Pool routing: real hull draw vs. bloodless win vs. abstraction
+    // (docs/p3c-economy-design.md §8.E). Single owner: opforPool.
+    const resolution = opforPool(gs, c);
+    var drawn: []types.HullInstanceId = &.{};
+    var enemy_bv_override: ?i64 = null;
+    switch (resolution) {
+        .abstraction => {}, // leave both defaults: existing RAT/BV abstraction behaviour
+        .forfeit => return forfeit(gs, c),
+        .pool => |pool| pool_blk: {
+            // Exclusion set: hulls that were combat_ineffective in an earlier
+            // battle of this contract (derived from committed records, no new column).
+            // destroyed == false records signal combat_ineffective (not simply surviving,
+            // because surviving hulls get no record). Player-hull ids are harmless: they
+            // are never pool members.
+            // Use scratch for the transient filter buffers; free before leaving the block.
+            const excl_buf_raw = gs.scratch().alloc(types.HullInstanceId, gs.hull_combat_records.items.len) catch break :pool_blk;
+            defer gs.scratch().free(excl_buf_raw);
+            var excl_len: usize = 0;
+            for (gs.hull_combat_records.items) |rec| {
+                if (rec.contract_id == c.id and !rec.destroyed) {
+                    excl_buf_raw[excl_len] = rec.hull_instance_id;
+                    excl_len += 1;
+                }
+            }
+            const excluded = excl_buf_raw[0..excl_len];
+            // Filtered candidates: pool members not in the exclusion set.
+            const filt_buf_raw = gs.scratch().alloc(types.HullInstanceId, pool.items.len) catch break :pool_blk;
+            defer gs.scratch().free(filt_buf_raw);
+            var filt_len: usize = 0;
+            for (pool.items) |hid| {
+                var excl = false;
+                for (excluded) |eid| if (eid == hid) {
+                    excl = true;
+                    break;
+                };
+                if (!excl) {
+                    filt_buf_raw[filt_len] = hid;
+                    filt_len += 1;
+                }
+            }
+            const filtered = filt_buf_raw[0..filt_len];
+            if (filtered.len == 0) return forfeit(gs, c); // all remaining hulls combat_ineffective
+            const garrison_probe = c.kind.isGarrisonClass();
+            const n = opfor.drawSize(filtered.len, c.enemy_lances, garrison_probe);
+            drawn = drawOpforHulls(gs, filtered, n);
+            // Fielded BV = Σ drawn-hull BVs (B2: opposed roll uses real hull BVs).
+            var fielded_bv: i64 = 0;
+            for (drawn) |hid| {
+                const inst = gs.hull_instances.getPtr(hid) orelse continue;
+                if (chassis_mod.find(inst.base_key)) |ch| fielded_bv += ch.bv;
+            }
+            enemy_bv_override = fielded_bv;
+        },
+    }
+
+    const open = openingRoll(gs, c, &player, env, enemy_bv_override);
     const scenario = open.scenario;
     const enemy_power = open.enemy_power;
     const scenario_mod = open.scenario_mod;
@@ -931,6 +1062,23 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     const enemy_bv = open.enemy_bv;
     const tb = tuning.battle;
     const engaged = player.engaged.items;
+
+    // Pool path: per-hull outcomes (fixed position in .battle stream, after open).
+    // Abstraction path: drawn is empty so this loop produces nothing.
+    // outcomes[] is parallel to drawn[]; only drawn hulls have entries.
+    // Arena-allocated (GameState lifetime): arena frees at gs.deinit().
+    const opfor_outcomes_buf: []opfor.OpforHullOutcome = try gs.allocator().alloc(opfor.OpforHullOutcome, drawn.len);
+    var enemy_destroyed_bv_real: i64 = 0;
+    for (drawn, 0..) |hid, i| {
+        const oc = opfor.hullOutcome(&gs.rng, .battle, outcome);
+        opfor_outcomes_buf[i] = oc;
+        if (oc == .destroyed) {
+            const inst = gs.hull_instances.getPtr(hid) orelse continue;
+            if (chassis_mod.find(inst.base_key)) |ch| enemy_destroyed_bv_real += ch.bv;
+        }
+    }
+    const opfor_outcomes = opfor_outcomes_buf[0..drawn.len];
+
     // The detailed AAR: every hit on record — which
     // hull, what it lost, what happened to the crew. The record outlives
     // the fight, so it copies the names it needs (battle_report.HullHit).
@@ -948,7 +1096,12 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // A cautious company does not wait out a draw: it withdraws.
     const withdrew = outcome == .draw and roe == .cautious;
     const held_field = outcome.heldField() and !withdrew;
-    const enemy_destroyed_bv = @divTrunc(enemy_bv * enemy_loss_pct, 100);
+    // Pool path: enemy_destroyed_bv from real hull BVs (B2).
+    // Abstraction path: existing @divTrunc formula.
+    const enemy_destroyed_bv = if (enemy_bv_override != null)
+        enemy_destroyed_bv_real
+    else
+        @divTrunc(enemy_bv * enemy_loss_pct, 100);
     // What the crews can actually haul off the field is bounded by the
     // salvage trucks on hand (`haulCapacityBv`).
     const trucks = salvageTrucks(gs, c.assigned_company);
@@ -1250,13 +1403,21 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     try @import("contract_events.zig").queueFieldRepair(gs, c, report.id);
 
     // Write one HullCombatRecord per engaged owned unit that has a linked hull
-    // instance (P3c.2). Failure-atomically: reserve capacity for the whole
-    // engaged slice FIRST (ensureUnusedCapacity is the last fallible step),
-    // then appendAssumeCapacity infallibly. A pre-reservation failure leaves
-    // hull_combat_records untouched (rule 7/13; held_hulls.holdUnit precedent).
-    // Units with hull_instance_id == .none are skipped; their pilot kill record
-    // is still written (no silent data loss for the person side).
-    try gs.hull_combat_records.ensureUnusedCapacity(gs.allocator(), engaged.len);
+    // instance (P3c.2), and one per drawn OpFor hull that was destroyed or
+    // combat_ineffective (surviving hulls get no record). Failure-atomically
+    // (rules 7/13): PREPARE opfor record values, RESERVE (only fallible step)
+    // by widening ensureUnusedCapacity, then COMMIT infallibly.
+    // A pre-reservation failure leaves hull_combat_records, hull_instances,
+    // the pool and hull_ownership_history untouched.
+    //
+    // PREPARE: count opfor records needed and build the destroyed-hull list.
+    var opfor_record_count: usize = 0;
+    for (opfor_outcomes) |oc| {
+        if (oc == .destroyed or oc == .combat_ineffective) opfor_record_count += 1;
+    }
+    // RESERVE: widen to cover both player and opfor records (only fallible step).
+    try gs.hull_combat_records.ensureUnusedCapacity(gs.allocator(), engaged.len + opfor_record_count);
+    // COMMIT (infallible from here): player records first.
     for (engaged) |uid| {
         const u = gs.unit(uid) orelse continue;
         if (u.hull_instance_id == .none) continue;
@@ -1302,6 +1463,134 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             .cause = rec_cause,
         });
     }
+    // COMMIT (continued): OpFor records for destroyed and combat_ineffective hulls.
+    // destroyed == false records are the exclusion signal for the next battle of
+    // this contract (combat_ineffective pre-draw exclusion, docs/p3c-economy-design.md §8.E).
+    // surviving hulls get no record and remain in the pool unchanged.
+    for (drawn, opfor_outcomes) |hid, oc| {
+        if (oc == .surviving) continue;
+        gs.hull_combat_records.appendAssumeCapacity(.{
+            .hull_instance_id = hid,
+            .battle_id = report.id,
+            .contract_id = c.id,
+            .kills = 0,
+            .hits_taken = 0,
+            .armor_lost = 0,
+            .slots_damaged = 0,
+            .slots_destroyed = 0,
+            .destroyed = (oc == .destroyed),
+            .cause = if (oc == .destroyed) .cored else .none,
+        });
+        if (oc != .destroyed) continue;
+        // Destroyed hull: mark permanently_destroyed, set owner .destroyed,
+        // close the open ownership interval, remove from the pool.
+        const inst = gs.hull_instances.getPtr(hid) orelse continue;
+        inst.status = .permanently_destroyed;
+        inst.owner = .destroyed;
+        // Close the open ownership interval in place (terminal; no new row).
+        for (gs.hull_ownership_history.items) |*h| {
+            if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = gs.clock.day_index;
+        }
+        // Remove from pool by id-match (orderedRemove preserves remaining order
+        // for future draws; the pool pointer from opforPool is still valid —
+        // no map key was deleted, only a value element removed).
+        switch (resolution) {
+            .pool => |pool| {
+                var pi: usize = 0;
+                while (pi < pool.items.len) : (pi += 1) {
+                    if (pool.items[pi] == hid) {
+                        _ = pool.orderedRemove(pi);
+                        break;
+                    }
+                }
+            },
+            else => {},
+        }
+    }
+}
+
+/// A bloodless win: the enemy's pool is absent or fully depleted (all
+/// hulls were combat_ineffective from prior battles of this contract).
+/// Score += forfeit, battles_fought/won updated; builds a normal victory
+/// report with no hits, no salvage, and no drawn/mutated hulls.
+/// Models concede() but is a win; no schema change (rule 20, no new field).
+fn forfeit(gs: *GameState, c: *contract_mod.Contract) !void {
+    const score_delta = tuning.battle.score.forfeit;
+
+    // If a combat op was committed, resolve it as a victory band on the
+    // forfeit path. Reserve the log slot before any mutation (failure-atomic,
+    // rule 17; mirror concede:1316 and resolveEngagement:1214).
+    const committed_op = operations_m.committedCombatOp(c);
+    const op_template_name: []const u8 = if (committed_op) |op|
+        if (operation_mod.findTemplate(op.template_key)) |t| t.name else ""
+    else
+        "";
+    var arc_log_text: []const u8 = "";
+    if (committed_op != null) {
+        try gs.reserveLog(1);
+        var arc_date_buf: [10]u8 = undefined;
+        arc_log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] operation {s}: forfeit (pool absent or depleted — victory)", .{
+            gs.clock.date.text(&arc_date_buf),
+            op_template_name,
+        });
+    }
+
+    // Mutations start here (infallible).
+    c.score += score_delta;
+    c.battles_fought +|= 1;
+    gs.stats.battles_won += 1;
+
+    // Resolve committed combat op as a victory band (log slot already reserved).
+    if (committed_op) |op| {
+        op.state = .resolved;
+        op.outcome = operations_m.combatBand(.victory);
+        op.resolved_day = gs.clock.day_index;
+        const clock_d = operations_m.outcomeClockDelta(op.outcome);
+        if (clock_d < 0) {
+            const relief: u16 = @intCast(@min(@as(i32, c.escalation_clock), -clock_d));
+            c.escalation_clock -= relief;
+        } else {
+            c.escalation_clock +|= @as(u16, @intCast(clock_d));
+        }
+        gs.event_log.appendAssumeCapacity(.{
+            .day = gs.clock.day_index,
+            .category = .contract,
+            .company = c.assigned_company,
+            .contract = c.id,
+            .text = arc_log_text,
+        });
+    }
+
+    const report: battle_report.BattleReport = .{
+        .id = gs.nextBattleId(),
+        .operation = op_template_name,
+        .operation_intent = if (committed_op) |op| op.intent else null,
+        .operation_tempo = if (committed_op) |op| op.tempo else null,
+        .operation_interventions = "",
+        .tasks = &.{},
+        .day = gs.clock.day_index,
+        .contract = c.id,
+        .company = c.assigned_company,
+        .kind = c.kind.label(),
+        .enemy_key = c.enemy_key,
+        .scenario = "",
+        .terrain = "",
+        .weather = "",
+        .outcome = .victory,
+        .held_field = true,
+        .roe = effectiveRoe(gs, c, c.assigned_company),
+        .roe_overridden = c.terms.command_rights.overridesRoe(),
+        .score_after = c.score,
+        .score_delta = score_delta,
+        .battle_loss_pct = c.terms.battle_loss_pct,
+        .salvage_pct = c.terms.salvage_pct,
+        .command_rights = @tagName(c.terms.command_rights),
+        .enemy_destroyed_bv = 0,
+    };
+    const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
+    for (try after_action.render(gs.allocator(), &report)) |line| try gs.log(.battle, ctx, "{s}", .{line});
+    try gs.battle_reports.record(gs.allocator(), report);
+    try @import("contract_control.zig").recordBattle(gs, c, 0, score_delta);
 }
 
 /// An engagement with nobody to put in the line: the objective is given up
@@ -3443,4 +3732,401 @@ test "salvage recovery records a .salvage ownership row with the enemy key" {
         try testing.expectEqual(@as(u32, 0), row.to_day);
         try testing.expect(gs.hull_instances.contains(row.hull_instance_id));
     }
+}
+
+// ---------- P3e.5b-3a: OpFor roster draw, attrition, and forfeit tests --------
+
+/// Seed n hull instances owned by faction_key (all "LCT-1V", bv=432) and
+/// return a slice of their ids. Arena-allocated; freed at gs.deinit().
+fn seedOpforHulls(gs: *GameState, faction_key: []const u8, n: usize) ![]types.HullInstanceId {
+    const alloc = gs.allocator();
+    const ids = try alloc.alloc(types.HullInstanceId, n);
+    const gop = try gs.faction_rosters.getOrPut(alloc, faction_key);
+    if (!gop.found_existing) gop.value_ptr.* = .empty;
+    for (ids, 0..) |*id, i| {
+        _ = i;
+        const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+        gs.next_hull_instance_id += 1;
+        try gs.hull_instances.put(alloc, hid, .{
+            .id = hid,
+            .base_key = "LCT-1V",
+            .owner = .{ .faction = faction_key },
+        });
+        try gs.hull_ownership_history.append(alloc, .{
+            .hull_instance_id = hid,
+            .from_day = 0,
+            .to_day = 0, // open interval
+            .acquisition_type = .initial,
+            .prior_owner_key = "",
+        });
+        try gop.value_ptr.append(alloc, hid);
+        id.* = hid;
+    }
+    return ids;
+}
+
+test "pool draw: destroyed hulls are permanently marked, removed, and their BV is the enemy_destroyed_bv" {
+    // Tests plan 3+4: destroyed and non-destroyed invariants.
+    const testing = std.testing;
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3001 });
+    defer gs.deinit();
+    gs.clock.day_index = 1; // non-zero so closed intervals are detectable
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const pool_ids = try seedOpforHulls(&gs, "DC", 4);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .enemy_lances = 1,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
+
+    // Run several engagements so at least some hull outcomes are likely exercised.
+    var battles: u32 = 0;
+    while (battles < 4 and c.status == .active) : (battles += 1) {
+        try resolveEngagement(&gs, c);
+        try answerBattleDecisions(&gs);
+    }
+
+    // Invariant A: for every HullCombatRecord with destroyed == true on this contract:
+    //   hull.status == .permanently_destroyed, hull.owner == .destroyed,
+    //   not in the pool, open ownership interval closed.
+    for (gs.hull_combat_records.items) |rec| {
+        if (rec.contract_id != @as(types.ContractId, @enumFromInt(1))) continue;
+        if (!rec.destroyed) continue;
+        const inst = gs.hull_instances.getPtr(rec.hull_instance_id) orelse return error.TestFailed;
+        try testing.expectEqual(@import("../domain/hull_instance.zig").HullStatus.permanently_destroyed, inst.status);
+        try testing.expectEqual(@import("../domain/hull_instance.zig").OwnerType.destroyed, std.meta.activeTag(inst.owner));
+        // Not in pool.
+        if (gs.faction_rosters.getPtr("DC")) |pool| {
+            for (pool.items) |pid| try testing.expect(pid != rec.hull_instance_id);
+        }
+        // Open interval closed.
+        for (gs.hull_ownership_history.items) |h| {
+            if (h.hull_instance_id == rec.hull_instance_id) {
+                try testing.expect(h.to_day != 0); // closed
+            }
+        }
+    }
+    // Invariant B: no non-destroyed hull in pool_ids had its status changed.
+    if (gs.faction_rosters.getPtr("DC")) |pool| {
+        for (pool.items) |pid| {
+            // Hull is in the pool: it should still be active.
+            const inst = gs.hull_instances.getPtr(pid) orelse continue;
+            try testing.expectEqual(@import("../domain/hull_instance.zig").HullStatus.active, inst.status);
+        }
+        // Pool is a subset of the original pool_ids.
+        for (pool.items) |pid| {
+            var found = false;
+            for (pool_ids) |oid| if (oid == pid) {
+                found = true;
+                break;
+            };
+            try testing.expect(found);
+        }
+    }
+    // HullStatus still has exactly two members (no new enum value was added).
+    try testing.expectEqual(@as(usize, 2), @typeInfo(@import("../domain/hull_instance.zig").HullStatus).@"enum".fields.len);
+}
+
+test "pool draw: enemy_destroyed_bv equals sum of BVs of destroyed drawn hulls" {
+    // Tests plan 3: BV figure accuracy (B2).
+    const testing = std.testing;
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3002 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    _ = try seedOpforHulls(&gs, "DC", 4);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .enemy_lances = 1,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
+
+    try resolveEngagement(&gs, c);
+    try answerBattleDecisions(&gs);
+
+    // enemy_destroyed_bv in the report == sum of BVs of hulls with destroyed record.
+    const report = &gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1];
+    // Pool path was taken (faction_rosters non-empty).
+    var bv_sum: i64 = 0;
+    for (gs.hull_combat_records.items) |rec| {
+        if (rec.contract_id != c.id) continue;
+        if (!rec.destroyed) continue;
+        const inst = gs.hull_instances.getPtr(rec.hull_instance_id) orelse continue;
+        if (chassis_mod.find(inst.base_key)) |ch| bv_sum += ch.bv;
+    }
+    try testing.expectEqual(bv_sum, report.enemy_destroyed_bv);
+}
+
+test "combat_ineffective hull is excluded from subsequent draws on the same contract" {
+    // Tests plan 5: exclusion across battles and depleted-pool forfeit.
+    const testing = std.testing;
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3003 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const pool_ids = try seedOpforHulls(&gs, "DC", 1); // single hull pool
+    const hid = pool_ids[0];
+    const cid: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .enemy_lances = 1,
+    });
+    const c = gs.contracts.getPtr(cid).?;
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
+
+    // Inject a combat_ineffective record for hid on this contract, as if a prior
+    // battle marked it ineffective (destroyed == false, contract == cid).
+    try gs.hull_combat_records.append(gs.allocator(), .{
+        .hull_instance_id = hid,
+        .battle_id = @enumFromInt(1),
+        .contract_id = cid,
+        .destroyed = false,
+    });
+
+    // Battle 2 (the hull is still in the pool but excluded by the record).
+    // If the exclusion works, the pool is empty → forfeit → victory.
+    const battles_won_before = gs.stats.battles_won;
+    try resolveEngagement(&gs, c);
+    // Forfeit: battles_won incremented, score increased by forfeit delta.
+    try testing.expect(gs.stats.battles_won > battles_won_before);
+    // The hull remains in the pool (combat_ineffective, not destroyed).
+    const pool = gs.faction_rosters.getPtr("DC") orelse return error.TestFailed;
+    var still_in_pool = false;
+    for (pool.items) |pid| if (pid == hid) {
+        still_in_pool = true;
+        break;
+    };
+    try testing.expect(still_in_pool);
+    // The hull's status is unchanged (still active — not destroyed by forfeit).
+    const inst = gs.hull_instances.getPtr(hid) orelse return error.TestFailed;
+    try testing.expectEqual(@import("../domain/hull_instance.zig").HullStatus.active, inst.status);
+}
+
+test "forfeit: would-be pool present but empty, and key absent for replenishment>0 faction" {
+    // Tests plan 6: forfeit from empty pool and absent pool (Decision 2b).
+    const testing = std.testing;
+    // Case A: key present, list empty.
+    {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 3004 });
+        defer gs.deinit();
+        _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+        const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+        // Seed an empty DC roster (key present, no hulls).
+        try gs.faction_rosters.put(gs.allocator(), "DC", .empty);
+        const cid: types.ContractId = @enumFromInt(1);
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .recon_raid,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+            .status = .active,
+            .assigned_company = co,
+            .monthly_net = 300_000,
+            .enemy_lances = 1,
+        });
+        const c = gs.contracts.getPtr(cid).?;
+        const site: types.Site = .{ .company = co };
+        try gs.addStock(site, "armor", 60);
+        for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
+        const score_before = c.score;
+        const battles_won_before = gs.stats.battles_won;
+        try resolveEngagement(&gs, c);
+        // Bloodless win: score += forfeit, battles_won++.
+        try testing.expect(c.score > score_before);
+        try testing.expect(gs.stats.battles_won > battles_won_before);
+        // Report says victory, held_field, enemy_destroyed_bv == 0.
+        const report = &gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1];
+        try testing.expectEqual(@import("../domain/autoresolve.zig").Outcome.victory, report.outcome);
+        try testing.expect(report.held_field);
+        try testing.expectEqual(@as(i64, 0), report.enemy_destroyed_bv);
+        // No hulls mutated (pool stays empty).
+        const pool = gs.faction_rosters.getPtr("DC").?;
+        try testing.expectEqual(@as(usize, 0), pool.items.len);
+    }
+    // Case B: key absent for a replenishment>0 faction (post-reload analog).
+    {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 3005 });
+        defer gs.deinit();
+        _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+        const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+        // Seed SOME entry (so faction_rosters.count() > 0, bypassing abstraction guard),
+        // but NOT for "DC" (simulating post-reload absence after depletion).
+        try gs.faction_rosters.put(gs.allocator(), "FS", .empty);
+        const cid: types.ContractId = @enumFromInt(1);
+        try gs.contracts.put(gs.allocator(), cid, .{
+            .id = cid,
+            .kind = .recon_raid,
+            .employer_key = "LC",
+            .enemy_key = "DC",
+            .planet_key = "galatea",
+            .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+            .status = .active,
+            .assigned_company = co,
+            .monthly_net = 300_000,
+            .enemy_lances = 1,
+        });
+        const c = gs.contracts.getPtr(cid).?;
+        const site: types.Site = .{ .company = co };
+        try gs.addStock(site, "armor", 60);
+        for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
+        const battles_won_before = gs.stats.battles_won;
+        try resolveEngagement(&gs, c);
+        // Bloodless win: battles_won++.
+        try testing.expect(gs.stats.battles_won > battles_won_before);
+        const report = &gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1];
+        try testing.expectEqual(@import("../domain/autoresolve.zig").Outcome.victory, report.outcome);
+        try testing.expectEqual(@as(i64, 0), report.enemy_destroyed_bv);
+    }
+}
+
+test "pool draw determinism: two same-seed campaigns with equal seeded pools produce equal state hash" {
+    // Tests plan 7: determinism on the pool path.
+    var gs1 = GameState.init(std.testing.allocator, .{ .seed = 3006 });
+    defer gs1.deinit();
+    _ = try founding.createCommander(&gs1, "T", .LC, .line_officer);
+    const co1 = try @import("starter_company.zig").generateInto(&gs1, "Alpha");
+    _ = try seedOpforHulls(&gs1, "DC", 4);
+    try gs1.contracts.put(gs1.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co1,
+        .monthly_net = 300_000,
+        .enemy_lances = 1,
+    });
+    const site1: types.Site = .{ .company = co1 };
+    try gs1.addStock(site1, "armor", 60);
+    for (@import("../domain/part.zig").munition_keys) |key| try gs1.addStock(site1, key, 40);
+
+    var gs2 = GameState.init(std.testing.allocator, .{ .seed = 3006 }); // same seed
+    defer gs2.deinit();
+    _ = try founding.createCommander(&gs2, "T", .LC, .line_officer);
+    const co2 = try @import("starter_company.zig").generateInto(&gs2, "Alpha");
+    _ = try seedOpforHulls(&gs2, "DC", 4);
+    try gs2.contracts.put(gs2.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co2,
+        .monthly_net = 300_000,
+        .enemy_lances = 1,
+    });
+    const site2: types.Site = .{ .company = co2 };
+    try gs2.addStock(site2, "armor", 60);
+    for (@import("../domain/part.zig").munition_keys) |key| try gs2.addStock(site2, key, 40);
+
+    // Both campaigns resolve the same engagement from the same RNG state.
+    const c1 = gs1.contracts.getPtr(@enumFromInt(1)).?;
+    const c2 = gs2.contracts.getPtr(@enumFromInt(1)).?;
+    try resolveEngagement(&gs1, c1);
+    try resolveEngagement(&gs2, c2);
+    try answerBattleDecisions(&gs1);
+    try answerBattleDecisions(&gs2);
+
+    const hash1 = @import("digest.zig").stateHash(&gs1);
+    const hash2 = @import("digest.zig").stateHash(&gs2);
+    try std.testing.expectEqual(hash1, hash2);
+}
+
+test "pool draw atomicity: hull_combat_records and hull_instances are consistent after pool-path battles" {
+    // Tests plan 8: rule 7/13 atomicity invariant — a destroyed hull has a
+    // hull_combat_record with destroyed=true, and every such record implies the
+    // hull has status permanently_destroyed and is absent from the pool.
+    // This verifies the PREPARE → RESERVE → COMMIT tail is all-or-nothing.
+    const testing = std.testing;
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    gs.clock.day_index = 1;
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    _ = try seedOpforHulls(&gs, "DC", 8); // larger pool for more outcome variety
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .enemy_lances = 2,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
+
+    // Run several engagements to accumulate a mix of outcomes.
+    var battles: u32 = 0;
+    while (battles < 5 and c.status == .active) : (battles += 1) {
+        try resolveEngagement(&gs, c);
+        try answerBattleDecisions(&gs);
+    }
+
+    // For each HullCombatRecord with destroyed=true: hull must be
+    // permanently_destroyed and absent from the pool. No half-states.
+    for (gs.hull_combat_records.items) |rec| {
+        if (!rec.destroyed) continue;
+        const inst = gs.hull_instances.getPtr(rec.hull_instance_id) orelse {
+            try testing.expect(false); // hull vanished without a record — violation
+            continue;
+        };
+        try testing.expectEqual(@import("../domain/hull_instance.zig").HullStatus.permanently_destroyed, inst.status);
+        if (gs.faction_rosters.getPtr("DC")) |pool| {
+            for (pool.items) |pid| try testing.expect(pid != rec.hull_instance_id);
+        }
+    }
+    // No hull in the pool has status permanently_destroyed.
+    if (gs.faction_rosters.getPtr("DC")) |pool| {
+        for (pool.items) |pid| {
+            const inst = gs.hull_instances.getPtr(pid) orelse continue;
+            try testing.expect(inst.status != .permanently_destroyed);
+        }
+    }
+    // Verify we ran at least some pool-path battles (faction_rosters had an entry).
+    try testing.expect(gs.faction_rosters.count() > 0);
 }

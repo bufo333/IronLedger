@@ -157,6 +157,14 @@ instance. If destroyed and salvaged, ownership transfers to the salvaging compan
 hull keeps accumulating data. If it survives and stays with the OpFor or another company,
 it keeps accumulating data as that entity operates.
 
+**P3e.5b-3a (shipped):** OpFor hulls drawn from `faction_rosters`/`merc_company_rosters`
+receive per-hull outcomes (`destroyed` / `combat_ineffective` / `surviving`). Destroyed hulls
+are immediately marked `permanently_destroyed`, removed from the pool, and have their open
+ownership interval closed. Combat-ineffective hulls remain in the pool but are excluded from
+subsequent draws on the same contract. An empty or absent pool for a would-be faction
+yields a bloodless forfeit win. P3e.5b-3b (SalvageCandidate hull_instance_id + takeSalvage
+hull transfer) is the next open increment.
+
 ---
 
 ## §3 Market integration and the Unit migration path

@@ -373,8 +373,9 @@ pub const Tuning = struct {
         wound_target: u8,
         wound_target_mash: u8,
         /// Contract score per outcome (defeat comes from the command rights;
-        /// concede is an engagement with nobody to put in the line).
-        score: struct { decisive_victory: i32, victory: i32, draw: i32, rout: i32, concede: i32 },
+        /// concede is an engagement with nobody to put in the line;
+        /// forfeit is a bloodless win from an empty/absent OpFor pool).
+        score: struct { decisive_victory: i32, victory: i32, draw: i32, rout: i32, concede: i32, forfeit: i32 },
         /// Company morale per outcome, and the relief a mess lance gives after a loss.
         morale: struct { decisive_victory: i32, victory: i32, draw: i32, defeat: i32, rout: i32, mess_relief: i32 },
         /// Fatigue a fight adds before the environment's share.
@@ -421,6 +422,16 @@ pub const Tuning = struct {
         /// shows. At most `battle.min_gap_days`, so every scheduled
         /// engagement opens its window on an advance.
         contact_warning_days: u32, // TUNE
+        /// Per-drawn-OpFor-hull outcome by engagement band (destroyed first, then
+        /// combat_ineffective; remainder survive). Percentages. // TUNE
+        /// combat_ineffective is an engagement outcome, NOT a HullStatus member.
+        opfor_outcome: struct {
+            decisive_victory: struct { destroyed_pct: u8, ineffective_pct: u8 },
+            victory: struct { destroyed_pct: u8, ineffective_pct: u8 },
+            draw: struct { destroyed_pct: u8, ineffective_pct: u8 },
+            defeat: struct { destroyed_pct: u8, ineffective_pct: u8 },
+            rout: struct { destroyed_pct: u8, ineffective_pct: u8 },
+        },
     },
     /// Field supply plan sizing constants. // TUNE
     field_supply: struct {
