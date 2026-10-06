@@ -1438,6 +1438,47 @@ RAT via `gen/roster_gen.zig`; orchestrated by `sim/roster_seed.zig` on the
 dedicated `.rosters` RNG stream. Rival roster seeding deferred to P3e.5
 (no rivals exist at campaign creation).
 
+### P3f — Faction economic loop (wrecks, black market, merc & pirate lifecycle)
+
+P3f closes the faction economic loop P3e opens: the P3e living rosters gain a
+loss-and-replacement cycle and a dispersed black-market channel, and the rival
+merc and pirate populations become self-sustaining. One coherent stage — the
+five features land together because each depends on the others. Prerequisite:
+P3e (faction/rival rosters and HullInstance ownership). Mechs only, consistent
+with P3e. The full design is fixed in a design doc on approval; TODO.md owns the
+design-approval entry and delivery order.
+
+- **Lost-field wreck flow.** Losing the field on a pool-path battle lets the
+  enemy faction salvage up to its cargo capacity; the remaining wrecks become
+  black-market listings dispersed across Inner Sphere worlds (not the origin
+  world), each time-delayed by an `available_after: day_index`. The player sees
+  them on qualifying worlds, but pirates and rival merc companies buy
+  competitively.
+- **Black-market tier.** A planet attribute gates black-market availability,
+  extending the 12C.17 fence mechanic rather than adding a parallel system. A
+  listing carries a `planet_key` (dispersed at generation), the `available_after`
+  delay, and a faction-access flag that lets the player, pirates and rival merc
+  companies buy.
+- **Merc-company death and replacement.** When a rival merc company goes
+  insolvent (the P3e.7 rival-insolvency hook), its remaining hulls liquidate
+  onto the market; a replacement company spawns, drawing a name and logo from
+  the remaining `data/logos/` pool and buying from the market and black market
+  to field its first full company of three lances (12 hulls minimum). A tunable
+  C-bill injection is the fallback floor. The active rival merc-company count
+  holds at 12.
+- **Pirate replenishment.** Pirates gain a small base
+  `replenishment_hulls_per_year` constant (2-3, tunable) for opportunistic
+  acquisition and also compete for black-market listings; an insolvent pirate
+  band is replaced by a new band drawing from the logo pool or procedural names.
+- **Logo picker (campaign wizard).** The campaign wizard gains a logo picker
+  showing every logo in `data/logos/`; selecting one auto-fills the company name
+  (title-case from the filename), complementing the existing emblem import
+  (12.7/12.14). The 12 seeded rival merc companies draw names and logos from the
+  pool at campaign start, excluding the player's pick.
+
+Every constant, faction composition and chassis value is sourced at
+implementation, never invented; new tunables land in `data/tables/tuning.zon`.
+
 ## Product completion P4 — Campaign operations and stories
 
 Begins only after the ordered contract, test, data-verification, and P1–P3

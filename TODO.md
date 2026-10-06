@@ -24,6 +24,20 @@ reschedule only on explicit dispatch.
   crewing, readiness, and persistence.
 - P2-battle-ui (P2h-P2i): both battle effects and REPL/TUI surfaces.
 
+- P3f-design Faction economic loop design approval (ROADMAP.md P3f): lost-field
+  wreck flow; dispersed black-market listings (`planet_key` + `available_after`,
+  faction-access flag); rival merc-company death and replacement from the
+  `data/logos/` pool; pirate base replenishment and black-market competition;
+  and the campaign-wizard logo picker (title-case name from the filename).
+  Closes the P3e living-roster loop; one coherent stage; needs the design doc
+  fixed before dispatch.
+- Per-location armor data accuracy (lower priority, after P3f): pull the 8 front
+  and 3 rear-torso armor values per mech from the MegaMek 3039u MTF files
+  (https://github.com/MegaMek/mm-data/tree/main/data/mekfiles/meks/3039u) for
+  all 64 `data/chassis.zon` mechs and cross-check ammo-slot placement; stored
+  per-location on the P3c hull instance, so it needs schema/domain changes.
+  Re-encode, not copy, the GPL source (as 12B.9). Design in ROADMAP.md first
+  before scheduling.
 - A mobile field base as a buyable Repair support lance, adding to the repair
   push beyond the Logistics lance's workshop.
 - Contracts difficulty display — replace skull/half-skull glyphs (☠/◐) with filled circles (●), keep color coding, rename the column header from 'skulls' to 'difficulty'; touches `src/sim/queries.zig` and `src/tui/app.zig`, smokes required.
