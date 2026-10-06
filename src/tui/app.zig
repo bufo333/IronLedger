@@ -935,9 +935,10 @@ pub const App = struct {
                 // padding = (cell_cols - name_display_width) / 2, clamped to 0.
                 const padding: usize = @as(usize, (cell_w -| @as(u16, @truncate(display_name.len))) / 2);
                 var center_buf: [256]u8 = undefined;
-                @memset(center_buf[0..padding], ' ');
-                @memcpy(center_buf[padding..][0..display_name.len], display_name);
-                self.screen.textPad(@intCast(cx), name_y, cell_w, center_buf[0 .. padding + display_name.len], lbl);
+                const safe_padding: usize = @min(padding, center_buf.len - display_name.len);
+                @memset(center_buf[0..safe_padding], ' ');
+                @memcpy(center_buf[safe_padding..][0..display_name.len], display_name);
+                self.screen.textPad(@intCast(cx), name_y, cell_w, center_buf[0 .. safe_padding + display_name.len], lbl);
 
                 // Thumbnail image: rows above the name label.
                 const img_h: u16 = cell_h - 1;
