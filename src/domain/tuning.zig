@@ -194,6 +194,15 @@ pub const Tuning = struct {
         /// Days a faction surplus listing stays on the board before returning
         /// its hull to the faction pool (docs/p3c-economy-design.md §4). // TUNE
         faction_surplus_listing_days: u32,
+        /// Minimum delay in days before a dispersed black-market listing
+        /// becomes visible after the triggering battle (docs/p3f-faction-loop-design.md §2.6). // TUNE
+        black_market_delay_days_min: u32,
+        /// Maximum delay in days before a dispersed black-market listing
+        /// becomes visible after the triggering battle (docs/p3f-faction-loop-design.md §2.6). // TUNE
+        black_market_delay_days_max: u32,
+        /// How many dispersed black-market listings the enemy faction may
+        /// place per recovery pass (docs/p3f-faction-loop-design.md §2.6). // TUNE
+        enemy_recovery_capacity: u8,
     },
     /// Medical staffing and recovery (MekHQ ratios); project-chosen constants // TUNE.
     medical: struct {
@@ -770,6 +779,12 @@ pub const Tuning = struct {
         /// it is seeded by a flat constant rather than years × rate
         /// (docs/p3c-economy-design.md §8.C; owner decision 3). // TUNE
         pirate_pool_hulls: u16,
+        /// Hulls the pirate pool gains per campaign year from dispersed
+        /// black-market recovery (docs/p3f-faction-loop-design.md §2.6). // TUNE
+        pirate_replenishment_hulls_per_year: u8,
+        /// Minimum C-bill price floor for a merc-company replacement hull
+        /// acquired from the black market (docs/p3f-faction-loop-design.md §2.6). // TUNE
+        merc_replacement_cbill_floor: types.CBills,
     },
     /// Real loss: how hulls die, what a rebuild needs, and when one is not
     /// worth it (TechManual hull destruction; CamOps salvage).

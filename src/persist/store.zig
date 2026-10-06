@@ -41,7 +41,7 @@ const merc_company_mod = @import("../domain/merc_company.zig");
 const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 
-pub const schema_version = 56;
+pub const schema_version = 57;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -82,7 +82,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS faction_standing (cid INTEGER NOT NULL, faction TEXT NOT NULL, value INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS event_memory (cid INTEGER NOT NULL, kind TEXT NOT NULL, last_day INTEGER NOT NULL, last_choice INTEGER NOT NULL, streak INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS rating_snapshot (cid INTEGER NOT NULL, year INTEGER NOT NULL, score INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER CHECK (staple IN (0,1)), listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0 CHECK (black IN (0,1)), company INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, hull_instance_id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER CHECK (staple IN (0,1)), listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0 CHECK (black IN (0,1)), company INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, hull_instance_id INTEGER NOT NULL DEFAULT 0, planet_key TEXT NOT NULL DEFAULT '', available_after INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS part_order (cid INTEGER NOT NULL, ord INTEGER NOT NULL, part_key TEXT, qty INTEGER, dest_kind TEXT, dest_id INTEGER, ordered INTEGER, eta INTEGER, cost INTEGER, status TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS event_log (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, text TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, battle INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
@@ -351,6 +351,9 @@ pub const Store = struct {
         // v56 (P3e.6): hull_instance_id in listing (faction surplus listings carry a real HullInstance).
         // Default 0 = .none; abstraction-path listings (house board, black market, contract world) stay 0.
         .{ .from = 55, .to = 56, .table = "listing", .column = "hull_instance_id", .sql = "ALTER TABLE listing ADD COLUMN hull_instance_id INTEGER NOT NULL DEFAULT 0" },
+        // v57 (P3f.1): dispersed black-market listing placement.
+        .{ .from = 56, .to = 57, .table = "listing", .column = "planet_key", .sql = "ALTER TABLE listing ADD COLUMN planet_key TEXT NOT NULL DEFAULT ''" },
+        .{ .from = 56, .to = 57, .table = "listing", .column = "available_after", .sql = "ALTER TABLE listing ADD COLUMN available_after INTEGER NOT NULL DEFAULT 0" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -1782,7 +1785,7 @@ pub const Store = struct {
     }
 
     fn saveListing(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO listing VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)");
+        const st = try self.db.prepare("INSERT INTO listing VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)");
         defer st.finalize();
         for (gs.market_listings.items, 0..) |l, i| {
             try st.bindAll(.{
@@ -1791,6 +1794,7 @@ pub const Store = struct {
                 @as(i64, l.listed_day),                                               @as(i64, l.expires_day),                                   @intFromEnum(l.hq),                                          if (l.condition) |c| @as(?i64, c.armor_pct) else null,
                 if (l.condition) |c| @as(?[]const u8, @tagName(c.quality)) else null, if (l.condition) |c| @as(?i64, c.damaged_slots) else null, if (l.condition) |c| @as(?i64, c.destroyed_slots) else null, if (l.condition) |c| @as(?i64, c.missing_components) else null,
                 @as(i64, @intFromBool(l.black_market)),                               @intFromEnum(l.company),                                   @intFromEnum(l.id),                                          @intFromEnum(l.hull_instance_id),
+                l.planet_key,                                                         @as(i64, l.available_after),
             });
             try st.run();
         }
@@ -2889,7 +2893,8 @@ pub const Store = struct {
         // v35 added an `id` column to listing; pre-v35 rows carry 0 and are
         // backfilled deterministically in ord order (rule 51).
         // v56 added hull_instance_id; pre-v56 rows carry 0 → .none (abstraction-path listings).
-        const st = try self.db.prepare("SELECT kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing, black, company, id, hull_instance_id FROM listing WHERE cid = ?1 ORDER BY ord");
+        // v57 added planet_key, available_after; pre-v57 rows carry defaults ('', 0).
+        const st = try self.db.prepare("SELECT kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing, black, company, id, hull_instance_id, planet_key, available_after FROM listing WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -2921,6 +2926,8 @@ pub const Store = struct {
                 .company = try toId(types.ForceId, st.int(15)),
                 .id = id,
                 .hull_instance_id = hull_instance_id,
+                .planet_key = try st.text(18, alloc),
+                .available_after = try st.intAs(u32, 19),
             };
             if (st.optInt(9)) |armor| {
                 l.condition = .{
@@ -4815,8 +4822,8 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    // Re-pinned by P3e.6 market-surplus — faction manufacturing flows surplus hulls to market.
-    try std.testing.expectEqual(@as(u64, 5307581209805942604), hash_before);
+    // Re-pinned by P3f.1 black-market data foundation — two new Listing fields in the digest.
+    try std.testing.expectEqual(@as(u64, 678860154598026402), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5311,9 +5318,9 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // Any change to a simulated or saved result moves this; re-pin it only
-    // when the change is meant. Re-pinned by P3e.6 market-surplus — faction
-    // manufacturing flows surplus hulls to market, conflict-throttled.
-    try std.testing.expectEqual(@as(u64, 5307581209805942604), digest.stateHash(&gs));
+    // when the change is meant. Re-pinned by P3f.1 black-market data foundation —
+    // two new Listing fields in the digest.
+    try std.testing.expectEqual(@as(u64, 678860154598026402), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -8317,4 +8324,150 @@ test "P3e.6: a listing with hull_instance_id naming no hull is rejected as corru
     // Tamper: the hull_instance 99999 does not exist in hull_instances.
     // validateReferences must detect this and return CorruptSave.
     try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+}
+
+test "P3f.1: dispersed listing planet_key and available_after round-trip through save/load" {
+    // Rules 45, 46, 53: a dispersed black-market listing with planet_key and
+    // available_after set saves and reloads with both fields preserved and
+    // the digest unchanged.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 57001 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    gs.clock.day_index = 5;
+
+    // Mint a market-owned HullInstance (validateReferences requires a referenced hull).
+    const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hid, .{
+        .id = hid,
+        .base_key = "SHD-2H",
+        .owner = .market,
+    });
+    try gs.hull_ownership_history.append(gs.allocator(), .{
+        .hull_instance_id = hid,
+        .from_day = 1,
+        .to_day = 0,
+        .acquisition_type = .transfer,
+        .prior_owner_key = "LC",
+    });
+
+    // Dispersed black-market listing with planet_key and available_after set.
+    const lid_dispersed: types.ListingId = @enumFromInt(gs.next_listing_id);
+    gs.next_listing_id += 1;
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = lid_dispersed,
+        .kind = .unit,
+        .item_key = "SHD-2H",
+        .rarity = .common,
+        .price = 1_200_000,
+        .listed_day = 1,
+        .expires_day = 90,
+        .black_market = true,
+        .hull_instance_id = hid,
+        .planet_key = "galatea",
+        .available_after = 100,
+    });
+
+    // Ordinary HQ listing with default values (covers the migrated/HQ path).
+    const lid_ordinary: types.ListingId = @enumFromInt(gs.next_listing_id);
+    gs.next_listing_id += 1;
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = lid_ordinary,
+        .kind = .unit,
+        .item_key = "SHD-2H",
+        .rarity = .common,
+        .price = 850_000,
+        .listed_day = 1,
+        .expires_day = 30,
+        // planet_key defaults to "", available_after defaults to 0
+    });
+
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    // Dispersed listing must preserve planet_key and available_after.
+    var found_dispersed = false;
+    var found_ordinary = false;
+    for (loaded.market_listings.items) |l| {
+        if (l.id == lid_dispersed) {
+            try std.testing.expectEqualStrings("galatea", l.planet_key);
+            try std.testing.expectEqual(@as(u32, 100), l.available_after);
+            found_dispersed = true;
+        }
+        if (l.id == lid_ordinary) {
+            try std.testing.expectEqualStrings("", l.planet_key);
+            try std.testing.expectEqual(@as(u32, 0), l.available_after);
+            found_ordinary = true;
+        }
+    }
+    try std.testing.expect(found_dispersed);
+    try std.testing.expect(found_ordinary);
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+}
+
+test "P3f.1: v56 store upgrades to v57, existing listings load with planet_key='' and available_after=0" {
+    // Rules 50, 51: a v56 store (listing table without planet_key/available_after)
+    // migrates to v57 — columns are added with defaults — and existing listings
+    // load with planet_key == "" and available_after == 0 (fail-closed, rule 49).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 57002 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+
+    // Add an abstraction-path listing (no planet_key/available_after).
+    const lid: types.ListingId = @enumFromInt(gs.next_listing_id);
+    gs.next_listing_id += 1;
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = lid,
+        .kind = .unit,
+        .item_key = "SHD-2H",
+        .rarity = .common,
+        .price = 800_000,
+        .listed_day = 1,
+        .expires_day = 62,
+        // planet_key and available_after default to "" and 0
+    });
+
+    const raw = try sqlite.Db.open(":memory:");
+    var s1 = try Store.fromDb(raw);
+    try s1.save(&gs);
+
+    // Downgrade to v56: drop planet_key and available_after from listing by recreating the table.
+    try raw.exec("PRAGMA foreign_keys = OFF");
+    try raw.exec(
+        \\ALTER TABLE listing RENAME TO listing__bak;
+        \\CREATE TABLE listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER CHECK (staple IN (0,1)), listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0 CHECK (black IN (0,1)), company INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, hull_instance_id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+        \\INSERT INTO listing SELECT cid, ord, kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing, black, company, id, hull_instance_id FROM listing__bak;
+        \\DROP TABLE listing__bak;
+        \\UPDATE setting SET value = 56 WHERE key = 'schema_version';
+        \\UPDATE campaign SET schema_version = 56;
+    );
+    try raw.exec("PRAGMA foreign_keys = ON");
+
+    // Re-open: sees v56, runs migration to add planet_key and available_after.
+    const s2 = try Store.fromDb(raw);
+    defer s2.close();
+    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
+    try std.testing.expect(try Store.hasColumnRt(raw, "listing", "planet_key"));
+    try std.testing.expect(try Store.hasColumnRt(raw, "listing", "available_after"));
+
+    // Load and verify existing listing has planet_key == "" and available_after == 0.
+    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var found = false;
+    for (loaded.market_listings.items) |l| {
+        if (l.id == lid) {
+            try std.testing.expectEqualStrings("", l.planet_key);
+            try std.testing.expectEqual(@as(u32, 0), l.available_after);
+            found = true;
+        }
+    }
+    try std.testing.expect(found);
 }

@@ -14,6 +14,8 @@ pub const Planet = struct {
     industry: u8, // 0–5: local markets, acquisition, local-purchase easing
     /// Terrain class; null = derived from the key (`terrain.terrainOf`).
     terrain: ?@import("terrain.zig").Terrain = null,
+    /// Known black-market hub: dispersed listings may surface here (docs/p3f-faction-loop-design.md §2.3).
+    black_market: bool = false,
 };
 
 pub const catalog: []const Planet = @import("planets_zon");

@@ -665,6 +665,8 @@ CREATE TABLE listing (
     black           INTEGER NOT NULL DEFAULT 0 CHECK (black IN (0,1)), -- bool: black-market offer
     company         INTEGER NOT NULL DEFAULT 0,      -- -> force.id: a contract-world hull for this deployed company
     hull_instance_id INTEGER NOT NULL DEFAULT 0,     -- .none (0) on abstraction path; real HullInstance id for faction surplus listings (P3e.6, added v56)
+    planet_key       TEXT NOT NULL DEFAULT '',        -- dispersed black-market surfacing world; '' on HQ/contract listings (P3f.1, added v57)
+    available_after  INTEGER NOT NULL DEFAULT 0,      -- day_index the listing becomes visible/buyable; 0 = already available (P3f.1, added v57)
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 

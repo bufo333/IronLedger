@@ -251,6 +251,13 @@ pub const Listing = struct {
     /// `.market` ownership; buying it transfers the instance to the player
     /// (docs/p3c-economy-design.md §2 "HullInstance ownership extension").
     hull_instance_id: types.HullInstanceId = .none,
+    /// Surfacing world for a dispersed black-market listing; empty string
+    /// on HQ-board and contract-world listings. See `black_market.buyerEligible`.
+    planet_key: []const u8 = "",
+    /// day_index from which the listing is visible and buyable; 0 = already
+    /// available (fail-closed migrated default, rule 49). A listing is absent
+    /// from every board until available_after <= day_index (rule 1).
+    available_after: u32 = 0,
 };
 
 /// Parts always on every board (weapons and ammo are readily available;
