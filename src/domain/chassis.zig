@@ -141,8 +141,9 @@ test "data: catalog loads from zon with sane values and unique keys" {
 
 test "arm actuator fields: identity crit_slots[arm] + fixed_count == 12" {
     // Chassis with .no_lower_arm (2 fixed: shoulder + upper arm) → arm free crits = 10.
+    // Source: MegaMek MTF slot layout (shoulder + upper arm, then weapons — no lower arm entry).
     const no_lower_arm_keys = [_][]const u8{
-        "CPLT-C1", "MAD-3R", "WHM-6R", "ARC-2R", "AWS-8Q", "AS7-D", "UM-R60",
+        "CPLT-C1", "RFL-3N", "UM-R60",
     };
     for (no_lower_arm_keys) |key| {
         const c = find(key).?;
@@ -151,8 +152,9 @@ test "arm actuator fields: identity crit_slots[arm] + fixed_count == 12" {
         try std.testing.expectEqual(@as(u8, 10), c.crit_slots[4]); // la index 4
         try std.testing.expectEqual(@as(u8, 10), c.crit_slots[5]); // ra index 5
     }
-    // Chassis with .no_hand (3 fixed: shoulder + upper arm + lower arm) → arm free crits = 9.
-    const no_hand_keys = [_][]const u8{"RFL-3N"};
+    // Chassis with .no_hand (3 fixed: shoulder + upper arm + lower arm, no hand) → arm free crits = 9.
+    // Source: MegaMek MTF slot layout (shoulder + upper arm + lower arm, then weapons — no hand entry).
+    const no_hand_keys = [_][]const u8{ "MAD-3R", "MAD-3D", "WHM-6R", "WHM-6D" };
     for (no_hand_keys) |key| {
         const c = find(key).?;
         try std.testing.expectEqual(ArmActuators.no_hand, c.left_arm_actuators);

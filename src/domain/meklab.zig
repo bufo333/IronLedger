@@ -28,11 +28,13 @@ pub fn freeCrits(design: *const chassis_mod.Chassis, loc: Location) u8 {
     return design.crit_slots[@intFromEnum(loc)];
 }
 
-/// Jump jets placed at `loc` for `design`, assuming an empty loadout (all slots
-/// available to the greedy fill). Fill order: ll, rl, ct, lt, rt (TechManual §10).
+/// Jump jets placed at `loc` for `design`, given `loadout_crits` already
+/// occupying slots per location (the caller's loadout pre-pass). Fill order:
+/// ll, rl, ct, lt, rt (TechManual §10). Only the remaining capacity
+/// (freeCrits - loadout_crits[loc]) is available at each location.
 /// Rule 20 single owner — call this instead of re-deriving in consumers.
-pub fn jumpJetsAt(design: *const chassis_mod.Chassis, loc: Location) u8 {
-    var crits_used: [location_count]u8 = .{0} ** location_count;
+pub fn jumpJetsAt(design: *const chassis_mod.Chassis, loc: Location, loadout_crits: [location_count]u8) u8 {
+    var crits_used = loadout_crits;
     var jets: u32 = design.jump_mp;
     const jet_order = [_]Location{ .ll, .rl, .ct, .lt, .rt };
     for (jet_order) |jloc| {
@@ -40,20 +42,23 @@ pub fn jumpJetsAt(design: *const chassis_mod.Chassis, loc: Location) u8 {
             crits_used[@intFromEnum(jloc)] += 1;
         }
     }
-    return crits_used[@intFromEnum(loc)];
+    return crits_used[@intFromEnum(loc)] - loadout_crits[@intFromEnum(loc)];
 }
 
 /// Number of implicit (non-loadout) crit slots occupied at `loc` by jump jets
-/// and loose heat sinks for `design`, assuming an empty loadout (all slots
-/// available to the greedy fill). This is the one owner (rule 20) for this
-/// predicate; labLayout and any future consumer must call this instead of
-/// re-deriving it.
+/// and loose heat sinks for `design`, given `loadout_crits` already occupying
+/// slots per location (the caller's loadout pre-pass). This is the one owner
+/// (rule 20) for this predicate; labLayout and any future consumer must call
+/// this instead of re-deriving it. Passing all-zeros is valid when no loadout
+/// has been placed (e.g. pure chassis analysis).
 ///
 /// JJ fill order: ll, rl, ct, lt, rt (TechManual §10).
 /// Loose HS count: heat_sinks - min(heat_sinks, engineRating() / 25).
 /// Loose HS fill order: ll, rl, lt, rt, la, ra, ct, hd (TechManual §10).
-pub fn implicitOccupants(design: *const chassis_mod.Chassis, loc: Location) u8 {
-    var crits_used: [location_count]u8 = .{0} ** location_count;
+/// Only the remaining capacity (freeCrits - loadout_crits[loc]) is available
+/// at each location; the fill is therefore loadout-aware.
+pub fn implicitOccupants(design: *const chassis_mod.Chassis, loc: Location, loadout_crits: [location_count]u8) u8 {
+    var crits_used = loadout_crits;
     var jets: u32 = design.jump_mp;
     const jet_order = [_]Location{ .ll, .rl, .ct, .lt, .rt };
     for (jet_order) |jloc| {
@@ -69,7 +74,7 @@ pub fn implicitOccupants(design: *const chassis_mod.Chassis, loc: Location) u8 {
             crits_used[@intFromEnum(sloc)] += 1;
         }
     }
-    return crits_used[@intFromEnum(loc)];
+    return crits_used[@intFromEnum(loc)] - loadout_crits[@intFromEnum(loc)];
 }
 
 pub fn isTorso(loc: Location) bool {

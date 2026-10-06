@@ -3797,6 +3797,28 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
     const design = chassis_mod.find(u.chassis_key) orelse return &.{};
     if (u.kind != .mek) return &.{};
 
+    // Pre-pass: count loadout crits already placed per location (live slots minus
+    // staged removes, plus staged installs). This loadout-aware tally is passed
+    // to implicitOccupants / jumpJetsAt so the implicit fill respects space
+    // already consumed by weapons and equipment (rule 20 single owner).
+    var loadout_crits_all: [meklab.location_count]u8 = @splat(0);
+    for (u.slots.items) |s| {
+        if (s.class == .structure) continue;
+        const sloc_all = meklab.parseLocation(s.slot_key) orelse continue;
+        var removed_all = false;
+        if (gs.refitPlanFor(uid)) |p| for (p.ops.items) |op| {
+            if (op == .remove and std.mem.eql(u8, op.remove, s.slot_key)) removed_all = true;
+        };
+        if (removed_all) continue;
+        const crits_all: u8 = if (part_dom.find(s.part_key)) |d| d.crits else 1;
+        loadout_crits_all[@intFromEnum(sloc_all)] +|= crits_all;
+    }
+    if (gs.refitPlanFor(uid)) |p| for (p.ops.items) |op| {
+        if (op != .install) continue;
+        const crits_all: u8 = if (part_dom.find(op.install.part_key)) |d| d.crits else 1;
+        loadout_crits_all[@intFromEnum(op.install.location)] +|= crits_all;
+    };
+
     var boxes: std.ArrayListUnmanaged(LocationBox) = .empty;
     inline for (@typeInfo(meklab.Location).@"enum".fields) |f| {
         const loc: meklab.Location = @enumFromInt(f.value);
@@ -3880,9 +3902,10 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
 
         // Derived equipment: jump jets and loose heat sinks for this location.
         // Counts come from meklab (rule 20 single owner); same formula and fill
-        // order as meklab.validate's implicit-occupant pass.
-        const jj_count: u8 = meklab.jumpJetsAt(design, loc);
-        const implicit_count: u8 = meklab.implicitOccupants(design, loc);
+        // order as meklab.validate's implicit-occupant pass. loadout_crits_all
+        // is passed so the fill only uses remaining capacity (loadout-aware).
+        const jj_count: u8 = meklab.jumpJetsAt(design, loc, loadout_crits_all);
+        const implicit_count: u8 = meklab.implicitOccupants(design, loc, loadout_crits_all);
         const hs_count: u8 = implicit_count - jj_count;
         var ji: u8 = 0;
         while (ji < jj_count) : (ji += 1) {
@@ -8991,36 +9014,46 @@ test "partsFittingLocation: a part legal at one location but not another is corr
     try std.testing.expect(found_torso_part);
 }
 
-test "labLayout implicit occupants match meklab for every catalogue mek" {
-    // Verifies rule-20 single-owner invariant: the diagram and the validator use
-    // the same formula for jump jet and loose heat sink slot counts per location.
+test "labLayout: no location box exceeds physicalTotal; crits_free matches validate" {
+    // Non-circular: directly checks that labLayout produces at most physicalTotal(loc)
+    // rows per location for meks where loadout occupies HS/JJ fill locations.
+    // AWS-8Q is the discriminating case: it has PPCs in RT and LT (3 crits each);
+    // an empty-frame fill would overflow those locations with its 19 loose heat sinks.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 13 });
     defer gs.deinit();
-    const commands = @import("commands.zig");
-    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .CC, .profession = .paymaster } });
-    _ = try commands.execute(&gs, .{ .new_company = "Foxtrot" });
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();
-    const meks = try labMeks(al, &gs);
-    try std.testing.expect(meks.len > 0);
-    for (meks) |uid| {
-        const u = gs.unit(uid) orelse continue;
-        const design = chassis_mod.find(u.chassis_key) orelse continue;
+
+    for (&[_][]const u8{ "AWS-8Q", "GHR-5H" }) |chassis_key| {
+        const uid = try gs.addUnit(chassis_key);
+        const design = chassis_mod.find(chassis_key).?;
+
+        // Build the validate report for crits_free ground truth.
+        const items = try meklab.itemsFromSlots(gs.unit(uid).?.slots.items, al);
+        const report = try meklab.validate(design, items, al);
+
         const boxes = try labLayout(al, &gs, uid);
+        try std.testing.expectEqual(@as(usize, 8), boxes.len);
         for (boxes) |box| {
-            // Count rows that are implicit occupants (equipment rows with no slot/part key).
-            var implicit_rows: u8 = 0;
-            for (box.rows) |row| {
-                if (row.kind == .equipment and row.slot_key.len == 0 and row.part_key.len == 0) {
-                    implicit_rows += 1;
-                }
-            }
-            const expected = meklab.implicitOccupants(design, box.loc);
-            if (implicit_rows != expected) {
+            const total = meklab.physicalTotal(box.loc);
+            if (box.rows.len > total) {
                 std.debug.print(
-                    "implicit mismatch: chassis={s} loc={s} diagram={d} meklab={d}\n",
-                    .{ u.chassis_key, @tagName(box.loc), implicit_rows, expected },
+                    "over-capacity: chassis={s} loc={s} rows={d} max={d}\n",
+                    .{ chassis_key, @tagName(box.loc), box.rows.len, total },
+                );
+                return error.TestUnexpectedResult;
+            }
+            // Free rows in the diagram must match validate's crits_free for this location.
+            var free_rows: u8 = 0;
+            for (box.rows) |row| if (row.kind == .free) {
+                free_rows += 1;
+            };
+            const expected_free = report.crits_free[@intFromEnum(box.loc)];
+            if (free_rows != expected_free) {
+                std.debug.print(
+                    "free mismatch: chassis={s} loc={s} diagram_free={d} validate_free={d}\n",
+                    .{ chassis_key, @tagName(box.loc), free_rows, expected_free },
                 );
                 return error.TestUnexpectedResult;
             }
