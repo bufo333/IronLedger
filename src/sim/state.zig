@@ -935,28 +935,6 @@ pub const GameState = struct {
         });
     }
 
-    /// The one writer for moving a faction pool hull onto the market (rule 20/3):
-    /// set owner to `.market`, close the open ownership interval, and open a new
-    /// `.transfer` interval naming the faction as prior owner. `faction_key` is
-    /// duped into the campaign arena. Callers invoke this in the commit phase after
-    /// reserving capacity for the new ownership row (docs/p3c-economy-design.md §2).
-    pub fn listFactionHullOnMarket(self: *GameState, hid: types.HullInstanceId, faction_key: []const u8) !void {
-        const alloc = self.allocator();
-        const inst = self.hull_instances.getPtr(hid) orelse return;
-        inst.owner = .market;
-        const owned_key = try alloc.dupe(u8, faction_key);
-        for (self.hull_ownership_history.items) |*h| {
-            if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = self.clock.day_index;
-        }
-        try self.hull_ownership_history.append(alloc, .{
-            .hull_instance_id = hid,
-            .from_day = self.clock.day_index,
-            .to_day = 0,
-            .acquisition_type = .transfer,
-            .prior_owner_key = owned_key,
-        });
-    }
-
     /// The one writer for returning an unsold market hull to its origin faction
     /// (rule 20/3): read the open ownership interval's `prior_owner_key` as the
     /// origin faction, set owner to `.{ .faction = key }`, open a new `.transfer`

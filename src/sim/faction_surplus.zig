@@ -172,7 +172,7 @@ pub fn runMonthly(gs: *GameState) !void {
             // Pop them in reverse order to keep indices stable.
             _ = roster.orderedRemove(roster.items.len - (to_market - li));
 
-            // Transfer ownership: faction → market.
+            // Transfer ownership: faction → market (rule 20/3 — single owner of this transition).
             const inst_ptr = gs.hull_instances.getPtr(hid).?;
             inst_ptr.owner = .market;
             // Close the initial ownership interval.
