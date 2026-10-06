@@ -14,23 +14,46 @@ const part_mod = @import("../domain/part.zig");
 const planet_mod = @import("../domain/planet.zig");
 const tuning = @import("../domain/tuning.zig").t;
 const hull_instance_mod = @import("../domain/hull_instance.zig");
+const roster_gen = @import("../gen/roster_gen.zig");
+const faction_mod = @import("../domain/faction.zig");
 
 /// Who is evaluating a black-market listing offer.
 pub const BuyerKind = enum { player, pirate, merc_company };
 
 /// Single owner of the "can buyer X take listing Y" rule (rule 20/3).
-/// Returns true iff the listing is a black-market offer whose visibility
-/// window has opened on the given day.
-/// `gs` and `buyer` are retained for the P3f.3 per-buyer reach gate on
-/// listing.planet_key; until then every black-market world is reachable
-/// by every buyer.
+/// Returns true iff: (1) the listing is a black-market offer, (2) its
+/// visibility window has opened (`available_after <= current_day`), AND
+/// (3) `buyer` can reach `listing.planet_key`.
+///
+/// Reach rules (docs/p3f-faction-loop-design.md §2.3, §4; shipped P3f.3
+/// per owner decision):
+///   .pirate       — reaches worlds whose faction == "PER" only.
+///   .merc_company — reaches worlds whose faction != "PER" only.
+///   .player       — reaches a world that is one of its HQ worlds, or a
+///                   world where one of its companies is deployed on an
+///                   active contract.
+/// Gates (1) and (2) are buyer-independent. An empty or unknown
+/// `listing.planet_key` (HQ-board/abstraction black-market offers) is
+/// unreachable by any buyer. `gs` is read only for the `.player` branch.
 pub fn buyerEligible(gs: *const GameState, listing: market.Listing, buyer: BuyerKind, current_day: u32) bool {
-    _ = gs;
-    _ = buyer;
     if (!listing.black_market) return false;
     if (listing.available_after > current_day) return false;
-    // P3f.3 fills per-buyer reach gating of listing.planet_key.
-    return true;
+    const planet = planet_mod.find(listing.planet_key) orelse return false;
+    switch (buyer) {
+        // "PER" literal: precedent at contract_market.zig:1131.
+        .pirate => return std.mem.eql(u8, planet.faction, "PER"),
+        .merc_company => return !std.mem.eql(u8, planet.faction, "PER"),
+        .player => {
+            for (gs.hqs.values()) |h| {
+                if (std.mem.eql(u8, h.planet_key, listing.planet_key)) return true;
+            }
+            for (gs.contracts.values()) |c| {
+                if (c.status == .active and c.assigned_company != .none and
+                    std.mem.eql(u8, c.planet_key, listing.planet_key)) return true;
+            }
+            return false;
+        },
+    }
 }
 
 /// Single owner of dispersed black-market listing construction (rule 20).
@@ -211,6 +234,254 @@ pub fn disperseEnemyWrecks(
 
     gs.next_listing_id = next_listing;
     // gs.rng is NOT written here — the caller commits it.
+}
+
+/// Single owner of the monthly NPC black-market consumption rule
+/// (rule 20/76/77; docs/p3f-faction-loop-design.md §4.1).
+///
+/// Called from tick.zig runMarkets on day == 1, AFTER faction_surplus.runMonthly
+/// (so NPCs see freshly minted listings) and BEFORE the player board is surfaced.
+/// Draw order: pirates (PER) first, then each merc company in
+/// gs.merc_companies.keys() order (insertion order == MercCompanyId order);
+/// within each buyer the listing is chosen by a .market draw over the remaining
+/// eligible set. Asset-safety: no player funds, forces, or units are touched.
+/// gs.rng committed only on success (rules 7/11-13).
+/// Each NPC buyer is evaluated with its own BuyerKind, so per-buyer reach
+/// gating applies (pirates→PER worlds, mercs→non-PER worlds); the
+/// kind==.unit and hull_instance_id!=.none guard excludes legacy abstraction
+/// black-market offers and part listings (rule 1).
+pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
+    const day = gs.clock.day_index;
+    const alloc = gs.allocator();
+
+    // Locate the PER faction key (fail-closed if absent).
+    const per_row = faction_mod.find("PER") orelse return;
+    const per_key = per_row.key; // static catalogue memory
+
+    // Build the ordered buyer list on a fixed stack buffer:
+    // entry 0 = pirate (PER), then one per merc company in insertion order.
+    const max_buyers: usize = 256 + 1;
+    const BuyerEntry = struct {
+        kind: BuyerKind,
+        merc_id: types.MercCompanyId, // .none for pirate
+    };
+    var buyers_buf: [max_buyers]BuyerEntry = undefined;
+    var buyers_len: usize = 0;
+    buyers_buf[buyers_len] = .{ .kind = .pirate, .merc_id = .none };
+    buyers_len += 1;
+    const merc_keys = gs.merc_companies.keys();
+    const mercs_count = @min(merc_keys.len, max_buyers - 1);
+    for (0..mercs_count) |mi| {
+        buyers_buf[buyers_len] = .{ .kind = .merc_company, .merc_id = merc_keys[mi] };
+        buyers_len += 1;
+    }
+
+    // ---- Prepare (fallible; no logical gs mutation) ----
+    var rng_copy = gs.rng;
+
+    // Consumed marker: one bool per listing, prevents two buyers from
+    // taking the same hull (rule 1).
+    const consumed = try alloc.alloc(bool, gs.market_listings.items.len);
+    @memset(consumed, false);
+
+    // Build consumption plan: for each buyer in order, build that buyer's
+    // per-buyer eligible set from the not-yet-consumed listings and draw up
+    // to npc_black_market_draws_per_month. Pirates reach only PER worlds;
+    // mercs reach only non-PER worlds (buyerEligible reach rules; disjoint
+    // sets). kind==.unit and hull_instance_id!=.none exclude legacy
+    // abstraction offers and part listings (rule 1).
+    const Plan = struct { buyer_idx: usize, listing_idx: usize };
+    var plan: std.ArrayListUnmanaged(Plan) = .empty;
+    for (0..buyers_len) |bi| {
+        var elig: std.ArrayListUnmanaged(usize) = .empty;
+        for (gs.market_listings.items, 0..) |l, i| {
+            if (consumed[i]) continue;
+            if (!buyerEligible(gs, l, buyers_buf[bi].kind, day)) continue;
+            if (l.kind != .unit) continue;
+            if (l.hull_instance_id == .none) continue;
+            try elig.append(alloc, i);
+        }
+        if (elig.items.len == 0) continue;
+        const take = @min(tuning.market.npc_black_market_draws_per_month, elig.items.len);
+        for (0..take) |_| {
+            const j = rng_copy.random(.market).uintLessThan(usize, elig.items.len);
+            const idx = elig.items[j];
+            try plan.append(alloc, .{ .buyer_idx = bi, .listing_idx = idx });
+            consumed[idx] = true;
+            _ = elig.swapRemove(j);
+        }
+    }
+
+    if (plan.items.len == 0) return;
+
+    // Count per-buyer takes from the plan.
+    var pirate_take: usize = 0;
+    var merc_takes_buf: [max_buyers - 1]usize = [_]usize{0} ** (max_buyers - 1);
+    for (plan.items) |entry| {
+        if (entry.buyer_idx == 0) {
+            pirate_take += 1;
+        } else {
+            merc_takes_buf[entry.buyer_idx - 1] += 1;
+        }
+    }
+    var distinct_mercs: usize = 0;
+    for (0..mercs_count) |mi| {
+        if (merc_takes_buf[mi] > 0) distinct_mercs += 1;
+    }
+
+    // Reserve capacity: one ownership history row per consumed hull.
+    try gs.hull_ownership_history.ensureUnusedCapacity(alloc, plan.items.len);
+
+    // Reserve PER roster capacity.
+    if (pirate_take > 0) {
+        try gs.faction_rosters.ensureUnusedCapacity(alloc, 1);
+        const gop = try gs.faction_rosters.getOrPut(alloc, per_key);
+        if (!gop.found_existing) gop.value_ptr.* = .empty;
+        try gop.value_ptr.ensureUnusedCapacity(alloc, pirate_take);
+    }
+
+    // Reserve merc roster capacities (ensureUnusedCapacity on the map first to
+    // prevent rehash invalidating existing pointers during successive getOrPuts).
+    if (distinct_mercs > 0) {
+        try gs.merc_company_rosters.ensureUnusedCapacity(alloc, distinct_mercs);
+        for (0..mercs_count) |mi| {
+            if (merc_takes_buf[mi] == 0) continue;
+            const merc_id = buyers_buf[mi + 1].merc_id;
+            const gop = try gs.merc_company_rosters.getOrPut(alloc, merc_id);
+            if (!gop.found_existing) gop.value_ptr.* = .empty;
+            try gop.value_ptr.ensureUnusedCapacity(alloc, merc_takes_buf[mi]);
+            // Do NOT retain gop.value_ptr across additional getOrPut calls
+            // (rehash hazard); re-fetch via getPtr in the commit phase.
+        }
+    }
+
+    // ---- Commit (infallible: no allocation past this point) ----
+    for (plan.items) |entry| {
+        const l = gs.market_listings.items[entry.listing_idx];
+        const hid = l.hull_instance_id;
+        const inst = gs.hull_instances.getPtr(hid).?;
+
+        if (entry.buyer_idx == 0) {
+            // Pirate (PER) acquisition.
+            inst.owner = .{ .faction = per_key };
+            inst.status = .active;
+            for (gs.hull_ownership_history.items) |*h| {
+                if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = day;
+            }
+            gs.hull_ownership_history.appendAssumeCapacity(.{
+                .hull_instance_id = hid,
+                .from_day = day,
+                .to_day = 0,
+                .acquisition_type = .transfer,
+                .prior_owner_key = "market", // static string literal — no dupe needed
+            });
+            gs.faction_rosters.getPtr(per_key).?.appendAssumeCapacity(hid);
+        } else {
+            // Merc company acquisition.
+            const merc_id = buyers_buf[entry.buyer_idx].merc_id;
+            inst.owner = .{ .merc_company = merc_id };
+            inst.status = .active;
+            for (gs.hull_ownership_history.items) |*h| {
+                if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = day;
+            }
+            gs.hull_ownership_history.appendAssumeCapacity(.{
+                .hull_instance_id = hid,
+                .from_day = day,
+                .to_day = 0,
+                .acquisition_type = .transfer,
+                .prior_owner_key = "market",
+            });
+            gs.merc_company_rosters.getPtr(merc_id).?.appendAssumeCapacity(hid);
+        }
+    }
+
+    // Remove consumed listings infallibly: sort by listing_idx descending so
+    // each orderedRemove does not shift any remaining consumed index.
+    std.mem.sort(Plan, plan.items, {}, struct {
+        fn desc(_: void, a: Plan, b: Plan) bool {
+            return a.listing_idx > b.listing_idx;
+        }
+    }.desc);
+    for (plan.items) |entry| {
+        _ = gs.market_listings.orderedRemove(entry.listing_idx);
+    }
+
+    gs.rng = rng_copy;
+}
+
+/// Single owner of the monthly pirate-pool trickle rule (rule 20/76/77;
+/// docs/p3f-faction-loop-design.md §2.6, §7 delivery table).
+///
+/// Called from tick.zig runMarkets on day == 1, after runNpcBlackMarketDraw.
+/// Mints a fractional monthly share of tuning.generation.pirate_replenishment_hulls_per_year
+/// new hulls into faction_rosters["PER"] via the PER RAT, advancing the .rosters
+/// stream. Independent of the market (does not consume listings; creates fresh hulls).
+/// gs.rng committed only on success (rules 7/11-13).
+pub fn runPirateReplenishment(gs: *GameState) !void {
+    const day = gs.clock.day_index;
+    const from_day = day -| types.days_per_month;
+    const year = gs.clock.date.year;
+    const alloc = gs.allocator();
+
+    // Locate PER; fail-closed if absent (matches seedPirateRoster).
+    const per_row = faction_mod.find("PER") orelse return;
+    const per_key = per_row.key; // static catalogue memory
+
+    const output = market.factionManufacturedBetween(
+        from_day,
+        day,
+        tuning.generation.pirate_replenishment_hulls_per_year,
+    );
+    if (output == 0) return; // no draw, no rng commit, no mutation
+
+    // ---- Prepare (fallible) ----
+    var rng_copy = gs.rng;
+    var next_id = gs.next_hull_instance_id;
+
+    try gs.hull_instances.ensureUnusedCapacity(alloc, output);
+    try gs.hull_ownership_history.ensureUnusedCapacity(alloc, output);
+    try gs.faction_rosters.ensureUnusedCapacity(alloc, 1);
+    const roster_gop = try gs.faction_rosters.getOrPut(alloc, per_key);
+    if (!roster_gop.found_existing) roster_gop.value_ptr.* = .empty;
+    try roster_gop.value_ptr.ensureUnusedCapacity(alloc, output);
+
+    // Pre-build HullInstance values (loadout appends are fallible — must happen here
+    // in the prepare phase, before any gs mutation).
+    const built = try alloc.alloc(hull_instance_mod.HullInstance, output);
+    for (built) |*inst| inst.* = hull_instance_mod.HullInstance{};
+    for (0..output) |idx| {
+        const hid: types.HullInstanceId = @enumFromInt(next_id);
+        next_id += 1;
+        const ch = roster_gen.rollFactionPoolOne(&rng_copy, .rosters, per_key, year);
+        var inst: hull_instance_mod.HullInstance = .{
+            .id = hid,
+            .base_key = ch.key, // static catalogue memory
+            .status = .active,
+            .intro_year = ch.intro_year,
+            .pre_campaign = false, // minted during the campaign (unlike seedPirateRoster)
+            .owner = .{ .faction = per_key }, // static catalogue key
+        };
+        for (ch.loadout) |slot| {
+            try inst.loadout.append(alloc, .{ .part_key = slot.part });
+        }
+        built[idx] = inst;
+    }
+
+    // ---- Commit (infallible: no allocation past this point) ----
+    const roster = roster_gop.value_ptr;
+    for (built) |inst| {
+        gs.hull_instances.putAssumeCapacity(inst.id, inst);
+        gs.hull_ownership_history.appendAssumeCapacity(.{
+            .hull_instance_id = inst.id,
+            .from_day = day,
+            .to_day = 0,
+            .acquisition_type = .initial,
+            .prior_owner_key = per_key, // static catalogue key — no dupe needed
+        });
+        roster.appendAssumeCapacity(inst.id);
+    }
+    gs.next_hull_instance_id = next_id;
+    gs.rng = rng_copy;
 }
 
 // ---- Tests ---------------------------------------------------------------
@@ -424,10 +695,11 @@ test "disperseEnemyWrecks: a failing allocator leaves stateHash unchanged" {
     }
 }
 
-test "buyerEligible: black_market flag and available_after gate access for all BuyerKinds" {
-    // Rule 67: buyerEligible is the single owner of the black-market listing
-    // eligibility predicate. Table-driven over the two axes:
-    // {black_market true/false} x {available_after <= current_day / >}.
+test "buyerEligible: black_market flag and available_after window gates (buyer-independent)" {
+    // Rule 67: buyerEligible gates (1) black_market flag and (2) available_after
+    // window are buyer-independent and evaluated before reach. Table exercises
+    // each gate independently. The reach dimension is covered by the dedicated
+    // reach tests below.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 57100 });
     defer gs.deinit();
 
@@ -445,20 +717,217 @@ test "buyerEligible: black_market flag and available_after gate access for all B
         .{ .black_market = false, .available_after = 0, .want = false },
         .{ .black_market = false, .available_after = 50, .want = false },
     };
-    const buyers = [_]BuyerKind{ .player, .pirate, .merc_company };
 
     for (cases) |c| {
+        if (c.want) {
+            // want=true: use a PER world with .pirate buyer so reach is satisfied.
+            // Isolates gates (1) and (2) from the reach dimension.
+            const listing = market.Listing{
+                .kind = .unit,
+                .item_key = "SHD-2H",
+                .rarity = .common,
+                .price = 0,
+                .black_market = c.black_market,
+                .available_after = c.available_after,
+                .planet_key = "antallos",
+            };
+            try std.testing.expectEqual(c.want, buyerEligible(&gs, listing, .pirate, current_day));
+        } else {
+            // want=false: these rows fail at gate (1) or (2), before reach.
+            // Buyer-independent: verify all three buyer kinds return false.
+            const buyers = [_]BuyerKind{ .player, .pirate, .merc_company };
+            const listing = market.Listing{
+                .kind = .unit,
+                .item_key = "SHD-2H",
+                .rarity = .common,
+                .price = 0,
+                .black_market = c.black_market,
+                .available_after = c.available_after,
+            };
+            for (buyers) |buyer| {
+                try std.testing.expectEqual(c.want, buyerEligible(&gs, listing, buyer, current_day));
+            }
+        }
+    }
+}
+
+test "buyerEligible: pirate reaches PER worlds, merc companies reach non-PER worlds" {
+    // Rule 67: reach-rule table. For each of the eight black-market worlds,
+    // pirate→PER only; merc_company→non-PER only (disjoint sets). One invariant,
+    // one table (test proportionality). gs not needed for these two buyer kinds.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 57101 });
+    defer gs.deinit();
+
+    const current_day: u32 = 100;
+    const Row = struct { key: []const u8, is_per: bool };
+    const worlds = [_]Row{
+        .{ .key = "antallos", .is_per = true },
+        .{ .key = "tortuga_prime", .is_per = true },
+        .{ .key = "star_s_end", .is_per = true },
+        .{ .key = "herotitus", .is_per = true },
+        .{ .key = "galatea", .is_per = false },
+        .{ .key = "solaris7", .is_per = false },
+        .{ .key = "outreach", .is_per = false },
+        .{ .key = "canopus4", .is_per = false },
+    };
+
+    for (worlds) |w| {
         const listing = market.Listing{
             .kind = .unit,
             .item_key = "SHD-2H",
             .rarity = .common,
             .price = 0,
-            .black_market = c.black_market,
-            .available_after = c.available_after,
+            .black_market = true,
+            .available_after = 0,
+            .planet_key = w.key,
         };
-        for (buyers) |buyer| {
-            const got = buyerEligible(&gs, listing, buyer, current_day);
-            try std.testing.expectEqual(c.want, got);
+        try std.testing.expectEqual(w.is_per, buyerEligible(&gs, listing, .pirate, current_day));
+        try std.testing.expectEqual(!w.is_per, buyerEligible(&gs, listing, .merc_company, current_day));
+    }
+}
+
+test "buyerEligible: player reaches HQ worlds and active-contract worlds only" {
+    // Rule 67: player reach branches. HQ world → true; active-contract deployed
+    // world → true; unrelated world → false; transit contract (non-active) → false.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 57102 });
+    defer gs.deinit();
+
+    const current_day: u32 = 100;
+    const hq_id: types.HqId = @enumFromInt(1);
+    const contract_id: types.ContractId = @enumFromInt(1);
+    const transit_id: types.ContractId = @enumFromInt(2);
+    const force_id: types.ForceId = @enumFromInt(1);
+
+    // HQ on galatea.
+    try gs.hqs.put(gs.allocator(), hq_id, .{
+        .id = hq_id,
+        .name = "Test HQ",
+        .tier = .field,
+        .planet_key = "galatea",
+    });
+    // Active contract with a deployed company on solaris7.
+    try gs.contracts.put(gs.allocator(), contract_id, .{
+        .id = contract_id,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "Bandits",
+        .planet_key = "solaris7",
+        .terms = .{ .length_months = 6, .base_pay_month = 0 },
+        .status = .active,
+        .assigned_company = force_id,
+    });
+    // Transit contract on outreach: transit != active → no reach.
+    try gs.contracts.put(gs.allocator(), transit_id, .{
+        .id = transit_id,
+        .kind = .garrison_duty,
+        .employer_key = "FWL",
+        .enemy_key = "Bandits",
+        .planet_key = "outreach",
+        .terms = .{ .length_months = 6, .base_pay_month = 0 },
+        .status = .transit,
+        .assigned_company = force_id,
+    });
+
+    const mkL = struct {
+        fn f(pk: []const u8) market.Listing {
+            return .{ .kind = .unit, .item_key = "SHD-2H", .rarity = .common, .price = 0, .black_market = true, .available_after = 0, .planet_key = pk };
+        }
+    }.f;
+
+    // HQ world: reachable.
+    try std.testing.expect(buyerEligible(&gs, mkL("galatea"), .player, current_day));
+    // Active-contract deployed world: reachable.
+    try std.testing.expect(buyerEligible(&gs, mkL("solaris7"), .player, current_day));
+    // Unrelated world: not reachable.
+    try std.testing.expect(!buyerEligible(&gs, mkL("antallos"), .player, current_day));
+    // Transit contract world (non-active): not reachable.
+    try std.testing.expect(!buyerEligible(&gs, mkL("outreach"), .player, current_day));
+}
+
+test "runNpcBlackMarketDraw: pirates consume only PER-world listings, mercs only non-PER; asset-safety" {
+    // Rule 67: consumer-agreement test. Seed 2 PER-world listings (antallos)
+    // and 2 non-PER listings (galatea). Pirates (reach: PER only) take the
+    // first; mercs (reach: non-PER only) take the second. Asset-safety: player
+    // funds unchanged (rule 67, P3f.3 §7).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 57103 });
+    defer gs.deinit();
+
+    // One merc company so buyers_buf includes a merc entry.
+    const merc_id: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id });
+
+    const day: u32 = 30;
+    gs.clock.day_index = day;
+
+    // Seed 4 hull instances: 0–1 will back PER listings, 2–3 non-PER.
+    var hull_ids: [4]types.HullInstanceId = undefined;
+    for (0..4) |i| {
+        const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+        gs.next_hull_instance_id += 1;
+        hull_ids[i] = hid;
+        try gs.hull_instances.put(gs.allocator(), hid, .{
+            .id = hid,
+            .base_key = "LCT-1V",
+            .owner = .market,
+            .status = .active,
+        });
+        try gs.hull_ownership_history.append(gs.allocator(), .{
+            .hull_instance_id = hid,
+            .from_day = 0,
+            .to_day = 0,
+            .acquisition_type = .transfer,
+            .prior_owner_key = "DC",
+        });
+    }
+
+    // Build listings: hull_ids[0,1] on "antallos" (PER), hull_ids[2,3] on "galatea" (non-PER).
+    for (0..4) |i| {
+        const pk: []const u8 = if (i < 2) "antallos" else "galatea";
+        const lid: types.ListingId = @enumFromInt(gs.next_listing_id);
+        gs.next_listing_id += 1;
+        try gs.market_listings.append(gs.allocator(), .{
+            .kind = .unit,
+            .item_key = "LCT-1V",
+            .rarity = .common,
+            .price = 0,
+            .black_market = true,
+            .available_after = 0,
+            .planet_key = pk,
+            .hull_instance_id = hull_ids[i],
+            .id = lid,
+        });
+    }
+
+    const funds_before = gs.funds;
+
+    try runNpcBlackMarketDraw(&gs);
+
+    // Asset-safety: player funds unchanged.
+    try std.testing.expectEqual(funds_before, gs.funds);
+
+    // Pirate (PER) roster: every hull came from a PER-world listing (hull_ids[0] or [1]).
+    if (gs.faction_rosters.get("PER")) |per_roster| {
+        for (per_roster.items) |hid| {
+            try std.testing.expect(hid == hull_ids[0] or hid == hull_ids[1]);
+        }
+    }
+
+    // Merc company roster: every hull came from a non-PER listing (hull_ids[2] or [3]).
+    if (gs.merc_company_rosters.get(merc_id)) |merc_roster| {
+        for (merc_roster.items) |hid| {
+            try std.testing.expect(hid == hull_ids[2] or hid == hull_ids[3]);
+        }
+    }
+
+    // No PER-world hull in merc roster; no non-PER hull in pirate roster.
+    if (gs.faction_rosters.get("PER")) |per_roster| {
+        for (per_roster.items) |hid| {
+            try std.testing.expect(hid != hull_ids[2] and hid != hull_ids[3]);
+        }
+    }
+    if (gs.merc_company_rosters.get(merc_id)) |merc_roster| {
+        for (merc_roster.items) |hid| {
+            try std.testing.expect(hid != hull_ids[0] and hid != hull_ids[1]);
         }
     }
 }

@@ -203,6 +203,10 @@ pub const Tuning = struct {
         /// How many dispersed black-market listings the enemy faction may
         /// place per recovery pass (docs/p3f-faction-loop-design.md §2.6). // TUNE
         enemy_recovery_capacity: u8,
+        /// How many eligible dispersed black-market listings each NPC buyer (pirate
+        /// band, then each merc company) may consume per monthly tick
+        /// (docs/p3f-faction-loop-design.md §4.1). // TUNE
+        npc_black_market_draws_per_month: u8,
     },
     /// Medical staffing and recovery (MekHQ ratios); project-chosen constants // TUNE.
     medical: struct {

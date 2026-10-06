@@ -13,6 +13,7 @@ const treasury = @import("treasury.zig");
 const types = @import("../domain/types.zig");
 const contract_market = @import("contract_market.zig");
 const faction_surplus = @import("faction_surplus.zig");
+const black_market = @import("black_market.zig");
 const maintenance = @import("maintenance.zig");
 const contract_events = @import("contract_events.zig");
 const battle = @import("battle.zig");
@@ -533,6 +534,9 @@ fn runMarkets(gs: *GameState) !void {
     try contract_market.refresh(gs);
     try contract_market.refreshListings(gs);
     try faction_surplus.runMonthly(gs);
+    // Order is part of the spec: new faction listings first, then NPC consumption, then pirate trickle.
+    try black_market.runNpcBlackMarketDraw(gs); // NPC buyers consume dispersed listings before the player board
+    try black_market.runPirateReplenishment(gs); // pirate pool monthly trickle (independent of market)
 }
 
 /// contract lifecycle: transit arrivals and completions, checked daily.

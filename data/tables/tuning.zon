@@ -134,6 +134,7 @@
         .black_market_delay_days_min = 7, // TUNE — docs/p3f-faction-loop-design.md §2.6
         .black_market_delay_days_max = 30, // TUNE — docs/p3f-faction-loop-design.md §2.6
         .enemy_recovery_capacity = 2, // TUNE — docs/p3f-faction-loop-design.md §2.6
+        .npc_black_market_draws_per_month = 2, // TUNE — docs/p3f-faction-loop-design.md §4.1
     },
     // Medical staffing and recovery (MekHQ ratios); project-chosen constants // TUNE.
     .medical = .{

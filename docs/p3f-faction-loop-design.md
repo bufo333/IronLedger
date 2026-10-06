@@ -175,9 +175,10 @@ dispersed listings.
 /// The canonical "can this buyer take this listing?" predicate (rule 20/3).
 /// buyer is player, pirate band (PER faction key), or merc company identity.
 /// Returns false if listing.available_after > gs.clock.day_index.
-/// Returns false if listing.planet_key is non-empty and buyer cannot reach it
-/// (reach rule: // TUNE — initially "all buyers can reach all black-market
-/// worlds"; spatial gating is a future P4 concern).
+/// Returns false if buyer cannot reach listing.planet_key.
+/// Reach rules (shipped P3f.3 per owner decision): pirate→PER worlds only;
+/// merc_company→non-PER worlds only; player→HQ worlds or active-contract
+/// deployed worlds; empty/unknown planet_key unreachable by any buyer.
 pub fn buyerEligible(
     gs: *const state.GameState,
     listing: *const market.Listing,
@@ -350,23 +351,19 @@ would, and consume some before the player's turn.
 **Owner:** `src/sim/black_market.zig` — `runNpcBlackMarketDraw`
 
 ```zig
-/// Monthly NPC consumption of dispersed black-market listings.
-/// Called from tick.zig runMarkets on gs.clock.date.day == 1.
-/// Iterates all listings where black_market=true and available_after
-/// <= gs.clock.day_index. For each eligible listing, for each NPC buyer
-/// (pirate band + every merc company), rolls against
-/// tuning.black_market.npc_buy_chance_pct on stream .market. On a hit,
-/// transfers the hull_instance to the NPC buyer's roster and removes the
-/// listing (same ownership transfer path as the player buy command).
-/// Draw order: deterministic — pirate band first, then merc companies in
-/// MercCompanyId order. This order is documented so the digest tests
-/// catch accidental reordering (rule 6/57).
-/// Asset safety: only the NPC's own roster is modified; no player funds,
-/// forces, or units are touched.
-pub fn runNpcBlackMarketDraw(
-    gs: *state.GameState,
-    alloc: std.mem.Allocator,
-) !void
+/// Monthly NPC consumption of dispersed black-market listings (shipped P3f.3).
+/// Called from tick.zig runMarkets on gs.clock.date.day == 1, after
+/// faction_surplus.runMonthly and before the player board is surfaced.
+/// Each NPC buyer is evaluated with its own BuyerKind so per-buyer reach
+/// gating applies: pirates consume only PER-faction-world listings; merc
+/// companies consume only non-PER listings (buyerEligible reach rules).
+/// Draw order: pirate band first, then each merc company in MercCompanyId
+/// insertion order; within a buyer, up to npc_black_market_draws_per_month
+/// draws on stream .market from that buyer's eligible set. A consumed-marker
+/// array prevents two buyers from taking the same hull (rule 1).
+/// Asset safety: only NPC/pirate rosters are modified; no player funds,
+/// forces, or units are touched (rule 67 P3f.3 §7).
+pub fn runNpcBlackMarketDraw(gs: *state.GameState) !void
 ```
 
 ### 4.2  Pirate replenishment trickle
