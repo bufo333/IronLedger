@@ -166,42 +166,40 @@ This module is the single owner of all dispersed-black-market rules (rule 3,
 rule 20).  Nothing outside this module evaluates buyer eligibility or generates
 dispersed listings.
 
-**Required exports:**
+**Delivered interfaces:**
 
 ```zig
 /// The canonical "can this buyer take this listing?" predicate (rule 20/3).
-/// buyer is player, pirate band (PER faction key), or merc company identity.
-/// Returns false if listing.available_after > gs.clock.day_index.
+/// buyer is player, pirate, or merc company.
+/// Returns false if listing.available_after > current_day.
 /// Returns false if buyer cannot reach listing.planet_key.
 /// Reach rules (shipped P3f.3 per owner decision): pirate→PER worlds only;
 /// merc_company→non-PER worlds only; player→HQ worlds or active-contract
 /// deployed worlds; empty/unknown planet_key unreachable by any buyer.
 pub fn buyerEligible(
     gs: *const state.GameState,
-    listing: *const market.Listing,
+    listing: market.Listing,
     buyer: BuyerKind,
+    current_day: u32,
 ) bool
 
 /// Generate a dispersed black-market listing for a wreck hull_instance_id.
-/// Selects a black_market=true world from the planet catalog (excluding
-/// battle_planet_key), draws available_after = battle_day + delay (// TUNE:
-/// dispersal_delay_days_min/max in tuning.zon), sets owner = .market.
-/// Caller must call within a failure-atomic prepare/commit block.
+/// The caller owns world selection and delay draws; this pure constructor sets
+/// available_after = battle_day + delay_days.
 pub fn makeDispersedListing(
-    alloc: std.mem.Allocator,
-    gs: *state.GameState,
+    gs: *const state.GameState,
     hull_instance_id: types.HullInstanceId,
-    condition: market.HullCondition,
+    listing_id: types.ListingId,
+    planet_key: []const u8,
     battle_day: u32,
-    battle_planet_key: []const u8,
-    rng: *rng_mod.Rng,
-) !market.Listing
+    delay_days: u32,
+) market.Listing
 
 /// BuyerKind: the three classes that can access the black market.
-pub const BuyerKind = union(enum) {
+pub const BuyerKind = enum {
     player,
-    pirate_faction, // always "PER"
-    merc_company: types.MercCompanyId,
+    pirate,
+    merc_company,
 };
 ```
 
@@ -318,6 +316,7 @@ pub fn disperseEnemyWrecks(
     gs: *state.GameState,
     alloc: std.mem.Allocator,
     wrecks: []const types.HullInstanceId,
+    enemy_faction_key: []const u8,
     battle_day: u32,
     battle_planet_key: []const u8,
     rng: *rng_mod.Rng,

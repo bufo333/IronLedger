@@ -1435,7 +1435,7 @@ placement inline with the rule named.
 ### P3e — Mech economy (living rosters & market throughput)
 
 The living mech economy layered on the P3c hull entities: every major faction and every
-rival company (P4i) owns a finite pool of `HullInstance` records. Hulls are manufactured
+world merc company owns a finite pool of `HullInstance` records. Hulls are manufactured
 slowly (each faction only builds the chassis it historically produces, the 3025 lostech
 era), committed to battle from the pool, lost when destroyed, and transferred on salvage.
 A faction with a surplus sells hulls onto the existing market; a faction under conflict
@@ -1445,8 +1445,8 @@ requirements and goes insolvent. The delivered P3e roster economy is mechs only;
 Product completion P2 adds the separate conventional-vehicle and aerospace foundation
 before those assets participate in NPC company reserves.
 
-Two new persisted roster families (FactionRoster, RivalRoster), current-owner fields on
-`HullInstance` (`owner_type`/`owner_id`, complementing the P3c.4 provenance chain),
+Two persisted roster families (faction rosters and merc-company rosters), current-owner
+fields on `HullInstance` (`owner_type`/`owner_id`, complementing the P3c.4 provenance chain),
 campaign-start seeding from the existing RAT (`data/tables/rat.zon`), battle-aftermath
 roster draw/attrition/salvage, conflict-throttled monthly market surplus, and rival
 insolvency. No chassis weight, faction composition or balance value is invented;
@@ -1472,22 +1472,22 @@ P3f closes the faction economic loop P3e opens: the P3e living rosters gain a
 loss-and-replacement cycle and a dispersed black-market channel, and the rival
 merc and pirate populations become self-sustaining. One coherent stage — the
 five features land together because each depends on the others. Prerequisite:
-P3e (faction/rival rosters and HullInstance ownership). The delivered loop is
+P3e (faction/merc-company rosters and HullInstance ownership). The delivered loop is
 mek-only; Product completion P2 provides the separate vehicle and aerospace
 reserve path. The full design is fixed in a design doc on approval; TODO.md
 owns the design-approval entry and delivery order.
 
 - **Lost-field wreck flow.** Losing the field on a pool-path battle lets the
-  enemy faction salvage up to its cargo capacity; the remaining wrecks become
+  enemy faction recover up to `enemy_recovery_capacity` wrecks; the remaining wrecks become
   black-market listings dispersed across Inner Sphere worlds (not the origin
   world), each time-delayed by an `available_after: day_index`. The player sees
   them on qualifying worlds, but pirates and rival merc companies buy
   competitively.
 - **Black-market tier.** A planet attribute gates black-market availability,
   extending the 12C.17 fence mechanic rather than adding a parallel system. A
-  listing carries a `planet_key` (dispersed at generation), the `available_after`
-  delay, and a faction-access flag that lets the player, pirates and rival merc
-  companies buy.
+  listing carries a `planet_key` (dispersed at generation) and an
+  `available_after` delay; `buyerEligible` derives access for the player,
+  pirates, and merc companies.
 - **Merc-company death and replacement.** When a rival merc company goes
   insolvent (the P3e.7 rival-insolvency hook), its remaining hulls liquidate
   onto the market; a replacement company spawns with a generated identity and
@@ -1504,7 +1504,7 @@ owns the design-approval entry and delivery order.
   has one persistent PER faction roster, not individually named pirate bands;
   pirate-band insolvency and replacement are not part of P3f.
 - **Logo picker (campaign wizard).** The campaign wizard gains a logo picker
-  showing every logo in `data/logos/`; selecting one auto-fills the company name
+  showing every logo in `data/logos/`; selecting one auto-fills the outfit name
   (title-case from the filename), complementing the existing emblem import
   (12.7/12.14). The 12 seeded rival merc companies draw generated identities
   and logos at campaign start, excluding the player's pick from the logo pool.
