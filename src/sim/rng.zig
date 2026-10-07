@@ -88,6 +88,15 @@ pub const Rng = struct {
     }
 };
 
+/// Returns a deterministic seed whose first roll on `stream` is `want`.
+pub fn seedForFirstRoll(stream: Stream, want: u8) u64 {
+    var seed: u64 = 0;
+    while (true) : (seed += 1) {
+        var rng = Rng.init(seed);
+        if (rng.roll2d6(stream) == want) return seed;
+    }
+}
+
 test "streams are independent and deterministic" {
     var a = Rng.init(42);
     var b = Rng.init(42);
@@ -116,6 +125,12 @@ test "2d6 stays in range" {
         const v = r.roll2d6(.events);
         try std.testing.expect(v >= 2 and v <= 12);
     }
+}
+
+test "seedForFirstRoll produces the requested stream roll" {
+    const seed = seedForFirstRoll(.maintenance, 10);
+    var rng = Rng.init(seed);
+    try std.testing.expectEqual(@as(u8, 10), rng.roll2d6(.maintenance));
 }
 
 test "stream salts are distinct and independent of enum order" {

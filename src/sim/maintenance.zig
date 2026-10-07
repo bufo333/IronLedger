@@ -742,14 +742,6 @@ test "no tech, no maintenance: an unassigned hull rots; an assigned one holds" {
     try std.testing.expect(gs2.ledger.balance() < 0); // consumables were paid for
 }
 
-fn seedForMaintenanceRoll(want: u8) u64 {
-    var seed: u64 = 0;
-    while (true) : (seed += 1) {
-        var rng = rng_mod.Rng.init(seed);
-        if (rng.roll2d6(.maintenance) == want) return seed;
-    }
-}
-
 test "weekly maintenance applies quality drift at configured margins" {
     const Case = struct { roll: u8, drift: QualityDrift, quality: types.Quality };
     const cases = [_]Case{
@@ -760,7 +752,7 @@ test "weekly maintenance applies quality drift at configured margins" {
     };
     const target: i32 = tuning.maintenance.target_base + types.Quality.c.maintenanceModifier();
     for (cases) |case| {
-        var gs = GameState.init(std.testing.allocator, .{ .seed = seedForMaintenanceRoll(case.roll) });
+        var gs = GameState.init(std.testing.allocator, .{ .seed = rng_mod.seedForFirstRoll(.maintenance, case.roll) });
         defer gs.deinit();
         const uid = try gs.addUnit("SHD-2H");
         const tech = try gs.hirePerson("Margin", "Tech", .tech_mek);
