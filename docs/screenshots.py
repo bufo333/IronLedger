@@ -197,10 +197,10 @@ def svg(rows, path, places=()):
     parts.append("</g>")
     # The crest as the terminal would show it: the real picture over the cells.
     import base64
-    # A big placement (the wizard preview, the review) gets the 800 px file
-    # of the same crest so it stays sharp at that size; small ones embed
-    # exactly what the app transmitted.
-    hires = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "logos", "unforgiven_800.png")
+    # A big placement (the wizard preview, the review) gets the 1024 px company
+    # logo so it stays sharp at that size; small ones embed exactly what the app
+    # transmitted.
+    hires = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "logos", "ironledger_mercenary_company.png")
     hires_png = open(hires, "rb").read() if os.path.exists(hires) else None
     for (y, x, img_id, w, h) in places:
         png = images.get(img_id)
@@ -226,12 +226,24 @@ drain(1.5)
 shot("splash")
 os.write(fd, b" "); drain(1.0)
 # ---- lobby ----
-send("p"); send("John\r"); shot("welcome")
+send("p"); send("Marcus Valen\r"); shot("welcome")
 send("s"); shot("settings"); send("\x1b")
-send("n"); shot("wizard-commander")
-send("\r"); send("\t"); send("\t"); send("l", 3.0)
-send("j", 2.5)                 # the 240 px logo (docs/logos): the picture the campaign stores, small enough to embed
-shot("wizard-emblem")
+# wizard step 1: commander name
+# The name field is pre-filled "Erik Kalmar" (11 chars); erase it, type the desired name.
+# DEL (0x7f) is backspace in the pty; pane=0 text field captures all chars when focused.
+send("n"); send("\x7f" * 11, 0.5); send("Marcus Valen"); shot("wizard-commander"); send("\r", 20.0)
+# wizard step 2: outfit & emblem
+# The outfit step transmits all visible thumbnails (~25 MB at first draw) through the
+# pty before any step-2 frame text arrives; the 20 s drain above lets that clear.
+# w_field starts at 0; pane-specific text binding (rank 1) wins over every-pane h/j/k/l
+# (rank 2), so Tab×2 is required to reach w_field=2 where no pane-2 text binding exists.
+# From logo 0: l→1, j→6, j→11, j→16 (ironledger_mercenary_company.png).
+# Each gridMove calls adoptLogoName → outfit becomes "Ironledger Mercenary Company".
+# company name "Alpha Company" is pre-filled from run(); both fields non-empty for Enter.
+send("\t"); send("\t")  # w_field 0 → 1 → 2 (grid-nav mode)
+send("l", 1.2); send("j", 1.2); send("j", 1.2); send("j", 1.5)
+shot("wizard-emblem", 3.0)
+# Enter generates the campaign; both w_outfit and w_company are non-empty.
 send("\r", 3.0); shot("wizard-company")
 send("\r"); shot("wizard-review")
 send("\r", 2.0)
