@@ -340,17 +340,17 @@ enemy-owned after a lost field.
 
 ### 4.1  Monthly NPC draw
 
-**Tick hook:** `src/sim/tick.zig` `runMarkets`, ordered AFTER
-`faction_surplus.runMonthly` and BEFORE the player's market board is surfaced.
-This ensures NPC buyers see the same freshly-generated listings the player
-would, and consume some before the player's turn.
+**Tick hook:** `src/sim/tick.zig` `runMarkets`, after the existing contract
+and site-listing refreshes and `faction_surplus.runMonthly`. NPC buyers then
+consume newly generated dispersed listings before the turn returns to the
+player.
 
 **Owner:** `src/sim/black_market.zig` — `runNpcBlackMarketDraw`
 
 ```zig
 /// Monthly NPC consumption of dispersed black-market listings (shipped P3f.3).
 /// Called from tick.zig runMarkets on gs.clock.date.day == 1, after
-/// faction_surplus.runMonthly and before the player board is surfaced.
+/// faction_surplus.runMonthly.
 /// Each NPC buyer is evaluated with its own BuyerKind so per-buyer reach
 /// gating applies: pirates consume only PER-faction-world listings; merc
 /// companies consume only non-PER listings (buyerEligible reach rules).
@@ -386,12 +386,13 @@ doc).
 
 ### 4.3  Ordering guarantee (rule 6/57)
 
-The draw order inside `runMarkets` is fixed:
+The day-one order inside `runMarkets` is fixed:
 
-1. `faction_surplus.runMonthly` (existing) — generates new faction/market listings
-2. `runNpcBlackMarketDraw` — NPC buyers consume eligible dispersed listings
-3. `runPirateReplenishment` — mint pirate trickle hulls
-4. Existing market-refresh / player-board generation (unchanged)
+1. Existing `contract_market.refresh` and `refreshListings` refresh contract and site listings.
+2. `faction_surplus.runMonthly` generates new faction/market listings.
+3. `runNpcBlackMarketDraw` lets NPC buyers consume eligible dispersed listings.
+4. `runPirateReplenishment` mints pirate trickle hulls.
+5. `runMercLifecycle` sees the month's refreshed listings and pirate trickle.
 
 This order is documented here so any reordering is caught by the determinism
 tests.
@@ -438,8 +439,8 @@ pub fn liquidateMercCompany(
 ```
 
 The listing pattern reuses `faction_surplus.runMonthly`'s surplus-listing path
-(owner-transfer to `.market` + listing append; `hullPrice` cited from
-docs/p3f-faction-loop-design.md §3.4 // TUNE). Dissolved companies are never
+(owner-transfer to `.market` + listing append; `market.hullPrice` with the
+fixed roll specified above). Dissolved companies are never
 removed from state (D-A): `dissolved_day != 0` is the permanent record.
 
 ### 5.3  Replacement spawn and hull buy

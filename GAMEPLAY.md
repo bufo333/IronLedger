@@ -221,7 +221,7 @@ identity shows up on rosters, contracts, and after-action reports.
 Founding: adopting a catalog logo (the *import* source in the new-campaign
 wizard) auto-fills the outfit name from the file's stem (title-cased) and
 permanently reserves that logo so no rival merc company — seeded at creation
-or spawned as a replacement — ever shares it.
+or spawned as a replacement — shares it while that company remains active.
 
 The hangar is a portfolio, not a garage. Every hull you own bills you
 monthly whether it fights or rusts, so the roster screen ranks meks by what
@@ -236,6 +236,10 @@ buy a local replacement — if its **local operating funds** cover it; the
 brigade treasury can't teleport. And when a company rotates home overweight,
 cold storage turns spare hulls into a cheap strategic reserve that takes
 weeks, not hours, to wake back up.
+
+Lost-field wrecks do not vanish. The enemy recovers a limited number; the rest
+become delayed, dispersed black-market listings. Pirate bands and active rival
+merc companies may buy those listings before the player returns to the board.
 
 ## The Lab: construction editor (P3d)
 

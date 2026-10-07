@@ -179,8 +179,9 @@ document. All such values are TBD pending verification against the owner's cited
   parallel battle or salvage path. On the pool path the salvage decision is mandatory
   (turn-blocking `salvage_priority`); a held-field win always defers salvage to the
   inbox so the player chooses which drawn wreck to take; the unchosen wrecks are
-  finalised as permanently_destroyed. Lost-field destroyed hulls stay enemy-owned and
-  active (pool-removed only). The exchange clause routes all destroyed drawn hulls to
+  finalised as permanently_destroyed. On a lost field, P3f.2 re-homes destroyed
+  hulls up to the enemy recovery capacity and disperses the remainder to the black
+  market. The exchange clause routes all destroyed drawn hulls to
   the employer faction immediately, with no inbox decision.
 - **Market — monthly surplus.** Monthly, each faction computes its surplus: hulls owned
   beyond its operational need. Surplus hulls flow to the open market as listings (§2),
