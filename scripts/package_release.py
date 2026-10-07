@@ -213,8 +213,8 @@ def validate_music_archive(archive, version, source_root):
                 path = PurePosixPath(entry.filename)
                 if entry.is_dir() or path.is_absolute() or "\\" in entry.filename or ".." in path.parts:
                     fail(f"unsafe music archive member: {entry.filename!r}")
-                if stat.S_ISLNK(entry.external_attr >> 16):
-                    fail(f"music archive contains a symlink: {entry.filename}")
+                if not stat.S_ISREG(entry.external_attr >> 16):
+                    fail(f"music archive contains a non-regular member: {entry.filename}")
                 if entry.filename in names:
                     fail(f"music archive contains a duplicate member: {entry.filename}")
                 if entry.date_time != ZIP_TIMESTAMP or (entry.external_attr >> 16 & 0o777) != 0o644:
@@ -290,6 +290,16 @@ def test_music_package(source_root):
         with_extra["share/iron-ledger/music/OST/unexpected.aac"] = unexpected
         deterministic_zip(with_extra, extra)
         expect_music_validation_failure(lambda: validate_music_archive(extra, "1.0.0", fixture))
+
+        fifo = root / "iron-ledger-1.0.0-music.zip"
+        with zipfile.ZipFile(fifo, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
+            for name in sorted(entries):
+                info = zipfile.ZipInfo(name, ZIP_TIMESTAMP)
+                info.create_system = 3
+                mode = stat.S_IFIFO if name == "share/iron-ledger/music/OST/one.m4a" else stat.S_IFREG
+                info.external_attr = ((mode | 0o644) << 16)
+                bundle.writestr(info, entries[name].read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+        expect_music_validation_failure(lambda: validate_music_archive(fifo, "1.0.0", fixture))
 
         unsafe = root / "iron-ledger-1.0.0-music.zip"
         deterministic_zip(entries, unsafe)
