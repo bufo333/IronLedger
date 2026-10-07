@@ -76,7 +76,9 @@ fn slotLine(al: std.mem.Allocator, row: q.LayoutRow) ![]const u8 {
 /// Map the flat linear cursor (which counts header + rows + blank per box)
 /// to (box_index, row_index_within_box).  row index is null when the cursor
 /// is on a header or blank separator row.
-fn cursorBoxRow(boxes: []const q.LocationBox, cursor: usize) struct { bi: usize, ri: ?usize } {
+const CursorSelection = struct { bi: usize, ri: ?usize };
+
+fn cursorBoxRow(boxes: []const q.LocationBox, cursor: usize) CursorSelection {
     var idx: usize = 0;
     for (boxes, 0..) |box, bi| {
         if (idx == cursor) return .{ .bi = bi, .ri = null }; // header
@@ -89,6 +91,13 @@ fn cursorBoxRow(boxes: []const q.LocationBox, cursor: usize) struct { bi: usize,
         idx += 1;
     }
     return .{ .bi = 0, .ri = null };
+}
+
+fn selectedDetail(boxes: []const q.LocationBox, cursor: usize) []const []const u8 {
+    const selected = cursorBoxRow(boxes, cursor);
+    const box = boxes[selected.bi];
+    if (selected.ri) |ri| return box.rows[ri].detail;
+    return box.empty_detail;
 }
 
 pub fn draw(self: *App) anyerror!void {
@@ -106,8 +115,8 @@ pub fn draw(self: *App) anyerror!void {
     const view = try q.lab(al, g, uid);
     const boxes = try q.labLayout(al, g, uid);
 
-    // Left pane: budget summary + staged plan (wide only).
-    const lw: u16 = if (self.narrow()) 0 else @max(30, layout.lab_hulls.of(b.w));
+    // Budget, diagram, and selection detail appear together only when all fit.
+    const lw: u16 = if (b.w >= layout.lab_full_cols) @max(30, layout.lab_hulls.of(b.w)) else 0;
     if (lw > 0) {
         var budget_rows: std.ArrayListUnmanaged([]const u8) = .empty;
         for (view.budget) |line| try budget_rows.append(al, line);
@@ -119,7 +128,7 @@ pub fn draw(self: *App) anyerror!void {
         self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, view.title, budget_rows.items, 1, false, false);
     }
 
-    // Spatial mech diagram — all remaining width.
+    // Spatial mech diagram and the selected-slot detail keep priority over budget.
     const dx: u16 = b.x + lw;
     const focused_overall = self.paneFocused(0);
 
@@ -172,19 +181,15 @@ pub fn draw(self: *App) anyerror!void {
         }
     }
 
-    // Stats panel: render view.budget lines in any remaining width to the
-    // right of the diagram (width = 2*arm_w + 3*torso_w = 74 chars).
-    const diag_w: u16 = arm_w *% 2 +% torso_w *% 3;
+    const diag_w: u16 = layout.lab_diagram_cols;
     const stats_x: u16 = dx +% diag_w;
     const stats_w: u16 = (b.x +% b.w) -| stats_x;
-    if (stats_w >= 18) {
-        var stats_rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        for (view.budget) |line| try stats_rows.append(al, line);
-        const stats_inner = self.screen.pane(
+    if (stats_w >= layout.lab_detail_cols) {
+        const detail_inner = self.screen.pane(
             .{ .x = stats_x, .y = b.y, .w = stats_w, .h = b.h },
-            .{ .title = "STATS", .focused = false },
+            .{ .title = "SELECTED SLOT", .focused = false },
         );
-        self.screen.lines(stats_inner, stats_rows.items, 0, null);
+        self.screen.lines(detail_inner, selectedDetail(boxes, self.cur(0).*), 0, null);
     }
 }
 
@@ -246,6 +251,25 @@ fn boxHeaderIndex(boxes: []const q.LocationBox, bi: usize) usize {
     return 0;
 }
 
+const location_order = [_]meklab.Location{ .hd, .ct, .rt, .lt, .ra, .la, .rl, .ll };
+
+/// Move the linear layout cursor to a location header in physical diagram order.
+pub fn navigateLocation(self: *App, delta: i32) !void {
+    const al = self.a();
+    const uid = (try self.labUnit()) orelse return;
+    const boxes = try q.labLayout(al, self.state(), uid);
+    if (boxes.len == 0) return;
+    const current = boxes[cursorBoxRow(boxes, self.cur(0).*).bi].loc;
+    const order_index = std.mem.indexOfScalar(meklab.Location, &location_order, current) orelse return;
+    const next: usize = @intCast(@mod(@as(i32, @intCast(order_index)) + delta, @as(i32, location_order.len)));
+    for (boxes, 0..) |box, bi| {
+        if (box.loc == location_order[next]) {
+            self.cur(0).* = boxHeaderIndex(boxes, bi);
+            return;
+        }
+    }
+}
+
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
@@ -257,13 +281,11 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
     switch (hit.action) {
         .next_hull => self.lab_sel = (self.lab_sel + 1) % meks.len,
         .prev_hull => self.lab_sel = (self.lab_sel + meks.len - 1) % meks.len,
-        .remove => {
-            // Remove: use the mounts list for backward compatibility.
-            if (view.mounts.len > 0) {
-                const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
-                _ = try self.execSay(.{ .refit_remove = .{ .unit = uid, .slot_key = m.slot_key } }, .good, "staged: remove {s}", .{m.slot_key});
-            }
-        },
+        .remove => if (cursorRow(boxes, self.cur(0).*)) |hit_row| {
+            if (hit_row.row.slot_key.len > 0) {
+                _ = try self.execSay(.{ .refit_remove = .{ .unit = uid, .slot_key = hit_row.row.slot_key } }, .good, "staged: remove {s}", .{hit_row.row.slot_key});
+            } else self.say(.dim, "select a mounted part", .{});
+        } else self.say(.dim, "select a mounted part", .{}),
         .install => {
             self.openModal(.{ .install_part = uid });
         },
@@ -273,19 +295,19 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
                 if (hit_row.row.kind == .free) {
                     // Free slot: open location-scoped part picker.
                     self.openModal(.{ .install_at = .{ .unit = uid, .location = hit_row.box.loc } });
-                } else if (hit_row.row.kind != .fixed) {
-                    // Loaded slot: stage remove.
-                    if (hit_row.row.slot_key.len > 0) {
-                        _ = try self.execSay(.{ .refit_remove = .{ .unit = uid, .slot_key = hit_row.row.slot_key } }, .good, "staged: remove {s}", .{hit_row.row.slot_key});
-                    }
-                }
+                } else if (hit_row.row.slot_key.len > 0) {
+                    _ = try self.execSay(.{ .refit_remove = .{ .unit = uid, .slot_key = hit_row.row.slot_key } }, .good, "staged: remove {s}", .{hit_row.row.slot_key});
+                } else self.say(.dim, "select a mounted part", .{});
+            } else self.say(.dim, "select a mounted part", .{});
+        },
+        .replace => if (cursorRow(boxes, self.cur(0).*)) |hit_row| {
+            if (hit_row.row.slot_key.len == 0) {
+                self.say(.dim, "select a mounted part", .{});
+            } else {
+                const res = self.execResult(.{ .replace_mount = .{ .unit = uid, .slot_key = hit_row.row.slot_key } }) orelse return true;
+                self.say(.good, "ordered 1 × {s} to {s}; techs fit it on the next repair pass once it lands", .{ hit_row.row.part_key, try q.hqName(self.a(), g, res.hq) });
             }
-        },
-        .replace => if (view.mounts.len > 0) {
-            const m = view.mounts[@min(self.cur(0).*, view.mounts.len - 1)];
-            const res = self.execResult(.{ .replace_mount = .{ .unit = uid, .slot_key = m.slot_key } }) orelse return true;
-            self.say(.good, "ordered 1 × {s} to {s}; techs fit it on the next repair pass once it lands", .{ m.part_key, try q.hqName(self.a(), g, res.hq) });
-        },
+        } else self.say(.dim, "select a mounted part", .{}),
         .clear => {
             _ = try self.execSay(.{ .refit_clear = uid }, .good, "#{d}: refit plan cleared", .{@intFromEnum(uid)});
         },
@@ -295,16 +317,8 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
         .depot => {
             _ = try self.execSay(.{ .depot = uid }, .good, "#{d} queued for depot repair — see the HQ screen's bays", .{@intFromEnum(uid)});
         },
-        .next_box => {
-            const sel2 = cursorBoxRow(boxes, self.cur(0).*);
-            const next_bi = (sel2.bi + 1) % boxes.len;
-            self.cur(0).* = boxHeaderIndex(boxes, next_bi);
-        },
-        .prev_box => {
-            const sel2 = cursorBoxRow(boxes, self.cur(0).*);
-            const prev_bi = (sel2.bi + boxes.len - 1) % boxes.len;
-            self.cur(0).* = boxHeaderIndex(boxes, prev_bi);
-        },
+        .next_box => try navigateLocation(self, 1),
+        .prev_box => try navigateLocation(self, -1),
     }
     return true;
 }
@@ -332,6 +346,22 @@ test "R on a sound mount shows canonical MountIsFine refusal" {
     const c = try app.clientForTest(std.testing.allocator);
     defer app.deinitForTest(c, std.testing.allocator);
     try toTab(c, .lab);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const uid = (try q.labMeks(arena.allocator(), c.app.state()))[c.app.lab_sel];
+    const boxes = try q.labLayout(arena.allocator(), c.app.state(), uid);
+    var idx: usize = 0;
+    outer: for (boxes) |box| {
+        idx += 1;
+        for (box.rows) |row| {
+            if (row.slot_key.len > 0) {
+                c.app.cur(0).* = idx;
+                break :outer;
+            }
+            idx += 1;
+        }
+        idx += 1;
+    }
     try app.pressForTest(c, .{ .char = 'R' });
     // A fresh company's gear is sound: the canonical sentence via cli.errorText.
     try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "is fine") != null);
@@ -387,4 +417,106 @@ test "Enter on a free slot opens the install_at modal" {
         else => false,
     };
     try std.testing.expect(is_install_at);
+}
+
+test "Tab follows the physical location cycle and Shift-Tab wraps" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .lab);
+    const expected = [_]meklab.Location{ .ct, .rt, .lt, .ra, .la, .rl, .ll, .hd };
+    for (expected) |loc| {
+        try app.pressForTest(c, .tab);
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const uid = (try q.labMeks(arena.allocator(), c.app.state()))[c.app.lab_sel];
+        const boxes = try q.labLayout(arena.allocator(), c.app.state(), uid);
+        try std.testing.expectEqual(loc, boxes[cursorBoxRow(boxes, c.app.cur(0).*).bi].loc);
+    }
+    try app.pressForTest(c, .backtab);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const uid = (try q.labMeks(arena.allocator(), c.app.state()))[c.app.lab_sel];
+    const boxes = try q.labLayout(arena.allocator(), c.app.state(), uid);
+    try std.testing.expectEqual(meklab.Location.ll, boxes[cursorBoxRow(boxes, c.app.cur(0).*).bi].loc);
+}
+
+test "header and separator refuse Lab mount actions locally" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .lab);
+    try app.pressForTest(c, .{ .char = '-' });
+    try std.testing.expectEqualStrings("select a mounted part", c.app.msg.slice());
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const uid = (try q.labMeks(arena.allocator(), c.app.state()))[c.app.lab_sel];
+    const boxes = try q.labLayout(arena.allocator(), c.app.state(), uid);
+    c.app.cur(0).* = boxes[0].rows.len + 1;
+    try app.pressForTest(c, .{ .char = 'R' });
+    try std.testing.expectEqualStrings("select a mounted part", c.app.msg.slice());
+}
+
+test "remove uses the selected multi-crit mount identity" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .lab);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const uid = (try q.labMeks(arena.allocator(), c.app.state()))[c.app.lab_sel];
+    const boxes = try q.labLayout(arena.allocator(), c.app.state(), uid);
+    var target: ?[]const u8 = null;
+    var idx: usize = 0;
+    outer: for (boxes) |box| {
+        idx += 1;
+        for (box.rows) |row| {
+            if (row.group_count > 1 and row.slot_key.len > 0) {
+                target = row.slot_key;
+                c.app.cur(0).* = idx;
+                break :outer;
+            }
+            idx += 1;
+        }
+        idx += 1;
+    }
+    const slot_key = target orelse return;
+    try app.pressForTest(c, .{ .char = '-' });
+    var plan_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer plan_arena.deinit();
+    const view = try q.lab(plan_arena.allocator(), c.app.state(), uid);
+    var found = false;
+    for (view.plan) |line| {
+        if (std.mem.indexOf(u8, line, slot_key) != null) found = true;
+    }
+    try std.testing.expect(found);
+}
+
+test "replacement targets the selected damaged mount" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .lab);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const uid = (try q.labMeks(arena.allocator(), c.app.state()))[c.app.lab_sel];
+    const lab_view = try q.lab(arena.allocator(), c.app.state(), uid);
+    const first_mount = if (lab_view.mounts.len > 0) lab_view.mounts[0].slot_key else return;
+    const boxes = try q.labLayout(arena.allocator(), c.app.state(), uid);
+    var target: ?q.LayoutRow = null;
+    var idx: usize = 0;
+    outer: for (boxes) |box| {
+        idx += 1;
+        for (box.rows) |row| {
+            if (row.slot_key.len > 0 and !std.mem.eql(u8, row.slot_key, first_mount)) {
+                target = row;
+                c.app.cur(0).* = idx;
+                break :outer;
+            }
+            idx += 1;
+        }
+        idx += 1;
+    }
+    const row = target orelse return;
+    for (c.app.state().unit(uid).?.slots.items) |*slot| {
+        if (std.mem.eql(u8, slot.slot_key, row.slot_key)) slot.condition = .damaged;
+    }
+    try app.pressForTest(c, .{ .char = 'R' });
+    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), row.part_key) != null);
 }

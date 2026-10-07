@@ -247,10 +247,12 @@ catalogue baseline.
 Interactions:
 
 - **Move `j`/`k`** to scroll the LAYOUT pane row by row.
+- **Tab / Shift-Tab** moves between location headers in physical order: HD, CT,
+  RT, LT, RA, LA, RL, LL, then wraps. The selected-slot pane shows complete
+  mount detail and its live condition; headers and separators show no slot.
 - **Enter on a free slot** opens a location-scoped part picker: only parts
   that fit this location are listed. Selecting a part stages the install.
-- **`-`** stages removing the mount under the cursor (also works without
-  Enter using the old mounts-list cursor).
+- **`-`** stages removing the mount under the cursor.
 - **`+`** opens the full install picker (part first, then location), for
   cases where you want to browse all available parts first.
 - **`m`** commits the staged plan as a bay job at the home HQ. The HQ

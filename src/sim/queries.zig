@@ -3757,6 +3757,8 @@ pub const LayoutRow = struct {
     group_count: u8,
     /// 1-based ordinal among the free slots in this location (install target).
     free_ordinal: u8,
+    /// Read-only selected-slot detail, escaped markup ready for the client.
+    detail: []const []const u8,
 };
 
 /// Per-location data for the construction editor layout.
@@ -3771,7 +3773,27 @@ pub const LocationBox = struct {
     /// One row per physical crit slot, in order: fixed occupants first,
     /// then loadout rows (expanded to crits each), then free rows.
     rows: []LayoutRow,
+    /// Detail for a selected location header or its blank separator.
+    empty_detail: []const []const u8,
 };
+
+fn conditionDetail(condition: unit_mod.PartCondition) []const u8 {
+    return switch (condition) {
+        .ok => "condition: {g}sound{/}",
+        .damaged => "condition: {a}damaged{/}",
+        .destroyed => "condition: {c}destroyed{/}",
+        .missing => "condition: {c}missing{/}",
+    };
+}
+
+fn mountDetail(alloc: Alloc, loc: meklab.Location, name: []const u8, slot_key: []const u8, group_index: u8, group_count: u8, condition: unit_mod.PartCondition) ![]const []const u8 {
+    return alloc.dupe([]const u8, &.{
+        try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{try table.plain(alloc, name)}),
+        try std.fmt.allocPrint(alloc, "location {s} · crit {d}/{d}", .{ @tagName(loc), group_index, group_count }),
+        try std.fmt.allocPrint(alloc, "slot {s}", .{slot_key}),
+        conditionDetail(condition),
+    });
+}
 
 fn slotKindFromMount(mount: part_dom.MountType) SlotKind {
     return switch (mount) {
@@ -3832,6 +3854,10 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
                 .group_index = 0,
                 .group_count = 0,
                 .free_ordinal = 0,
+                .detail = &.{
+                    "fixed occupant",
+                    "derived from this location's construction and non-removable",
+                },
             });
         }
 
@@ -3866,6 +3892,7 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
                     .group_index = gi,
                     .group_count = crits,
                     .free_ordinal = 0,
+                    .detail = try mountDetail(alloc, loc, name, s.slot_key, gi, crits, s.condition),
                 });
             }
         }
@@ -3892,6 +3919,10 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
                     .group_index = gi,
                     .group_count = crits,
                     .free_ordinal = 0,
+                    .detail = &.{
+                        "pending install",
+                        "staged in the refit plan and non-removable",
+                    },
                 });
             }
         };
@@ -3913,6 +3944,10 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
                 .group_index = 0,
                 .group_count = 0,
                 .free_ordinal = 0,
+                .detail = &.{
+                    "derived jump jet",
+                    "implicit chassis equipment and non-removable",
+                },
             });
         }
         var hi: u8 = 0;
@@ -3925,6 +3960,10 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
                 .group_index = 0,
                 .group_count = 0,
                 .free_ordinal = 0,
+                .detail = &.{
+                    "derived heat sink",
+                    "implicit chassis equipment and non-removable",
+                },
             });
         }
 
@@ -3941,6 +3980,10 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
                 .group_index = 0,
                 .group_count = 0,
                 .free_ordinal = fi,
+                .detail = try alloc.dupe([]const u8, &.{
+                    try std.fmt.allocPrint(alloc, "location {s} · free slot {d}", .{ @tagName(loc), fi }),
+                    "opens this location's install picker",
+                }),
             });
         }
 
@@ -3978,6 +4021,10 @@ pub fn labLayout(alloc: Alloc, gs: *GameState, uid: types.UnitId) ![]LocationBox
             .narrow = narrow,
             .actuator_note = actuator_note,
             .rows = try rows.toOwnedSlice(alloc),
+            .empty_detail = try alloc.dupe([]const u8, &.{
+                try std.fmt.allocPrint(alloc, "location {s}", .{@tagName(loc)}),
+                "no crit slot selected",
+            }),
         });
     }
     return boxes.toOwnedSlice(alloc);
@@ -9099,6 +9146,61 @@ test "labLayout: multi-crit weapon expands to N grouped rows with correct group_
             }
         }
     }
+}
+
+test "labLayout selected mount detail carries live condition and shared multi-crit identity" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 56 });
+    defer gs.deinit();
+    const uid = try gs.addUnit("AWS-8Q");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+
+    const unit = gs.unit(uid).?;
+    var damaged_key: []const u8 = "";
+    var destroyed_key: []const u8 = "";
+    var changed: u8 = 0;
+    for (unit.slots.items) |*slot| {
+        if (slot.class == .structure) continue;
+        if (changed == 0) {
+            slot.condition = .damaged;
+            damaged_key = slot.slot_key;
+        } else if (changed == 1) {
+            slot.condition = .destroyed;
+            destroyed_key = slot.slot_key;
+            changed += 1;
+            break;
+        }
+        changed += 1;
+    }
+    try std.testing.expectEqual(@as(u8, 2), changed);
+
+    const boxes = try labLayout(al, &gs, uid);
+    var damaged_found = false;
+    var destroyed_found = false;
+    var multi_key: ?[]const u8 = null;
+    var multi_rows: usize = 0;
+    for (boxes) |box| for (box.rows) |row| {
+        if (std.mem.eql(u8, row.slot_key, damaged_key)) {
+            damaged_found = true;
+            try std.testing.expect(std.mem.indexOf(u8, row.detail[3], "damaged") != null);
+        }
+        if (std.mem.eql(u8, row.slot_key, destroyed_key)) {
+            destroyed_found = true;
+            try std.testing.expect(std.mem.indexOf(u8, row.detail[3], "destroyed") != null);
+        }
+        if (row.group_count > 1) {
+            if (multi_key) |key| {
+                if (std.mem.eql(u8, key, row.slot_key)) multi_rows += 1;
+            } else {
+                multi_key = row.slot_key;
+                multi_rows = 1;
+            }
+        }
+    };
+    try std.testing.expect(damaged_found);
+    try std.testing.expect(destroyed_found);
+    try std.testing.expect(multi_rows > 1);
 }
 
 test "variantMarker: stock hull is false; after a staged install it is true" {

@@ -152,7 +152,8 @@ command line:   : prompt (opens on :), hints on the right
 ```
 
 **Tabs** are screens; `F1`–`F10` or `1`–`0` switch them. **Tab / Shift-Tab**
-cycles pane focus; each pane owns its own cursor. `j`/`k` and the arrow keys
+cycles pane focus except in F8, where it cycles the physical location headers;
+each pane owns its own cursor. `j`/`k` and the arrow keys
 move the cursor; PgUp/PgDn scroll ten rows; `←`/`→` scroll wide table columns.
 
 <br clear="all">
@@ -321,7 +322,9 @@ supply inventory. `[`/`]` switches between HQs. `u` queues a facility upgrade;
 
 The MekLab. `[`/`]` steps through hulls; the construction grid shows all eight
 locations (HD/CT/LT/RT/LA/RA/LL/RL) with fixed occupants, mounted equipment,
-and free slots. Enter on a free slot opens the location-scoped part picker;
+and free slots. The selected slot's detail pane shows its full identity and live
+condition. Tab / Shift-Tab cycles location headers in physical order (HD, CT,
+RT, LT, RA, LA, RL, LL). Enter on a free slot opens the location-scoped part picker;
 `+` stages an install; `-` stages a removal; `m` commits the plan as a bay job;
 `c` clears the staged plan. The lab validates tonnage, per-location criticals,
 heat, and ammunition and quotes the refit class (A–D).
@@ -590,6 +593,8 @@ fixed occupants (cockpit, engine, gyro, actuators — derived from standard
 inner-sphere crit tables), mounted equipment, and remaining free slots. Staging
 a diff generates a parts list, refit class (A–D), and tech-time estimate.
 Committing queues the hull as a bay job; it is out of action for the duration.
+Selecting a mounted crit reveals its full mount identity, location, slot key and
+live sound, damaged, destroyed, or missing condition in the detail pane.
 
 The lab validates tonnage, per-location criticals, heat budget, and ammunition
 and refuses an illegal fit by name before anything is queued. A hull whose

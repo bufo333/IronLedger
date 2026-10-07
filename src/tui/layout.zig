@@ -50,6 +50,12 @@ pub const people_list: Ratio = .{ .num = 62, .den = 100 };
 pub const hq_detail: Ratio = .{ .num = 45, .den = 100 };
 pub const lab_hulls: Ratio = .{ .num = 3, .den = 10 };
 pub const lab_mounts: Ratio = .{ .num = 7, .den = 20 };
+/// The selected-slot detail pane beside the Lab's spatial diagram.
+pub const lab_detail_cols: u16 = 30;
+/// The fixed record-sheet diagram width: two arms plus three torso boxes.
+pub const lab_diagram_cols: u16 = 74;
+/// Budget, diagram, and selected detail fit side by side at this width.
+pub const lab_full_cols: u16 = wide_cols;
 pub const ledger_pnl: Ratio = .{ .num = 3, .den = 10 };
 /// The after-action sheet's splits: the fight column beside the field,
 /// and the field above the spoils and the trucks.

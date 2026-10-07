@@ -2080,7 +2080,7 @@ pub const App = struct {
         .{ .match = .{ .chars = .{ '1', '9' } }, .action = .screen_digit, .label = "screens 1-9", .group = .navigate, .show_footer = false, .show_help = false },
         .{ .match = keys.Match.char('0'), .action = .screen_market, .label = "market", .group = .navigate, .show_footer = false, .show_help = false },
         .{ .match = .{ .key = .{ .f = 12 } }, .action = .settings, .label = "settings", .group = .misc, .show_footer = false },
-        .{ .match = .{ .key = .tab }, .action = .next_pane, .label = "pane", .group = .navigate, .show_footer = false, .help = "next pane (Shift-Tab: previous)" },
+        .{ .match = .{ .key = .tab }, .action = .next_pane, .label = "pane", .group = .navigate, .show_footer = false, .help = "next pane (F8: next location; Shift-Tab: previous)" },
         .{ .match = .{ .key = .backtab }, .action = .prev_pane, .label = "previous pane", .group = .navigate, .show_footer = false, .show_help = false },
         .{ .match = keys.Match.char('j'), .action = .cursor_down, .label = "cursor", .group = .navigate, .shown = "j/k ↑/↓", .show_footer = false, .help = "move the cursor (PgUp/PgDn ten rows)" },
         .{ .match = .{ .key = .down }, .action = .cursor_down, .label = "down", .group = .navigate, .show_footer = false, .show_help = false },
@@ -2231,8 +2231,12 @@ pub const App = struct {
             .screen_digit => self.switchTab(@enumFromInt(hit.offset)),
             .screen_market => self.switchTab(.market),
             .settings => self.modal = .settings,
-            .next_pane => self.focus = (self.focus + 1) % self.paneCount(),
-            .prev_pane => self.focus = (self.focus + self.paneCount() - 1) % self.paneCount(),
+            .next_pane => {
+                if (self.tab == .lab) try screens.lab.navigateLocation(self, 1) else self.focus = (self.focus + 1) % self.paneCount();
+            },
+            .prev_pane => {
+                if (self.tab == .lab) try screens.lab.navigateLocation(self, -1) else self.focus = (self.focus + self.paneCount() - 1) % self.paneCount();
+            },
             .cursor_down => try self.screenMove(1),
             .cursor_up => try self.screenMove(-1),
             .page_down => try self.screenMove(10),

@@ -79,7 +79,8 @@ command line   `:` prompt (opens on `:`), hints on the right
 ```
 
 - **Tabs** are screens; **panes** are the composable windows inside a
-  screen. Tab / Shift-Tab cycles pane focus; each pane owns a cursor.
+  screen. Tab / Shift-Tab cycles pane focus except on F8, where it cycles
+  the Lab's physical location headers; each pane owns a cursor.
 - **Modals** (end-turn checklist, decision, confirmations, order/transfer
   forms) draw over the current screen and take all input until closed.
   The **after-action sheet** (Desk `b`, then Enter) is the one that carves
@@ -151,7 +152,7 @@ no room.
 | F5 | Ledger | Treasuries · P&L · Ledger |
 | F6 | Supply | Sites · Demand · Order form · Shop |
 | F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall |
-| F8 | Lab | Budget/plan (wide) · Spatial mech diagram: 8 per-location crit boxes (HD / CT / LT / RT / LA / RA / LL / RL) |
+| F8 | Lab | Budget/plan (wide) · Spatial mech diagram: 8 per-location crit boxes (HD / CT / LT / RT / LA / RA / LL / RL) · Selected-slot detail |
 | F9 | People | Personnel (pinned header, role filter) · Person-detail modal (Enter or `r` opens it: file, skills, status, assignment and eligible actions) · Open seats |
 | F10 | Market | Boards · Order catalog · Demand |
 
@@ -170,7 +171,7 @@ filters to the active context (see the Keys description above).
 |---|---|
 | `F1-F10 / 1-0` | switch screens: Desk, Map, Forces, Contracts, Ledger, Supply, HQ, Lab, People, Market |
 | `F12` | settings |
-| `Tab` | next pane (Shift-Tab: previous) |
+| `Tab` | next pane (F8: next location; Shift-Tab: previous) |
 | `j/k ↑/↓` | move the cursor (PgUp/PgDn ten rows) |
 | `← →` | scroll a wide table's columns (◀ 2 · 3 ▶ = hidden); pan the star map |
 | `:` | the command line: every CLI verb works (day, transfer, order, accept, …) |
