@@ -2185,21 +2185,25 @@ pub const App = struct {
                 var buf: [16]u8 = undefined;
                 try out.print(al, "| `{s}` | {s} |\n", .{ keys.keyText(&buf, e), e.help orelse e.label });
             };
+            for (t.extra_legend) |e| if (e.show_help) {
+                var buf: [16]u8 = undefined;
+                try out.print(al, "| `{s}` | {s} |\n", .{ keys.keyText(&buf, e), e.help orelse e.label });
+            };
         }
         try out.appendSlice(al, "\n" ++ keys_end);
         return out.toOwnedSlice(al);
     }
 
     /// The tables outside the game screens, as the key reference lists them.
-    const other_tables = [_]struct { name: []const u8, legend: []const keys.Entry }{
+    const other_tables = [_]struct { name: []const u8, legend: []const keys.Entry, extra_legend: []const keys.Entry = &.{} }{
         .{ .name = "Welcome", .legend = &welcome_legend },
         .{ .name = "New campaign · commander", .legend = &commander_legend },
         .{ .name = "New campaign · outfit and emblem", .legend = &outfit_legend },
         .{ .name = "New campaign · company and back office", .legend = &company_legend },
         .{ .name = "New campaign · review", .legend = &review_legend },
         .{ .name = "Lists (pick a company, a part, a seat, …)", .legend = &list_legend },
-        .{ .name = "Sheets (hull, help, summary, …)", .legend = &sheet_legend },
-        .{ .name = "Help", .legend = &help_legend },
+        .{ .name = "Sheets (hull, summary, …)", .legend = &sheet_legend },
+        .{ .name = "Help", .legend = &help_navigation_legend, .extra_legend = &help_legend },
         .{ .name = "Raise a company · hulls", .legend = &raise_hulls_legend },
         .{ .name = "Raise a company · support train", .legend = &raise_support_legend },
         .{ .name = "Raise a company · crews", .legend = &raise_crews_legend },
@@ -3734,7 +3738,7 @@ pub const App = struct {
         .{ .match = .{ .key = .left }, .action = .scroll_left, .label = "columns", .group = .navigate, .shown = "←/→" },
         .{ .match = .{ .key = .right }, .action = .scroll_right, .label = "columns", .group = .navigate, .show_footer = false, .show_help = false },
         .{ .match = .{ .key = .enter }, .action = .pick, .label = "choose", .group = .act },
-        .{ .match = .{ .key = .escape }, .action = .close, .label = "cancel", .group = .misc },
+        .{ .match = .{ .key = .escape }, .action = .close, .label = "cancel / close", .group = .misc },
     };
 
     /// A read-only sheet: ←/→ scroll a table, any other key closes it.
@@ -3798,6 +3802,17 @@ pub const App = struct {
     const log_legend = keys.entries(LogAction, &log_bindings);
     const sheet_legend = keys.entries(SheetAction, &sheet_bindings);
     const help_legend = keys.entries(HelpAction, &help_bindings);
+    const help_navigation_legend = [_]keys.Entry{
+        list_legend[0],
+        list_legend[1],
+        list_legend[2],
+        list_legend[3],
+        list_legend[4],
+        list_legend[5],
+        list_legend[6],
+        list_legend[7],
+        list_legend[11],
+    };
 
     /// A list modal's title: its name, then the list keys with the verbs
     /// this modal gives them ("choose", "assign", "cancel").
@@ -5398,6 +5413,13 @@ test "help overlay scrolls and question mark closes it" {
     try std.testing.expectEqual(Modal.help, c.app.modal);
     try std.testing.expect(c.app.modal_cursor > 0);
 
+    try pressForTest(c, .{ .char = 'x' });
+    try std.testing.expectEqual(Modal.help, c.app.modal);
+
+    try pressForTest(c, .escape);
+    try std.testing.expectEqual(Modal.none, c.app.modal);
+
+    try pressForTest(c, .{ .char = '?' });
     try pressForTest(c, .{ .char = '?' });
     try std.testing.expectEqual(Modal.none, c.app.modal);
 }

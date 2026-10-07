@@ -394,9 +394,9 @@ filters to the active context (see the Keys description above).
 | `End` | end |
 | `←/→` | columns |
 | `Enter` | choose |
-| `Esc` | cancel |
+| `Esc` | cancel / close |
 
-### Sheets (hull, help, summary, …)
+### Sheets (hull, summary, …)
 
 | Key | Does |
 |---|---|
@@ -408,6 +408,11 @@ filters to the active context (see the Keys description above).
 
 | Key | Does |
 |---|---|
+| `j/k ↑/↓` | row |
+| `PgUp/PgDn` | page |
+| `Home` | top |
+| `End` | end |
+| `Esc` | cancel / close |
 | `?` | close |
 
 ### Raise a company · hulls
