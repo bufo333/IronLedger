@@ -409,6 +409,36 @@ pub const GameState = struct {
 
     // ---------------------------------------------------------------- money
 
+    /// A validated ledger posting whose commit cannot allocate. The caller owns
+    /// the prepared value only for its operation boundary.
+    pub const PreparedTreasuryPosting = struct {
+        treasury: Treasury,
+        txn: finance_mod.Transaction,
+    };
+
+    /// Validate a named treasury and reserve its ledger destination for one
+    /// posting. Preparation changes no gameplay value.
+    pub fn prepareTreasuryPosting(self: *GameState, treasury: Treasury, txn: finance_mod.Transaction) !PreparedTreasuryPosting {
+        switch (treasury) {
+            .outfit => {},
+            .hq => |id| if (!self.hqs.contains(id)) return error.UnknownTreasury,
+            .company => |id| if (!self.forces.contains(id)) return error.UnknownTreasury,
+        }
+        try self.reserveLedger(1);
+        return .{ .treasury = treasury, .txn = txn };
+    }
+
+    /// Append a prepared ledger entry and apply its balance delta. The named
+    /// treasury was validated and ledger capacity reserved by preparation.
+    pub fn commitTreasuryPosting(self: *GameState, prepared: PreparedTreasuryPosting) void {
+        self.ledger.transactions.appendAssumeCapacity(prepared.txn);
+        switch (prepared.treasury) {
+            .outfit => self.funds += prepared.txn.amount,
+            .hq => |id| self.hqs.getPtr(id).?.funds += prepared.txn.amount,
+            .company => |id| self.forces.getPtr(id).?.local_funds += prepared.txn.amount,
+        }
+    }
+
     /// Post to the outfit's central treasury (the common case).
     pub fn postTransaction(self: *GameState, txn: finance_mod.Transaction) !void {
         try self.postTreasury(.outfit, txn);
@@ -418,17 +448,8 @@ pub const GameState = struct {
     /// in lockstep. Balances MAY go negative (obligations don't wait);
     /// purchases that should refuse instead go through `treasury.debit`.
     pub fn postTreasury(self: *GameState, treasury: Treasury, txn: finance_mod.Transaction) !void {
-        switch (treasury) {
-            .outfit => {},
-            .hq => |id| if (!self.hqs.contains(id)) return error.UnknownTreasury,
-            .company => |id| if (!self.forces.contains(id)) return error.UnknownTreasury,
-        }
-        try self.ledger.post(self.allocator(), txn);
-        switch (treasury) {
-            .outfit => self.funds += txn.amount,
-            .hq => |id| self.hqs.getPtr(id).?.funds += txn.amount,
-            .company => |id| self.forces.getPtr(id).?.local_funds += txn.amount,
-        }
+        const prepared = try self.prepareTreasuryPosting(treasury, txn);
+        self.commitTreasuryPosting(prepared);
     }
 
     pub fn treasuryBalance(self: *GameState, treasury: Treasury) types.CBills {
@@ -648,13 +669,40 @@ pub const GameState = struct {
         return self.faction_standing.get(faction) orelse 0;
     }
 
+    /// A clamped faction-standing update with any new map key owned before
+    /// commit. `key` is null when the faction already has an entry.
+    pub const PreparedStandingAdjustment = struct {
+        faction: []const u8,
+        value: i32,
+        key: ?[]const u8,
+    };
+
+    /// Calculate a clamped standing result, reserve map capacity, and own a
+    /// new faction key when necessary. Preparation changes no standing value.
+    pub fn prepareStandingAdjustment(self: *GameState, faction: []const u8, delta: i32) !PreparedStandingAdjustment {
+        const existing = self.faction_standing.contains(faction);
+        try self.faction_standing.ensureUnusedCapacity(self.allocator(), @intFromBool(!existing));
+        const key = if (existing) null else try self.allocator().dupe(u8, faction);
+        return .{
+            .faction = faction,
+            .value = std.math.clamp(self.standing(faction) + delta, -100, 100),
+            .key = key,
+        };
+    }
+
+    /// Install a prepared standing value without allocation. The faction map
+    /// capacity and any owned key were supplied by preparation.
+    pub fn commitStandingAdjustment(self: *GameState, prepared: PreparedStandingAdjustment) void {
+        const entry = self.faction_standing.getOrPutAssumeCapacity(prepared.faction);
+        if (!entry.found_existing) entry.key_ptr.* = prepared.key.?;
+        entry.value_ptr.* = prepared.value;
+    }
+
     /// Move a house's standing by `delta`, clamped to ±100; logged by the caller.
     pub fn adjustStanding(self: *GameState, faction: []const u8, delta: i32) !i32 {
-        const now = std.math.clamp(self.standing(faction) + delta, -100, 100);
-        const g = try self.faction_standing.getOrPut(self.allocator(), faction);
-        if (!g.found_existing) g.key_ptr.* = try self.allocator().dupe(u8, faction);
-        g.value_ptr.* = now;
-        return now;
+        const prepared = try self.prepareStandingAdjustment(faction, delta);
+        self.commitStandingAdjustment(prepared);
+        return prepared.value;
     }
 
     /// Is this employer faction still cooling after a breach?
@@ -1197,6 +1245,48 @@ test "postTreasury against a removed HQ returns UnknownTreasury" {
 
     const missing: types.HqId = @enumFromInt(999);
     try std.testing.expectError(error.UnknownTreasury, gs.postTreasury(.{ .hq = missing }, .{ .day = 0, .amount = 100, .category = .event }));
+}
+
+test "prepared treasury posting leaves ledger and balance unchanged on allocation failure" {
+    var gs = GameState.init(std.testing.allocator, .{ .start_funds = 100 });
+    defer gs.deinit();
+    const funds_before = gs.funds;
+    const entries_before = gs.ledger.transactions.items.len;
+    const balance_before = gs.ledger.balance();
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+    try std.testing.expectError(error.OutOfMemory, gs.prepareTreasuryPosting(.outfit, .{ .day = 0, .amount = 25, .category = .event }));
+    try std.testing.expectEqual(funds_before, gs.funds);
+    try std.testing.expectEqual(entries_before, gs.ledger.transactions.items.len);
+    try std.testing.expectEqual(balance_before, gs.ledger.balance());
+
+    var complete = GameState.init(std.testing.allocator, .{ .start_funds = 100 });
+    defer complete.deinit();
+    const prepared = try complete.prepareTreasuryPosting(.outfit, .{ .day = 0, .amount = 25, .category = .event });
+    complete.commitTreasuryPosting(prepared);
+    try std.testing.expectEqual(@as(types.CBills, 125), complete.funds);
+    try std.testing.expectEqual(@as(types.CBills, 25), complete.ledger.balance());
+}
+
+test "prepared standing adjustment leaves a new key absent on allocation failure and updates existing keys" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const count_before = gs.faction_standing.count();
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+    try std.testing.expectError(error.OutOfMemory, gs.prepareStandingAdjustment("LC", 5));
+    try std.testing.expectEqual(count_before, gs.faction_standing.count());
+    try std.testing.expectEqual(@as(i32, 0), gs.standing("LC"));
+
+    var complete = GameState.init(std.testing.allocator, .{});
+    defer complete.deinit();
+    const first = try complete.prepareStandingAdjustment("LC", 5);
+    complete.commitStandingAdjustment(first);
+    const existing = try complete.prepareStandingAdjustment("LC", 200);
+    complete.commitStandingAdjustment(existing);
+    try std.testing.expectEqual(@as(i32, 100), complete.standing("LC"));
 }
 
 test "recordHullAcquisition creates instance, opens interval, and closes prior on re-acquisition" {

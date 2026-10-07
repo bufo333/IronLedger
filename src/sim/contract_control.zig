@@ -31,6 +31,7 @@ const operations = @import("operations.zig");
 const actors_m = @import("actors.zig");
 const rivals_m = @import("rivals.zig");
 const officers_m = @import("officers.zig");
+const personnel = @import("personnel.zig");
 
 pub const grace_days: u32 = tuning.contract.grace_days;
 pub const cooling_days: u32 = tuning.contract.cooling_days;
@@ -92,80 +93,153 @@ pub fn onAccept(gs: *GameState, c: *contract_mod.Contract) void {
     }
 }
 
-/// After a battle: the pool shrinks, victory points accrue, and a broken
-/// pool completes the objective outright.
-pub fn recordBattle(gs: *GameState, c: *contract_mod.Contract, enemy_destroyed_bv: i64, score_delta: i32) !void {
-    c.victory_points += score_delta * tuning.contract.vp_per_score;
-    if (c.objective != .attrition) return;
-    c.enemy_pool_remaining = @max(0, c.enemy_pool_remaining - enemy_destroyed_bv);
-    c.victory_points += @intCast(@divTrunc(enemy_destroyed_bv * 20, @max(1, c.enemy_pool_bv)));
-    if (c.enemy_pool_remaining == 0) {
-        try complete(gs, c, true);
-    } else if (c.objectivesMet()) {
-        try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[objective] {s}: opposition {d}% destroyed — objectives substantially met; `complete` to close out, or keep grinding", .{
-            @tagName(c.kind), c.poolDestroyedPct(),
-        });
+pub const PreparedCompletion = struct {
+    scratch: std.heap.ArenaAllocator,
+    active: bool,
+    id: types.ContractId,
+    company: types.ForceId,
+    bonus: ?GameState.PreparedTreasuryPosting,
+    gain: i32,
+    employer: GameState.PreparedStandingAdjustment,
+    enemy: ?GameState.PreparedStandingAdjustment,
+    finish_tour: PreparedFinishTour,
+    tour: personnel.PreparedContractTour,
+    shares: personnel.PreparedProfitShare,
+    standing_log: []const u8,
+    morale_log: ?[]const u8,
+    completion_log: []const u8,
+    pub fn deinit(self: *PreparedCompletion) void {
+        self.scratch.deinit();
     }
+};
+
+const PreparedFinishTour = struct {
+    company: types.ForceId,
+    planet_key: []const u8,
+    applies: bool,
+};
+
+fn prepareFinishTour(gs: *GameState, c: *const contract_mod.Contract) PreparedFinishTour {
+    return .{
+        .company = c.assigned_company,
+        .planet_key = c.planet_key,
+        .applies = gs.force(c.assigned_company) != null,
+    };
 }
 
-/// Close a contract out. `objectives_broken` (the pool hit zero) earns the
-/// completion bonus — half the remaining payments; an early close-out on a
-/// substantially-met objective forfeits the remainder without breach.
-pub fn complete(gs: *GameState, c: *contract_mod.Contract, objectives_broken: bool) !void {
-    if (c.status != .active) return;
-    const months_left: i64 = if (c.end_day) |end| @divTrunc(@as(i64, end) - @as(i64, gs.clock.day_index), types.days_per_month) else 0;
-    if (objectives_broken and months_left > 0) {
-        const bonus = @divTrunc(c.monthly_net * @max(0, months_left), 2);
-        try gs.postTransaction(.{
-            .day = gs.clock.day_index,
-            .amount = bonus,
-            .category = .contract_payment,
-            .company = c.assigned_company,
-            .contract = c.id,
-            .note = "early completion bonus",
-        });
+fn commitFinishTour(gs: *GameState, prepared: PreparedFinishTour) void {
+    if (!prepared.applies) return;
+    const force = gs.force(prepared.company).?;
+    force.location_planet = prepared.planet_key;
+    force.contracts_since_rotation += 1;
+}
+
+fn onBooks(gs: *GameState) u32 {
+    var n: u32 = 0;
+    var it = gs.people.iterator();
+    while (it.next()) |e| {
+        if (e.value_ptr.isOnBooks()) n += 1;
     }
-    c.status = .completed;
-    // Reputation by victory points: a tour in the red earns none.
+    return n;
+}
+
+fn prepareCompletion(gs: *GameState, c: *const contract_mod.Contract, broken: bool) !PreparedCompletion {
+    var scratch = std.heap.ArenaAllocator.init(gs.scratch());
+    errdefer scratch.deinit();
+    if (c.status != .active) return .{ .scratch = scratch, .active = false, .id = c.id, .company = c.assigned_company, .bonus = null, .gain = 0, .employer = undefined, .enemy = null, .finish_tour = undefined, .tour = undefined, .shares = undefined, .standing_log = "", .morale_log = null, .completion_log = "" };
+    const months: i64 = if (c.end_day) |end| @divTrunc(@as(i64, end) - @as(i64, gs.clock.day_index), types.days_per_month) else 0;
+    const amount: types.CBills = if (broken and months > 0) @divTrunc(c.monthly_net * @max(0, months), 2) else 0;
+    const bonus = if (amount > 0) try gs.prepareTreasuryPosting(.outfit, .{ .day = gs.clock.day_index, .amount = amount, .category = .contract_payment, .company = c.assigned_company, .contract = c.id, .note = "early completion bonus" }) else null;
     const t = tuning.contract;
     const vp_bonus = std.math.clamp(@divTrunc(c.victory_points, t.rep_vp_per_point), t.rep_vp_bonus_min, t.rep_vp_bonus_max);
-    const gain: i32 = if (c.victory_points < 0) vp_bonus else 1 + vp_bonus; // −8 VP → 0, −25 VP → −1
-    gs.reputation += gain;
-    // Standing: the employer remembers a tour served, and so does
-    // whoever you served it against.
-    const employer_now = try gs.adjustStanding(c.employer_key, @max(t.standing_gain_floor, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)) + @as(i32, @intFromBool(c.beachhead)) * t.standing_beachhead_bonus);
-    const enemy_now = if (!std.mem.eql(u8, c.enemy_key, "PER")) try gs.adjustStanding(c.enemy_key, -t.standing_enemy_loss) else 0;
-    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[standing] {s} +{d} → {d}{s}", .{ c.employer_key, @max(t.standing_gain_floor, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)), employer_now, if (!std.mem.eql(u8, c.enemy_key, "PER")) try std.fmt.allocPrint(gs.allocator(), " · {s} −{d} → {d}", .{ c.enemy_key, t.standing_enemy_loss, enemy_now }) else "" });
-    try finishTour(gs, c);
-    // Service records: a tour served, and an outstanding one noted.
-    {
-        const outstanding = c.gradeOf() == .outstanding;
-        var ids: std.ArrayListUnmanaged(types.PersonId) = .empty;
-        defer ids.deinit(gs.scratch());
-        var pit = gs.people.iterator();
-        while (pit.next()) |e| {
-            const p = e.value_ptr;
-            if (!p.isOnBooks() or !toe.personInCompany(gs, p, c.assigned_company)) continue;
-            p.tours += 1;
-            if (outstanding) p.outstanding_tours += 1;
-            p.edge_spent = false; // Edge is per contract
-            try ids.append(gs.scratch(), p.id);
-        }
-        for (ids.items) |id| _ = try @import("personnel.zig").checkAwards(gs, id);
+    const gain: i32 = if (c.victory_points < 0) vp_bonus else 1 + vp_bonus;
+    const delta = @max(t.standing_gain_floor, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)) + @as(i32, @intFromBool(c.beachhead)) * t.standing_beachhead_bonus;
+    const employer = try gs.prepareStandingAdjustment(c.employer_key, delta);
+    const enemy = if (!std.mem.eql(u8, c.enemy_key, "PER")) try gs.prepareStandingAdjustment(c.enemy_key, -t.standing_enemy_loss) else null;
+    const finish_tour = prepareFinishTour(gs, c);
+    const strong = @intFromEnum(c.gradeOf()) >= @intFromEnum(contract_mod.Contract.Grade.strong);
+    const tour = try personnel.prepareContractTour(scratch.allocator(), gs, c.assigned_company, c.gradeOf() == .outstanding);
+    const shares = try personnel.prepareProfitShare(scratch.allocator(), gs, c.id, c.assigned_company, amount);
+    try gs.reserveLedger(@as(usize, @intFromBool(bonus != null)) + shares.ledgerSlots());
+    try gs.reserveLog(tour.log_slots + shares.logSlots() + 2 + @as(usize, @intFromBool(strong)));
+    try gs.faction_standing.ensureUnusedCapacity(gs.allocator(), @as(usize, @intFromBool(employer.key != null)) + @as(usize, @intFromBool(if (enemy) |standing| standing.key != null else false)));
+    var date: [10]u8 = undefined;
+    const enemy_text = if (enemy) |s| try std.fmt.allocPrint(gs.allocator(), " · {s} −{d} → {d}", .{ c.enemy_key, t.standing_enemy_loss, s.value }) else "";
+    const standing_log = try std.fmt.allocPrint(gs.allocator(), "{s} [standing] {s} +{d} → {d}{s}", .{ gs.clock.date.text(&date), c.employer_key, @max(t.standing_gain_floor, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)), employer.value, enemy_text });
+    const morale_log = if (strong) try std.fmt.allocPrint(gs.allocator(), "{s} [morale] a {s} tour — spirits lift across the outfit (+{d} morale, {d} people)", .{ gs.clock.date.text(&date), c.grade(), tuning.person.morale_contract_strong, onBooks(gs) }) else null;
+    const pay_note: []const u8 = if (months <= 0) "the employer pays in full" else if (broken) "the employer pays in full plus the early-completion bonus" else "closed out early — the remaining payments are forfeited";
+    const completion_log = try std.fmt.allocPrint(gs.allocator(), "{s} [{s}] contract COMPLETE — {s} ({s}, {d} VP, score {d}) — reputation {s} ({s}{d}); {s}", .{ gs.clock.date.text(&date), @tagName(c.kind), c.grade(), if (broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else if (gain > 0) "rises" else if (gain == 0) "unchanged" else "slips", if (gain >= 0) "+" else "", gain, pay_note });
+    return .{ .scratch = scratch, .active = true, .id = c.id, .company = c.assigned_company, .bonus = bonus, .gain = gain, .employer = employer, .enemy = enemy, .finish_tour = finish_tour, .tour = tour, .shares = shares, .standing_log = standing_log, .morale_log = morale_log, .completion_log = completion_log };
+}
+
+pub fn prepareComplete(gs: *GameState, id: types.ContractId, broken: bool) !PreparedCompletion {
+    return prepareCompletion(gs, gs.contracts.getPtr(id) orelse return error.UnknownContract, broken);
+}
+
+pub fn commitComplete(gs: *GameState, prepared: *const PreparedCompletion) void {
+    if (!prepared.active) return;
+    if (prepared.bonus) |bonus| gs.commitTreasuryPosting(bonus);
+    const c = gs.contracts.getPtr(prepared.id).?;
+    c.status = .completed;
+    gs.reputation += prepared.gain;
+    gs.commitStandingAdjustment(prepared.employer);
+    if (prepared.enemy) |enemy| gs.commitStandingAdjustment(enemy);
+    gs.event_log.appendAssumeCapacity(.{ .day = gs.clock.day_index, .category = .contract, .company = prepared.company, .contract = prepared.id, .text = prepared.standing_log });
+    commitFinishTour(gs, prepared.finish_tour);
+    personnel.commitContractTour(gs, prepared.company, prepared.tour);
+    personnel.commitProfitShare(gs, prepared.id, prepared.company, prepared.shares);
+    if (prepared.morale_log) |line| {
+        _ = personnel.adjustMoraleAll(gs, tuning.person.morale_contract_strong);
+        gs.event_log.appendAssumeCapacity(.{ .day = gs.clock.day_index, .category = .rotation, .company = prepared.company, .contract = prepared.id, .text = line });
     }
-    // Shares: the stakeholders take their cut of what the tour earned.
-    _ = try @import("personnel.zig").payShares(gs, c.id, c.assigned_company);
-    // Morale: a strong finish lifts the whole outfit.
-    if (@intFromEnum(c.gradeOf()) >= @intFromEnum(contract_mod.Contract.Grade.strong)) {
-        const n = @import("personnel.zig").adjustMoraleAll(gs, tuning.person.morale_contract_strong);
-        try gs.log(.rotation, .{ .company = c.assigned_company, .contract = c.id }, "[morale] a {s} tour — spirits lift across the outfit (+{d} morale, {d} people)", .{ c.grade(), tuning.person.morale_contract_strong, n });
+    gs.event_log.appendAssumeCapacity(.{ .day = gs.clock.day_index, .category = .contract, .company = prepared.company, .contract = prepared.id, .text = prepared.completion_log });
+}
+
+pub fn complete(gs: *GameState, c: *contract_mod.Contract, broken: bool) !void {
+    var prepared = try prepareComplete(gs, c.id, broken);
+    defer prepared.deinit();
+    commitComplete(gs, &prepared);
+}
+
+pub const PreparedBattleRecord = struct {
+    id: types.ContractId,
+    victory_points: i32,
+    pool_remaining: i64,
+    completion: ?PreparedCompletion,
+    objective_log: ?[]const u8,
+    pub fn deinit(self: *PreparedBattleRecord) void {
+        if (self.completion) |*p| p.deinit();
     }
-    // What the employer pays: a term served runs its course, a broken
-    // pool earns the bonus, an early close-out forfeits the months left.
-    const pay_note: []const u8 = if (months_left <= 0) "the employer pays in full" else if (objectives_broken) "the employer pays in full plus the early-completion bonus" else "closed out early — the remaining payments are forfeited";
-    try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] contract COMPLETE — {s} ({s}, {d} VP, score {d}) — reputation {s} ({s}{d}); {s}", .{
-        @tagName(c.kind), c.grade(), if (objectives_broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else if (gain > 0) "rises" else if (gain == 0) "unchanged" else "slips", if (gain >= 0) "+" else "", gain, pay_note,
-    });
+};
+
+pub fn prepareRecordBattle(gs: *GameState, id: types.ContractId, enemy_bv: i64, score: i32) !PreparedBattleRecord {
+    const c = gs.contracts.getPtr(id) orelse return error.UnknownContract;
+    var projected = c.*;
+    projected.victory_points += score * tuning.contract.vp_per_score;
+    if (projected.objective != .attrition) return .{ .id = id, .victory_points = projected.victory_points, .pool_remaining = projected.enemy_pool_remaining, .completion = null, .objective_log = null };
+    projected.enemy_pool_remaining = @max(0, projected.enemy_pool_remaining - enemy_bv);
+    projected.victory_points += @intCast(@divTrunc(enemy_bv * 20, @max(1, projected.enemy_pool_bv)));
+    if (projected.enemy_pool_remaining == 0) return .{ .id = id, .victory_points = projected.victory_points, .pool_remaining = projected.enemy_pool_remaining, .completion = try prepareCompletion(gs, &projected, true), .objective_log = null };
+    if (projected.objectivesMet()) {
+        try gs.reserveLog(1);
+        var date: [10]u8 = undefined;
+        const line = try std.fmt.allocPrint(gs.allocator(), "{s} [objective] {s}: opposition {d}% destroyed — objectives substantially met; `complete` to close out, or keep grinding", .{ gs.clock.date.text(&date), @tagName(projected.kind), projected.poolDestroyedPct() });
+        return .{ .id = id, .victory_points = projected.victory_points, .pool_remaining = projected.enemy_pool_remaining, .completion = null, .objective_log = line };
+    }
+    return .{ .id = id, .victory_points = projected.victory_points, .pool_remaining = projected.enemy_pool_remaining, .completion = null, .objective_log = null };
+}
+
+pub fn commitRecordBattle(gs: *GameState, prepared: *const PreparedBattleRecord) void {
+    const c = gs.contracts.getPtr(prepared.id).?;
+    c.victory_points = prepared.victory_points;
+    c.enemy_pool_remaining = prepared.pool_remaining;
+    if (prepared.completion) |*completion| commitComplete(gs, completion) else if (prepared.objective_log) |line| gs.event_log.appendAssumeCapacity(.{ .day = gs.clock.day_index, .category = .contract, .company = c.assigned_company, .contract = c.id, .text = line });
+}
+
+pub fn recordBattle(gs: *GameState, c: *contract_mod.Contract, enemy_bv: i64, score: i32) !void {
+    var prepared = try prepareRecordBattle(gs, c.id, enemy_bv, score);
+    defer prepared.deinit();
+    commitRecordBattle(gs, &prepared);
 }
 
 /// The breach clause: recalled early, or combat-ineffective with no
@@ -365,6 +439,125 @@ pub fn execAcceptContract(gs: *GameState, a: @FieldType(Command, "accept_contrac
     acceptContract(gs, a.offer, a.company) catch |err| return @errorCast(err);
     // The accepted contract has the same id as the offer (assigned at generation).
     return .{ .contract = a.offer };
+}
+
+fn completionFixture(gs: *GameState, terminal: bool) !types.ContractId {
+    const company = try gs.createForce("Alpha", .company, .none);
+    const person = try gs.hirePerson("Award", "Holder", .mekwarrior);
+    gs.person(person).?.assigned_force = company;
+    gs.person(person).?.shares = 1;
+    const id: types.ContractId = @enumFromInt(1);
+    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = 100_000, .category = .contract_payment, .contract = id });
+    try gs.contracts.put(gs.allocator(), id, .{
+        .id = id,
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = company,
+        .monthly_net = 300_000,
+        .objective = .attrition,
+        .enemy_pool_bv = 100,
+        .enemy_pool_remaining = if (terminal) 50 else 25,
+        .victory_points = 20,
+        .end_day = 180,
+    });
+    return id;
+}
+
+test "recordBattle is atomic through terminal completion and retries equivalently" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
+    const id = try completionFixture(&gs, true);
+    const before = digest.stateHash(&gs);
+    var failed = false;
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
+        gs.arena.child_allocator = failing.allocator();
+        if (recordBattle(&gs, gs.contracts.getPtr(id).?, 50, 4)) |_| break else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+            failed = true;
+        }
+    }
+    try std.testing.expect(failed);
+    try std.testing.expectEqual(contract_mod.ContractStatus.completed, gs.contracts.getPtr(id).?.status);
+    try std.testing.expect(gs.person(@enumFromInt(1)).?.hasAward("commendation"));
+    try std.testing.expect(gs.ledger.transactions.items.len >= 3);
+    try std.testing.expect(gs.event_log.items.len >= 4);
+
+    var clean = GameState.init(std.testing.allocator, .{ .start_funds = 1_000_000 });
+    defer clean.deinit();
+    const clean_id = try completionFixture(&clean, true);
+    try recordBattle(&clean, clean.contracts.getPtr(clean_id).?, 50, 4);
+    try std.testing.expectEqual(digest.stateHash(&clean), digest.stateHash(&gs));
+}
+
+test "recordBattle leaves a substantially-met attrition contract unchanged on allocation failure" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
+    const id = try completionFixture(&gs, false);
+    const before = digest.stateHash(&gs);
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+    try std.testing.expectError(error.OutOfMemory, recordBattle(&gs, gs.contracts.getPtr(id).?, 10, 1));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+
+    var success = GameState.init(std.testing.allocator, .{ .start_funds = 1_000_000 });
+    defer success.deinit();
+    const complete_id = try completionFixture(&success, false);
+    try recordBattle(&success, success.contracts.getPtr(complete_id).?, 10, 1);
+    const c = success.contracts.getPtr(complete_id).?;
+    try std.testing.expectEqual(contract_mod.ContractStatus.active, c.status);
+    try std.testing.expect(c.objectivesMet());
+    try std.testing.expectEqual(@as(usize, 1), success.event_log.items.len);
+}
+
+test "complete closes ordinarily without an early bonus and leaves inactive contracts alone" {
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .start_funds = 1_000_000 });
+    defer gs.deinit();
+    const id = try completionFixture(&gs, true);
+    try complete(&gs, gs.contracts.getPtr(id).?, false);
+    try std.testing.expectEqual(contract_mod.ContractStatus.completed, gs.contracts.getPtr(id).?.status);
+    for (gs.ledger.transactions.items) |txn| try std.testing.expect(!std.mem.eql(u8, txn.note, "early completion bonus"));
+    const before = digest.stateHash(&gs);
+    try complete(&gs, gs.contracts.getPtr(id).?, false);
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "complete leaves the full campaign digest unchanged on every preparation failure" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
+    const id = try completionFixture(&gs, true);
+    const before = digest.stateHash(&gs);
+    var failed = false;
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
+        gs.arena.child_allocator = failing.allocator();
+        if (complete(&gs, gs.contracts.getPtr(id).?, true)) |_| break else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+            failed = true;
+        }
+    }
+    try std.testing.expect(failed);
+    try std.testing.expectEqual(contract_mod.ContractStatus.completed, gs.contracts.getPtr(id).?.status);
 }
 
 test "execAcceptContract returns the ContractId of the accepted contract" {

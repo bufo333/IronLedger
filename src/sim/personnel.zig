@@ -118,15 +118,31 @@ pub fn refreshShares(gs: *GameState) u32 {
     return gained;
 }
 
-/// Contract completed: `gs.share_profit_bp` of what the contract
-/// brought in, split pro rata across every shareholder on the books and
-/// paid as payroll "profit shares". Returns the pool paid.
-pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.ForceId) !types.CBills {
+pub const PreparedProfitShare = struct {
+    holders: []const types.PersonId,
+    paid: types.CBills,
+    posting: ?GameState.PreparedTreasuryPosting,
+    log_line: ?[]const u8,
+
+    pub fn ledgerSlots(self: PreparedProfitShare) usize {
+        return @intFromBool(self.posting != null);
+    }
+
+    pub fn logSlots(self: PreparedProfitShare) usize {
+        return @intFromBool(self.log_line != null);
+    }
+};
+
+/// Prepare the profit-share payout from recorded contract income plus an
+/// already-prepared completion bonus. The returned operation owns no state and
+/// commits without allocation.
+pub fn prepareProfitShare(alloc: std.mem.Allocator, gs: *GameState, contract_id: types.ContractId, company: types.ForceId, completion_bonus: types.CBills) !PreparedProfitShare {
     var income: types.CBills = 0;
     for (gs.ledger.transactions.items) |t| if (t.contract == contract_id) {
         income += t.amount;
     };
-    if (income <= 0 or gs.share_profit_bp == 0) return 0;
+    income += completion_bonus;
+    if (income <= 0 or gs.share_profit_bp == 0) return .{ .holders = &.{}, .paid = 0, .posting = null, .log_line = null };
     var total_shares: u32 = 0;
     var it = gs.people.iterator();
     while (it.next()) |e| {
@@ -134,25 +150,60 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
         if (!p.isOnBooks()) continue;
         total_shares += p.shares;
     }
-    if (total_shares == 0) return 0;
+    if (total_shares == 0) return .{ .holders = &.{}, .paid = 0, .posting = null, .log_line = null };
     const pool = types.applyBp(income, gs.share_profit_bp);
     const per_share = @divTrunc(pool, @as(types.CBills, total_shares));
-    if (per_share <= 0) return 0;
+    if (per_share <= 0) return .{ .holders = &.{}, .paid = 0, .posting = null, .log_line = null };
     var paid: types.CBills = 0;
     var holders: u32 = 0;
+    var holder_ids: std.ArrayListUnmanaged(types.PersonId) = .empty;
     var it2 = gs.people.iterator();
     while (it2.next()) |e| {
         const p = e.value_ptr;
         if (!p.isOnBooks() or p.shares == 0) continue;
         paid += per_share * p.shares;
         holders += 1;
-        p.addMorale(tuning.contract.share_morale_bonus);
+        try holder_ids.append(alloc, p.id);
     }
-    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -paid, .category = .payroll, .company = company, .contract = contract_id, .note = "profit shares" });
-    try gs.log(.contract, .{ .company = company, .contract = contract_id }, "[shares] {s} c-bills of {s} contract income ({d}%) paid to {d} shareholders — {d} shares at {s} each (morale +{d})", .{
-        try types.moneyText(gs.allocator(), paid), try types.moneyText(gs.allocator(), income), types.bpPercent(gs.share_profit_bp), holders, total_shares, try types.moneyText(gs.allocator(), per_share), tuning.contract.share_morale_bonus,
+    const posting = try gs.prepareTreasuryPosting(.outfit, .{ .day = gs.clock.day_index, .amount = -paid, .category = .payroll, .company = company, .contract = contract_id, .note = "profit shares" });
+    try gs.reserveLog(1);
+    var date_buf: [10]u8 = undefined;
+    const log_line = try std.fmt.allocPrint(gs.allocator(), "{s} [shares] {s} c-bills of {s} contract income ({d}%) paid to {d} shareholders — {d} shares at {s} each (morale +{d})", .{
+        gs.clock.date.text(&date_buf),
+        try types.moneyText(gs.allocator(), paid),
+        try types.moneyText(gs.allocator(), income),
+        types.bpPercent(gs.share_profit_bp),
+        holders,
+        total_shares,
+        try types.moneyText(gs.allocator(), per_share),
+        tuning.contract.share_morale_bonus,
     });
-    return paid;
+    return .{ .holders = try holder_ids.toOwnedSlice(alloc), .paid = paid, .posting = posting, .log_line = log_line };
+}
+
+/// Commit a prepared profit-share payout. Shareholder eligibility, ledger
+/// capacity, and the campaign log line were fixed during preparation.
+pub fn commitProfitShare(gs: *GameState, contract_id: types.ContractId, company: types.ForceId, prepared: PreparedProfitShare) void {
+    for (prepared.holders) |id| gs.person(id).?.addMorale(tuning.contract.share_morale_bonus);
+    if (prepared.posting) |posting| gs.commitTreasuryPosting(posting);
+    if (prepared.log_line) |line| gs.event_log.appendAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .category = .contract,
+        .company = company,
+        .contract = contract_id,
+        .text = line,
+    });
+}
+
+/// Contract completed: `gs.share_profit_bp` of what the contract brought in,
+/// split pro rata across every shareholder on the books and paid as payroll.
+/// Returns the pool paid.
+pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.ForceId) !types.CBills {
+    var scratch_arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer scratch_arena.deinit();
+    const prepared = try prepareProfitShare(scratch_arena.allocator(), gs, contract_id, company, 0);
+    commitProfitShare(gs, contract_id, company, prepared);
+    return prepared.paid;
 }
 
 /// Clear every pilot/tech slot that points at this person (rule 20: one owner
@@ -405,8 +456,74 @@ pub fn creditKills(
     return kills;
 }
 
-/// Hand out every award whose threshold a person has crossed.
-/// Returns how many were pinned on.
+pub const PreparedAward = struct { key: []const u8, morale: u8, log_line: []const u8 };
+pub const PreparedTourPerson = struct { id: types.PersonId, awards: []const PreparedAward };
+pub const PreparedContractTour = struct {
+    people: []const PreparedTourPerson,
+    outstanding: bool,
+    log_slots: usize,
+};
+
+fn projectedCounter(p: *const person_mod.Person, kind: award_mod.Counter, day: u32, outstanding: bool) u32 {
+    return switch (kind) {
+        .tours => p.tours + 1,
+        .outstanding_tours => p.outstanding_tours + @intFromBool(outstanding),
+        else => p.counter(kind, day),
+    };
+}
+
+/// Prepare service-record and award changes for on-books personnel assigned to
+/// one company. Award storage and every award log are ready before commit.
+pub fn prepareContractTour(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, outstanding: bool) !PreparedContractTour {
+    var people: std.ArrayListUnmanaged(PreparedTourPerson) = .empty;
+    var award_log_count: usize = 0;
+    var it = gs.people.iterator();
+    while (it.next()) |entry| {
+        const p = entry.value_ptr;
+        if (!p.isOnBooks() or !toe.personInCompany(gs, p, company)) continue;
+        var awards: std.ArrayListUnmanaged(PreparedAward) = .empty;
+        for (award_mod.table) |a| {
+            if (p.hasAward(a.key) or projectedCounter(p, a.kind, gs.clock.day_index, outstanding) < a.threshold) continue;
+            const ranked_name = try p.rankedName(gs.allocator());
+            var date_buf: [10]u8 = undefined;
+            const line = try std.fmt.allocPrint(gs.allocator(), "{s} [award] {s} receives the {s} ({s} {d})", .{
+                gs.clock.date.text(&date_buf), ranked_name, a.name, @tagName(a.kind), projectedCounter(p, a.kind, gs.clock.day_index, outstanding),
+            });
+            try awards.append(alloc, .{ .key = a.key, .morale = a.morale, .log_line = line });
+        }
+        try p.awards.ensureUnusedCapacity(gs.allocator(), awards.items.len);
+        award_log_count += awards.items.len;
+        try people.append(alloc, .{ .id = p.id, .awards = try awards.toOwnedSlice(alloc) });
+    }
+    try gs.reserveLog(award_log_count);
+    return .{ .people = try people.toOwnedSlice(alloc), .outstanding = outstanding, .log_slots = award_log_count };
+}
+
+/// Commit a prepared contract-tour close without allocation. Every referenced
+/// person and award destination was validated during preparation.
+pub fn commitContractTour(gs: *GameState, company: types.ForceId, prepared: PreparedContractTour) void {
+    for (prepared.people) |person| {
+        const p = gs.person(person.id).?;
+        p.tours += 1;
+        if (prepared.outstanding) p.outstanding_tours += 1;
+        p.edge_spent = false;
+        for (person.awards) |award| {
+            p.awards.appendAssumeCapacity(award.key);
+            p.last_award_day = gs.clock.day_index;
+            p.morale = @intCast(@min(100, @as(u32, p.morale) + award.morale));
+            gs.event_log.appendAssumeCapacity(.{
+                .day = gs.clock.day_index,
+                .category = .rotation,
+                .company = company,
+                .hq = p.posted_hq,
+                .text = award.log_line,
+            });
+        }
+    }
+}
+
+/// Hand out every award whose threshold a person has crossed. Returns how many
+/// were pinned on.
 pub fn checkAwards(gs: *GameState, person_id: types.PersonId) !u32 {
     const p = gs.person(person_id) orelse return 0;
     if (!p.isOnBooks()) return 0;
@@ -415,7 +532,7 @@ pub fn checkAwards(gs: *GameState, person_id: types.PersonId) !u32 {
         if (p.hasAward(a.key)) continue;
         if (p.counter(a.kind, gs.clock.day_index) < a.threshold) continue;
         try p.awards.append(gs.allocator(), a.key);
-        p.last_award_day = gs.clock.day_index; // a recent award is a loyalty modifier
+        p.last_award_day = gs.clock.day_index;
         p.morale = @intCast(@min(100, @as(u32, p.morale) + a.morale));
         n += 1;
         try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force), .hq = p.posted_hq }, "[award] {s} receives the {s} ({s} {d})", .{ try p.rankedName(gs.allocator()), a.name, @tagName(a.kind), p.counter(a.kind, gs.clock.day_index) });
@@ -780,6 +897,44 @@ test "shares are paid pro rata from contract income at the configured share" {
     // Nothing owed with the share at zero or no shareholders.
     gs.share_profit_bp = 0;
     try std.testing.expectEqual(@as(types.CBills, 0), try payShares(&gs, cid, .none));
+}
+
+test "prepared profit shares and tour awards leave no partial personnel effects on failure" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
+    const company = try gs.createForce("Alpha", .company, .none);
+    const person = try gs.hirePerson("Award", "Holder", .mekwarrior);
+    gs.person(person).?.assigned_force = company;
+    gs.person(person).?.shares = 1;
+    const contract: types.ContractId = @enumFromInt(1);
+    try gs.postTransaction(.{ .day = 0, .amount = 100_000, .category = .contract_payment, .contract = contract });
+    const before = digest.stateHash(&gs);
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+    var scratch = std.heap.ArenaAllocator.init(gs.scratch());
+    defer scratch.deinit();
+    try std.testing.expectError(error.OutOfMemory, prepareContractTour(scratch.allocator(), &gs, company, true));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+
+    var complete = GameState.init(std.testing.allocator, .{ .start_funds = 1_000_000 });
+    defer complete.deinit();
+    const done_company = try complete.createForce("Alpha", .company, .none);
+    const done_person = try complete.hirePerson("Award", "Holder", .mekwarrior);
+    complete.person(done_person).?.assigned_force = done_company;
+    complete.person(done_person).?.shares = 1;
+    try complete.postTransaction(.{ .day = 0, .amount = 100_000, .category = .contract_payment, .contract = contract });
+    var done_scratch = std.heap.ArenaAllocator.init(complete.scratch());
+    defer done_scratch.deinit();
+    const tour = try prepareContractTour(done_scratch.allocator(), &complete, done_company, true);
+    const shares = try prepareProfitShare(done_scratch.allocator(), &complete, contract, done_company, 0);
+    commitContractTour(&complete, done_company, tour);
+    commitProfitShare(&complete, contract, done_company, shares);
+    try std.testing.expect(complete.person(done_person).?.hasAward("commendation"));
+    try std.testing.expect(complete.person(done_person).?.morale > 50);
+    try std.testing.expect(complete.ledger.balance() < 100_000);
 }
 
 test "a raised company is an empty skeleton; hulls bought for it land in a lance or ship with the map transit; halls crew it" {
