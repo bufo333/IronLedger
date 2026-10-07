@@ -14,6 +14,7 @@ const part_mod = @import("../domain/part.zig");
 const planet_mod = @import("../domain/planet.zig");
 const tuning = @import("../domain/tuning.zig").t;
 const hull_instance_mod = @import("../domain/hull_instance.zig");
+const merc_company_mod = @import("../domain/merc_company.zig");
 const roster_gen = @import("../gen/roster_gen.zig");
 const faction_mod = @import("../domain/faction.zig");
 
@@ -114,8 +115,8 @@ pub fn makeDispersedListing(
 /// that point each hull in `wrecks` is pool-removed, `.active`, enemy-owned,
 /// and absent from any roster — the limbo state §3.1 describes. This function
 /// gives every such hull exactly one terminal disposition:
-///   - The first `min(len, enemy_recovery_capacity)` hulls re-home into
-///     `faction_rosters[enemy_faction_key]`.
+///   - The first `min(len, enemy_recovery_capacity)` hulls re-home into their
+///     explicit source roster (faction or merc company).
 ///   - The remainder transfer to `.market` and surface as dispersed
 ///     black-market listings on worlds other than the battle world.
 ///
@@ -130,7 +131,7 @@ pub fn disperseEnemyWrecks(
     gs: *GameState,
     alloc: std.mem.Allocator,
     wrecks: []const types.HullInstanceId,
-    enemy_faction_key: []const u8,
+    source_owner: hull_instance_mod.HullOwner,
     battle_day: u32,
     battle_planet_key: []const u8,
     rng: *rng_mod.Rng,
@@ -150,55 +151,77 @@ pub fn disperseEnemyWrecks(
         }
     }
 
-    // Precondition: enemy_faction_key must be non-empty; pickEnemy always
-    // produces one, so an empty key is a programming error.
-    std.debug.assert(enemy_faction_key.len > 0);
-    // Guard: if the key is somehow empty (unreachable in practice) or no
-    // black-market worlds exist, collapse dispersed to zero — wrecks are left
-    // untouched (the recovery path at line 144 is also gated on a non-empty
-    // key, so no roster write occurs).  This is a safe no-op degrade, not a
-    // rule-1 violation, because the branch is unreachable in production.
-    const effective_cap: usize = if (enemy_faction_key.len == 0 or worlds_len == 0)
-        wrecks.len // route all to recovery
-    else
-        recovered_n;
+    const prior_owner_key = switch (source_owner) {
+        .faction => |key| key,
+        .merc_company => |id| gs.merc_companies.getPtr(id).?.faction_key,
+        else => unreachable,
+    };
+    const effective_cap: usize = if (worlds_len == 0) wrecks.len else recovered_n;
     const dispersed = wrecks[effective_cap..];
     const recovered = wrecks[0..effective_cap];
 
     // ---- Prepare (fallible; no draw; no logical gs mutation) ----
     try gs.hull_ownership_history.ensureUnusedCapacity(alloc, recovered.len + dispersed.len);
     try gs.market_listings.ensureUnusedCapacity(alloc, dispersed.len);
-    if (recovered.len > 0 and enemy_faction_key.len > 0) {
-        const gop = try gs.faction_rosters.getOrPut(alloc, enemy_faction_key);
-        if (!gop.found_existing) gop.value_ptr.* = .empty;
-        try gop.value_ptr.ensureUnusedCapacity(alloc, recovered.len);
-    }
+    if (recovered.len > 0) switch (source_owner) {
+        .faction => |key| {
+            const gop = try gs.faction_rosters.getOrPut(alloc, key);
+            if (!gop.found_existing) gop.value_ptr.* = .empty;
+            try gop.value_ptr.ensureUnusedCapacity(alloc, recovered.len);
+        },
+        .merc_company => |id| {
+            const gop = try gs.merc_company_rosters.getOrPut(alloc, id);
+            if (!gop.found_existing) gop.value_ptr.* = .empty;
+            try gop.value_ptr.ensureUnusedCapacity(alloc, recovered.len);
+        },
+        else => unreachable,
+    };
 
     // ---- Commit (infallible from here) ----
     var next_listing: u32 = gs.next_listing_id;
 
-    // Recovery: re-home into the enemy faction roster.
-    if (recovered.len > 0 and enemy_faction_key.len > 0) {
-        const roster = gs.faction_rosters.getPtr(enemy_faction_key).?;
-        for (recovered) |hid| {
-            const inst = gs.hull_instances.getPtr(hid).?;
-            inst.owner = .{ .faction = enemy_faction_key };
-            inst.status = .active;
-            // Close the open ownership interval.
-            for (gs.hull_ownership_history.items) |*h| {
-                if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = battle_day;
+    // Recovery returns wrecks to their explicit source owner, not merely its faction.
+    if (recovered.len > 0) switch (source_owner) {
+        .faction => |key| {
+            const roster = gs.faction_rosters.getPtr(key).?;
+            for (recovered) |hid| {
+                const inst = gs.hull_instances.getPtr(hid).?;
+                inst.owner = source_owner;
+                inst.status = .active;
+                for (gs.hull_ownership_history.items) |*h| {
+                    if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = battle_day;
+                }
+                gs.hull_ownership_history.appendAssumeCapacity(.{
+                    .hull_instance_id = hid,
+                    .from_day = battle_day,
+                    .to_day = 0,
+                    .acquisition_type = .transfer,
+                    .prior_owner_key = prior_owner_key,
+                });
+                roster.appendAssumeCapacity(hid);
             }
-            // Open a transfer interval naming the enemy faction as prior owner.
-            gs.hull_ownership_history.appendAssumeCapacity(.{
-                .hull_instance_id = hid,
-                .from_day = battle_day,
-                .to_day = 0,
-                .acquisition_type = .transfer,
-                .prior_owner_key = enemy_faction_key, // static key — no dupe needed
-            });
-            roster.appendAssumeCapacity(hid);
-        }
-    }
+        },
+        .merc_company => |id| {
+            const roster = gs.merc_company_rosters.getPtr(id).?;
+            for (recovered) |hid| {
+                const inst = gs.hull_instances.getPtr(hid).?;
+                inst.owner = source_owner;
+                inst.status = .active;
+                for (gs.hull_ownership_history.items) |*h| {
+                    if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = battle_day;
+                }
+                gs.hull_ownership_history.appendAssumeCapacity(.{
+                    .hull_instance_id = hid,
+                    .from_day = battle_day,
+                    .to_day = 0,
+                    .acquisition_type = .transfer,
+                    .prior_owner_key = prior_owner_key,
+                });
+                roster.appendAssumeCapacity(hid);
+            }
+        },
+        else => unreachable,
+    };
 
     // Dispersal: transfer to .market and build a black-market listing.
     for (dispersed) |hid| {
@@ -219,13 +242,13 @@ pub fn disperseEnemyWrecks(
         for (gs.hull_ownership_history.items) |*h| {
             if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = battle_day;
         }
-        // Open a transfer interval naming the enemy faction as prior owner.
+        // Open a transfer interval naming the original source affiliation.
         gs.hull_ownership_history.appendAssumeCapacity(.{
             .hull_instance_id = hid,
             .from_day = battle_day,
             .to_day = 0,
             .acquisition_type = .transfer,
-            .prior_owner_key = enemy_faction_key, // static key — no dupe needed
+            .prior_owner_key = prior_owner_key,
         });
 
         const listing = makeDispersedListing(gs, hid, lid, worlds[widx], battle_day, delay);
@@ -239,10 +262,10 @@ pub fn disperseEnemyWrecks(
 /// Single owner of the monthly NPC black-market consumption rule
 /// (rule 20/76/77; docs/p3f-faction-loop-design.md §4.1).
 ///
-/// Called from tick.zig runMarkets on day == 1, AFTER faction_surplus.runMonthly
-/// (so NPCs see freshly minted listings) and BEFORE the player board is surfaced.
-/// Draw order: pirates (PER) first, then each merc company in
-/// gs.merc_companies.keys() order (insertion order == MercCompanyId order);
+/// Called from tick.zig runMarkets on day == 1, after faction_surplus.runMonthly
+/// (so NPCs see freshly minted listings). Draw order: pirates (PER) first, then
+/// each active merc company in gs.merc_companies.keys() order (insertion order ==
+/// MercCompanyId order);
 /// within each buyer the listing is chosen by a .market draw over the remaining
 /// eligible set. Asset-safety: no player funds, forces, or units are touched.
 /// gs.rng committed only on success (rules 7/11-13).
@@ -259,7 +282,7 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
     const per_key = per_row.key; // static catalogue memory
 
     // Build the ordered buyer list on a fixed stack buffer:
-    // entry 0 = pirate (PER), then one per merc company in insertion order.
+    // entry 0 = pirate (PER), then one active merc company in insertion order.
     const max_buyers: usize = 256 + 1;
     const BuyerEntry = struct {
         kind: BuyerKind,
@@ -270,10 +293,14 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
     buyers_buf[buyers_len] = .{ .kind = .pirate, .merc_id = .none };
     buyers_len += 1;
     const merc_keys = gs.merc_companies.keys();
-    const mercs_count = @min(merc_keys.len, max_buyers - 1);
-    for (0..mercs_count) |mi| {
-        buyers_buf[buyers_len] = .{ .kind = .merc_company, .merc_id = merc_keys[mi] };
+    var mercs_count: usize = 0;
+    for (merc_keys) |merc_id| {
+        if (mercs_count == max_buyers - 1) break;
+        const company = gs.merc_companies.getPtr(merc_id) orelse unreachable;
+        if (company.dissolved_day != 0) continue;
+        buyers_buf[buyers_len] = .{ .kind = .merc_company, .merc_id = merc_id };
         buyers_len += 1;
+        mercs_count += 1;
     }
 
     // ---- Prepare (fallible; no logical gs mutation) ----
@@ -548,7 +575,7 @@ test "disperseEnemyWrecks: recovers up to capacity, disperses the remainder to o
     std.mem.copyForwards(types.HullInstanceId, buf[0..n], wrecks[0..n]);
 
     var rng = rng_mod.Rng.init(7201);
-    try disperseEnemyWrecks(&gs, gs.allocator(), buf[0..n], faction_key, battle_day, battle_planet, &rng);
+    try disperseEnemyWrecks(&gs, gs.allocator(), buf[0..n], .{ .faction = faction_key }, battle_day, battle_planet, &rng);
 
     // Check recovered hulls.
     const roster = gs.faction_rosters.get(faction_key).?;
@@ -611,7 +638,7 @@ test "disperseEnemyWrecks: every pool wreck reaches exactly one terminal disposi
     defer testing.allocator.free(wrecks);
 
     var rng = rng_mod.Rng.init(7202);
-    try disperseEnemyWrecks(&gs, gs.allocator(), wrecks, faction_key, battle_day, battle_planet, &rng);
+    try disperseEnemyWrecks(&gs, gs.allocator(), wrecks, .{ .faction = faction_key }, battle_day, battle_planet, &rng);
 
     // Verify: no hull in the input is still owner==.faction while absent from roster.
     const roster = gs.faction_rosters.get(faction_key).?;
@@ -641,6 +668,52 @@ test "disperseEnemyWrecks: every pool wreck reaches exactly one terminal disposi
             else => try testing.expect(false), // unexpected owner type
         }
     }
+}
+
+test "disperseEnemyWrecks: recovered merc-company wrecks return to their company roster" {
+    var gs = GameState.init(testing.allocator, .{ .seed = 7204 });
+    defer gs.deinit();
+
+    const merc_id: types.MercCompanyId = @enumFromInt(1);
+    const faction_key = "DC";
+    const battle_day: u32 = 300;
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{
+        .id = merc_id,
+        .faction_key = faction_key,
+    });
+
+    const n: u32 = tuning.market.enemy_recovery_capacity;
+    const wrecks = try testing.allocator.alloc(types.HullInstanceId, n);
+    defer testing.allocator.free(wrecks);
+    for (wrecks, 0..) |*hid, i| {
+        hid.* = @enumFromInt(gs.next_hull_instance_id);
+        gs.next_hull_instance_id += 1;
+        try gs.hull_instances.put(gs.allocator(), hid.*, .{
+            .id = hid.*,
+            .base_key = "LCT-1V",
+            .owner = .{ .merc_company = merc_id },
+            .status = .active,
+        });
+        try gs.hull_ownership_history.append(gs.allocator(), .{
+            .hull_instance_id = hid.*,
+            .from_day = 0,
+            .to_day = 0,
+            .acquisition_type = .initial,
+            .prior_owner_key = faction_key,
+        });
+        _ = i;
+    }
+
+    var rng = rng_mod.Rng.init(7204);
+    try disperseEnemyWrecks(&gs, gs.allocator(), wrecks, .{ .merc_company = merc_id }, battle_day, "galatea", &rng);
+
+    const roster = gs.merc_company_rosters.get(merc_id).?;
+    try testing.expectEqual(@as(usize, n), roster.items.len);
+    for (wrecks) |hid| {
+        const inst = gs.hull_instances.getPtr(hid).?;
+        try testing.expectEqual(hull_instance_mod.OwnerType.merc_company, std.meta.activeTag(inst.owner));
+    }
+    try testing.expect(gs.faction_rosters.get(faction_key) == null);
 }
 
 test "disperseEnemyWrecks: a failing allocator leaves stateHash unchanged" {
@@ -684,7 +757,7 @@ test "disperseEnemyWrecks: a failing allocator leaves stateHash unchanged" {
         gs.arena.child_allocator = failing.allocator();
 
         var rng = rng_mod.Rng.init(7203 + @as(u64, i));
-        if (disperseEnemyWrecks(&gs, gs.allocator(), wrecks, faction_key, battle_day, battle_planet, &rng)) |_| {
+        if (disperseEnemyWrecks(&gs, gs.allocator(), wrecks, .{ .faction = faction_key }, battle_day, battle_planet, &rng)) |_| {
             // Success: state must have changed.
             try testing.expect(digest.stateHash(&gs) != before);
             break;
@@ -930,4 +1003,31 @@ test "runNpcBlackMarketDraw: pirates consume only PER-world listings, mercs only
             try std.testing.expect(hid != hull_ids[0] and hid != hull_ids[1]);
         }
     }
+}
+
+test "runNpcBlackMarketDraw: dissolved merc companies do not buy listings" {
+    var gs = GameState.init(testing.allocator, .{ .seed = 57104 });
+    defer gs.deinit();
+
+    const merc_id: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .dissolved_day = 1 });
+    const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hid, .{ .id = hid, .base_key = "LCT-1V", .owner = .market });
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = @enumFromInt(gs.next_listing_id),
+        .kind = .unit,
+        .item_key = "LCT-1V",
+        .rarity = .common,
+        .price = 0,
+        .black_market = true,
+        .planet_key = "galatea",
+        .hull_instance_id = hid,
+    });
+
+    try runNpcBlackMarketDraw(&gs);
+
+    try testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
+    try testing.expectEqual(hull_instance_mod.OwnerType.market, std.meta.activeTag(gs.hull_instances.getPtr(hid).?.owner));
+    try testing.expect(gs.merc_company_rosters.get(merc_id) == null);
 }

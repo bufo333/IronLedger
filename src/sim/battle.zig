@@ -31,6 +31,7 @@ const operations_m = @import("operations.zig");
 const operation_mod = @import("../domain/operation.zig");
 const readiness_m = @import("readiness.zig");
 const black_market = @import("black_market.zig");
+const hull_instance_for_pool = @import("../domain/hull_instance.zig");
 
 /// Salvage trucks (SVT-1) a company can work a battlefield: operational
 /// (fit crew, not parked or busy) SVT-1s only (ARCH §9.3 active capability).
@@ -371,7 +372,10 @@ pub fn engagementEnemyBv(c: *const contract_mod.Contract, player_bv: i64, varian
 /// or .abstraction (no would-be pool → existing RAT/BV behaviour unchanged).
 /// Single owner of this routing rule (rule 20, docs/p3c-economy-design.md §8.E).
 const PoolResolution = union(enum) {
-    pool: *std.ArrayListUnmanaged(types.HullInstanceId), // present and non-empty
+    pool: struct {
+        hulls: *std.ArrayListUnmanaged(types.HullInstanceId),
+        owner: hull_instance_for_pool.HullOwner,
+    }, // present and non-empty
     forfeit, // would-be pool but absent or empty
     abstraction, // no would-be pool
 };
@@ -390,7 +394,7 @@ fn opforPool(gs: *GameState, c: *const contract_mod.Contract) PoolResolution {
         const would_be = tuning.generation.pirate_pool_hulls > 0;
         if (!would_be) return .abstraction;
         if (gs.faction_rosters.getPtr("PER")) |roster| {
-            if (roster.items.len > 0) return .{ .pool = roster };
+            if (roster.items.len > 0) return .{ .pool = .{ .hulls = roster, .owner = .{ .faction = "PER" } } };
         }
         return .forfeit;
     }
@@ -401,7 +405,7 @@ fn opforPool(gs: *GameState, c: *const contract_mod.Contract) PoolResolution {
         if (rv.merc_company_id == .none) continue;
         // Seeded merc companies always have a roster: would-be = true.
         if (gs.merc_company_rosters.getPtr(rv.merc_company_id)) |roster| {
-            if (roster.items.len > 0) return .{ .pool = roster };
+            if (roster.items.len > 0) return .{ .pool = .{ .hulls = roster, .owner = .{ .merc_company = rv.merc_company_id } } };
         }
         return .forfeit;
     }
@@ -409,7 +413,7 @@ fn opforPool(gs: *GameState, c: *const contract_mod.Contract) PoolResolution {
     const faction = faction_mod.find(c.enemy_key) orelse return .abstraction;
     if (faction.replenishment_hulls_per_year == 0) return .abstraction;
     if (gs.faction_rosters.getPtr(c.enemy_key)) |roster| {
-        if (roster.items.len > 0) return .{ .pool = roster };
+        if (roster.items.len > 0) return .{ .pool = .{ .hulls = roster, .owner = .{ .faction = c.enemy_key } } };
     }
     return .forfeit;
 }
@@ -1087,9 +1091,9 @@ fn writeHullCombatRecords(
         switch (resolution) {
             .pool => |pool| {
                 var pi: usize = 0;
-                while (pi < pool.items.len) : (pi += 1) {
-                    if (pool.items[pi] == hid) {
-                        _ = pool.orderedRemove(pi);
+                while (pi < pool.hulls.items.len) : (pi += 1) {
+                    if (pool.hulls.items[pi] == hid) {
+                        _ = pool.hulls.orderedRemove(pi);
                         break;
                     }
                 }
@@ -1138,10 +1142,10 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             }
             const excluded = excl_buf_raw[0..excl_len];
             // Filtered candidates: pool members not in the exclusion set.
-            const filt_buf_raw = try gs.scratch().alloc(types.HullInstanceId, pool.items.len);
+            const filt_buf_raw = try gs.scratch().alloc(types.HullInstanceId, pool.hulls.items.len);
             defer gs.scratch().free(filt_buf_raw);
             var filt_len: usize = 0;
-            for (pool.items) |hid| {
+            for (pool.hulls.items) |hid| {
                 var excl = false;
                 for (excluded) |eid| if (eid == hid) {
                     excl = true;
@@ -1566,7 +1570,11 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         for (drawn, opfor_outcomes) |hid, oc| if (oc == .destroyed) try destroyed_wrecks.append(gs.allocator(), hid);
         if (destroyed_wrecks.items.len > 0) {
             var rng_copy = gs.rng;
-            try black_market.disperseEnemyWrecks(gs, gs.allocator(), destroyed_wrecks.items, c.enemy_key, gs.clock.day_index, c.planet_key, &rng_copy);
+            const source_owner = switch (resolution) {
+                .pool => |pool| pool.owner,
+                else => unreachable,
+            };
+            try black_market.disperseEnemyWrecks(gs, gs.allocator(), destroyed_wrecks.items, source_owner, gs.clock.day_index, c.planet_key, &rng_copy);
             gs.rng = rng_copy;
         }
     }
@@ -4324,7 +4332,7 @@ test "pool draw atomicity: OpFor tail is all-or-nothing under ensureUnusedCapaci
         @enumFromInt(1), // contract_id
         &.{}, // per_unit_kills
         &.{}, // hit_log
-        .{ .pool = pool },
+        .{ .pool = .{ .hulls = pool, .owner = .{ .faction = "DC" } } },
     ));
 
     // Assert: no OpFor tail writes happened.

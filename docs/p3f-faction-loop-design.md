@@ -306,7 +306,7 @@ chooses the cleaner boundary and documents the choice in the commit message.**
 ```zig
 /// Terminal disposition for drawn destroyed enemy hulls on a lost field.
 /// Up to market.enemy_recovery_capacity hulls are returned to
-/// faction_rosters[enemy_faction_key] (owner transfer to .faction).
+/// their explicit source roster (faction or merc company).
 /// The remainder are transferred to .market ownership and listed as
 /// dispersed black-market listings via makeDispersedListing.
 /// Failure-atomic: prepare all ownership transfers and listing appends,
@@ -316,7 +316,7 @@ pub fn disperseEnemyWrecks(
     gs: *state.GameState,
     alloc: std.mem.Allocator,
     wrecks: []const types.HullInstanceId,
-    enemy_faction_key: []const u8,
+    source_owner: hull_instance.HullOwner,
     battle_day: u32,
     battle_planet_key: []const u8,
     rng: *rng_mod.Rng,
@@ -759,7 +759,7 @@ The merc-company death-and-replacement cycle maps to AtB's retirement/creation
 flow (`PersonnelMarket`, `UnitMarket`). The replacement company draws its
 identity from the person-name and rival-archetype generators, then separately
 selects a logo not held by an active company. The scheduled NPC identity work
-makes name and logo assignment campaign-wide unique. The campaign-wizard alone
+will make name and logo assignment campaign-wide unique. The campaign-wizard alone
 derives the player's outfit name from a chosen logo key (§6.2).
 
 ### Risk register
