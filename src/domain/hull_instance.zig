@@ -59,8 +59,7 @@ pub const HullInstance = struct {
 /// allocations; no deinit needed. (P3c.2, docs/p3c-hull-lifecycle-design.md §1, §4)
 pub const HullCombatRecord = struct {
     hull_instance_id: types.HullInstanceId = .none,
-    /// Backlink to a battle report. This historical reference may be unavailable
-    /// on load and is therefore not a containment foreign key.
+    /// Backlink to the permanent battle report that produced this record.
     battle_id: types.BattleId = .none,
     /// Backlink to the contract; contracts are removed after completion.
     /// Not reference-validated for the same reason as battle_id.
@@ -117,9 +116,8 @@ pub const MaintenanceAction = enum {
 
 /// One maintenance event on a physical hull: who worked it, when, what kind,
 /// and the labor cost of the job it queued. Child of HullInstance, keyed
-/// (cid, hull_instance_id, ord). hull_instance_id is the one validated FK; tech
-/// and battle_id are historical backlinks and are NOT reference-validated
-/// because their referenced records may be unavailable on load.
+/// (cid, hull_instance_id, ord). `battle_id` names the permanent battle report
+/// when the work followed an engagement.
 /// (P3c.3, docs/p3c-hull-lifecycle-design.md §1, §2)
 pub const MaintenanceEntry = struct {
     hull_instance_id: types.HullInstanceId = .none,

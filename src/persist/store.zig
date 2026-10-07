@@ -3595,7 +3595,19 @@ fn validateReferences(gs: *GameState) error{CorruptSave}!void {
             for (gsp.held_hulls.items) |*h| if (h.unit.id == id) return;
             return error.CorruptSave;
         }
+        fn reportExists(id: types.BattleId, gsp: *const GameState) error{CorruptSave}!void {
+            if (id == .none) return;
+            if (gsp.battle_reports.find(id) == null) return error.CorruptSave;
+        }
     };
+    // A permanent report ID is unique campaign history. A duplicate makes every
+    // backlink ambiguous, so reject the whole save rather than choosing one.
+    for (gs.battle_reports.kept.items, 0..) |r, i| {
+        if (r.id == .none) return error.CorruptSave;
+        for (gs.battle_reports.kept.items[0..i]) |earlier| {
+            if (earlier.id == r.id) return error.CorruptSave;
+        }
+    }
     // Units
     var uit = gs.units.iterator();
     while (uit.next()) |e| {
@@ -3650,11 +3662,16 @@ fn validateReferences(gs: *GameState) error{CorruptSave}!void {
         try Ref.inMap(types.ContractId, ev.contract, gs.contracts);
         try Ref.inMap(types.ForceId, ev.company, gs.forces);
         try Ref.inMap(types.PersonId, ev.person, gs.people);
+        try Ref.reportExists(ev.battle, gs);
     }
     // Held hulls
     for (gs.held_hulls.items) |h| {
         try Ref.inMap(types.ForceId, h.from_force, gs.forces);
+        try Ref.reportExists(h.battle, gs);
     }
+    // Permanent history: every populated backlink names exactly one retained report.
+    for (gs.hull_combat_records.items) |r| try Ref.reportExists(r.battle_id, gs);
+    for (gs.maintenance_entries.items) |e| try Ref.reportExists(e.battle_id, gs);
     // Market listings: a non-.none hull_instance_id must name a live HullInstance (rules 47/48).
     for (gs.market_listings.items) |l| {
         try Ref.inMap(types.HullInstanceId, l.hull_instance_id, gs.hull_instances);
@@ -4356,6 +4373,50 @@ test "battle reports beyond forty survive save and load" {
     try std.testing.expect(loaded.battle_reports.find(@enumFromInt(1)) != null);
     try std.testing.expect(loaded.battle_reports.find(@enumFromInt(report_count)) != null);
     try std.testing.expectEqual(report_count + 1, loaded.next_battle_id);
+}
+
+test "permanent report identities and battle backlinks reject corruption" {
+    const hull_inst_mod = @import("../domain/hull_instance.zig");
+    var gs = try buildHullGs(std.testing.allocator);
+    defer gs.deinit();
+
+    var hid: types.HullInstanceId = .none;
+    var hulls = gs.hull_instances.iterator();
+    if (hulls.next()) |entry| hid = entry.key_ptr.*;
+    try std.testing.expect(hid != .none);
+
+    for (1..3) |i| try gs.battle_reports.record(gs.allocator(), .{
+        .id = @enumFromInt(i),
+        .day = @intCast(i),
+        .contract = .none,
+        .company = .none,
+        .kind = "raid",
+        .enemy_key = "DC",
+        .scenario = "probe",
+        .terrain = "plains",
+        .weather = "clear",
+        .outcome = .victory,
+    });
+    try gs.hull_combat_records.append(gs.allocator(), .{ .hull_instance_id = hid, .battle_id = @enumFromInt(1) });
+    try gs.maintenance_entries.append(gs.allocator(), .{
+        .hull_instance_id = hid,
+        .action = .repair,
+        .description = hull_inst_mod.MaintenanceAction.repair.describe(),
+        .battle_id = @enumFromInt(1),
+    });
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var valid = try store.load(std.testing.allocator, gs.campaign_id);
+    defer valid.deinit();
+
+    try store.db.exec("UPDATE battle_report SET id = 1 WHERE id = 2");
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+
+    try store.db.exec("UPDATE battle_report SET id = ord + 1");
+    try store.db.exec("DELETE FROM battle_report WHERE id = 1");
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
 }
 
 test "a hull the enemy holds round-trips, slots and all — off the books, not struck off" {
@@ -5259,6 +5320,18 @@ test "a recovery decision remembers its battle, and a held hull its lance" {
         .assigned_company = co,
     });
     const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    try gs.battle_reports.record(gs.allocator(), .{
+        .id = @enumFromInt(4),
+        .day = gs.clock.day_index,
+        .contract = c.id,
+        .company = co,
+        .kind = "planetary assault",
+        .enemy_key = "DC",
+        .scenario = "probe",
+        .terrain = "plains",
+        .weather = "clear",
+        .outcome = .defeat,
+    });
     const taken = blk: {
         var it = gs.units.iterator();
         while (it.next()) |e| if (e.value_ptr.kind == .mek and e.value_ptr.force != .none) break :blk e.value_ptr.id;
@@ -5803,7 +5876,7 @@ test "a v38 store migrates to v39 with arc_finale_key, committed_day, and operat
         \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
         \\INSERT INTO contract VALUES (1, 0, 0, 1, 'garrison_duty', 'LC', 'PER', 'caph', 'active', 0, 0, 0, 30, 0, 14, 14, 360, 80000, 30, 0, 0, 'duration', 0, 100000, 100000, 0, NULL, NULL, 12, 80000, 25, 0, 0, 0, 0, 0, 0, 'independent', 0, 0, 'regular', 0, 0, 0, NULL, 'fracturing_garrison', 0, 5);
         \\INSERT INTO operation (cid, contract_id, ord, id, template_key, state, outcome, opened_day) VALUES (1, 1, 0, 1, 'negotiate_terms', 'committed', 'none', 0);
-        \\INSERT INTO battle_report (cid, ord, outcome, roe) VALUES (1, 0, 'defeat', 'standard');
+        \\INSERT INTO battle_report (cid, ord, id, day, contract, company, outcome, roe) VALUES (1, 0, 1, 0, 1, 0, 'defeat', 'standard');
     );
     const store = try Store.fromDb(raw);
     defer store.close();
@@ -7274,6 +7347,19 @@ test "hull_combat_records survive a save/load round-trip with identical stateHas
     // stateHash. Exercises saveHullCombatRecords/loadHullCombatRecords.
     var gs = try buildHullGs(std.testing.allocator);
     defer gs.deinit();
+    try gs.battle_reports.record(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .day = 0,
+        .contract = .none,
+        .company = .none,
+        .kind = "raid",
+        .enemy_key = "DC",
+        .scenario = "probe",
+        .terrain = "plains",
+        .weather = "clear",
+        .outcome = .victory,
+    });
+    gs.next_battle_id = 2;
 
     // Add two distinct combat records referencing the two hull instances.
     var hids: [2]types.HullInstanceId = .{ .none, .none };
@@ -7350,6 +7436,19 @@ test "an orphan hull_instance_id in a hull_combat_record rejects the load as cor
     // a loaded hull_instance; an orphan must be rejected as a corrupt save.
     var gs = try buildHullGs(std.testing.allocator);
     defer gs.deinit();
+    try gs.battle_reports.record(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .day = 0,
+        .contract = .none,
+        .company = .none,
+        .kind = "raid",
+        .enemy_key = "DC",
+        .scenario = "probe",
+        .terrain = "plains",
+        .weather = "clear",
+        .outcome = .victory,
+    });
+    gs.next_battle_id = 2;
 
     // Get any valid hull_instance_id.
     var hid: types.HullInstanceId = .none;
