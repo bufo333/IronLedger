@@ -1719,7 +1719,7 @@ pub const App = struct {
             },
             .settings => self.modal = .settings,
             .music => try self.toggleMusic(),
-            .help => self.modal = .help,
+            .help => self.openModal(.help),
         }
     }
 
@@ -2100,23 +2100,48 @@ pub const App = struct {
     };
     pub const global_legend = keys.entries(GlobalAction, &global_bindings);
 
+    fn appendHelpLegendRows(rows: *std.ArrayListUnmanaged([]const u8), al: std.mem.Allocator, title: []const u8, legend: []const keys.Entry) !void {
+        try rows.append(al, try std.fmt.allocPrint(al, "  {{t}}{s}{{/}}", .{title}));
+        var key_width: usize = 0;
+        for (legend) |entry| {
+            if (!entry.show_help) continue;
+            var key_buf: [16]u8 = undefined;
+            key_width = @max(key_width, screen_mod.visibleLen(keys.keyText(&key_buf, entry)));
+        }
+        const groups = [_]keys.Group{ .navigate, .act, .money, .misc };
+        for (groups) |group| {
+            var any = false;
+            for (legend) |entry| if (entry.group == group and entry.show_help) {
+                any = true;
+            };
+            if (!any) continue;
+            if (rows.items.len > 1 and rows.items[rows.items.len - 1].len > 0) try rows.append(al, "");
+            for (legend) |entry| {
+                if (entry.group != group or !entry.show_help) continue;
+                var key_buf: [16]u8 = undefined;
+                const key = keys.keyText(&key_buf, entry);
+                var line: std.ArrayListUnmanaged(u8) = .empty;
+                try line.appendSlice(al, "    ");
+                try line.appendSlice(al, key);
+                try line.appendNTimes(al, ' ', key_width - screen_mod.visibleLen(key) + 2);
+                try line.appendSlice(al, entry.help orelse entry.label);
+                try rows.append(al, try line.toOwnedSlice(al));
+            }
+        }
+    }
+
     /// The help modal's key reference, filtered to the active context.
-    /// In-game: the shared global keys plus the focused screen's keys only.
-    /// Welcome: the welcome-screen keys.
-    /// Wizard: the current wizard-step keys.
     fn keyHelpRows(self: *App, al: std.mem.Allocator) ![]const []const u8 {
         var rows: std.ArrayListUnmanaged([]const u8) = .empty;
         switch (self.mode) {
             .game => {
-                try rows.append(al, "  {a}everywhere{/}");
-                for (try keys.helpLines(al, &global_legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
+                try appendHelpLegendRows(&rows, al, "everywhere", &global_legend);
                 const spec = screenSpec(self.tab);
-                try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}}", .{spec.name}));
-                for (try keys.helpLines(al, spec.legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
+                try rows.append(al, "");
+                try appendHelpLegendRows(&rows, al, spec.name, spec.legend);
             },
             .welcome => {
-                try rows.append(al, "  {a}Welcome{/}");
-                for (try keys.helpLines(al, &welcome_legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
+                try appendHelpLegendRows(&rows, al, "Welcome", &welcome_legend);
             },
             .wizard => {
                 const step_legend: []const keys.Entry = switch (self.step) {
@@ -2131,8 +2156,7 @@ pub const App = struct {
                     .company => "New campaign · company and back office",
                     .review => "New campaign · review",
                 };
-                try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}}", .{step_name}));
-                for (try keys.helpLines(al, step_legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
+                try appendHelpLegendRows(&rows, al, step_name, step_legend);
             },
         }
         return rows.toOwnedSlice(al);
@@ -2175,6 +2199,7 @@ pub const App = struct {
         .{ .name = "New campaign · review", .legend = &review_legend },
         .{ .name = "Lists (pick a company, a part, a seat, …)", .legend = &list_legend },
         .{ .name = "Sheets (hull, help, summary, …)", .legend = &sheet_legend },
+        .{ .name = "Help", .legend = &help_legend },
         .{ .name = "Raise a company · hulls", .legend = &raise_hulls_legend },
         .{ .name = "Raise a company · support train", .legend = &raise_support_legend },
         .{ .name = "Raise a company · crews", .legend = &raise_crews_legend },
@@ -2224,7 +2249,7 @@ pub const App = struct {
             .end_week => try self.endTurnRequest(7),
             .quit => self.modal = .quit,
             .music => try self.toggleMusic(),
-            .help => self.modal = .help,
+            .help => self.openModal(.help),
         }
     }
 
@@ -3003,9 +3028,13 @@ pub const App = struct {
                     try rows.appendSlice(al, &concepts_b);
                     try rows.append(al, try std.fmt.allocPrint(al, "               factions {s}", .{try q.factionLegend(al)}));
                 }
-                try rows.append(al, "");
-                try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keyHint(SheetAction, al, &sheet_bindings, .close, "close")}));
-                return .{ .title = "HELP", .rows = rows.items, .read_only = true, .w = layout.modal.help_w, .max_h = layout.modal.help_h };
+                const hint = try std.fmt.allocPrint(al, "  {{d}}{s} · {s} · {s} · {s}{{/}}", .{
+                    try keyHint(ListAction, al, &list_bindings, .down, "scroll"),
+                    try keyHint(ListAction, al, &list_bindings, .page_down, "page"),
+                    try keyHint(ListAction, al, &list_bindings, .close, "close"),
+                    try keyHint(HelpAction, al, &help_bindings, .close, "close"),
+                });
+                return .{ .title = "HELP", .rows = rows.items, .foot = try al.dupe([]const u8, &.{hint}), .scroll = true, .w = layout.modal.help_w, .max_h = full_h };
             },
             .decision => |idx| {
                 const view = try q.desk(al, self.state(), 0);
@@ -3717,6 +3746,10 @@ pub const App = struct {
         .{ .match = .{ .key = .enter }, .action = .close, .label = "close", .group = .misc, .show_footer = false, .show_help = false },
         .{ .match = .text, .action = .close, .label = "any other key closes", .group = .misc, .show_footer = false },
     };
+    const HelpAction = enum { close };
+    pub const help_bindings = [_]keys.Binding(HelpAction){
+        .{ .match = keys.Match.char('?'), .action = .close, .label = "close", .group = .misc },
+    };
 
     const RaiseHullsAction = enum { take, pass, prev_lance, next_lance, support_train };
     pub const raise_hulls_bindings = [_]keys.Binding(RaiseHullsAction){
@@ -3764,6 +3797,7 @@ pub const App = struct {
     const decision_legend = keys.entries(DecisionAction, &decision_bindings);
     const log_legend = keys.entries(LogAction, &log_bindings);
     const sheet_legend = keys.entries(SheetAction, &sheet_bindings);
+    const help_legend = keys.entries(HelpAction, &help_bindings);
 
     /// A list modal's title: its name, then the list keys with the verbs
     /// this modal gives them ("choose", "assign", "cancel").
@@ -4095,6 +4129,12 @@ pub const App = struct {
     /// key was one of them.
     fn listExtra(self: *App, key: Key) !bool {
         switch (self.modal) {
+            .help => {
+                const hit = keys.lookup(HelpAction, &help_bindings, 0, key) orelse return false;
+                switch (hit.action) {
+                    .close => self.modal = .none,
+                }
+            },
             .raise_hulls => {
                 const hit = keys.lookup(RaiseHullsAction, &raise_hulls_bindings, 0, key) orelse return false;
                 switch (hit.action) {
@@ -4787,7 +4827,7 @@ pub const App = struct {
                     self.say(.good, "saved at day {d}", .{(try q.status(self.a(), g)).day});
                 },
                 .quit => self.modal = .quit,
-                .help => self.modal = .help,
+                .help => self.openModal(.help),
                 .settings => self.modal = .settings,
                 .summary => self.modal = .summary,
                 .music => self.openModal(.music),
@@ -5011,6 +5051,7 @@ test "every modal, welcome and wizard table is well formed" {
     const K = keys;
     try K.expectWellFormed(App.ListAction, &App.list_bindings);
     try K.expectWellFormed(App.SheetAction, &App.sheet_bindings);
+    try K.expectWellFormed(App.HelpAction, &App.help_bindings);
     try K.expectWellFormed(App.RaiseHullsAction, &App.raise_hulls_bindings);
     try K.expectWellFormed(App.RaiseSupportAction, &App.raise_support_bindings);
     try K.expectWellFormed(App.RaiseCrewsAction, &App.raise_crews_bindings);
@@ -5315,12 +5356,18 @@ test "help overlay is context-aware: game shows focused screen only; switching t
     const desk_rows = try c.app.keyHelpRows(al);
     var found_desk = false;
     var found_lab = false;
-    for (desk_rows) |row| {
-        if (std.mem.indexOf(u8, row, "F1 Desk") != null) found_desk = true;
+    var desk_header: ?usize = null;
+    for (desk_rows, 0..) |row, i| {
+        if (std.mem.indexOf(u8, row, "F1 Desk") != null) {
+            found_desk = true;
+            desk_header = i;
+        }
         if (std.mem.indexOf(u8, row, "F8 Lab") != null) found_lab = true;
     }
     try std.testing.expect(found_desk);
     try std.testing.expect(!found_lab);
+    try std.testing.expect(desk_header != null and desk_header.? > 0);
+    try std.testing.expectEqualStrings("", desk_rows[desk_header.? - 1]);
 
     // Switch to Lab (F8); help rows must now contain "F8 Lab" and not "F1 Desk".
     try pressForTest(c, .{ .f = 8 });
@@ -5334,4 +5381,23 @@ test "help overlay is context-aware: game shows focused screen only; switching t
     }
     try std.testing.expect(found_lab2);
     try std.testing.expect(!found_desk2);
+}
+
+test "help overlay scrolls and question mark closes it" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    try c.app.screen.resize(80, 24);
+
+    try pressForTest(c, .{ .char = '?' });
+    try std.testing.expectEqual(Modal.help, c.app.modal);
+    const view = try c.app.listView(c.app.a());
+    try std.testing.expect(view.scroll);
+    try std.testing.expectEqual(c.app.screen.rows -| 2, view.max_h);
+
+    try pressForTest(c, .{ .char = 'j' });
+    try std.testing.expectEqual(Modal.help, c.app.modal);
+    try std.testing.expect(c.app.modal_cursor > 0);
+
+    try pressForTest(c, .{ .char = '?' });
+    try std.testing.expectEqual(Modal.none, c.app.modal);
 }

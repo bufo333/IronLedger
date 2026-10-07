@@ -60,7 +60,6 @@ pub const aar_field: Ratio = .{ .num = 1, .den = 2 };
 /// at the call site from the rows shown).
 pub const modal = struct {
     pub const help_w: u16 = 134;
-    pub const help_h: u16 = 34;
     pub const end_turn_w: u16 = 100;
     pub const end_turn_max_h: u16 = 40;
     pub const quit_w: u16 = 60;

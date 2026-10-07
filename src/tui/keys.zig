@@ -246,18 +246,6 @@ pub fn title(alloc: std.mem.Allocator, name: []const u8, list: []const Entry) ![
     return out.toOwnedSlice(alloc);
 }
 
-/// One help line per binding shown in help: the key, then its sentence or
-/// its label.
-pub fn helpLines(alloc: std.mem.Allocator, list: []const Entry) ![]const []const u8 {
-    var out: std.ArrayListUnmanaged([]const u8) = .empty;
-    for (list) |e| {
-        if (!e.show_help) continue;
-        var buf: [16]u8 = undefined;
-        try out.append(alloc, try std.fmt.allocPrint(alloc, "{s: <10} {s}", .{ keyText(&buf, e), e.help orelse e.label }));
-    }
-    return out.toOwnedSlice(alloc);
-}
-
 /// Every action has a binding, and no two bindings answer the same key in
 /// the same pane (a pane binding and an every-pane binding may share a key:
 /// the pane's wins where it applies).

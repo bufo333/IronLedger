@@ -106,7 +106,9 @@ are all generated from the same tables. The help overlay (`?`) shows only
 the context-relevant keys: in-game it shows the shared global keys plus the
 focused screen's keys only; the lobby shows the welcome-screen keys; the new
 campaign wizard shows the current step's keys. Screen keys are shortcuts for
-commands the command line can also run.
+commands the command line can also run. Help scrolls with the list-navigation
+keys and closes with `Esc` or `?`; blank rows separate binding groups and the
+global and focused-screen sections.
 
 The command line and the REPL share one parser, `src/sim/cli.zig`
 (`game.cli.parseCommand`, `verbs`, `usage`, `errorText`): simulation command
@@ -401,6 +403,12 @@ filters to the active context (see the Keys description above).
 | `←/→` | columns |
 | `Esc` | close |
 | `type` | any other key closes |
+
+### Help
+
+| Key | Does |
+|---|---|
+| `?` | close |
 
 ### Raise a company · hulls
 
