@@ -1492,10 +1492,11 @@ owns the design-approval entry and delivery order.
   insolvent (the P3e.7 rival-insolvency hook), its remaining hulls liquidate
   onto the market; a replacement company spawns, drawing a name and logo from
   the remaining `data/logos/` pool and buying from the market and black market
-  to field four active mek lances (16 meks). A 50M C-bill formation floor,
-  shared-market replacement, player-equivalent operating costs, and active
-  contract protection are planned follow-up work; the active rival
-  merc-company count holds at 12.
+  to field its configured roster. The delivered P3f.4 target is eight hulls
+  with a 5M C-bill floor. Owner-approved follow-up work changes new campaigns
+  to four active mek lances (16 meks), a 50M formation floor, shared-market
+  replacement, player-equivalent operating costs, and active-contract
+  protection; the active rival merc-company count holds at 12.
 - **Pirate replenishment.** Pirates gain a small base
   `replenishment_hulls_per_year` constant (2-3, tunable) for opportunistic
   acquisition and also compete for black-market listings; an insolvent pirate

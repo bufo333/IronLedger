@@ -1,7 +1,7 @@
 # P3f Faction Economic Loop — Implementation Design
 
 **Date:** 2026-10-06
-**Status:** proposed — awaiting owner approval
+**Status:** delivered (P3f.1-P3f.5); follow-up NPC economy work is in `TODO.md`
 **Prerequisite:** P3e (entity model, rivals, insolvency predicate — merged)
 **Scope:** mechs only; one coherent stage delivered as ordered increments P3f.1–P3f.5
 
@@ -637,7 +637,7 @@ rule-72 gate before the next increment is dispatched.
 | Tests (r67) | Asset-safety: no player funds, forces, or units modified by non-buy NPC paths                   |
 | Gate        | `zig fmt`, `zig build test`, `verify-contract.sh`; NO smoke                                     |
 
-### P3f.4 — Merc Lifecycle
+### P3f.4 — Merc Lifecycle ✅
 
 | Area        | Deliverable                                                                                      |
 |-------------|--------------------------------------------------------------------------------------------------|
@@ -650,7 +650,7 @@ rule-72 gate before the next increment is dispatched.
 | Tests (r68) | Save/load of `MercCompany.logo_key`; round-trip digest equality                                  |
 | Gate        | `zig fmt`, `zig build test`, `verify-contract.sh`; NO smoke                                     |
 
-### P3f.5 — Campaign-Wizard Logo Picker
+### P3f.5 — Campaign-Wizard Logo Picker ✅
 
 | Area        | Deliverable                                                                                      |
 |-------------|--------------------------------------------------------------------------------------------------|

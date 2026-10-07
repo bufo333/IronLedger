@@ -33,10 +33,11 @@ reschedule only on explicit dispatch.
 - NPC world-contract design: shared world conflicts and typed opposing forces
   (faction, pirate, or named merc company); player offers, NPC commitments,
   location/transit, pay, readiness, withdrawal, breach, and completion.
-- NPC merc-company economy: new campaigns seed 12 companies with 16 active
-  mechs and 50M C-bills; shared mech-market replacement, player-equivalent
-  operating costs, 12-month understrength runway, contract income, and
-  liquidation only after no-cash, understrength, and no active contract.
+- NPC merc-company economy: owner-approved new-campaign target of 12 companies
+  with 16 active mechs and 50M C-bills; shared mech-market replacement,
+  player-equivalent operating costs, 12-month understrength runway, contract
+  income, and liquidation only after no-cash, understrength, and no active
+  contract.
 - NPC contract and battle parity: committed companies fight their real roster,
   choose doctrine-based withdrawals, concede or breach when unable to field,
   and never produce zero-vs-zero victories.
