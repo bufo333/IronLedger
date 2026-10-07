@@ -22,6 +22,8 @@ The contract market refreshes with offers *inside your influence rings*.
 Personnel market turns over. Loans tick. This is where you learn whether a
 deployment is bleeding you and why: the ledger is itemized down to
 "local supplies (3.0×, Deshler, 40 LY beyond ring)".
+Turnover risk remains visible on the Desk and each person's People record;
+it does not pause an end turn before payday.
 
 **Strategic (the campaign):** spend profit to grow reach and capacity. Found a
 field HQ on a beachhead world. Upgrade it toward regional status. Link it into

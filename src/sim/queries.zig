@@ -8993,6 +8993,13 @@ test "personActions eligibility invariants: wounded/admit, leave, admin, restles
         try std.testing.expectEqual(risk > 0, pa.restless);
         try std.testing.expect(pa.restless); // high fatigue+low morale over a year ⇒ restless
     }
+    var desk_row: ?ChecklistRow = null;
+    for ((try desk(arena.allocator(), &gs, 0)).checklist) |row| if (row.kind == .restless_crew) {
+        desk_row = row;
+    };
+    const row = desk_row orelse return error.TestExpectedEqual;
+    try std.testing.expect(!row.prompts);
+    try std.testing.expectEqual(@as(u8, 8), row.jump);
 }
 
 test "hull lifecycle views render a seeded hull (rule 67)" {

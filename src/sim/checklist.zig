@@ -87,7 +87,7 @@ pub const WarningKind = enum {
     /// stop the turn to say so again.
     pub fn prompts(self: WarningKind) bool {
         return switch (self) {
-            .crew_recovering => false,
+            .crew_recovering, .restless_crew => false,
             else => true,
         };
     }
@@ -583,6 +583,35 @@ test "a wounded pilot keeps the seat: a Desk note the end-turn prompt skips, not
         open = x.kind.prompts();
     };
     try std.testing.expect(open);
+}
+
+test "restless crew stay on the Desk without prompting for an end turn" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 64 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    gs.clock.day_index = 400;
+    var pilot: types.PersonId = .none;
+    var units = gs.units.iterator();
+    while (units.next()) |entry| if (gs.companyOf(entry.value_ptr.force) == co and entry.value_ptr.pilot != .none) {
+        pilot = entry.value_ptr.pilot;
+        break;
+    };
+    const person = gs.person(pilot).?;
+    person.recruited_day = 1;
+    person.morale = 0;
+    try std.testing.expect(person.status == .active);
+    try std.testing.expect(!posture.isCompanyDeployed(&gs, gs.companyOf(person.assigned_force)));
+    try std.testing.expect(medical.turnoverRisk(person, gs.clock.day_index) > 0);
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var found = false;
+    for (try turnWarnings(&gs, arena.allocator())) |warning| if (warning.kind == .restless_crew) {
+        found = true;
+        try std.testing.expect(!warning.kind.prompts());
+    };
+    try std.testing.expect(found);
 }
 
 test "a spent pilot in a seat is a checklist warning" {

@@ -854,7 +854,9 @@ should have known slips past a turn boundary unannounced. A warning the player c
 turn stays on the Desk and does not stop the turn (`WarningKind.prompts`):
 a hull whose pilot or tech is wounded or on leave keeps the seat for them
 (`Person.seatState`) and sits out until they are back, marked on the TO&E
-with the day; only an empty seat is an open slot.
+with the day; only an empty seat is an open slot. Restless crew remain a
+Desk and People advisory before their payday turnover roll, but do not open
+an end-turn prompt.
 
 ## 10. MekLab / refits
 

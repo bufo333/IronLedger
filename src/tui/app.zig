@@ -5033,13 +5033,14 @@ test "a malformed :day moves no time; N asks first like n, and n there ends the 
 test "the end-turn prompt asks only about warnings that prompt; Desk notes stay out" {
     const rows = [_]q.ChecklistRow{
         .{ .kind = .crew_recovering, .urgent = false, .prompts = false, .text = "heals", .jump = 2 },
+        .{ .kind = .restless_crew, .urgent = false, .prompts = false, .text = "restless", .jump = 8 },
         .{ .kind = .open_slots, .urgent = false, .prompts = true, .text = "empty seat", .jump = 2 },
     };
     const asks = try App.endTurnRows(std.testing.allocator, &rows);
     defer std.testing.allocator.free(asks);
     try std.testing.expectEqual(@as(usize, 1), asks.len);
     try std.testing.expectEqual(game.checklist.WarningKind.open_slots, asks[0].kind);
-    const none = try App.endTurnRows(std.testing.allocator, rows[0..1]);
+    const none = try App.endTurnRows(std.testing.allocator, rows[0..2]);
     defer std.testing.allocator.free(none);
     try std.testing.expectEqual(@as(usize, 0), none.len);
 }

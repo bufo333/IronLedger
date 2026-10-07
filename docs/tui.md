@@ -655,7 +655,7 @@ Modals: **End turn** (the checklist rows that prompt, with jump targets;
 `n` ends the advance asked for — a day, a week from `N`, or `:day n` —
 and `N` a week; it opens for every advance while a row prompts, and
 `:day n force` skips it; Desk notes such as a hull waiting on a pilot in
-the medbay stay on the Desk) ·
+the medbay or restless crew stay on the Desk) ·
 **Decision** (options with effects, default marked) ·
 **Battle orders** (the situation and odds; ←/→ step the ROE and each
 lance's role with the odds recomputed, Enter buys the emergency resupply,
