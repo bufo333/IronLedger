@@ -402,8 +402,12 @@ pub fn runMercLifecycle(gs: *GameState) !void {
         }
     }
 
-    try prepareLifecycleCommit(gs, actions.items);
-    try allocateReplacementNames(gs, actions.items);
+    var transaction_arena = gs.lifecycleArena();
+    errdefer transaction_arena.deinit();
+    const transaction_alloc = transaction_arena.allocator();
+    try prepareLifecycleCommit(gs, transaction_alloc, actions.items);
+    try allocateReplacementNames(transaction_alloc, actions.items);
+    try gs.retainLifecycleArena(&transaction_arena);
 
     for (actions.items) |action| switch (action) {
         .buy => |buy| commitBuy(gs, buy, day),
@@ -524,8 +528,7 @@ fn planBuy(scratch: std.mem.Allocator, gs: *const GameState, listings: *std.Arra
     return .{ .company_id = company.id, .purchases = try purchases.toOwnedSlice(scratch), .remove_order = remove_order };
 }
 
-fn prepareLifecycleCommit(gs: *GameState, actions: []LifecycleAction) !void {
-    const alloc = gs.allocator();
+fn prepareLifecycleCommit(gs: *GameState, alloc: std.mem.Allocator, actions: []LifecycleAction) !void {
     var history_count: usize = 0;
     var listing_count: usize = 0;
     var company_count: usize = 0;
@@ -562,11 +565,11 @@ fn prepareBuyRoster(gs: *GameState, alloc: std.mem.Allocator, buy: *BuyPlan, new
     }
 }
 
-fn allocateReplacementNames(gs: *GameState, actions: []LifecycleAction) !void {
+fn allocateReplacementNames(alloc: std.mem.Allocator, actions: []LifecycleAction) !void {
     for (actions) |*action| switch (action.*) {
         .replace => |*replace| {
             replace.replacement.company.unit_name = try std.fmt.allocPrint(
-                gs.allocator(),
+                alloc,
                 "{s} {s}",
                 replace.replacement.unit_name_parts,
             );
@@ -577,17 +580,18 @@ fn allocateReplacementNames(gs: *GameState, actions: []LifecycleAction) !void {
 
 fn commitLiquidation(gs: *GameState, company_id: types.MercCompanyId, listings: []const market.Listing, day: u32) void {
     const mc = gs.merc_companies.getPtr(company_id).?;
-    const roster = gs.merc_company_rosters.getPtr(company_id) orelse unreachable;
-    for (roster.items, 0..) |hid, i| {
-        const inst = gs.hull_instances.getPtr(hid).?;
-        inst.owner = .market;
-        for (gs.hull_ownership_history.items) |*history| {
-            if (history.hull_instance_id == hid and history.to_day == 0) history.to_day = day;
+    if (gs.merc_company_rosters.getPtr(company_id)) |roster| {
+        for (roster.items, 0..) |hid, i| {
+            const inst = gs.hull_instances.getPtr(hid).?;
+            inst.owner = .market;
+            for (gs.hull_ownership_history.items) |*history| {
+                if (history.hull_instance_id == hid and history.to_day == 0) history.to_day = day;
+            }
+            gs.hull_ownership_history.appendAssumeCapacity(.{ .hull_instance_id = hid, .from_day = day, .acquisition_type = .transfer, .prior_owner_key = mc.faction_key });
+            gs.market_listings.appendAssumeCapacity(listings[i]);
         }
-        gs.hull_ownership_history.appendAssumeCapacity(.{ .hull_instance_id = hid, .from_day = day, .acquisition_type = .transfer, .prior_owner_key = mc.faction_key });
-        gs.market_listings.appendAssumeCapacity(listings[i]);
+        roster.clearRetainingCapacity();
     }
-    roster.clearRetainingCapacity();
     gs.next_listing_id += @intCast(listings.len);
     mc.dissolved_day = day;
 }
@@ -949,6 +953,32 @@ test "runMercLifecycle: (b) bankrupt company (cbills < 0) triggers liquidation e
     try std.testing.expect(gs.merc_companies.getPtr(mc_bankrupt).?.dissolved_day != 0);
 }
 
+test "runMercLifecycle: bankrupt company without a roster is dissolved and replaced" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 4005 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    gs.clock.advance();
+
+    const bankrupt: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(gs.allocator(), bankrupt, .{
+        .id = bankrupt,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Empty Bankrupt Co",
+        .faction_key = "DC",
+        .cbills = -1,
+        .logo_key = logo.all_keys[0],
+    });
+    gs.next_merc_company_id = 2;
+
+    try runMercLifecycle(&gs);
+
+    try std.testing.expectEqual(gs.clock.day_index, gs.merc_companies.getPtr(bankrupt).?.dissolved_day);
+    try std.testing.expectEqual(@as(usize, 2), gs.merc_companies.count());
+    const replacement: types.MercCompanyId = @enumFromInt(2);
+    try std.testing.expect(gs.merc_companies.getPtr(replacement).?.dissolved_day == 0);
+}
+
 test "runMercLifecycle: (c) determinism — two same-seed campaigns hash equal after lifecycle" {
     const a = std.testing.allocator;
     var gs1 = GameState.init(a, .{ .seed = 4003 });
@@ -1056,7 +1086,8 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
 
 test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" {
     // Rule 69: the fixture executes a bankruptcy replacement and a separate
-    // under-strength purchase; every preparation failure preserves the digest.
+    // under-strength purchase; every preparation failure preserves the digest
+    // and campaign-arena capacity.
     var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer outer.deinit();
 
@@ -1065,6 +1096,7 @@ test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" 
         var gs = GameState.init(outer.allocator(), .{ .seed = 4004 });
         try seedLifecycleAtomicityFixture(&gs);
         const before = digest.stateHash(&gs);
+        const capacity_before = gs.arena.queryCapacity();
 
         var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
         gs.arena.child_allocator = failing.allocator();
@@ -1080,6 +1112,7 @@ test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" 
         } else |err| {
             try std.testing.expectEqual(error.OutOfMemory, err);
             try std.testing.expectEqual(before, digest.stateHash(&gs));
+            try std.testing.expectEqual(capacity_before, gs.arena.queryCapacity());
             gs.deinit();
         }
     }

@@ -79,10 +79,10 @@ but the enum extension requires new migrations plus new branches in every
 **Owner: confirm the reuse of `.market` ownership.**
 
 **D5 — Enemy-recovery capacity on a lost field (P3f.2)**
-Recommend: on a lost field, the enemy faction recovers up to a tunable capacity
-(`market.enemy_recovery_capacity` // TUNE, in `tuning.zon`) of the drawn destroyed
-hulls back into `faction_rosters[enemy_key]` via `transferHullOwnership`;
-the remainder disperse to black-market listings.  Capacity is a ceiling on
+Recommend: on a lost field, the explicit `HullOwner` source owner recovers up
+to a tunable capacity (`market.enemy_recovery_capacity` // TUNE, in
+`tuning.zon`) of the drawn destroyed hulls into its faction or merc-company
+roster; the remainder disperse to black-market listings. Capacity is a ceiling on
 hull count, not tonnage, for simplicity in 3025 (BV-weighted variant is a
 future refinement).  Alternative: recover all; rejected because it leaves
 nothing to disperse, defeating P3f's purpose.
@@ -288,7 +288,7 @@ destroyed enemy hulls and call the new owner `disperseEnemyWrecks`:
 // P3f.2: drawn destroyed enemy hulls need a terminal disposition on the
 // lost field. Enemy recovers up to capacity; remainder disperses.
 try black_market.disperseEnemyWrecks(gs, alloc, drawn_destroyed_enemy_hulls.items,
-    contract.enemy_key, gs.clock.day_index, contract.planet_key, &rng_copy);
+    source_owner, gs.clock.day_index, contract.planet_key, &rng_copy);
 break :blk "";
 ```
 

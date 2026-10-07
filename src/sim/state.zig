@@ -228,7 +228,15 @@ pub const RefitPlan = struct {
 pub const EventMemory = struct { last_day: u32 = 0, last_choice: u8 = 0, streak: u8 = 0 };
 
 pub const GameState = struct {
+    const LifecycleArena = struct {
+        arena: std.heap.ArenaAllocator,
+        next: ?*LifecycleArena,
+    };
+
     arena: std.heap.ArenaAllocator,
+    /// Lifecycle transaction arenas retained after their prepared allocations
+    /// become campaign data. Session-only allocation ownership.
+    lifecycle_arenas: ?*LifecycleArena = null,
     rng: rng_mod.Rng,
     clock: clock_mod.Clock,
     funds: types.CBills,
@@ -386,6 +394,11 @@ pub const GameState = struct {
     }
 
     pub fn deinit(self: *GameState) void {
+        var retained = self.lifecycle_arenas;
+        while (retained) |node| {
+            retained = node.next;
+            node.arena.deinit();
+        }
         self.arena.deinit();
     }
 
@@ -405,6 +418,19 @@ pub const GameState = struct {
     /// All campaign-lifetime allocations come from here.
     pub fn allocator(self: *GameState) std.mem.Allocator {
         return self.arena.allocator();
+    }
+
+    /// Creates a reclaimable arena for lifecycle data pending an atomic commit.
+    pub fn lifecycleArena(self: *GameState) std.heap.ArenaAllocator {
+        return std.heap.ArenaAllocator.init(self.scratch());
+    }
+
+    /// Retains lifecycle allocations after all lifecycle preparation succeeds.
+    /// Its node lives in that arena, so this cannot allocate from the campaign arena.
+    pub fn retainLifecycleArena(self: *GameState, arena: *std.heap.ArenaAllocator) !void {
+        const node = try arena.allocator().create(LifecycleArena);
+        node.* = .{ .arena = arena.*, .next = self.lifecycle_arenas };
+        self.lifecycle_arenas = node;
     }
 
     // ---------------------------------------------------------------- money
@@ -1110,6 +1136,7 @@ pub const GameState = struct {
     /// and the round-trip digest proves they come back the same.
     pub const field_persistence = [_]struct { []const u8, Persistence }{
         .{ "arena", .session }, // the memory the campaign lives in
+        .{ "lifecycle_arenas", .session }, // allocation ownership only
         .{ "campaign_id", .session }, // the save store's row, not the campaign
         .{ "rng", .persisted },
         .{ "clock", .persisted },
