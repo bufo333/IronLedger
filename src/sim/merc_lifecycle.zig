@@ -36,93 +36,24 @@ pub fn liquidateMercCompany(
     company_id: types.MercCompanyId,
     day: u32,
 ) !void {
-    const mc = gs.merc_companies.getPtr(company_id) orelse return;
-    const listing_days = tuning.market.faction_surplus_listing_days;
-
-    // Prepare: count roster length.
-    const roster_len: usize = if (gs.merc_company_rosters.get(company_id)) |r| r.items.len else 0;
-
-    // Reserve capacity for all mutations before any commit.
-    try gs.hull_ownership_history.ensureUnusedCapacity(alloc, roster_len);
-    try gs.market_listings.ensureUnusedCapacity(alloc, roster_len);
-
-    // Pre-build listings (no gs mutation yet).
-    const built_listings = try alloc.alloc(market.Listing, roster_len);
-    const mc_faction_key = mc.faction_key; // static catalog memory or arena — no dupe needed
-
-    if (roster_len > 0) {
-        const roster = gs.merc_company_rosters.get(company_id).?;
-        var next_lid = gs.next_listing_id;
-        for (roster.items, 0..) |hid, i| {
-            const inst = gs.hull_instances.getPtr(hid) orelse continue;
-            const ch = chassis_mod.find(inst.base_key) orelse continue;
-            // Compute avg weapon cost (docs/p3f-faction-loop-design.md §3.4 // TUNE).
-            var weapon_value: types.CBills = 0;
-            var weapon_count: u32 = 0;
-            for (ch.loadout) |slot| if (slot.class == .weapon) {
-                weapon_value += part_mod.cost(slot.part);
-                weapon_count += 1;
-            };
-            const avg_weapon: types.CBills = if (weapon_count > 0)
-                @divTrunc(weapon_value, weapon_count)
-            else
-                50_000;
-            const factory_cond: market.HullCondition = .{
-                .armor_pct = 100,
-                .quality = .f,
-                .damaged_slots = 0,
-                .destroyed_slots = 0,
-                .missing_components = 0,
-            };
-            const lid: types.ListingId = @enumFromInt(next_lid);
-            next_lid += 1;
-            built_listings[i] = .{
-                .kind = .unit,
-                .item_key = ch.key,
-                .rarity = ch.rarity,
-                .price = market.hullPrice(ch.cost, avg_weapon, factory_cond, 10_000),
-                .id = lid,
-                .black_market = false,
-                .hq = .none,
-                .planet_key = "",
-                .condition = null,
-                .listed_day = day,
-                .expires_day = day + listing_days,
-                .hull_instance_id = hid,
-            };
-        }
-    }
-
-    // Commit (infallible from here).
-    if (roster_len > 0) {
-        const roster = gs.merc_company_rosters.getPtr(company_id).?;
-        for (roster.items, 0..) |hid, i| {
-            const inst = gs.hull_instances.getPtr(hid) orelse continue;
-            _ = chassis_mod.find(inst.base_key) orelse continue;
-            // Transfer ownership: merc_company → market.
-            inst.owner = .market;
-            // Close the open ownership interval.
-            for (gs.hull_ownership_history.items) |*h| {
-                if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = day;
-            }
-            // Open a transfer interval naming the company's faction as prior owner.
-            gs.hull_ownership_history.appendAssumeCapacity(.{
-                .hull_instance_id = hid,
-                .from_day = day,
-                .to_day = 0,
-                .acquisition_type = .transfer,
-                .prior_owner_key = mc_faction_key, // static key — no dupe needed
-            });
-            gs.market_listings.appendAssumeCapacity(built_listings[i]);
-        }
-        roster.clearRetainingCapacity();
-        gs.next_listing_id += @intCast(roster_len);
-    }
-    gs.merc_companies.getPtr(company_id).?.dissolved_day = day;
+    if (!gs.merc_companies.contains(company_id)) return;
+    var transaction_arena = std.heap.ArenaAllocator.init(alloc);
+    errdefer transaction_arena.deinit();
+    const transaction_alloc = transaction_arena.allocator();
+    var next_listing_id = gs.next_listing_id;
+    const listings = try planLiquidation(transaction_alloc, gs, company_id, day, &next_listing_id);
+    const actions = [_]LifecycleAction{.{ .liquidate = .{
+        .company_id = company_id,
+        .listings = listings,
+    } }};
+    const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, next_listing_id, gs.next_merc_company_id, day);
+    try gs.retainLifecycleArena(&transaction_arena);
+    commitLifecycleStage(gs, stage);
 }
 
 /// Single owner of "buy eligible hulls toward full strength" (rule 20/76).
-/// Shared by `spawnReplacementCompany` and the monthly `runMercLifecycle` tick.
+/// Uses the same purchase plan and staged lifecycle commit as replacement spawn
+/// and the monthly `runMercLifecycle` tick.
 ///
 /// Target T = tuning.generation.merc_company_hulls_each. If the company's
 /// current roster length >= T, returns immediately (no-op). Draws eligible
@@ -139,88 +70,47 @@ pub fn buyHullsForCompany(
     day: u32,
     rng: *rng_mod.Rng,
 ) !void {
-    const T = tuning.generation.merc_company_hulls_each;
-    const mc = gs.merc_companies.getPtr(company_id) orelse return;
+    const company = gs.merc_companies.get(company_id) orelse return;
+    const roster_len = if (gs.merc_company_rosters.get(company_id)) |roster| roster.items.len else 0;
+    if (roster_len >= tuning.generation.merc_company_hulls_each) return;
 
-    const current_n: usize = if (gs.merc_company_rosters.get(company_id)) |r| r.items.len else 0;
-    if (current_n >= T) return;
+    var scratch_arena = std.heap.ArenaAllocator.init(alloc);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+    var listings = std.ArrayListUnmanaged(PlannedListing).empty;
+    try listings.ensureTotalCapacity(scratch, gs.market_listings.items.len);
+    for (gs.market_listings.items) |listing| listings.appendAssumeCapacity(.{ .listing = listing });
 
-    // Build the eligible-listing index set (no gs mutation; uses arena allocator).
-    var elig: std.ArrayListUnmanaged(usize) = .empty;
-    for (gs.market_listings.items, 0..) |l, i| {
-        if (l.kind != .unit) continue;
-        if (l.hull_instance_id == .none) continue;
-        const eligible = !l.black_market or black_market.buyerEligible(gs, l, .merc_company, day);
-        if (eligible) try elig.append(alloc, i);
+    var planned_company = PlannedCompany{
+        .id = company_id,
+        .cbills = company.cbills,
+        .roster_len = roster_len,
+        .dissolved_day = company.dissolved_day,
+        .logo_key = company.logo_key,
+    };
+    var rng_copy = rng.*;
+    const buy = try planBuy(scratch, gs, &listings, &planned_company, day, &rng_copy);
+    if (buy.purchases.len == 0) {
+        rng.* = rng_copy;
+        return;
     }
 
-    // Draw-and-plan: collect purchase plan from the eligible set.
-    var cb = mc.cbills;
-    var want: usize = T - current_n;
-    const Plan = struct { listing_idx: usize };
-    var plan: std.ArrayListUnmanaged(Plan) = .empty;
-    while (want > 0 and elig.items.len > 0) {
-        const j = rng.random(.market).uintLessThan(usize, elig.items.len);
-        const li = elig.items[j];
-        const listing = gs.market_listings.items[li];
-        if (listing.price <= cb) {
-            try plan.append(alloc, .{ .listing_idx = li });
-            cb -= listing.price;
-            want -= 1;
-        }
-        // An unaffordable draw is consumed from the working set (matches runNpcBlackMarketDraw).
-        _ = elig.swapRemove(j);
-    }
-
-    if (plan.items.len == 0) return;
-
-    // Reserve capacity.
-    try gs.hull_ownership_history.ensureUnusedCapacity(alloc, plan.items.len);
-    try gs.merc_company_rosters.ensureUnusedCapacity(alloc, 1);
-    const gop = try gs.merc_company_rosters.getOrPut(alloc, company_id);
-    if (!gop.found_existing) gop.value_ptr.* = .empty;
-    try gop.value_ptr.ensureUnusedCapacity(alloc, plan.items.len);
-
-    // Commit (infallible).
-    var total_spent: types.CBills = 0;
-    for (plan.items) |entry| {
-        const l = gs.market_listings.items[entry.listing_idx];
-        const hid = l.hull_instance_id;
-        const inst = gs.hull_instances.getPtr(hid).?;
-        inst.owner = .{ .merc_company = company_id };
-        inst.status = .active;
-        for (gs.hull_ownership_history.items) |*h| {
-            if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = day;
-        }
-        gs.hull_ownership_history.appendAssumeCapacity(.{
-            .hull_instance_id = hid,
-            .from_day = day,
-            .to_day = 0,
-            .acquisition_type = .transfer,
-            .prior_owner_key = "market", // static string literal — no dupe needed
-        });
-        gs.merc_company_rosters.getPtr(company_id).?.appendAssumeCapacity(hid);
-        total_spent += l.price;
-    }
-    gs.merc_companies.getPtr(company_id).?.cbills -= total_spent;
-
-    // Remove consumed listings by descending index (as runNpcBlackMarketDraw does).
-    std.mem.sort(Plan, plan.items, {}, struct {
-        fn desc(_: void, a: Plan, b: Plan) bool {
-            return a.listing_idx > b.listing_idx;
-        }
-    }.desc);
-    for (plan.items) |entry| {
-        _ = gs.market_listings.orderedRemove(entry.listing_idx);
-    }
+    var transaction_arena = gs.lifecycleArena();
+    errdefer transaction_arena.deinit();
+    const transaction_alloc = transaction_arena.allocator();
+    const actions = [_]LifecycleAction{.{ .buy = buy }};
+    const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, gs.next_listing_id, gs.next_merc_company_id, day);
+    try gs.retainLifecycleArena(&transaction_arena);
+    commitLifecycleStage(gs, stage);
+    rng.* = rng_copy;
 }
 
 /// Single owner of replacement merc company spawn (rule 20/76).
 /// Draws the next archetype and hiring faction in the same order as
 /// `seedMercCompanies`. Picks the first logo from `logo.all_keys` not held
 /// by any active (dissolved_day == 0) company and never the player's reserved
-/// `player_logo_key`. Sets cbills to `merc_replacement_cbill_floor` and calls
-/// `buyHullsForCompany` to form the hull pool from market supply.
+/// `player_logo_key`. Sets cbills to `merc_replacement_cbill_floor` and uses
+/// the shared purchase plan to form the hull pool from market supply.
 ///
 /// Does NOT write `gs.rng` — the caller commits the rng copy.
 pub fn spawnReplacementCompany(
@@ -229,74 +119,36 @@ pub fn spawnReplacementCompany(
     day: u32,
     rng: *rng_mod.Rng,
 ) !void {
-    const tg = tuning.generation;
-
-    // Collect hiring factions (static catalog, stack-local; max 32 as in roster_seed).
-    var hiring_faction_idx: [32]usize = undefined;
-    var num_hiring: usize = 0;
-    for (faction_mod.table, 0..) |*f, i| {
-        if (f.hires) {
-            hiring_faction_idx[num_hiring] = i;
-            num_hiring += 1;
-        }
-    }
-    if (num_hiring == 0) return;
-
-    // Draw archetype and hiring faction on .rivals stream (same order as seedMercCompanies).
-    const archetype_idx = rng.random(.rivals).uintLessThan(usize, rival_mod.table.archetypes.len);
-    const archetype = &rival_mod.table.archetypes[archetype_idx];
-    const fi = hiring_faction_idx[rng.random(.rivals).uintLessThan(usize, num_hiring)];
-    const f = &faction_mod.table[fi];
-
-    // Draw identity.
-    const identity = roster_gen.rollMercCompanyIdentity(rng, .rivals, archetype, f.key);
-
-    // Pick the first logo key not held by any active company and not reserved for the player.
-    var chosen_logo: []const u8 = "";
-    for (logo.all_keys) |key| {
-        if (gs.player_logo_key.len > 0 and std.mem.eql(u8, key, gs.player_logo_key)) continue; // reserved for the player
-        var held = false;
-        var mc_it = gs.merc_companies.iterator();
-        while (mc_it.next()) |entry| {
-            const mc = entry.value_ptr;
-            if (mc.dissolved_day == 0 and std.mem.eql(u8, mc.logo_key, key)) {
-                held = true;
-                break;
-            }
-        }
-        if (!held) {
-            chosen_logo = key; // static all_keys memory — no dupe needed
-            break;
-        }
+    var scratch_arena = std.heap.ArenaAllocator.init(alloc);
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
+    var listings = std.ArrayListUnmanaged(PlannedListing).empty;
+    try listings.ensureTotalCapacity(scratch, gs.market_listings.items.len);
+    for (gs.market_listings.items) |listing| listings.appendAssumeCapacity(.{ .listing = listing });
+    var companies = std.ArrayListUnmanaged(PlannedCompany).empty;
+    try companies.ensureTotalCapacity(scratch, gs.merc_companies.count() + 1);
+    for (gs.merc_companies.keys(), gs.merc_companies.values()) |id, company| {
+        companies.appendAssumeCapacity(.{
+            .id = id,
+            .cbills = company.cbills,
+            .roster_len = if (gs.merc_company_rosters.get(id)) |roster| roster.items.len else 0,
+            .dissolved_day = company.dissolved_day,
+            .logo_key = company.logo_key,
+        });
     }
 
-    // Allocate unit_name (arena lifetime = campaign lifetime).
-    const unit_name = try std.fmt.allocPrint(alloc, "{s} {s}", .{ identity.last, archetype.unit_noun });
-
-    const new_id: types.MercCompanyId = @enumFromInt(gs.next_merc_company_id);
-
-    // Reserve map capacity before insert.
-    try gs.merc_companies.ensureUnusedCapacity(alloc, 1);
-
-    // Commit.
-    gs.merc_companies.putAssumeCapacity(new_id, merc_company_mod.MercCompany{
-        .id = new_id,
-        .archetype_key = archetype.key, // static catalog memory
-        .commander_first = identity.first, // static names table memory
-        .commander_last = identity.last, // static names table memory
-        .unit_name = unit_name,
-        .faction_key = f.key, // static catalog memory
-        .side = identity.side,
-        .doctrine = identity.doctrine,
-        .cbills = tg.merc_replacement_cbill_floor,
-        .founded_day = day,
-        .dissolved_day = 0,
-        .logo_key = chosen_logo,
-    });
-    gs.next_merc_company_id += 1;
-
-    // Buy hulls from market supply toward full strength.
-    try buyHullsForCompany(gs, alloc, new_id, day, rng);
+    var rng_copy = rng.*;
+    var next_company_id = gs.next_merc_company_id;
+    const replacement = try planReplacement(scratch, gs, &companies, &listings, day, &rng_copy, &next_company_id);
+    var transaction_arena = gs.lifecycleArena();
+    errdefer transaction_arena.deinit();
+    const transaction_alloc = transaction_arena.allocator();
+    var actions = [_]LifecycleAction{.{ .spawn = replacement }};
+    try allocateReplacementNames(transaction_alloc, &actions);
+    const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, gs.next_listing_id, next_company_id, day);
+    try gs.retainLifecycleArena(&transaction_arena);
+    commitLifecycleStage(gs, stage);
+    rng.* = rng_copy;
 }
 
 const PlannedListing = struct {
@@ -322,7 +174,6 @@ const BuyPlan = struct {
     company_id: types.MercCompanyId,
     purchases: []const Purchase,
     remove_order: []const Purchase,
-    new_roster: ?std.ArrayListUnmanaged(types.HullInstanceId) = null,
 };
 
 const ReplacementPlan = struct {
@@ -331,8 +182,29 @@ const ReplacementPlan = struct {
     buy: ?BuyPlan,
 };
 
+const HullChange = struct {
+    id: types.HullInstanceId,
+    owner: hull_instance_mod.HullOwner,
+    status: ?hull_instance_mod.HullStatus = null,
+};
+
+const LifecycleStage = struct {
+    merc_companies: std.AutoArrayHashMapUnmanaged(types.MercCompanyId, merc_company_mod.MercCompany),
+    merc_company_rosters: std.AutoArrayHashMapUnmanaged(types.MercCompanyId, std.ArrayListUnmanaged(types.HullInstanceId)),
+    market_listings: std.ArrayListUnmanaged(market.Listing),
+    hull_ownership_history: std.ArrayListUnmanaged(hull_instance_mod.HullOwnershipHistory),
+    hull_changes: std.ArrayListUnmanaged(HullChange),
+    next_listing_id: u32,
+    next_merc_company_id: u32,
+};
+
 const LifecycleAction = union(enum) {
     buy: BuyPlan,
+    liquidate: struct {
+        company_id: types.MercCompanyId,
+        listings: []const market.Listing,
+    },
+    spawn: ReplacementPlan,
     replace: struct {
         dissolved_id: types.MercCompanyId,
         liquidation_listings: []const market.Listing,
@@ -405,17 +277,11 @@ pub fn runMercLifecycle(gs: *GameState) !void {
     var transaction_arena = gs.lifecycleArena();
     errdefer transaction_arena.deinit();
     const transaction_alloc = transaction_arena.allocator();
-    try prepareLifecycleCommit(gs, transaction_alloc, actions.items);
     try allocateReplacementNames(transaction_alloc, actions.items);
+    const stage = try stageLifecycleCommit(gs, transaction_alloc, actions.items, next_listing_id, next_company_id, day);
     try gs.retainLifecycleArena(&transaction_arena);
 
-    for (actions.items) |action| switch (action) {
-        .buy => |buy| commitBuy(gs, buy, day),
-        .replace => |replace| {
-            commitLiquidation(gs, replace.dissolved_id, replace.liquidation_listings, day);
-            commitReplacement(gs, replace.replacement, day);
-        },
-    };
+    commitLifecycleStage(gs, stage);
     gs.rng = rng_copy;
 }
 
@@ -528,99 +394,127 @@ fn planBuy(scratch: std.mem.Allocator, gs: *const GameState, listings: *std.Arra
     return .{ .company_id = company.id, .purchases = try purchases.toOwnedSlice(scratch), .remove_order = remove_order };
 }
 
-fn prepareLifecycleCommit(gs: *GameState, alloc: std.mem.Allocator, actions: []LifecycleAction) !void {
-    var history_count: usize = 0;
-    var listing_count: usize = 0;
-    var company_count: usize = 0;
-    var roster_count: usize = 0;
-    for (actions) |*action| switch (action.*) {
-        .buy => |*buy| {
-            history_count += buy.purchases.len;
-            try prepareBuyRoster(gs, alloc, buy, &roster_count);
-        },
-        .replace => |*replace| {
-            history_count += replace.liquidation_listings.len;
-            listing_count += replace.liquidation_listings.len;
-            company_count += 1;
-            if (replace.replacement.buy) |*buy| {
-                history_count += buy.purchases.len;
-                try prepareBuyRoster(gs, alloc, buy, &roster_count);
-            }
-        },
-    };
-    try gs.hull_ownership_history.ensureUnusedCapacity(alloc, history_count);
-    try gs.market_listings.ensureUnusedCapacity(alloc, listing_count);
-    try gs.merc_companies.ensureUnusedCapacity(alloc, company_count);
-    try gs.merc_company_rosters.ensureUnusedCapacity(alloc, roster_count);
-}
-
-fn prepareBuyRoster(gs: *GameState, alloc: std.mem.Allocator, buy: *BuyPlan, new_rosters: *usize) !void {
-    if (gs.merc_company_rosters.getPtr(buy.company_id)) |roster| {
-        try roster.ensureUnusedCapacity(alloc, buy.purchases.len);
-    } else {
-        var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
-        try roster.ensureUnusedCapacity(alloc, buy.purchases.len);
-        buy.new_roster = roster;
-        new_rosters.* += 1;
-    }
-}
-
 fn allocateReplacementNames(alloc: std.mem.Allocator, actions: []LifecycleAction) !void {
     for (actions) |*action| switch (action.*) {
+        .spawn => |*replacement| try allocateReplacementName(alloc, replacement),
         .replace => |*replace| {
-            replace.replacement.company.unit_name = try std.fmt.allocPrint(
-                alloc,
-                "{s} {s}",
-                replace.replacement.unit_name_parts,
-            );
+            try allocateReplacementName(alloc, &replace.replacement);
         },
-        .buy => {},
+        .buy, .liquidate => {},
     };
 }
 
-fn commitLiquidation(gs: *GameState, company_id: types.MercCompanyId, listings: []const market.Listing, day: u32) void {
-    const mc = gs.merc_companies.getPtr(company_id).?;
-    if (gs.merc_company_rosters.getPtr(company_id)) |roster| {
-        for (roster.items, 0..) |hid, i| {
-            const inst = gs.hull_instances.getPtr(hid).?;
-            inst.owner = .market;
-            for (gs.hull_ownership_history.items) |*history| {
-                if (history.hull_instance_id == hid and history.to_day == 0) history.to_day = day;
-            }
-            gs.hull_ownership_history.appendAssumeCapacity(.{ .hull_instance_id = hid, .from_day = day, .acquisition_type = .transfer, .prior_owner_key = mc.faction_key });
-            gs.market_listings.appendAssumeCapacity(listings[i]);
+fn allocateReplacementName(alloc: std.mem.Allocator, replacement: *ReplacementPlan) !void {
+    replacement.company.unit_name = try std.fmt.allocPrint(
+        alloc,
+        "{s} {s}",
+        replacement.unit_name_parts,
+    );
+}
+
+fn stageLifecycleCommit(
+    gs: *const GameState,
+    alloc: std.mem.Allocator,
+    actions: []const LifecycleAction,
+    next_listing_id: u32,
+    next_merc_company_id: u32,
+    day: u32,
+) !LifecycleStage {
+    var stage = LifecycleStage{
+        .merc_companies = .empty,
+        .merc_company_rosters = .empty,
+        .market_listings = .empty,
+        .hull_ownership_history = .empty,
+        .hull_changes = .empty,
+        .next_listing_id = next_listing_id,
+        .next_merc_company_id = next_merc_company_id,
+    };
+    try stage.merc_companies.ensureTotalCapacity(alloc, gs.merc_companies.count());
+    for (gs.merc_companies.keys(), gs.merc_companies.values()) |id, company| {
+        stage.merc_companies.putAssumeCapacity(id, company);
+    }
+    try stage.merc_company_rosters.ensureTotalCapacity(alloc, gs.merc_company_rosters.count());
+    for (gs.merc_company_rosters.keys(), gs.merc_company_rosters.values()) |id, source| {
+        var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+        try roster.appendSlice(alloc, source.items);
+        stage.merc_company_rosters.putAssumeCapacity(id, roster);
+    }
+    try stage.market_listings.appendSlice(alloc, gs.market_listings.items);
+    try stage.hull_ownership_history.appendSlice(alloc, gs.hull_ownership_history.items);
+
+    for (actions) |action| switch (action) {
+        .buy => |buy| try stageBuy(&stage, alloc, buy, day),
+        .liquidate => |liquidation| try stageLiquidation(&stage, alloc, liquidation.company_id, liquidation.listings, day),
+        .spawn => |replacement| try stageReplacement(&stage, alloc, replacement, day),
+        .replace => |replace| {
+            try stageLiquidation(&stage, alloc, replace.dissolved_id, replace.liquidation_listings, day);
+            try stageReplacement(&stage, alloc, replace.replacement, day);
+        },
+    };
+    return stage;
+}
+
+fn stageLiquidation(stage: *LifecycleStage, alloc: std.mem.Allocator, company_id: types.MercCompanyId, listings: []const market.Listing, day: u32) !void {
+    const company = stage.merc_companies.getPtr(company_id).?;
+    if (stage.merc_company_rosters.getPtr(company_id)) |roster| {
+        for (roster.items, 0..) |hull_id, i| {
+            try stage.hull_changes.append(alloc, .{ .id = hull_id, .owner = .market });
+            closeOwnershipHistory(&stage.hull_ownership_history, hull_id, day);
+            try stage.hull_ownership_history.append(alloc, .{
+                .hull_instance_id = hull_id,
+                .from_day = day,
+                .acquisition_type = .transfer,
+                .prior_owner_key = company.faction_key,
+            });
+            try stage.market_listings.append(alloc, listings[i]);
         }
         roster.clearRetainingCapacity();
     }
-    gs.next_listing_id += @intCast(listings.len);
-    mc.dissolved_day = day;
+    company.dissolved_day = day;
 }
 
-fn commitReplacement(gs: *GameState, replacement: ReplacementPlan, day: u32) void {
-    gs.merc_companies.putAssumeCapacity(replacement.company.id, replacement.company);
-    gs.next_merc_company_id += 1;
-    if (replacement.buy) |buy| commitBuy(gs, buy, day);
+fn stageReplacement(stage: *LifecycleStage, alloc: std.mem.Allocator, replacement: ReplacementPlan, day: u32) !void {
+    try stage.merc_companies.put(alloc, replacement.company.id, replacement.company);
+    if (replacement.buy) |buy| try stageBuy(stage, alloc, buy, day);
 }
 
-fn commitBuy(gs: *GameState, buy: BuyPlan, day: u32) void {
-    if (buy.new_roster) |roster| gs.merc_company_rosters.putAssumeCapacity(buy.company_id, roster);
+fn stageBuy(stage: *LifecycleStage, alloc: std.mem.Allocator, buy: BuyPlan, day: u32) !void {
+    if (!stage.merc_company_rosters.contains(buy.company_id)) {
+        try stage.merc_company_rosters.put(alloc, buy.company_id, .empty);
+    }
     var spent: types.CBills = 0;
-    const roster = gs.merc_company_rosters.getPtr(buy.company_id).?;
+    const roster = stage.merc_company_rosters.getPtr(buy.company_id).?;
     for (buy.purchases) |purchase| {
-        const inst = gs.hull_instances.getPtr(purchase.hull_instance_id).?;
-        inst.owner = .{ .merc_company = buy.company_id };
-        inst.status = .active;
-        for (gs.hull_ownership_history.items) |*history| {
-            if (history.hull_instance_id == purchase.hull_instance_id and history.to_day == 0) history.to_day = day;
-        }
-        gs.hull_ownership_history.appendAssumeCapacity(.{ .hull_instance_id = purchase.hull_instance_id, .from_day = day, .acquisition_type = .transfer, .prior_owner_key = "market" });
-        roster.appendAssumeCapacity(purchase.hull_instance_id);
+        try stage.hull_changes.append(alloc, .{ .id = purchase.hull_instance_id, .owner = .{ .merc_company = buy.company_id }, .status = .active });
+        closeOwnershipHistory(&stage.hull_ownership_history, purchase.hull_instance_id, day);
+        try stage.hull_ownership_history.append(alloc, .{ .hull_instance_id = purchase.hull_instance_id, .from_day = day, .acquisition_type = .transfer, .prior_owner_key = "market" });
+        try roster.append(alloc, purchase.hull_instance_id);
         spent += purchase.price;
     }
-    gs.merc_companies.getPtr(buy.company_id).?.cbills -= spent;
+    stage.merc_companies.getPtr(buy.company_id).?.cbills -= spent;
     for (buy.remove_order) |purchase| {
-        _ = gs.market_listings.orderedRemove(indexOfPurchasedHull(gs.market_listings.items, purchase.hull_instance_id));
+        _ = stage.market_listings.orderedRemove(indexOfPurchasedHull(stage.market_listings.items, purchase.hull_instance_id));
     }
+}
+
+fn closeOwnershipHistory(history: *std.ArrayListUnmanaged(hull_instance_mod.HullOwnershipHistory), hull_id: types.HullInstanceId, day: u32) void {
+    for (history.items) |*entry| {
+        if (entry.hull_instance_id == hull_id and entry.to_day == 0) entry.to_day = day;
+    }
+}
+
+fn commitLifecycleStage(gs: *GameState, stage: LifecycleStage) void {
+    gs.merc_companies = stage.merc_companies;
+    gs.merc_company_rosters = stage.merc_company_rosters;
+    gs.market_listings = stage.market_listings;
+    gs.hull_ownership_history = stage.hull_ownership_history;
+    for (stage.hull_changes.items) |change| {
+        const hull = gs.hull_instances.getPtr(change.id).?;
+        hull.owner = change.owner;
+        if (change.status) |status| hull.status = status;
+    }
+    gs.next_listing_id = stage.next_listing_id;
+    gs.next_merc_company_id = stage.next_merc_company_id;
 }
 
 fn indexOfPurchasedHull(listings: []const market.Listing, hull_instance_id: types.HullInstanceId) usize {
@@ -816,6 +710,49 @@ test "buyHullsForCompany: OOM atomicity — stateHash unchanged on failure" {
     try std.testing.expectEqual(hash_before, digest.stateHash(&gs));
 }
 
+test "buyHullsForCompany: late transaction OOM leaves no roster entry or retained allocation" {
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var gs = GameState.init(outer.allocator(), .{ .seed = 2003 });
+        _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+        const company_id: types.MercCompanyId = @enumFromInt(1);
+        const hull_id: types.HullInstanceId = @enumFromInt(1);
+        try gs.merc_companies.put(gs.allocator(), company_id, .{
+            .id = company_id,
+            .archetype_key = "enemy_raiders",
+            .unit_name = "Buying Co",
+            .faction_key = "DC",
+            .cbills = 10_000_000,
+        });
+        try gs.hull_instances.put(gs.allocator(), hull_id, .{ .id = hull_id, .base_key = "LCT-1V", .owner = .market });
+        try gs.hull_ownership_history.append(gs.allocator(), .{ .hull_instance_id = hull_id, .from_day = 0, .acquisition_type = .transfer, .prior_owner_key = "market" });
+        try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .id = @enumFromInt(1), .hull_instance_id = hull_id });
+
+        const before = digest.stateHash(&gs);
+        const capacity_before = gs.arena.queryCapacity();
+        const rosters_before = gs.merc_company_rosters.keys().ptr;
+        var rng = gs.rng;
+        const rng_before = rng;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
+        gs.arena.child_allocator = failing.allocator();
+        if (buyHullsForCompany(&gs, outer.allocator(), company_id, 1, &rng)) |_| {
+            try std.testing.expect(gs.merc_company_rosters.contains(company_id));
+            gs.deinit();
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+            try std.testing.expectEqual(capacity_before, gs.arena.queryCapacity());
+            try std.testing.expectEqual(rosters_before, gs.merc_company_rosters.keys().ptr);
+            try std.testing.expectEqual(rng_before, rng);
+            gs.deinit();
+        }
+    }
+}
+
 test "spawnReplacementCompany: unique id, founded_day, dissolved_day==0, cbills==floor, logo distinct from active" {
     const a = std.testing.allocator;
     var gs = GameState.init(a, .{ .seed = 3001 });
@@ -869,6 +806,37 @@ test "spawnReplacementCompany: never picks the player's reserved logo_key" {
     const spawned = gs.merc_companies.getPtr(new_id) orelse return error.TestFailed;
     // Spawned company must not use the player's reserved logo.
     try std.testing.expect(!std.mem.eql(u8, spawned.logo_key, logo.all_keys[0]));
+}
+
+test "spawnReplacementCompany: late transaction OOM leaves no company or ID advance" {
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var gs = GameState.init(outer.allocator(), .{ .seed = 3003 });
+        _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+        const before = digest.stateHash(&gs);
+        const capacity_before = gs.arena.queryCapacity();
+        const companies_before = gs.merc_companies.keys().ptr;
+        var rng = gs.rng;
+        const rng_before = rng;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
+        gs.arena.child_allocator = failing.allocator();
+        if (spawnReplacementCompany(&gs, outer.allocator(), 1, &rng)) |_| {
+            try std.testing.expectEqual(@as(usize, 1), gs.merc_companies.count());
+            try std.testing.expectEqual(@as(u32, 2), gs.next_merc_company_id);
+            gs.deinit();
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+            try std.testing.expectEqual(capacity_before, gs.arena.queryCapacity());
+            try std.testing.expectEqual(companies_before, gs.merc_companies.keys().ptr);
+            try std.testing.expectEqual(rng_before, rng);
+            gs.deinit();
+        }
+    }
 }
 
 test "runMercLifecycle: (a) insolvent company liquidated+replaced, active count held; dissolved record persists" {
@@ -1086,8 +1054,8 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
 
 test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" {
     // Rule 69: the fixture executes a bankruptcy replacement and a separate
-    // under-strength purchase; every preparation failure preserves the digest
-    // and campaign-arena capacity.
+    // under-strength purchase; every preparation failure preserves gameplay,
+    // live collection storage, and campaign-arena capacity.
     var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer outer.deinit();
 
@@ -1097,6 +1065,12 @@ test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" 
         try seedLifecycleAtomicityFixture(&gs);
         const before = digest.stateHash(&gs);
         const capacity_before = gs.arena.queryCapacity();
+        const companies_before = gs.merc_companies.keys().ptr;
+        const rosters_before = gs.merc_company_rosters.keys().ptr;
+        const listings_before = gs.market_listings.items.ptr;
+        const history_before = gs.hull_ownership_history.items.ptr;
+        const bankrupt_roster_before = gs.merc_company_rosters.get(@enumFromInt(1)).?.items.ptr;
+        const under_strength_roster_before = gs.merc_company_rosters.get(@enumFromInt(2)).?.items.ptr;
 
         var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
         gs.arena.child_allocator = failing.allocator();
@@ -1113,6 +1087,12 @@ test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" 
             try std.testing.expectEqual(error.OutOfMemory, err);
             try std.testing.expectEqual(before, digest.stateHash(&gs));
             try std.testing.expectEqual(capacity_before, gs.arena.queryCapacity());
+            try std.testing.expectEqual(companies_before, gs.merc_companies.keys().ptr);
+            try std.testing.expectEqual(rosters_before, gs.merc_company_rosters.keys().ptr);
+            try std.testing.expectEqual(listings_before, gs.market_listings.items.ptr);
+            try std.testing.expectEqual(history_before, gs.hull_ownership_history.items.ptr);
+            try std.testing.expectEqual(bankrupt_roster_before, gs.merc_company_rosters.get(@enumFromInt(1)).?.items.ptr);
+            try std.testing.expectEqual(under_strength_roster_before, gs.merc_company_rosters.get(@enumFromInt(2)).?.items.ptr);
             gs.deinit();
         }
     }

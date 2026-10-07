@@ -1105,22 +1105,15 @@ fn writeHullCombatRecords(
 
 pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     try gs.battle_reports.prepareRecord(gs.allocator());
-    // Where and in what: the world's ground, the day's weather.
-    const env: terrain_mod.Environment = blk: {
-        const world = planet_mod.find(c.planet_key) orelse break :blk .{};
-        const t = terrain_mod.terrainOf(world);
-        break :blk .{ .terrain = t, .weather = terrain_mod.rollWeather(&gs.rng, .battle, t) };
-    };
-    var player = try playerSideIn(gs, gs.scratch(), c, env);
-    defer player.engaged.deinit(gs.scratch());
-    defer player.ammo_reserved.deinit(gs.scratch());
-    if (player.engaged.items.len == 0) return concede(gs, c);
-
     // Pool routing: real hull draw vs. bloodless win vs. abstraction
     // (docs/p3c-economy-design.md §8.E). Single owner: opforPool.
     const resolution = opforPool(gs, c);
     var drawn: []types.HullInstanceId = &.{};
     var enemy_bv_override: ?i64 = null;
+    var draw_candidates: []const types.HullInstanceId = &.{};
+    var filtered_candidates: ?[]types.HullInstanceId = null;
+    defer if (filtered_candidates) |buf| gs.scratch().free(buf);
+    var draw_count: usize = 0;
     switch (resolution) {
         .abstraction => {}, // leave both defaults: existing RAT/BV abstraction behaviour
         .forfeit => return forfeit(gs, c),
@@ -1130,7 +1123,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             // destroyed == false records signal combat_ineffective (not simply surviving,
             // because surviving hulls get no record). Player-hull ids are harmless: they
             // are never pool members.
-            // Use scratch for the transient filter buffers; free before leaving the block.
+            // Use scratch for transient filter buffers; free before returning.
             const excl_buf_raw = try gs.scratch().alloc(types.HullInstanceId, gs.hull_combat_records.items.len);
             defer gs.scratch().free(excl_buf_raw);
             var excl_len: usize = 0;
@@ -1142,25 +1135,50 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             }
             const excluded = excl_buf_raw[0..excl_len];
             // Filtered candidates: pool members not in the exclusion set.
-            const filt_buf_raw = try gs.scratch().alloc(types.HullInstanceId, pool.hulls.items.len);
-            defer gs.scratch().free(filt_buf_raw);
-            var filt_len: usize = 0;
-            for (pool.hulls.items) |hid| {
-                var excl = false;
-                for (excluded) |eid| if (eid == hid) {
-                    excl = true;
-                    break;
-                };
-                if (!excl) {
-                    filt_buf_raw[filt_len] = hid;
-                    filt_len += 1;
+            if (excluded.len == 0) {
+                draw_candidates = pool.hulls.items;
+            } else {
+                const filt_buf_raw = try gs.scratch().alloc(types.HullInstanceId, pool.hulls.items.len);
+                var filt_len: usize = 0;
+                for (pool.hulls.items) |hid| {
+                    var excl = false;
+                    for (excluded) |eid| if (eid == hid) {
+                        excl = true;
+                        break;
+                    };
+                    if (!excl) {
+                        filt_buf_raw[filt_len] = hid;
+                        filt_len += 1;
+                    }
                 }
+                filtered_candidates = filt_buf_raw;
+                draw_candidates = filt_buf_raw[0..filt_len];
             }
-            const filtered = filt_buf_raw[0..filt_len];
-            if (filtered.len == 0) return forfeit(gs, c); // all remaining hulls combat_ineffective
+            if (draw_candidates.len == 0) return forfeit(gs, c); // all remaining hulls combat_ineffective
             const garrison_probe = c.kind.isGarrisonClass();
-            const n = opfor.drawSize(filtered.len, c.enemy_lances, garrison_probe);
-            drawn = try drawOpforHulls(gs, filtered, n);
+            draw_count = opfor.drawSize(draw_candidates.len, c.enemy_lances, garrison_probe);
+
+            // A lost field can disperse every drawn hull. Reserve that path before
+            // weather or draw RNG advances and before battle state changes.
+            try black_market.prepareEnemyWreckDispersal(gs, gs.allocator(), draw_count, pool.owner);
+            if (filtered_candidates == null) draw_candidates = pool.hulls.items;
+        },
+    }
+
+    // Where and in what: the world's ground, the day's weather.
+    const env: terrain_mod.Environment = blk: {
+        const world = planet_mod.find(c.planet_key) orelse break :blk .{};
+        const t = terrain_mod.terrainOf(world);
+        break :blk .{ .terrain = t, .weather = terrain_mod.rollWeather(&gs.rng, .battle, t) };
+    };
+    var player = try playerSideIn(gs, gs.scratch(), c, env);
+    defer player.engaged.deinit(gs.scratch());
+    defer player.ammo_reserved.deinit(gs.scratch());
+    if (player.engaged.items.len == 0) return concede(gs, c);
+
+    switch (resolution) {
+        .pool => {
+            drawn = try drawOpforHulls(gs, draw_candidates, draw_count);
             // Fielded BV = Σ drawn-hull BVs (B2: opposed roll uses real hull BVs).
             var fielded_bv: i64 = 0;
             for (drawn) |hid| {
@@ -1169,6 +1187,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
             }
             enemy_bv_override = fielded_bv;
         },
+        else => {},
     }
 
     const open = openingRoll(gs, c, &player, env, enemy_bv_override);
@@ -1574,7 +1593,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
                 .pool => |pool| pool.owner,
                 else => unreachable,
             };
-            try black_market.disperseEnemyWrecks(gs, gs.allocator(), destroyed_wrecks.items, source_owner, gs.clock.day_index, c.planet_key, &rng_copy);
+            black_market.commitEnemyWreckDispersal(gs, destroyed_wrecks.items, source_owner, gs.clock.day_index, c.planet_key, &rng_copy);
             gs.rng = rng_copy;
         }
     }
@@ -2095,6 +2114,48 @@ test "resolveEngagement: report reservation is failure-atomic under OOM" {
     try std.testing.expectError(error.OutOfMemory, resolveEngagement(&gs, gs.contracts.getPtr(@enumFromInt(1)).?));
     try std.testing.expectEqual(before, digest.stateHash(&gs));
     try std.testing.expectEqual(@as(usize, 0), gs.battle_reports.kept.items.len);
+}
+
+test "resolveEngagement: lost-field wreck reservation failure leaves state unchanged" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 7771 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    _ = try seedOpforHulls(&gs, "DC", 4);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .enemy_lances = 1,
+    });
+
+    const before = digest.stateHash(&gs);
+    const pool_len = gs.faction_rosters.getPtr("DC").?.items.len;
+    const report_len = gs.battle_reports.kept.items.len;
+    const record_len = gs.hull_combat_records.items.len;
+    const log_len = gs.event_log.items.len;
+    const listing_len = gs.market_listings.items.len;
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, resolveEngagement(&gs, gs.contracts.getPtr(@enumFromInt(1)).?));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(pool_len, gs.faction_rosters.getPtr("DC").?.items.len);
+    try std.testing.expectEqual(report_len, gs.battle_reports.kept.items.len);
+    try std.testing.expectEqual(record_len, gs.hull_combat_records.items.len);
+    try std.testing.expectEqual(log_len, gs.event_log.items.len);
+    try std.testing.expectEqual(listing_len, gs.market_listings.items.len);
 }
 
 test "hard hits wound pilots: a season of fighting sends someone to the medbay" {

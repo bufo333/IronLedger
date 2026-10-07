@@ -124,18 +124,37 @@ pub fn makeDispersedListing(
 /// (no draw); for each dispersed hull in order: (a) draw world index, then
 /// (b) draw delay.
 ///
-/// Failure-atomic (rules 7/69): all fallible reserves happen before any draw
-/// or gs mutation; a failing reserve leaves `gs` unchanged and `rng` advanced
-/// not at all.  `gs.rng` is never written here — the caller commits it.
-pub fn disperseEnemyWrecks(
+/// Reserve every destination the lost-field terminal-disposition rule can
+/// touch for up to `max_wrecks` hulls. The source roster must already exist
+/// for a pool-path battle. This changes no gameplay value and consumes no RNG.
+pub fn prepareEnemyWreckDispersal(
     gs: *GameState,
     alloc: std.mem.Allocator,
+    max_wrecks: usize,
+    source_owner: hull_instance_mod.HullOwner,
+) !void {
+    if (max_wrecks == 0) return;
+
+    try gs.hull_ownership_history.ensureUnusedCapacity(alloc, max_wrecks);
+    try gs.market_listings.ensureUnusedCapacity(alloc, max_wrecks);
+    switch (source_owner) {
+        .faction => |key| try gs.faction_rosters.getPtr(key).?.ensureUnusedCapacity(alloc, max_wrecks),
+        .merc_company => |id| try gs.merc_company_rosters.getPtr(id).?.ensureUnusedCapacity(alloc, max_wrecks),
+        else => unreachable,
+    }
+}
+
+/// Give each lost-field wreck exactly one terminal disposition. Callers must
+/// first reserve destinations with `prepareEnemyWreckDispersal`; this commit
+/// consumes `.battle` draws only for dispersed hulls and cannot allocate.
+pub fn commitEnemyWreckDispersal(
+    gs: *GameState,
     wrecks: []const types.HullInstanceId,
     source_owner: hull_instance_mod.HullOwner,
     battle_day: u32,
     battle_planet_key: []const u8,
     rng: *rng_mod.Rng,
-) !void {
+) void {
     if (wrecks.len == 0) return;
 
     const cap: usize = tuning.market.enemy_recovery_capacity;
@@ -160,24 +179,6 @@ pub fn disperseEnemyWrecks(
     const dispersed = wrecks[effective_cap..];
     const recovered = wrecks[0..effective_cap];
 
-    // ---- Prepare (fallible; no draw; no logical gs mutation) ----
-    try gs.hull_ownership_history.ensureUnusedCapacity(alloc, recovered.len + dispersed.len);
-    try gs.market_listings.ensureUnusedCapacity(alloc, dispersed.len);
-    if (recovered.len > 0) switch (source_owner) {
-        .faction => |key| {
-            const gop = try gs.faction_rosters.getOrPut(alloc, key);
-            if (!gop.found_existing) gop.value_ptr.* = .empty;
-            try gop.value_ptr.ensureUnusedCapacity(alloc, recovered.len);
-        },
-        .merc_company => |id| {
-            const gop = try gs.merc_company_rosters.getOrPut(alloc, id);
-            if (!gop.found_existing) gop.value_ptr.* = .empty;
-            try gop.value_ptr.ensureUnusedCapacity(alloc, recovered.len);
-        },
-        else => unreachable,
-    };
-
-    // ---- Commit (infallible from here) ----
     var next_listing: u32 = gs.next_listing_id;
 
     // Recovery returns wrecks to their explicit source owner, not merely its faction.
@@ -257,6 +258,22 @@ pub fn disperseEnemyWrecks(
 
     gs.next_listing_id = next_listing;
     // gs.rng is NOT written here — the caller commits it.
+}
+
+/// Prepare and commit the lost-field terminal disposition as one operation.
+/// Direct callers receive failure atomicity; battle resolution stages the
+/// preparation before its first gameplay mutation and calls the commit later.
+pub fn disperseEnemyWrecks(
+    gs: *GameState,
+    alloc: std.mem.Allocator,
+    wrecks: []const types.HullInstanceId,
+    source_owner: hull_instance_mod.HullOwner,
+    battle_day: u32,
+    battle_planet_key: []const u8,
+    rng: *rng_mod.Rng,
+) !void {
+    try prepareEnemyWreckDispersal(gs, alloc, wrecks.len, source_owner);
+    commitEnemyWreckDispersal(gs, wrecks, source_owner, battle_day, battle_planet_key, rng);
 }
 
 /// Single owner of the monthly NPC black-market consumption rule
@@ -681,6 +698,8 @@ test "disperseEnemyWrecks: recovered merc-company wrecks return to their company
         .id = merc_id,
         .faction_key = faction_key,
     });
+    const roster = try gs.merc_company_rosters.getOrPut(gs.allocator(), merc_id);
+    if (!roster.found_existing) roster.value_ptr.* = .empty;
 
     const n: u32 = tuning.market.enemy_recovery_capacity;
     const wrecks = try testing.allocator.alloc(types.HullInstanceId, n);
@@ -707,8 +726,8 @@ test "disperseEnemyWrecks: recovered merc-company wrecks return to their company
     var rng = rng_mod.Rng.init(7204);
     try disperseEnemyWrecks(&gs, gs.allocator(), wrecks, .{ .merc_company = merc_id }, battle_day, "galatea", &rng);
 
-    const roster = gs.merc_company_rosters.get(merc_id).?;
-    try testing.expectEqual(@as(usize, n), roster.items.len);
+    const recovered_roster = gs.merc_company_rosters.get(merc_id).?;
+    try testing.expectEqual(@as(usize, n), recovered_roster.items.len);
     for (wrecks) |hid| {
         const inst = gs.hull_instances.getPtr(hid).?;
         try testing.expectEqual(hull_instance_mod.OwnerType.merc_company, std.meta.activeTag(inst.owner));
