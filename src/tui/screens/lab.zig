@@ -100,6 +100,48 @@ fn selectedDetail(boxes: []const q.LocationBox, cursor: usize) []const []const u
     return box.empty_detail;
 }
 
+fn screenHasText(screen: *const app.Screen, needle: []const u8) bool {
+    for (0..screen.rows) |y| {
+        for (0..screen.cols -| needle.len) |x| {
+            var matched = true;
+            for (needle, 0..) |ch, i| {
+                if (screen.get(@intCast(x + i), @intCast(y)).ch != ch) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) return true;
+        }
+    }
+    return false;
+}
+
+fn damageMountForTest(c: *app.ClientForTest, uid: app.types.UnitId, skip: []const u8) !?q.LayoutRow {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    var company: app.types.ForceId = .none;
+    for (try q.toe(al, c.app.state())) |row| {
+        if (row.unit == uid) company = row.company;
+    }
+    if (company == .none) return null;
+    for (0..30) |_| game.contract_events.damageRandomUnits(c.app.state(), company, 12, .line);
+    const boxes = try q.labLayout(al, c.app.state(), uid);
+    var idx: usize = 0;
+    for (boxes) |box| {
+        idx += 1;
+        for (box.rows) |row| {
+            if (row.slot_key.len > 0 and !std.mem.eql(u8, row.slot_key, skip) and std.mem.indexOf(u8, row.detail[3], "damaged") != null) {
+                c.app.cur(0).* = idx;
+                return row;
+            }
+            idx += 1;
+        }
+        idx += 1;
+    }
+    return null;
+}
+
 pub fn draw(self: *App) anyerror!void {
     const al = self.a();
     const g = self.state();
@@ -495,28 +537,45 @@ test "replacement targets the selected damaged mount" {
     try toTab(c, .lab);
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const uid = (try q.labMeks(arena.allocator(), c.app.state()))[c.app.lab_sel];
-    const lab_view = try q.lab(arena.allocator(), c.app.state(), uid);
-    const first_mount = if (lab_view.mounts.len > 0) lab_view.mounts[0].slot_key else return;
-    const boxes = try q.labLayout(arena.allocator(), c.app.state(), uid);
-    var target: ?q.LayoutRow = null;
-    var idx: usize = 0;
-    outer: for (boxes) |box| {
-        idx += 1;
-        for (box.rows) |row| {
-            if (row.slot_key.len > 0 and !std.mem.eql(u8, row.slot_key, first_mount)) {
-                target = row;
-                c.app.cur(0).* = idx;
-                break :outer;
-            }
-            idx += 1;
+    const meks = try q.labMeks(arena.allocator(), c.app.state());
+    var uid: ?app.types.UnitId = null;
+    for (try q.toe(arena.allocator(), c.app.state())) |toe_row| {
+        if (toe_row.unit == .none or toe_row.company == .none) continue;
+        for (meks, 0..) |mek, i| {
+            if (mek != toe_row.unit) continue;
+            c.app.lab_sel = i;
+            uid = mek;
+            break;
         }
-        idx += 1;
+        if (uid != null) break;
     }
-    const row = target orelse return;
-    for (c.app.state().unit(uid).?.slots.items) |*slot| {
-        if (std.mem.eql(u8, slot.slot_key, row.slot_key)) slot.condition = .damaged;
-    }
+    const selected_uid = uid orelse return error.TestUnexpectedResult;
+    const lab_view = try q.lab(arena.allocator(), c.app.state(), selected_uid);
+    const first_mount = if (lab_view.mounts.len > 0) lab_view.mounts[0].slot_key else return;
+    const row = (try damageMountForTest(c, selected_uid, first_mount)) orelse return error.TestUnexpectedResult;
     try app.pressForTest(c, .{ .char = 'R' });
     try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), row.part_key) != null);
+}
+
+test "selected detail visibility follows Lab width tiers" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .lab);
+
+    try c.app.screen.resize(layout.lab_diagram_cols + layout.lab_detail_cols - 1, 50);
+    c.app.screen.clear();
+    try draw(&c.app);
+    try std.testing.expect(!screenHasText(&c.app.screen, "SELECTED SLOT"));
+
+    try c.app.screen.resize(layout.lab_diagram_cols + layout.lab_detail_cols, 50);
+    c.app.screen.clear();
+    try draw(&c.app);
+    try std.testing.expect(screenHasText(&c.app.screen, "SELECTED SLOT"));
+    try std.testing.expect(!screenHasText(&c.app.screen, "chassis"));
+
+    try c.app.screen.resize(layout.lab_full_cols, 50);
+    c.app.screen.clear();
+    try draw(&c.app);
+    try std.testing.expect(screenHasText(&c.app.screen, "SELECTED SLOT"));
+    try std.testing.expect(screenHasText(&c.app.screen, "chassis"));
 }

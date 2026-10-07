@@ -9203,6 +9203,38 @@ test "labLayout selected mount detail carries live condition and shared multi-cr
     try std.testing.expect(multi_rows > 1);
 }
 
+test "labLayout carries one changed multi-crit mount condition on every crit row" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 57 });
+    defer gs.deinit();
+    const uid = try gs.addUnit("AWS-8Q");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+
+    const unit = gs.unit(uid).?;
+    var slot_key: []const u8 = "";
+    var crits: u8 = 0;
+    for (unit.slots.items) |*slot| {
+        const part = part_dom.find(slot.part_key) orelse continue;
+        if (part.crits <= 1) continue;
+        slot.condition = .missing;
+        slot_key = slot.slot_key;
+        crits = part.crits;
+        break;
+    }
+    try std.testing.expect(crits > 1);
+
+    const boxes = try labLayout(al, &gs, uid);
+    var rows: u8 = 0;
+    for (boxes) |box| for (box.rows) |row| {
+        if (!std.mem.eql(u8, row.slot_key, slot_key)) continue;
+        rows += 1;
+        try std.testing.expectEqual(crits, row.group_count);
+        try std.testing.expect(std.mem.indexOf(u8, row.detail[3], "missing") != null);
+    };
+    try std.testing.expectEqual(crits, rows);
+}
+
 test "variantMarker: stock hull is false; after a staged install it is true" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 99 });
     defer gs.deinit();
