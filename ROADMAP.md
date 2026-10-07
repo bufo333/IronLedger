@@ -1499,8 +1499,9 @@ owns the design-approval entry and delivery order.
   protection; the active rival merc-company count holds at 12.
 - **Pirate replenishment.** Pirates gain a small base
   `replenishment_hulls_per_year` constant (2-3, tunable) for opportunistic
-  acquisition and also compete for black-market listings; an insolvent pirate
-  band is replaced by a new band drawing from the logo pool or procedural names.
+  acquisition and also compete for black-market listings. The delivered model
+  has one persistent PER faction roster, not individually named pirate bands;
+  pirate-band insolvency and replacement are not part of P3f.
 - **Logo picker (campaign wizard).** The campaign wizard gains a logo picker
   showing every logo in `data/logos/`; selecting one auto-fills the company name
   (title-case from the filename), complementing the existing emblem import

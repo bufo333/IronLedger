@@ -254,15 +254,16 @@ migration (the round-trip test covers this).
 
 ### 2.6  Dispersal tunables (P3f.1)
 
-New constants in `data/tables/tuning.zon` and corresponding fields in
+Delivered constants in `data/tables/tuning.zon` and corresponding fields in
 `src/domain/tuning.zig`, all labelled `// TUNE`:
 
 ```
-black_market.dispersal_delay_days_min    // TUNE: minimum days before a dispersed listing surfaces
-black_market.dispersal_delay_days_max    // TUNE: maximum days before a dispersed listing surfaces
-black_market.enemy_recovery_hulls_max    // TUNE: max hulls enemy recovers on a lost field (P3f.2)
-black_market.npc_buy_chance_pct          // TUNE: monthly probability any given NPC buys an eligible listing (P3f.3)
-black_market.pirate_replenishment_hulls_per_year  // TUNE: base trickle hulls per year for PER (P3f.3)
+market.black_market_delay_days_min       // TUNE: minimum days before a dispersed listing surfaces
+market.black_market_delay_days_max       // TUNE: maximum days before a dispersed listing surfaces
+market.enemy_recovery_capacity           // TUNE: dispersed listings the enemy may recover on a lost field
+market.npc_black_market_draws_per_month  // TUNE: monthly draws per eligible NPC buyer
+generation.pirate_replenishment_hulls_per_year // TUNE: base PER hull trickle per year
+generation.merc_replacement_cbill_floor  // TUNE: merc-company replacement capital floor
 ```
 
 ---
@@ -600,7 +601,7 @@ the current `build.zig.zon` paths at P3f.5.
 Each row asserts the increment is independently correct and green on the
 rule-72 gate before the next increment is dispatched.
 
-### P3f.1 — Data Foundation
+### P3f.1 — Data Foundation ✅
 
 | Area        | Deliverable                                                                                      |
 |-------------|--------------------------------------------------------------------------------------------------|
@@ -608,13 +609,13 @@ rule-72 gate before the next increment is dispatched.
 | Listing     | `market.Listing.planet_key`, `market.Listing.available_after` fields                            |
 | Schema      | v57; two ADD COLUMN migrations; `saveListing`/`loadListing` wiring; `docs/schema.sql` updated   |
 | New module  | `src/sim/black_market.zig`: `BuyerKind`, `buyerEligible`, `makeDispersedListing`                |
-| Tuning      | Five new constants in `tuning.zon` / `tuning.zig` (all `// TUNE`)                               |
+| Tuning      | Six constants in `tuning.zon` / `tuning.zig` (all `// TUNE`)                                    |
 | Tests (r67) | `buyerEligible` table test: buyer kinds × available/unavailable × planet reachable/unreachable  |
 | Tests (r68) | Save/load round-trip: `planet_key`/`available_after` survive; digest equality before/after load  |
 | Tests (r68) | Pre-v57 migration fixture: absent columns backfill to `""`/`0` without error                    |
 | Gate        | `zig fmt`, `zig build test`, `verify-contract.sh`; NO smoke (no tui/cli/queries/main.zig change)|
 
-### P3f.2 — Lost-Field Wreck Dispersal
+### P3f.2 — Lost-Field Wreck Dispersal ✅
 
 | Area        | Deliverable                                                                                      |
 |-------------|--------------------------------------------------------------------------------------------------|
@@ -626,7 +627,7 @@ rule-72 gate before the next increment is dispatched.
 | Tests (r69) | Injected-failure atomicity: failing allocator leaves `stateHash` unchanged                      |
 | Gate        | `zig fmt`, `zig build test`, `verify-contract.sh`; NO smoke (no tui/cli/queries/main change)    |
 
-### P3f.3 — NPC Competition + Pirate Replenishment
+### P3f.3 — NPC Competition + Pirate Replenishment ✅
 
 | Area        | Deliverable                                                                                      |
 |-------------|--------------------------------------------------------------------------------------------------|
@@ -642,9 +643,9 @@ rule-72 gate before the next increment is dispatched.
 | Area        | Deliverable                                                                                      |
 |-------------|--------------------------------------------------------------------------------------------------|
 | Domain      | `MercCompany.logo_key: []const u8 = ""`                                                          |
-| Schema      | Next free version; ADD COLUMN `merc_company.logo_key`; `saveMercCompany`/`loadMercCompany`       |
+| Schema      | v58; ADD COLUMN `merc_company.logo_key`; `saveMercCompany`/`loadMercCompany`                    |
 | Tick hook   | `runMercLifecycle` in `tick.zig` or new `merc_lifecycle.zig`                                     |
-| New fns     | `liquidateCompany`, `spawnReplacementCompany`                                                    |
+| New fns     | `liquidateMercCompany`, `spawnReplacementCompany`                                                |
 | Tests (r67) | Insolvency → liquidation → replacement: count held at 12; C-bill injection floor exercised       |
 | Tests (r67) | Determinism: same seed produces same company sequence                                            |
 | Tests (r68) | Save/load of `MercCompany.logo_key`; round-trip digest equality                                  |
@@ -743,12 +744,12 @@ verified at plan time.  They land in `data/tables/tuning.zon` and
 `src/domain/tuning.zig`:
 
 ```
-black_market.dispersal_delay_days_min     // TUNE
-black_market.dispersal_delay_days_max     // TUNE
-black_market.enemy_recovery_hulls_max     // TUNE
-black_market.npc_buy_chance_pct           // TUNE
-black_market.pirate_replenishment_hulls_per_year  // TUNE
-generation.merc_company_spawn_cbills      // TUNE (C-bill injection floor for P3f.4)
+market.black_market_delay_days_min         // TUNE
+market.black_market_delay_days_max         // TUNE
+market.enemy_recovery_capacity             // TUNE
+market.npc_black_market_draws_per_month    // TUNE
+generation.pirate_replenishment_hulls_per_year // TUNE
+generation.merc_replacement_cbill_floor    // TUNE (C-bill injection floor for P3f.4)
 ```
 
 No chassis name, RAT composition, or C-bill value is stated in this doc.  The
