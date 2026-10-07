@@ -778,6 +778,7 @@ CREATE TABLE battle_report (
     operation_tempo TEXT    NOT NULL DEFAULT '',     -- P4f: TempoPosture tag name of the committed operation; empty = no tempo
     operation_interventions TEXT NOT NULL DEFAULT '', -- P4g: comma-separated intervention labels applied; empty = none
     UNIQUE (cid, ord),
+    UNIQUE (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
@@ -1063,14 +1064,14 @@ CREATE INDEX IF NOT EXISTS ix_hull_loadout_cid ON hull_loadout(cid);
 
 -- P3c.2: per-engagement combat record for a physical hull.
 -- hull_combat_record -> hull_instance (containment FK).
--- battle_id and contract_id are historical backlinks only; NOT reference-validated
--- because their target records may be unavailable on load.
--- Only hull_instance_id is a validated FK (schema + loader orphan check).
+-- battle_id is a validated backlink to the permanent battle-report history;
+-- contract_id remains historical and may be unavailable on load.
+-- hull_instance_id is the containment FK.
 CREATE TABLE hull_combat_record (
     cid             INTEGER NOT NULL,
     hull_instance_id INTEGER NOT NULL,                  -- -> hull_instance.id (validated)
     ord             INTEGER NOT NULL,                   -- stable insertion order
-    battle_id       INTEGER NOT NULL DEFAULT 0,         -- BattleId backlink; not validated
+    battle_id       INTEGER NOT NULL DEFAULT 0,         -- BattleId backlink; validated when nonzero
     contract_id     INTEGER NOT NULL DEFAULT 0,         -- ContractId backlink; not validated
     kills           INTEGER NOT NULL DEFAULT 0,         -- kills credited this engagement
     hits_taken      INTEGER NOT NULL DEFAULT 0,         -- count of HullHit rows for this unit
@@ -1086,9 +1087,9 @@ CREATE INDEX IF NOT EXISTS ix_hull_combat_record_cid ON hull_combat_record(cid);
 
 -- P3c.3: maintenance log entry for a physical hull (depot repair or loadout refit).
 -- maintenance_entry -> hull_instance (containment FK).
--- tech and battle_id are historical backlinks; NOT reference-validated because their
--- target records may be unavailable on load.
--- Only hull_instance_id is a validated FK (schema + loader orphan check).
+-- battle_id is a validated backlink to the permanent battle-report history;
+-- tech remains historical and may be unavailable on load.
+-- hull_instance_id is the containment FK.
 -- Column order matches runtime (saveMaintenanceEntries/loadMaintenanceEntries).
 CREATE TABLE maintenance_entry (
     cid              INTEGER NOT NULL,
@@ -1098,7 +1099,7 @@ CREATE TABLE maintenance_entry (
     tech             INTEGER NOT NULL DEFAULT 0,    -- PersonId of assigned tech; 0 = none
     action           TEXT    NOT NULL DEFAULT 'repair', -- MaintenanceAction tag
     description      TEXT    NOT NULL DEFAULT '',   -- short phrase from action.describe()
-    battle_id        INTEGER NOT NULL DEFAULT 0,    -- BattleId backlink; not validated
+    battle_id        INTEGER NOT NULL DEFAULT 0,    -- BattleId backlink; validated when nonzero
     cost             INTEGER NOT NULL DEFAULT 0,    -- labor cost in C-bills (copied from job)
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
     FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
