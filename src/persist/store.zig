@@ -88,7 +88,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, battle INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS refit_plan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, committed INTEGER CHECK (committed IN (0,1)), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS refit_op (cid INTEGER NOT NULL, plan_ord INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, slot_key TEXT, location TEXT, part_key TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, plan_ord) REFERENCES refit_plan(cid, ord) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)), salvage_unclaimed INTEGER NOT NULL DEFAULT 0, operation TEXT NOT NULL DEFAULT '', operation_intent TEXT NOT NULL DEFAULT '', operation_tempo TEXT NOT NULL DEFAULT '', operation_interventions TEXT NOT NULL DEFAULT '', UNIQUE (cid, ord), UNIQUE (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL CHECK (id > 0), day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)), salvage_unclaimed INTEGER NOT NULL DEFAULT 0, operation TEXT NOT NULL DEFAULT '', operation_intent TEXT NOT NULL DEFAULT '', operation_tempo TEXT NOT NULL DEFAULT '', operation_interventions TEXT NOT NULL DEFAULT '', UNIQUE (cid, ord), UNIQUE (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_hit (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, chassis_key TEXT, chassis_name TEXT, armor_before INTEGER, armor_after INTEGER, slot TEXT, slot_part TEXT, slot_result TEXT, destroyed INTEGER, cause TEXT, pilot INTEGER, crew_name TEXT, wound_severity INTEGER, wound_location TEXT, wound_permanent INTEGER, fate TEXT, recovery_roll INTEGER, recovery_target INTEGER, lost INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_ammo (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, family TEXT, burned INTEGER, reserve INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_salvage (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, key TEXT, name TEXT, bv INTEGER, armor_pct INTEGER, quality TEXT, damaged INTEGER, destroyed INTEGER, missing INTEGER, hull_instance_id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
@@ -526,10 +526,11 @@ pub const Store = struct {
             cols_len += name.len;
         }
         var insert_buf: [4096:0]u8 = undefined;
-        _ = std.fmt.bufPrintZ(&insert_buf, "INSERT INTO battle_report__new SELECT {s} FROM battle_report", .{cols_buf[0..cols_len]}) catch return error.SqliteError;
+        _ = std.fmt.bufPrintZ(&insert_buf, "INSERT INTO battle_report__new ({s}) SELECT {s} FROM battle_report", .{ cols_buf[0..cols_len], cols_buf[0..cols_len] }) catch return error.SqliteError;
         try db.exec(&insert_buf);
         try db.exec("DROP TABLE battle_report");
         try db.exec("ALTER TABLE battle_report__new RENAME TO battle_report");
+        try db.exec(index_ddl);
     }
 
     fn hasColumnRt(db: sqlite.Db, table: []const u8, column: []const u8) !bool {
@@ -4879,6 +4880,20 @@ test "the migrations array is strictly ascending by to and each from < to" {
         try std.testing.expect(m.to >= prev_to);
         prev_to = m.to;
     }
+}
+
+test "a v58 report with a nullable ID rejects the v59 migration" {
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    try raw.exec(
+        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
+        \\CREATE TABLE battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, UNIQUE (cid, ord));
+        \\INSERT INTO setting VALUES ('schema_version', 58);
+        \\INSERT INTO campaign VALUES (1, 'Fixture', NULL, 0, '3025-01-01', 58, 1, 0);
+        \\INSERT INTO battle_report VALUES (1, 0, NULL);
+    );
+    try std.testing.expectError(error.ConstraintViolation, Store.fromDb(raw));
 }
 
 test "foreign keys are enforced on every connection" {

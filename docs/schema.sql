@@ -721,7 +721,7 @@ CREATE TABLE event_memory (
 CREATE TABLE battle_report (
     cid             INTEGER NOT NULL,
     ord             INTEGER NOT NULL,
-    id              INTEGER,                         -- BattleId, campaign-unique (meta next_battle_id)
+    id              INTEGER NOT NULL CHECK (id > 0), -- BattleId, campaign-unique (meta next_battle_id)
     day             INTEGER,
     contract        INTEGER,                         -- -> contract.id
     company         INTEGER,                         -- -> force.id
