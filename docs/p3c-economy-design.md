@@ -217,9 +217,10 @@ prerequisite for all of it.
 - **P3e.2 — HullInstance current-owner fields.** `HullInstance` gains `owner_type` and
   `owner_id`; schema change and migration numbered forward from the version on local
   `main` at branch start; kept consistent with the P3c.4 provenance chain.
-- **P3e.3 — FactionRoster + RivalRoster persistence.** The two roster collections,
+- **P3e.3 — Faction and merc-company roster persistence.** The roster collections,
   `field_persistence` entries, digest coverage, and golden round-trip proof; schema
-  change.
+  change. The world-actor entity split renamed the planned rival roster to
+  `merc_company_rosters` before delivery.
 - **P3e.4 — Campaign-start roster seeding.** Deterministic `src/gen/` seeding from the
   campaign seed, the RAT (`rat.zon`) and the faction manufacturing data; named RNG
   stream; pure core.
@@ -229,9 +230,9 @@ prerequisite for all of it.
   to `.merc_company` (schema migration). P3e.5 then seeds merc companies at campaign
   start and draws OpFor from faction, merc-company, and pirate (PER) pools. Exact
   increment numbering is fixed when the owner dispatches it.
-- **P3e.5 — Battle aftermath integration.** OpFor force drawn from the faction/rival
-  roster; post-battle destroyed/salvaged/surviving ownership and status updates in the
-  existing failure-atomic aftermath path.
+- **P3e.5 — Battle aftermath integration.** **Delivered:** OpFor force drawn from
+  faction, world-merc-company, or PER pools; post-battle destroyed/salvaged/surviving
+  ownership and status updates run in the existing failure-atomic aftermath path.
 - **P3e.6 — Market surplus throughput.** Monthly surplus calculation flowing faction
   surplus to market listings, throttled by `world_state` conflict intensity.
   **Delivered** (schema v56; `src/sim/faction_surplus.zig`; `TODO.md` line 80 checked off).
@@ -269,12 +270,13 @@ current-owner fields build on P3c.4's provenance chain and keep the two consiste
 This design-approval increment is approved when the owner confirms:
 
 - [ ] Scope and owner decisions (§1): five decisions recorded, no value invented.
-- [ ] Entity model (§2): FactionRoster, RivalRoster, the HullInstance current-owner
-      extension (distinct from P3c.4 provenance), and market-source integration.
+- [x] Entity model (§2): Faction and merc-company rosters, the HullInstance
+      current-owner extension (distinct from P3c.4 provenance), and market-source integration.
 - [ ] Faction data (§3): manufacturing data extends `factions.zon`; the RAT is the
       existing `rat.zon`; all specific values TBD pending source verification.
-- [x] Lifecycle triggers (§4): campaign-start seeding (P3e.4 ✓), battle draw/attrition/salvage
-      (P3e.5 ✓), monthly conflict-throttled market surplus (P3e.6 ✓), rival insolvency (P3e.7 ✓).
+- [x] Lifecycle triggers (§4): campaign-start seeding (P3e.4/P3e.5 ✓), battle
+      draw/attrition/salvage (P3e.5 ✓), monthly conflict-throttled market surplus
+      (P3e.6 ✓), merc-company insolvency (P3e.7 ✓).
 - [ ] Delivery order (§5): P3e.0 design approval first, then P3e.1–P3e.7, each
       independently correct, prerequisite P3c.
 - [ ] Hull-lifecycle increments (§6): P3c.3/P3c.5/P3c.6 unblocked; P3c.4 re-scoped to the

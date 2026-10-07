@@ -919,7 +919,8 @@ instances drawn deterministically from the RAT via `gen/roster_gen.zig` on
 the dedicated `.rosters` RNG stream. Each hull is a `HullInstance` with
 `owner = .{ .faction = key }` and one open `.initial` provenance interval;
 membership is written to `faction_rosters` in the same atomic commit as the
-hull record. Rival roster seeding is deferred to P3e.5.
+hull record. P3e.5 subsequently seeds the PER pool and world merc companies at
+campaign creation.
 
 ## 12. Persistence
 

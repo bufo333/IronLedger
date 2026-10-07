@@ -1464,8 +1464,8 @@ P3e.4 delivered: at `create_commander`, every manufacturing faction (nonzero
 `replenishment_hulls_per_year`) is deterministically seeded a hull pool of
 `replenishment_hulls_per_year × faction_roster_seed_years` hulls drawn from the
 RAT via `gen/roster_gen.zig`; orchestrated by `sim/roster_seed.zig` on the
-dedicated `.rosters` RNG stream. Merc-company roster seeding deferred to P3e.5
-(no world merc companies exist at campaign creation).
+dedicated `.rosters` RNG stream. P3e.5 subsequently seeds the PER pool and
+world merc companies at campaign creation.
 
 ### P3f — Faction economic loop (wrecks, black market, merc & pirate lifecycle)
 
@@ -1492,13 +1492,13 @@ owns the design-approval entry and delivery order.
 - **Merc-company death and replacement.** When a world merc company goes
   insolvent (the P3e.7 rival-insolvency hook), its remaining hulls liquidate
   onto the market; a replacement company spawns with a generated identity and
-  an unused logo from the remaining `data/logos/` pool, buying from the market
-  and black market
+  a logo not held by an active company, buying from the market and black market
   to field its configured roster. The delivered P3f.4 target is eight hulls
   with a 5M C-bill floor. Owner-approved follow-up work changes new campaigns
   to four active mek lances (16 meks), a 50M formation floor, shared-market
   replacement, player-equivalent operating costs, and active-contract
-  protection; the active world merc-company count holds at 12.
+  protection; the active world merc-company count holds at 12. The scheduled
+  identity work makes names and logo assignment campaign-wide unique.
 - **Pirate replenishment.** Pirates gain a small base
   `replenishment_hulls_per_year` constant (2-3, tunable) for opportunistic
   acquisition and also compete for black-market listings. The delivered model

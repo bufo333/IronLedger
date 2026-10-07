@@ -757,8 +757,9 @@ P3f black-market, NPC-competition, and merc-company lifecycle mappings.
 The merc-company death-and-replacement cycle maps to AtB's retirement/creation
 flow (`PersonnelMarket`, `UnitMarket`). The replacement company draws its
 identity from the person-name and rival-archetype generators, then separately
-selects an unused logo. The campaign-wizard alone derives the player's outfit
-name from a chosen logo key (§6.2).
+selects a logo not held by an active company. The scheduled NPC identity work
+makes name and logo assignment campaign-wide unique. The campaign-wizard alone
+derives the player's outfit name from a chosen logo key (§6.2).
 
 ### Risk register
 
