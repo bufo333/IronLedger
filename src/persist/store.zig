@@ -360,9 +360,6 @@ pub const Store = struct {
         .{ .from = 57, .to = 58, .table = "merc_company", .column = "founded_day", .sql = "ALTER TABLE merc_company ADD COLUMN founded_day INTEGER NOT NULL DEFAULT 0" },
         .{ .from = 57, .to = 58, .table = "merc_company", .column = "dissolved_day", .sql = "ALTER TABLE merc_company ADD COLUMN dissolved_day INTEGER NOT NULL DEFAULT 0" },
         .{ .from = 57, .to = 58, .table = "merc_company", .column = "logo_key", .sql = "ALTER TABLE merc_company ADD COLUMN logo_key TEXT NOT NULL DEFAULT ''" },
-        // v59: permanent battle report IDs are unique within a campaign. Existing
-        // stores gain the matching unique index; duplicate testing saves refuse upgrade.
-        .{ .from = 58, .to = 59, .table = "battle_report", .column = "", .sql = "CREATE UNIQUE INDEX ux_battle_report_cid_id ON battle_report(cid, id)" },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -420,6 +417,10 @@ pub const Store = struct {
         // Rebuild per-cid tables with the declared constraint set (rules 50, 51).
         // Skipped for brand-new stores (stored == 0): ddl already creates constrained tables.
         if (stored >= 1 and stored < 37) try rebuildToV37(db);
+        // v59: rebuild battle_report so existing stores acquire the declared
+        // UNIQUE (cid, id) constraint. A duplicate historical ID rejects the
+        // transaction rather than leaving an ambiguous permanent report.
+        if (stored >= 1 and stored < 59) try rebuildBattleReportToV59(db);
         try store.setSetting("schema_version", schema_version);
         try db.exec("COMMIT");
         // Re-enable FK enforcement for all subsequent operations (rule 50).
@@ -496,6 +497,39 @@ pub const Store = struct {
         }
         // Recreate all per-cid indexes after the rebuild (idempotent).
         try db.exec(index_ddl);
+    }
+
+    fn rebuildBattleReportToV59(db: sqlite.Db) !void {
+        const marker = "CREATE TABLE IF NOT EXISTS battle_report (";
+        const ddl_pos = std.mem.indexOf(u8, ddl, marker) orelse return error.SqliteError;
+        const ddl_end = std.mem.indexOfScalarPos(u8, ddl, ddl_pos, '\n') orelse return error.SqliteError;
+        const table_ddl = ddl[ddl_pos..ddl_end];
+        const suffix = table_ddl["CREATE TABLE IF NOT EXISTS battle_report".len..];
+        var create_buf: [2048:0]u8 = undefined;
+        _ = std.fmt.bufPrintZ(&create_buf, "CREATE TABLE battle_report__new{s}", .{suffix}) catch return error.SqliteError;
+        try db.exec(&create_buf);
+
+        var cols_buf: [2048]u8 = undefined;
+        var cols_len: usize = 0;
+        const info = try db.prepare("PRAGMA table_info(battle_report)");
+        defer info.finalize();
+        var name_buf: [64]u8 = undefined;
+        while (try info.next()) {
+            var fba = std.heap.FixedBufferAllocator.init(&name_buf);
+            const name = info.text(1, fba.allocator()) catch return error.SqliteError;
+            if (cols_len > 0) {
+                cols_buf[cols_len] = ',';
+                cols_len += 1;
+            }
+            if (cols_len + name.len > cols_buf.len) return error.SqliteError;
+            @memcpy(cols_buf[cols_len..][0..name.len], name);
+            cols_len += name.len;
+        }
+        var insert_buf: [4096:0]u8 = undefined;
+        _ = std.fmt.bufPrintZ(&insert_buf, "INSERT INTO battle_report__new SELECT {s} FROM battle_report", .{cols_buf[0..cols_len]}) catch return error.SqliteError;
+        try db.exec(&insert_buf);
+        try db.exec("DROP TABLE battle_report");
+        try db.exec("ALTER TABLE battle_report__new RENAME TO battle_report");
     }
 
     fn hasColumnRt(db: sqlite.Db, table: []const u8, column: []const u8) !bool {

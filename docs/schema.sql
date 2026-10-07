@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 55. The executable DDL and its column migrations
+-- Matches schema_version 59. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -37,7 +37,7 @@
 --     Soft and polymorphic references that use NULL or 0-as-none (e.g.
 --     stock.owner_id, unit.force, contract.offer_hq) are the loader's
 --     responsibility; the loader rejects a save whose rows do not resolve.
---   * UNIQUE keys: battle_report(cid, ord), refit_plan(cid, ord) (targets for
+--   * UNIQUE keys: battle_report(cid, ord) and battle_report(cid, id), refit_plan(cid, ord) (targets for
 --     the FK chains above); stock(cid, owner_kind, owner_id, key).
 --   * CHECK constraints: schema_version > 0; boolean NOT NULL columns in
 --     person (admitted, rank_pinned, edge_spent), contract (is_offer,
