@@ -92,7 +92,10 @@ jobs:
           Expand-Archive -LiteralPath $archive -DestinationPath $destination
           $zigDirectory = Get-ChildItem -LiteralPath $destination -Directory | Select-Object -First 1
           if ($null -eq $zigDirectory) { throw 'Zig archive has no root directory' }
+          $zigExecutable = Join-Path $zigDirectory.FullName 'zig.exe'
+          if (-not (Test-Path -LiteralPath $zigExecutable -PathType Leaf)) { throw 'Zig archive has no executable' }
           $zigDirectory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "ZIG_EXE=$zigExecutable" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Install Linux SQLite headers
         if: runner.os == 'Linux'
         shell: bash
@@ -133,9 +136,17 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $sqlite = Join-Path $env:RUNNER_TEMP 'sqlite'
-          zig fmt --check build.zig src
-          $env:PATH = "$sqlite;$env:PATH"
-          zig build test --summary all "-Dwindows-sqlite-lib-dir=$sqlite" "-Dwindows-sqlite-dll=$(Join-Path $sqlite 'sqlite3.dll')"
+          $zig = $env:ZIG_EXE
+          if (-not (Test-Path -LiteralPath $zig -PathType Leaf)) { throw 'verified Zig executable is unavailable' }
+          & $zig fmt --check build.zig src
+          $originalPath = $env:PATH
+          try {
+            $env:PATH = $sqlite
+            & $zig build test --summary all "-Dwindows-sqlite-lib-dir=$sqlite" "-Dwindows-sqlite-dll=$(Join-Path $sqlite 'sqlite3.dll')"
+            if ($LASTEXITCODE -ne 0) { throw "zig build test failed with status $LASTEXITCODE" }
+          } finally {
+            $env:PATH = $originalPath
+          }
           ./docs/verify-contract.sh
           bash docs/clean-package.sh ReleaseFast "-Dwindows-sqlite-lib-dir=$sqlite" "-Dwindows-sqlite-dll=$(Join-Path $sqlite 'sqlite3.dll')"
           python docs/data-fixtures.py
