@@ -61,7 +61,7 @@ contract, and `available_after=0` means "already available" on migrated rows.
 **D3 — Buyer-eligibility single owner (P3f.1)**
 Recommend: a single function `black_market.buyerEligible(gs, listing, buyer)`
 in new `src/sim/black_market.zig` decides "can buyer X take listing Y", where
-buyer ∈ {player, pirate band, rival merc company}.  The listing carries only
+buyer ∈ {player, pirate, world merc company}. The listing carries only
 `planet_key` and `available_after`; access is derived at query time, not
 stored redundantly (rule 3, rule 20).  Alternative: per-listing access flag;
 rejected because it duplicates the derivation and creates a second truth.
@@ -637,7 +637,7 @@ rule-72 gate before the next increment is dispatched.
 | Schema      | v58; ADD COLUMN `merc_company.logo_key`; `saveMercCompany`/`loadMercCompany`                    |
 | Tick hook   | `runMercLifecycle` in `tick.zig` or new `merc_lifecycle.zig`                                     |
 | New fns     | `liquidateMercCompany`, `spawnReplacementCompany`                                                |
-| Tests (r67) | Insolvency → liquidation → replacement: count held at 12; C-bill injection floor exercised       |
+| Tests (r67) | Insolvency → liquidation → replacement: active count held at 12; C-bill injection floor exercised |
 | Tests (r67) | Determinism: same seed produces same company sequence                                            |
 | Tests (r68) | Save/load of `MercCompany.logo_key`; round-trip digest equality                                  |
 | Gate        | `zig fmt`, `zig build test`, `verify-contract.sh`; NO smoke                                     |

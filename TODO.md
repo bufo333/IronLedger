@@ -33,6 +33,10 @@ reschedule only on explicit dispatch.
 - NPC world-contract design: shared world conflicts and typed opposing forces
   (faction, pirate, or named merc company); player offers, NPC commitments,
   location/transit, pay, readiness, withdrawal, breach, and completion.
+- NPC merc-company identity: unique company names across the campaign; assign
+  each unused logo once before creating any logo-less company, then leave
+  logo_key empty and continue with collision-free generated names. NPC logo
+  display remains deferred.
 - NPC merc-company economy: owner-approved new-campaign target of 12 companies
   with 16 active mechs and 50M C-bills; shared mech-market replacement,
   player-equivalent operating costs, 12-month understrength runway, contract
@@ -41,10 +45,6 @@ reschedule only on explicit dispatch.
 - NPC contract and battle parity: committed companies fight their real roster,
   choose doctrine-based withdrawals, concede or breach when unable to field,
   and never produce zero-vs-zero victories.
-- NPC merc-company identity: unique company names across the campaign; assign
-  each unused logo once before creating any logo-less company, then leave
-  logo_key empty and continue with collision-free generated names. NPC logo
-  display remains deferred.
 - Desk quarterly P&L report: outfit-wide calendar-quarter index and drill-down
   modal using the ledger's authoritative income, expense, and net totals.
 - Per-location armor data accuracy (lower priority, after P3f): pull the 8 front
