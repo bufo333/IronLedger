@@ -485,9 +485,13 @@ Migration v57→v58: four `ALTER TABLE merc_company ADD COLUMN …` rows
 ### 5.5  Determinism
 
 Liquidation is RNG-free. Spawn and buy draw on `.rivals` (identity) and
-`.market` (hull selection) streams; `runMercLifecycle` commits `gs.rng`
-once per company-action (bounded non-atomicity on OOM, matching
-`faction_surplus.runMonthly`). Golden-master tests re-pinned at P3f.4.
+`.market` (hull selection) streams. `runMercLifecycle` stages the complete
+initial-company pass, including its resulting RNG state, in reclaimable scratch
+memory. It reserves every persistent destination and allocates replacement
+names in the campaign arena only after the pass is otherwise prepared; one
+infallible commit applies every action and the staged RNG state. An allocation
+failure therefore leaves the entire pass unchanged. Golden-master tests remain
+pinned to the documented company iteration and draw order.
 
 ---
 

@@ -732,8 +732,8 @@ listing Y" predicate (`buyerEligible`), for lost-field wreck dispersal
 (`runPirateReplenishment`). When the battle field is lost on the pool path,
 `disperseEnemyWrecks` gives every drawn destroyed enemy hull a terminal
 disposition: up to `tuning.market.enemy_recovery_capacity` hulls re-home into
-the enemy faction roster; the remainder transfer to `.market` and surface as
-dispersed black-market listings on black-market worlds other than the battle
+their source faction or merc-company roster; the remainder transfer to `.market`
+and surface as dispersed black-market listings on black-market worlds other than the battle
 world. `buyerEligible` applies per-buyer reach gating: pirate buyers reach
 only PER-faction worlds; merc companies reach only non-PER worlds; the player
 reaches a world where it has an HQ or a company deployed on an active contract.

@@ -1479,7 +1479,8 @@ reserve path. The full design is fixed in a design doc on approval; TODO.md
 owns the design-approval entry and delivery order.
 
 - **Lost-field wreck flow.** Losing the field on a pool-path battle lets the
-  enemy faction recover up to `enemy_recovery_capacity` wrecks; the remaining wrecks become
+  source faction or merc company recover up to `enemy_recovery_capacity` wrecks;
+  the remaining wrecks become
   black-market listings dispersed across black-market worlds (not the origin
   world), each time-delayed by an `available_after: day_index`. The player sees
   them on qualifying worlds, but pirates and world merc companies buy
