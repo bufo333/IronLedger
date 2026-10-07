@@ -88,8 +88,10 @@ pub const Rng = struct {
     }
 };
 
-/// Returns a deterministic seed whose first roll on `stream` is `want`.
-pub fn seedForFirstRoll(stream: Stream, want: u8) u64 {
+/// Returns a deterministic seed whose first roll on `stream` is `want`, or null
+/// when `want` is outside the 2d6 range.
+pub fn seedForFirstRoll(stream: Stream, want: u8) ?u64 {
+    if (want < 2 or want > 12) return null;
     var seed: u64 = 0;
     while (true) : (seed += 1) {
         var rng = Rng.init(seed);
@@ -128,9 +130,11 @@ test "2d6 stays in range" {
 }
 
 test "seedForFirstRoll produces the requested stream roll" {
-    const seed = seedForFirstRoll(.maintenance, 10);
+    const seed = seedForFirstRoll(.maintenance, 10).?;
     var rng = Rng.init(seed);
     try std.testing.expectEqual(@as(u8, 10), rng.roll2d6(.maintenance));
+    try std.testing.expectEqual(@as(?u64, null), seedForFirstRoll(.maintenance, 1));
+    try std.testing.expectEqual(@as(?u64, null), seedForFirstRoll(.maintenance, 13));
 }
 
 test "stream salts are distinct and independent of enum order" {

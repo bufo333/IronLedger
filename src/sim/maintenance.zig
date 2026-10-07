@@ -752,7 +752,8 @@ test "weekly maintenance applies quality drift at configured margins" {
     };
     const target: i32 = tuning.maintenance.target_base + types.Quality.c.maintenanceModifier();
     for (cases) |case| {
-        var gs = GameState.init(std.testing.allocator, .{ .seed = rng_mod.seedForFirstRoll(.maintenance, case.roll) });
+        const seed = rng_mod.seedForFirstRoll(.maintenance, case.roll) orelse unreachable;
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
         defer gs.deinit();
         const uid = try gs.addUnit("SHD-2H");
         const tech = try gs.hirePerson("Margin", "Tech", .tech_mek);
