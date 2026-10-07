@@ -83,5 +83,8 @@
         "data/tables",
         "data/logos",
         "LICENSE",
+        "ASSETS.md",
+        "THIRD-PARTY-NOTICES.md",
+        "scripts/package_release.py",
     },
 }
