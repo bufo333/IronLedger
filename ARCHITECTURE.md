@@ -751,10 +751,12 @@ battle value — the sum of chassis BV across all `.active` hulls in its pool
 — falls below `tuning.generation.merc_company_insolvency_bv` is inactive and
 can no longer be selected as the OpFor for a new arc contract. The predicate
 is derived, not persisted (no schema change); it is re-evaluated on each read
-and is terminal in practice because merc-company pools only shrink (no
-manufacturing or salvage-in for merc companies). A company without a roster
-entry is not an economy participant and is treated as solvent. The two single
-rule owners are `mercCompanyFieldableBv` and `mercCompanyInsolvent` in
+and prevents selection for a new arc contract. It is not permanent: the monthly
+merc lifecycle buys eligible market hulls toward full strength, and its
+black-market draw can add further hulls. A company that remains insolvent
+liquidates and a replacement company forms from the market. A company without a
+roster entry is not an economy participant and is treated as solvent. The two
+single rule owners are `mercCompanyFieldableBv` and `mercCompanyInsolvent` in
 `src/sim/rivals.zig`; the insolvency filter is enforced in `instantiateRivals`
 and surfaced read-only on the Operations rivals block via `RivalRow.insolvent`
 (docs/p3c-economy-design.md §4, §8.G).

@@ -471,10 +471,8 @@ required):
 - **P3e.7 (insolvency)** is **merc-company** insolvency (fieldable BV below threshold →
   the company cannot take contracts), not "rival" insolvency. **Delivered:** derived predicate
   (`mercCompanyInsolvent` in `src/sim/rivals.zig`), threshold constant
-  `tuning.generation.merc_company_insolvency_bv = 2000` (// TUNE), terminal in practice
-  (pools only shrink), no persisted flag, no schema migration; surfaced read-only via
-  `RivalRow.insolvent` on the Operations view.
-- **P3f (new-company formation and insolvency lifecycle)** — out of scope for this design
-  update, but the `MercCompany` entity model supports it naturally: formation adds a company
-  + pool; insolvency removes/retires one. No entity added by P3f that §8 does not already
-  define.
+  `tuning.generation.merc_company_insolvency_bv = 2000` (// TUNE), no persisted flag,
+  no schema migration; surfaced read-only via `RivalRow.insolvent` on the Operations view.
+- **P3f (new-company formation and insolvency lifecycle)** later delivered market purchases
+  toward full strength, liquidation, and replacement over this entity model. No entity added
+  by P3f changes the §8 ownership model.

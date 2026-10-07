@@ -22,14 +22,11 @@ before the next is dispatched.
 | P3f.1     | Data foundation + black-market schema | v57    |
 | P3f.2     | Lost-field wreck dispersal            | —      |
 | P3f.3     | NPC competition + pirate replenishment| —      |
-| P3f.4     | Merc lifecycle (death + replacement)  | next free after v57 |
-| P3f.5     | Campaign-wizard logo picker           | next free (merc_company logo_key, if not landed in P3f.4) |
+| P3f.4     | Merc lifecycle (death + replacement)  | v58                |
+| P3f.5     | Campaign-wizard logo picker           | —                  |
 
-Later increment schema versions are "next free integer" because other branches
-may land between P3f sub-increments.  Each implementer reads the current
-`schema_version` constant before writing the migration and uses `current + 1`.
-P3f.1 is the only increment where the version is fixed (v57) because the base
-at plan approval is v56 (verified: `src/persist/store.zig` line 44).
+P3f.1 shipped schema v57 and P3f.4 shipped schema v58. P3f.2, P3f.3, and
+P3f.5 required no additional schema version.
 
 ### Owner Decisions for Confirmation at Approval
 
@@ -83,7 +80,7 @@ but the enum extension requires new migrations plus new branches in every
 
 **D5 — Enemy-recovery capacity on a lost field (P3f.2)**
 Recommend: on a lost field, the enemy faction recovers up to a tunable capacity
-(`enemy_recovery_hulls_max` // TUNE, in `tuning.zon`) of the drawn destroyed
+(`market.enemy_recovery_capacity` // TUNE, in `tuning.zon`) of the drawn destroyed
 hulls back into `faction_rosters[enemy_key]` via `transferHullOwnership`;
 the remainder disperse to black-market listings.  Capacity is a ceiling on
 hull count, not tonnage, for simplicity in 3025 (BV-weighted variant is a
@@ -310,7 +307,7 @@ chooses the cleaner boundary and documents the choice in the commit message.**
 
 ```zig
 /// Terminal disposition for drawn destroyed enemy hulls on a lost field.
-/// Up to black_market.enemy_recovery_hulls_max hulls are returned to
+/// Up to market.enemy_recovery_capacity hulls are returned to
 /// faction_rosters[enemy_faction_key] (owner transfer to .faction).
 /// The remainder are transferred to .market ownership and listed as
 /// dispersed black-market listings via makeDispersedListing.
@@ -375,7 +372,7 @@ recruitment from untracked periphery raiders.
 
 ```zig
 /// Monthly pirate hull trickle (independent of market listings).
-/// Mints up to tuning.black_market.pirate_replenishment_hulls_per_year/12
+/// Mints up to tuning.generation.pirate_replenishment_hulls_per_year/12
 /// new HullInstances drawn from PER's RAT (reuse faction_surplus draw
 /// pattern on stream .market), adds them to faction_rosters["PER"].
 /// Called from tick.zig runMarkets on gs.clock.date.day == 1, after
@@ -562,8 +559,8 @@ Owner decision: `data/logos/` was brought forward from P3f.5 to P3f.4 so the
 build-time scan produces a reproducible catalog on every machine (tracked PNGs
 are identical everywhere). The 35 PNGs are committed in this branch.
 
-The campaign-wizard logo picker (using `titleCaseLogoKey` to auto-fill the
-outfit name) and the `data/logos` runtime serving/install remain P3f.5.
+P3f.5 delivered the campaign-wizard logo picker, which uses
+`titleCaseLogoKey` to auto-fill the outfit name, and the runtime logo install.
 
 The 35 files committed (sorted, from `git ls-files data/logos/`):
 
@@ -588,11 +585,9 @@ vipers_due.png                 voidbreakers_mercenaries.png
 windsong_company.png
 ```
 
-**`build.zig.zon` and packaging:** if the logos must ship with the binary
-(ReleaseFast build, `-Dbundle-music` analogue), the implementer adds the
-`data/logos/` path to the packaging paths at P3f.5 time, following the pattern
-in `src/tui/paths.zig`.  This decision is deferred to the implementer who reads
-the current `build.zig.zon` paths at P3f.5.
+**`build.zig.zon` and packaging:** `data/logos/` is in the package paths, and
+`build.zig` installs its PNGs to `share/iron-ledger/logos` in every release
+tree. `src/tui/paths.zig` locates that runtime directory.
 
 ---
 
@@ -683,12 +678,12 @@ goes through the existing `commands.zig` → `contract_market.buyFromListing`
 boundary, unchanged by P3f.  NPC "buys" inside `runNpcBlackMarketDraw` are
 simulation-internal state mutations (not player commands); they use the same
 ownership-transfer functions as the command path and are failure-atomic.
-`disperseEnemyWrecks` and `liquidateCompany` are failure-atomic (prepare/commit
+`disperseEnemyWrecks` and `liquidateMercCompany` are failure-atomic (prepare/commit
 pattern).
 
 **Rule 20/3 (one owner, one result):** `black_market.buyerEligible` is the
 single owner of the "can X buy Y" decision.  `makeDispersedListing` is the
-single owner of dispersed listing generation.  `liquidateCompany` is the single
+single owner of dispersed listing generation.  `liquidateMercCompany` is the single
 owner of hull liquidation.  `spawnReplacementCompany` is the single owner of
 replacement formation.  No caller re-implements any of these.
 
@@ -698,7 +693,7 @@ references use `types.ListingId`.  No ID is cast, inferred, or constructed
 outside its mint point.
 
 **Rule 56 (integer C-bills, basis points):** The C-bill injection floor
-(`tuning.generation.merc_company_spawn_cbills`) is an integer C-bill value.
+(`tuning.generation.merc_replacement_cbill_floor`) is an integer C-bill value.
 All pricing calculations use the existing `types.CBills` + `types.Bp` pattern.
 
 **Rule 6/57 (named RNG streams, pinned salts, documented draw order):** All
@@ -765,9 +760,10 @@ rows; the P3f implementer adds the rows for hull black-market, NPC competition,
 and company retirement/replacement.
 
 The merc-company death-and-replacement cycle maps to AtB's retirement/creation
-flow (`PersonnelMarket`, `UnitMarket`).  The replacement company draws from
-the logo pool rather than using AtB's random-name generation; name derivation
-from the logo key (§6.2) is the game's canon approach.
+flow (`PersonnelMarket`, `UnitMarket`). The replacement company draws its
+identity from the person-name and rival-archetype generators, then separately
+selects an unused logo. The campaign-wizard alone derives the player's outfit
+name from a chosen logo key (§6.2).
 
 ### Risk register
 
@@ -775,27 +771,21 @@ from the logo key (§6.2) is the game's canon approach.
 |-------------------------------------|---------------------------------------------------------------------|
 | D4 rejected (new OwnerType wanted)  | §2.3 describes the fallback; implementer adds enum value + migrations |
 | D7 rejected (auto-fill w_company)   | One-line change in app.zig; no architectural rework needed           |
-| Schema-version drift                | P3f.1 is fixed at v57; later increments use "next free integer"     |
+| Schema-version drift                | P3f.1 shipped v57 and P3f.4 shipped v58                              |
 | `available_after=0` semantics       | Explicit in §2.2: zero means "already available" (fail-closed)      |
 | Determinism from new RNG draws      | Draw ORDER documented in §4.3; digest/golden tests catch reordering  |
 | Asset fan-out (hulls + C-bills)     | Existing command boundary for player buys; NPC paths use same transfer functions + asset-safety tests |
-| Scope creep into P4 narrative       | §10 Non-goals explicitly excludes P4 integration                    |
+| Scope creep into P4 narrative       | §10 Delivered Scope Limits excludes P4 integration                  |
 
 ---
 
-## §10  Non-Goals
+## §10  Delivered Scope Limits
 
-- Any P3f.1–P3f.5 source or data implementation in this branch (design doc only;
-  dispatched separately against this approved doc, one branch each).
-- Conventional vehicles, battle armor, artillery, or any non-mech hull in the
-  economy (mechs only, per P3e).
+- P3f delivers the documented mech-only economy. The planned P2 vehicle and
+  aerospace foundation owns conventional combat hulls; it is not retrofitted
+  into this delivered design.
 - A new pirate faction key (pirates are the existing `PER` faction, verified
   present in `data/tables/factions.zon`).
 - A parallel market, command, event, battle, or report path (all extensions
   go through existing owners).
-- Editing ROADMAP.md, TODO.md, governance, gate, CI, agent configuration, or
-  the contract/exception ledger in this branch.
-- Re-filing TODO's `P3f-design` into P3f.1–P3f.5 implementation items (owner
-  action after approval).
 - P4 narrative integration, world-state progression, or faction political events.
-- Remote operations (the user owns all pushes, merges, and PRs).

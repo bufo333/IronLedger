@@ -1490,8 +1490,9 @@ owns the design-approval entry and delivery order.
   companies buy.
 - **Merc-company death and replacement.** When a rival merc company goes
   insolvent (the P3e.7 rival-insolvency hook), its remaining hulls liquidate
-  onto the market; a replacement company spawns, drawing a name and logo from
-  the remaining `data/logos/` pool and buying from the market and black market
+  onto the market; a replacement company spawns with a generated identity and
+  an unused logo from the remaining `data/logos/` pool, buying from the market
+  and black market
   to field its configured roster. The delivered P3f.4 target is eight hulls
   with a 5M C-bill floor. Owner-approved follow-up work changes new campaigns
   to four active mek lances (16 meks), a 50M formation floor, shared-market
@@ -1505,8 +1506,8 @@ owns the design-approval entry and delivery order.
 - **Logo picker (campaign wizard).** The campaign wizard gains a logo picker
   showing every logo in `data/logos/`; selecting one auto-fills the company name
   (title-case from the filename), complementing the existing emblem import
-  (12.7/12.14). The 12 seeded rival merc companies draw names and logos from the
-  pool at campaign start, excluding the player's pick.
+  (12.7/12.14). The 12 seeded rival merc companies draw generated identities
+  and logos at campaign start, excluding the player's pick from the logo pool.
 
 Every constant, faction composition and chassis value is sourced at
 implementation, never invented; new tunables land in `data/tables/tuning.zon`.
