@@ -346,8 +346,8 @@
         .injury_days_serious = 14,
         .injury_days_crippling = 22,
         .consumables_divisor = 2_500,
-        .quality_drop_margin = 3, // TUNE: play-feedback balance
-        .quality_rise_margin = 5, // TUNE: play-feedback balance
+        .quality_drop_margin = 3, // TUNE
+        .quality_rise_margin = 5, // TUNE
         .quality_sale_bp_per_step = 500,
         .hours_quality_bp = .{ .a = 15_000, .b = 12_500, .c = 10_000, .d = 10_000, .e = 9_000, .f = 8_000 },
         .hours_exotic_bp = 12_500,

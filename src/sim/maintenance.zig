@@ -21,6 +21,7 @@ const GameState = @import("state.zig").GameState;
 const founding = @import("founding.zig");
 const posture = @import("posture.zig");
 const readiness_m = @import("readiness.zig");
+const rng_mod = @import("rng.zig");
 
 /// Hours a field repair costs the hull's tech (tuning.maintenance).
 const hours_damaged_slot = tuning.maintenance.hours_damaged_slot;
@@ -93,8 +94,8 @@ fn activeTech(gs: *GameState, u: *const unit_mod.Unit) ?*person_mod.Person {
 
 pub const QualityDrift = enum { drop, hold, rise };
 
-/// Classifies a maintenance result against its target using the play-feedback
-/// quality margins in `data/tables/tuning.zon`.
+/// Classifies a maintenance result against its target using the quality margins
+/// in `data/tables/tuning.zon`.
 pub fn qualityDrift(total: i32, target: i32) QualityDrift {
     if (total <= target - tuning.maintenance.quality_drop_margin) return .drop;
     if (total >= target + tuning.maintenance.quality_rise_margin) return .rise;
@@ -741,12 +742,35 @@ test "no tech, no maintenance: an unassigned hull rots; an assigned one holds" {
     try std.testing.expect(gs2.ledger.balance() < 0); // consumables were paid for
 }
 
-test "quality drift uses the configured margins at their boundaries" {
-    const target: i32 = 7;
-    try std.testing.expectEqual(QualityDrift.drop, qualityDrift(target - 3, target));
-    try std.testing.expectEqual(QualityDrift.hold, qualityDrift(target - 2, target));
-    try std.testing.expectEqual(QualityDrift.hold, qualityDrift(target + 4, target));
-    try std.testing.expectEqual(QualityDrift.rise, qualityDrift(target + 5, target));
+fn seedForMaintenanceRoll(want: u8) u64 {
+    var seed: u64 = 0;
+    while (true) : (seed += 1) {
+        var rng = rng_mod.Rng.init(seed);
+        if (rng.roll2d6(.maintenance) == want) return seed;
+    }
+}
+
+test "weekly maintenance applies quality drift at configured margins" {
+    const Case = struct { roll: u8, drift: QualityDrift, quality: types.Quality };
+    const cases = [_]Case{
+        .{ .roll = 2, .drift = .drop, .quality = .b },
+        .{ .roll = 3, .drift = .hold, .quality = .c },
+        .{ .roll = 9, .drift = .hold, .quality = .c },
+        .{ .roll = 10, .drift = .rise, .quality = .d },
+    };
+    const target: i32 = tuning.maintenance.target_base + types.Quality.c.maintenanceModifier();
+    for (cases) |case| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seedForMaintenanceRoll(case.roll) });
+        defer gs.deinit();
+        const uid = try gs.addUnit("SHD-2H");
+        const tech = try gs.hirePerson("Margin", "Tech", .tech_mek);
+        try gs.person(tech).?.skills.put(gs.allocator(), .tech_mek, 5);
+        try crew.assignSlot(&gs, uid, .tech, tech);
+
+        try std.testing.expectEqual(case.drift, qualityDrift(@as(i32, case.roll), target));
+        try runWeeklyMaintenance(&gs);
+        try std.testing.expectEqual(case.quality, gs.unit(uid).?.quality);
+    }
 }
 
 test "a worn or exotic hull wants more hours; a sharper tech needs fewer" {
