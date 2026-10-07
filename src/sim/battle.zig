@@ -1484,8 +1484,8 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     };
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
     for (try after_action.render(gs.allocator(), &report)) |line| try gs.log(.battle, ctx, "{s}", .{line});
-    // Kept so the screens can show the fight as a picture; the
-    // AAR lines above are the permanent account and are never pruned.
+    // The structured report is the permanent account; the log carries its
+    // rendered campaign narrative.
     try gs.battle_reports.record(gs.allocator(), report);
     // Hulls left on the field pass into enemy hands — off
     // our books once the AAR has named them, but held, not struck off:

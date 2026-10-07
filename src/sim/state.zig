@@ -275,8 +275,7 @@ pub const GameState = struct {
     /// Stamped onto each resolved engagement, so an AAR's lines
     /// can be gathered by battle rather than by reading their prefix.
     next_battle_id: u32 = 1,
-    /// Recent engagements as records; the journal owns its own
-    /// retention, as `event_queue` owns the inbox's.
+    /// Every resolved engagement as a structured campaign record.
     battle_reports: battle_report_mod.Journal = .{},
     /// Hulls the enemy dragged off a field we lost: off the books
     /// but not struck off, so a recovery raid has something to win back.

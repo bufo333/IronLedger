@@ -1,7 +1,7 @@
 //! Battle-report record types (ARCH §7). The after-action record kept as
 //! fields rather than prose, so screens can count and colour without reading
 //! text. `BattleReport` holds everything one engagement produced; `Journal`
-//! holds the last `tuning.battle.reports_kept` fights.
+//! holds the campaign's complete battle history.
 //!
 //! Lifetime rule: everything a report holds must live in the campaign arena,
 //! which outlives every entity in it. Borrowing from a catalogue row or from
@@ -23,7 +23,6 @@ const unit_mod = @import("unit.zig");
 const person_mod = @import("person.zig");
 const force_mod = @import("force.zig");
 const autoresolve = @import("autoresolve.zig");
-const tuning = @import("tuning.zig").t;
 const operation = @import("operation.zig");
 
 /// What a hit did to a mounted part.
@@ -244,24 +243,17 @@ pub const BattleReport = struct {
     }
 };
 
-/// The engagements still on record, oldest first. Owns its own
-/// retention, the way `events.EventQueue` owns the inbox: `GameState`
-/// holds one and nothing else decides how long a report lives.
-///
-/// The permanent account of a battle is its `[AAR]` lines in the campaign
-/// log, which are never pruned. These are what a screen reads to show a
-/// fight as something other than prose, so a few tours' worth is enough.
+/// The campaign's engagements, oldest first. `GameState` holds one complete
+/// structured history; acknowledgement controls turn gating, never retention.
 pub const Journal = struct {
     kept: std.ArrayListUnmanaged(BattleReport) = .empty,
 
-    /// Keep a resolved engagement, dropping the oldest past
-    /// `tuning.battle.reports_kept`. The one place retention is decided.
+    /// Keep a resolved engagement for the campaign lifetime.
     pub fn record(self: *Journal, alloc: std.mem.Allocator, report: BattleReport) !void {
         try self.kept.append(alloc, report);
-        if (self.kept.items.len > tuning.battle.reports_kept) _ = self.kept.orderedRemove(0);
     }
 
-    /// One kept engagement, or null once it has aged out of the window.
+    /// One retained engagement, or null when no report with that ID exists.
     pub fn find(self: *const Journal, id: types.BattleId) ?*const BattleReport {
         for (self.kept.items) |*r| if (r.id == id) return r;
         return null;
@@ -282,8 +274,7 @@ pub const Journal = struct {
         return null;
     }
 
-    /// Mark one read. Returns false when it has aged out of the window,
-    /// so the command can refuse rather than silently do nothing.
+    /// Mark one read. Returns false when no report with that ID exists.
     pub fn markRead(self: *Journal, id: types.BattleId) bool {
         for (self.kept.items) |*r| if (r.id == id) {
             r.acknowledged = true;
@@ -333,16 +324,15 @@ test "armorOnly and hullsLost read the record, not the prose" {
     try std.testing.expectEqual(@as(u32, 0), r.burned("ammo_lrm"));
 }
 
-test "the journal is bounded, and the newest survive" {
+test "the journal retains every recorded engagement" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();
-    const keep = tuning.battle.reports_kept;
+    const reports: u32 = 80;
 
     var journal: Journal = .{};
-    // Record two windows' worth: the list stops growing, the oldest go.
     var i: u32 = 0;
-    while (i < keep * 2) : (i += 1) {
+    while (i < reports) : (i += 1) {
         try journal.record(al, .{
             .id = @enumFromInt(i + 1),
             .day = i,
@@ -356,13 +346,9 @@ test "the journal is bounded, and the newest survive" {
             .outcome = .victory,
         });
     }
-    try std.testing.expectEqual(@as(usize, keep), journal.kept.items.len);
-
-    // The window holds the most recent engagements, not the first ones.
-    try std.testing.expectEqual(@as(u32, keep * 2 - 1), journal.kept.items[keep - 1].day);
-    try std.testing.expectEqual(@as(u32, keep), journal.kept.items[0].day);
-
-    // A report inside the window is findable; one that aged out is not.
-    try std.testing.expect(journal.find(journal.kept.items[keep - 1].id) != null);
-    try std.testing.expect(journal.find(@enumFromInt(1)) == null);
+    try std.testing.expectEqual(@as(usize, reports), journal.kept.items.len);
+    try std.testing.expectEqual(@as(u32, 0), journal.kept.items[0].day);
+    try std.testing.expectEqual(@as(u32, reports - 1), journal.kept.items[reports - 1].day);
+    try std.testing.expect(journal.find(@enumFromInt(1)) != null);
+    try std.testing.expect(journal.find(@enumFromInt(reports)) != null);
 }

@@ -2440,9 +2440,8 @@ pub const Store = struct {
         while (try st.next()) {
             const hid = try toId(types.HullInstanceId, st.int(0));
             // hull_instance_id must resolve to a loaded hull_instance (orphan check).
-            // battle_id and contract_id are NOT validated: battle reports age out of the
-            // bounded journal and contracts are removed, so a live record legitimately
-            // points at a gone battle/contract. Only hull_instance_id is a validated FK.
+            // Historical battle and contract backlinks may be unavailable on load;
+            // only hull_instance_id is a validated containment FK.
             _ = gs.hull_instances.getPtr(hid) orelse return error.CorruptSave;
             const cause = st.enumValue(unit_mod.WreckCause, 9) orelse return error.CorruptSave;
             const rec: hull_inst_mod.HullCombatRecord = .{
@@ -4320,6 +4319,43 @@ test "a battle report round-trips as fields, not as a row count" {
         try std.testing.expectEqual(before_lines.len, after_lines.len);
         for (before_lines, after_lines) |bl, al2| try std.testing.expectEqualStrings(bl, al2);
     }
+}
+
+test "battle reports beyond the former retention cap survive save and load" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9_021 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
+    const report_count: u32 = 41;
+    var i: u32 = 1;
+    while (i <= report_count) : (i += 1) {
+        try gs.battle_reports.record(gs.allocator(), .{
+            .id = @enumFromInt(i),
+            .day = i,
+            .contract = .none,
+            .company = co,
+            .kind = "raid",
+            .enemy_key = "DC",
+            .scenario = "probe",
+            .terrain = "plains",
+            .weather = "clear",
+            .outcome = .victory,
+        });
+    }
+    gs.next_battle_id = report_count + 1;
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(@as(usize, report_count), loaded.battle_reports.kept.items.len);
+    try std.testing.expect(loaded.battle_reports.find(@enumFromInt(1)) != null);
+    try std.testing.expect(loaded.battle_reports.find(@enumFromInt(report_count)) != null);
+    try std.testing.expectEqual(report_count + 1, loaded.next_battle_id);
 }
 
 test "a hull the enemy holds round-trips, slots and all — off the books, not struck off" {

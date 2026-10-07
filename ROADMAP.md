@@ -1232,7 +1232,7 @@ the player reads, and a turn that stops until they have.
   `aftermath`), and the eight inline `gs.log` calls became one loop over
   the rendered lines. MekHQ counterpart: `AtBScenario` resolution.
 - ✅ 12G.4 **Reports kept, listed and read.** `battle_report.Journal`
-  holds the last `tuning.battle.reports_kept` fights; `battles` lists
+  holds every resolved fight for the campaign lifetime; `battles` lists
   them and Enter opens a four-pane full-screen sheet — outcome and the
   roll that decided it, ammunition burned against what is left, every
   hull's armour before → after with what broke and what became of its

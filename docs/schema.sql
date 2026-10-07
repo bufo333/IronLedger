@@ -716,10 +716,8 @@ CREATE TABLE event_memory (
 
 ---------------------------------------------------------------- battles
 
--- Resolved engagements as records: what the after-action screens read. The
--- permanent account of a battle is its [AAR] lines in event_log, which are
--- never pruned; these are bounded by tuning.battle.reports_kept and age out
--- oldest-first.
+-- Resolved engagements as complete structured records for the campaign
+-- lifetime. The after-action screens render these fields directly.
 CREATE TABLE battle_report (
     cid             INTEGER NOT NULL,
     ord             INTEGER NOT NULL,
@@ -1065,9 +1063,8 @@ CREATE INDEX IF NOT EXISTS ix_hull_loadout_cid ON hull_loadout(cid);
 
 -- P3c.2: per-engagement combat record for a physical hull.
 -- hull_combat_record -> hull_instance (containment FK).
--- battle_id and contract_id are backlinks only; NOT reference-validated because
--- battle reports age out of the bounded journal and contracts are removed after
--- completion — a live row legitimately points at a gone battle/contract.
+-- battle_id and contract_id are historical backlinks only; NOT reference-validated
+-- because their target records may be unavailable on load.
 -- Only hull_instance_id is a validated FK (schema + loader orphan check).
 CREATE TABLE hull_combat_record (
     cid             INTEGER NOT NULL,
@@ -1089,8 +1086,8 @@ CREATE INDEX IF NOT EXISTS ix_hull_combat_record_cid ON hull_combat_record(cid);
 
 -- P3c.3: maintenance log entry for a physical hull (depot repair or loadout refit).
 -- maintenance_entry -> hull_instance (containment FK).
--- tech and battle_id are historical backlinks; NOT reference-validated because the
--- tech may later leave the roster and battle reports age out — HullCombatRecord precedent.
+-- tech and battle_id are historical backlinks; NOT reference-validated because their
+-- target records may be unavailable on load.
 -- Only hull_instance_id is a validated FK (schema + loader orphan check).
 -- Column order matches runtime (saveMaintenanceEntries/loadMaintenanceEntries).
 CREATE TABLE maintenance_entry (
