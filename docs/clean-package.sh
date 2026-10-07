@@ -3,11 +3,13 @@
 # paths build.zig.zon declares into a fresh tree and build a release there,
 # so an input the package leaves out fails here instead of for the first
 # person who fetches it.
-#   docs/clean-package.sh [optimize]     (default ReleaseFast)
+#   docs/clean-package.sh [optimize] [zig build args...]     (default ReleaseFast)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 repo="$(pwd)"
 optimize="${1:-ReleaseFast}"
+if [ "$#" -gt 0 ]; then shift; fi
+zig_args=("$@")
 # A fixed tree path and the repository's own .zig-cache, so the cache CI
 # restores for the workspace serves this build too.
 tree="${TMPDIR:-/tmp}/iron-ledger-clean-package"
@@ -37,7 +39,7 @@ done <<< "$paths"
 
 # The baseline CPU: a release runs on machines other than the builder,
 # and a native build's cache is useless on the next CI runner's CPU.
-(cd "$tree" && zig build -Doptimize="$optimize" -Dcpu=baseline --prefix "$tree/dist" --cache-dir "$repo/.zig-cache")
+(cd "$tree" && zig build -Doptimize="$optimize" -Dcpu=baseline --prefix "$tree/dist" --cache-dir "$repo/.zig-cache" "${zig_args[@]}")
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) executable="$tree/dist/bin/game.exe" ;;
   *) executable="$tree/dist/bin/game" ;;

@@ -147,9 +147,10 @@ pub fn build(b: *std.Build) void {
     const windows_sqlite_dll = b.option([]const u8, "windows-sqlite-dll", "Verified Windows sqlite3.dll to install beside game.exe");
     mod.link_libc = true;
     if (target.result.os.tag == .windows) {
-        if (windows_sqlite_lib_dir) |dir| mod.addLibraryPath(b.path(dir));
+        if (windows_sqlite_lib_dir) |dir| mod.addLibraryPath(if (std.fs.path.isAbsolute(dir)) .{ .cwd_relative = dir } else b.path(dir));
         if (windows_sqlite_dll) |dll| {
-            b.getInstallStep().dependOn(&b.addInstallBinFile(b.path(dll), "sqlite3.dll").step);
+            const source: std.Build.LazyPath = if (std.fs.path.isAbsolute(dll)) .{ .cwd_relative = dll } else b.path(dll);
+            b.getInstallStep().dependOn(&b.addInstallBinFile(source, "sqlite3.dll").step);
         }
     }
     mod.linkSystemLibrary("sqlite3", .{});

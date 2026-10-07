@@ -134,9 +134,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $sqlite = Join-Path $env:RUNNER_TEMP 'sqlite'
           zig fmt --check build.zig src
+          $env:PATH = "$sqlite;$env:PATH"
           zig build test --summary all "-Dwindows-sqlite-lib-dir=$sqlite" "-Dwindows-sqlite-dll=$(Join-Path $sqlite 'sqlite3.dll')"
           ./docs/verify-contract.sh
-          bash docs/clean-package.sh ReleaseFast
+          bash docs/clean-package.sh ReleaseFast "-Dwindows-sqlite-lib-dir=$sqlite" "-Dwindows-sqlite-dll=$(Join-Path $sqlite 'sqlite3.dll')"
           python docs/data-fixtures.py
           powershell -ExecutionPolicy Bypass -File docs/windows_smoke.ps1 zig-out/bin/game.exe (Join-Path $env:RUNNER_TEMP 'windows-smoke.db')
       - name: Package core ZIP (macOS and Linux)
