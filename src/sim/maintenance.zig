@@ -91,9 +91,11 @@ fn activeTech(gs: *GameState, u: *const unit_mod.Unit) ?*person_mod.Person {
     return if (t.isAvailable(gs.clock.day_index)) t else null;
 }
 
-const QualityDrift = enum { drop, hold, rise };
+pub const QualityDrift = enum { drop, hold, rise };
 
-fn qualityDrift(total: i32, target: i32) QualityDrift {
+/// Classifies a maintenance result against its target using the play-feedback
+/// quality margins in `data/tables/tuning.zon`.
+pub fn qualityDrift(total: i32, target: i32) QualityDrift {
     if (total <= target - tuning.maintenance.quality_drop_margin) return .drop;
     if (total >= target + tuning.maintenance.quality_rise_margin) return .rise;
     return .hold;
