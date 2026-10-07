@@ -17,6 +17,12 @@ reschedule only on explicit dispatch.
   staffing/upkeep, capacity/facility effects, eligibility, and one-brigade rule.
 - P1-brigade (P1b-P1d): regional-to-brigade project, shared rules,
   persistence, queries, REPL/TUI, and current-behavior docs.
+- P2-design conventional combat vehicles and aerospace: sourced chassis,
+  combat/readiness, repair, salvage, market, and ownership rules; every bought
+  hull has a unique HullInstanceId, while vehicle and aerospace markets remain
+  replenishing rather than faction-production-limited.
+- P2-vehicles/aerospace: verified data, persistence, acquisition, market
+  availability, battle integration, queries, and player/NPC ownership.
 - P2-design battle-armor/artillery design approval (P2a).
 - P2-battle-armor (P2b-P2d): verified domain facts, acquisition/attachment,
   crewing, readiness, and persistence.
@@ -24,10 +30,22 @@ reschedule only on explicit dispatch.
   crewing, readiness, and persistence.
 - P2-battle-ui (P2h-P2i): both battle effects and REPL/TUI surfaces.
 
-- P3f.4b Leaderboard TUI screen (separate branch, P3f.4b): NPC merc company
-  status display; uses the lifecycle fields delivered in P3f.4 sim core.
-- P3f.5 Campaign-wizard logo picker: logo catalog picker in `src/tui/app.zig`;
-  `titleCaseLogoKey` auto-fill; runtime serving and install of `data/logos/`.
+- NPC world-contract design: shared world conflicts and typed opposing forces
+  (faction, pirate, or named merc company); player offers, NPC commitments,
+  location/transit, pay, readiness, withdrawal, breach, and completion.
+- NPC merc-company economy: new campaigns seed 12 companies with 16 active
+  mechs and 50M C-bills; shared mech-market replacement, player-equivalent
+  operating costs, 12-month understrength runway, contract income, and
+  liquidation only after no-cash, understrength, and no active contract.
+- NPC contract and battle parity: committed companies fight their real roster,
+  choose doctrine-based withdrawals, concede or breach when unable to field,
+  and never produce zero-vs-zero victories.
+- NPC merc-company identity: unique company names across the campaign; assign
+  each unused logo once before creating any logo-less company, then leave
+  logo_key empty and continue with collision-free generated names. NPC logo
+  display remains deferred.
+- Desk quarterly P&L report: outfit-wide calendar-quarter index and drill-down
+  modal using the ledger's authoritative income, expense, and net totals.
 - Per-location armor data accuracy (lower priority, after P3f): pull the 8 front
   and 3 rear-torso armor values per mech from the MegaMek 3039u MTF files
   (https://github.com/MegaMek/mm-data/tree/main/data/mekfiles/meks/3039u) for
@@ -37,5 +55,3 @@ reschedule only on explicit dispatch.
   before scheduling.
 - A mobile field base as a buyable Repair support lance, adding to the repair
   push beyond the Logistics lance's workshop.
-- Contracts difficulty display — replace skull/half-skull glyphs (☠/◐) with filled circles (●), keep color coding, rename the column header from 'skulls' to 'difficulty'; touches `src/sim/queries.zig` and `src/tui/app.zig`, smokes required.
-- Help overlay UX — screen-specific contextual help filtered to the current screen's active bindings (expand existing stub); design in ROADMAP.md first before scheduling.

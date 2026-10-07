@@ -1350,6 +1350,21 @@ terms, and third-party notices. Windows packages a verified official SQLite
 documentation covers package layout, checksums, optional local music builds,
 and the tag/version release process.
 
+## Product completion P2 — Conventional vehicles and aerospace
+
+The existing P2 battle-armor and artillery work gains a preceding conventional
+vehicle and aerospace track. It first establishes sourced chassis data and the
+rules for ownership, market acquisition, readiness, repair, salvage, and
+autoresolve participation. Every purchased vehicle or fighter is a unique
+`HullInstance` with its own provenance, like a mek. Unlike the finite mek
+economy, their markets replenish and are not limited by faction manufacturing.
+
+This foundation lets player and NPC companies buy the same assets from the
+market. NPC merc companies require four active mek lances (16 meks) for
+readiness; combat vehicles and aerospace may be retained as additional reserve
+assets and contribute their normal combat value without filling those mek
+slots. The exact P2 delivery order is in `TODO.md` after design approval.
+
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.
 
@@ -1426,7 +1441,9 @@ era), committed to battle from the pool, lost when destroyed, and transferred on
 A faction with a surplus sells hulls onto the existing market; a faction under conflict
 pressure (P4i `world_state`) replenishes its own roster first, so market supply tightens
 with the war. A rival that loses too many hulls cannot meet contract battle-value
-requirements and goes insolvent. Mechs only; conventional vehicles are out of scope.
+requirements and goes insolvent. The delivered P3e roster economy is mechs only;
+Product completion P2 adds the separate conventional-vehicle and aerospace foundation
+before those assets participate in NPC company reserves.
 
 Two new persisted roster families (FactionRoster, RivalRoster), current-owner fields on
 `HullInstance` (`owner_type`/`owner_id`, complementing the P3c.4 provenance chain),
@@ -1455,9 +1472,10 @@ P3f closes the faction economic loop P3e opens: the P3e living rosters gain a
 loss-and-replacement cycle and a dispersed black-market channel, and the rival
 merc and pirate populations become self-sustaining. One coherent stage — the
 five features land together because each depends on the others. Prerequisite:
-P3e (faction/rival rosters and HullInstance ownership). Mechs only, consistent
-with P3e. The full design is fixed in a design doc on approval; TODO.md owns the
-design-approval entry and delivery order.
+P3e (faction/rival rosters and HullInstance ownership). The delivered loop is
+mek-only; Product completion P2 provides the separate vehicle and aerospace
+reserve path. The full design is fixed in a design doc on approval; TODO.md
+owns the design-approval entry and delivery order.
 
 - **Lost-field wreck flow.** Losing the field on a pool-path battle lets the
   enemy faction salvage up to its cargo capacity; the remaining wrecks become
@@ -1474,9 +1492,10 @@ design-approval entry and delivery order.
   insolvent (the P3e.7 rival-insolvency hook), its remaining hulls liquidate
   onto the market; a replacement company spawns, drawing a name and logo from
   the remaining `data/logos/` pool and buying from the market and black market
-  to field its first full company of three lances (12 hulls minimum). A tunable
-  C-bill injection is the fallback floor. The active rival merc-company count
-  holds at 12.
+  to field four active mek lances (16 meks). A 50M C-bill formation floor,
+  shared-market replacement, player-equivalent operating costs, and active
+  contract protection are planned follow-up work; the active rival
+  merc-company count holds at 12.
 - **Pirate replenishment.** Pirates gain a small base
   `replenishment_hulls_per_year` constant (2-3, tunable) for opportunistic
   acquisition and also compete for black-market listings; an insolvent pirate
@@ -1501,7 +1520,8 @@ P3f.4 sim core delivered: merc-company lifecycle (`src/sim/merc_lifecycle.zig`:
 `dissolved_day`, `logo_key`); schema v58; build-time logo catalog from
 `data/logos/` (35 PNGs committed, generated `logos.zon`, `src/domain/logo.zig`
 shim, `src/gen/logo_name.zig`); `mercCompanyEligibleAsOpFor` OpFor gate.
-Leaderboard TUI (P3f.4b) and campaign-wizard logo picker (P3f.5) remain.
+Leaderboard TUI (P3f.4b) and campaign-wizard logo picker (P3f.5) are delivered.
+The remaining NPC-economy and world-contract work is ordered in `TODO.md`.
 
 ## Product completion P4 — Campaign operations and stories
 
