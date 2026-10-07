@@ -94,8 +94,8 @@ fn activeTech(gs: *GameState, u: *const unit_mod.Unit) ?*person_mod.Person {
 
 pub const QualityDrift = enum { drop, hold, rise };
 
-/// Classifies a maintenance result against its target using the quality margins
-/// in `data/tables/tuning.zon`.
+/// Classifies a maintenance result against its target under the weekly tech-time
+/// rule (ARCHITECTURE.md §9.9), using margins in `data/tables/tuning.zon`.
 pub fn qualityDrift(total: i32, target: i32) QualityDrift {
     if (total <= target - tuning.maintenance.quality_drop_margin) return .drop;
     if (total >= target + tuning.maintenance.quality_rise_margin) return .rise;
