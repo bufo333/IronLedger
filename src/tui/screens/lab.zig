@@ -116,22 +116,25 @@ fn screenHasText(screen: *const app.Screen, needle: []const u8) bool {
     return false;
 }
 
-fn damageMountForTest(c: *app.ClientForTest, uid: app.types.UnitId, skip: []const u8) !?q.LayoutRow {
+fn damageMountForTest(c: *app.ClientForTest, uid: app.types.UnitId, skip: []const u8) !q.LayoutRow {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();
-    var company: app.types.ForceId = .none;
-    for (try q.toe(al, c.app.state())) |row| {
-        if (row.unit == uid) company = row.company;
+    const unit = c.app.state().unit(uid) orelse return error.TestUnexpectedResult;
+    var damaged_key: ?[]const u8 = null;
+    for (unit.slots.items) |*slot| {
+        if (slot.class == .structure or std.mem.eql(u8, slot.slot_key, skip)) continue;
+        slot.condition = .damaged;
+        damaged_key = slot.slot_key;
+        break;
     }
-    if (company == .none) return null;
-    for (0..30) |_| game.contract_events.damageRandomUnits(c.app.state(), company, 12, .line);
+    const slot_key = damaged_key orelse return error.TestUnexpectedResult;
     const boxes = try q.labLayout(al, c.app.state(), uid);
     var idx: usize = 0;
     for (boxes) |box| {
         idx += 1;
         for (box.rows) |row| {
-            if (row.slot_key.len > 0 and !std.mem.eql(u8, row.slot_key, skip) and std.mem.indexOf(u8, row.detail[3], "damaged") != null) {
+            if (std.mem.eql(u8, row.slot_key, slot_key) and std.mem.indexOf(u8, row.detail[3], "damaged") != null) {
                 c.app.cur(0).* = idx;
                 return row;
             }
@@ -139,7 +142,7 @@ fn damageMountForTest(c: *app.ClientForTest, uid: app.types.UnitId, skip: []cons
         }
         idx += 1;
     }
-    return null;
+    return error.TestUnexpectedResult;
 }
 
 pub fn draw(self: *App) anyerror!void {
@@ -551,8 +554,8 @@ test "replacement targets the selected damaged mount" {
     }
     const selected_uid = uid orelse return error.TestUnexpectedResult;
     const lab_view = try q.lab(arena.allocator(), c.app.state(), selected_uid);
-    const first_mount = if (lab_view.mounts.len > 0) lab_view.mounts[0].slot_key else return;
-    const row = (try damageMountForTest(c, selected_uid, first_mount)) orelse return error.TestUnexpectedResult;
+    const first_mount = if (lab_view.mounts.len > 0) lab_view.mounts[0].slot_key else return error.TestUnexpectedResult;
+    const row = try damageMountForTest(c, selected_uid, first_mount);
     try app.pressForTest(c, .{ .char = 'R' });
     try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), row.part_key) != null);
 }
