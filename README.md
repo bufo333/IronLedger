@@ -81,14 +81,21 @@ Release downloads provide native x64 core ZIPs:
 - `iron-ledger-1.0.0-linux-x64.zip`
 - `iron-ledger-1.0.0-windows-x64.zip`
 
-Each archive contains `bin/game` (or `bin/game.exe`),
+The optional, platform-neutral soundtrack overlay is published separately:
+
+- `iron-ledger-1.0.0-music.zip`
+
+Each core archive contains `bin/game` (or `bin/game.exe`),
 `share/iron-ledger/logos/`, `LICENSE`, `ASSETS.md`, and
 `THIRD-PARTY-NOTICES.md`. Keep that layout intact when unpacking. macOS and
 Linux use the host SQLite library; the Windows archive includes `bin/sqlite3.dll`.
 Verify a release against its accompanying `SHA256SUMS` asset. Core ZIPs do not
-include music. Build a local music-enabled tree only with
-`zig build -Doptimize=ReleaseFast -Dbundle-music --prefix dist`; no music archive
-is published without separate approval.
+include music. To install the soundtrack, unpack the music ZIP alongside an
+unpacked core ZIP so it creates `share/iron-ledger/music/`. The music ZIP is
+included in that shared `SHA256SUMS` verification. It includes no audio player:
+music playback requires `afplay`, `mpv`, `ffplay`, or `aplay` on `PATH`. The game
+remains playable without the music ZIP or an available player. Build a local
+music-enabled tree with `zig build -Doptimize=ReleaseFast -Dbundle-music --prefix dist`.
 
 ---
 

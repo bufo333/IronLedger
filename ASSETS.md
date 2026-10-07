@@ -38,9 +38,11 @@ other projects, sold, modified, or distributed on their own.
   - Suno's terms govern the tracks as well as the permission above. Read
     them at the link, rather than a copy that may be out of date.
 - **Packaging:** the soundtrack is not part of the Zig package
-  (`build.zig.zon` leaves it out). It is installed only with
-  `-Dbundle-music` or shipped as a separately approved archive. Core release
-  ZIPs deliberately omit the soundtrack.
+  (`build.zig.zon` leaves it out). The official
+  `iron-ledger-<version>-music.zip` is an approved redistribution of this
+  soundtrack under the project-only permission above. It preserves every track's
+  watermark and metadata. Core release ZIPs deliberately omit the soundtrack;
+  local music-enabled trees use `-Dbundle-music`.
 
 ## Covered by the GPL with the code
 

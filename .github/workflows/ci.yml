@@ -9,6 +9,40 @@ permissions:
   contents: read
 
 jobs:
+  music:
+    name: music archive
+    runs-on: ubuntu-24.04
+    steps:
+      # actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Package music ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(python3 - <<'PY'
+          import re
+          text = open("build.zig.zon", encoding="utf-8").read()
+          match = re.search(r'\.version\s*=\s*"([^"]+)"', text)
+          if not match:
+              raise SystemExit("build.zig.zon has no product version")
+          print(match.group(1))
+          PY
+          )
+          release="$RUNNER_TEMP/release"
+          python3 scripts/package_release.py test-music --source-root .
+          python3 scripts/package_release.py package-music --version "$version" --output "$release" --source-root .
+          python3 scripts/package_release.py validate-music --archive "$release/iron-ledger-${version}-music.zip" --version "$version" --source-root .
+          (cd "$release" && shasum -a 256 "iron-ledger-${version}-music.zip") > "$release/music.sha256"
+      # actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: music
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+          overwrite: false
+
   native:
     name: ${{ matrix.label }} native
     runs-on: ${{ matrix.runner }}
