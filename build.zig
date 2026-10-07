@@ -143,7 +143,15 @@ pub fn build(b: *std.Build) void {
 
     // Persistence: the system SQLite library, bound by hand in
     // src/persist/sqlite.zig (no translate-c dependency).
+    const windows_sqlite_lib_dir = b.option([]const u8, "windows-sqlite-lib-dir", "Directory containing the verified Windows SQLite import library");
+    const windows_sqlite_dll = b.option([]const u8, "windows-sqlite-dll", "Verified Windows sqlite3.dll to install beside game.exe");
     mod.link_libc = true;
+    if (target.result.os.tag == .windows) {
+        if (windows_sqlite_lib_dir) |dir| mod.addLibraryPath(b.path(dir));
+        if (windows_sqlite_dll) |dll| {
+            b.getInstallStep().dependOn(&b.addInstallBinFile(b.path(dll), "sqlite3.dll").step);
+        }
+    }
     mod.linkSystemLibrary("sqlite3", .{});
 
     // The executable: src/main.zig (demo, REPL, `--tui` client) importing `game`.

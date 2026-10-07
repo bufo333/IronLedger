@@ -38,5 +38,9 @@ done <<< "$paths"
 # The baseline CPU: a release runs on machines other than the builder,
 # and a native build's cache is useless on the next CI runner's CPU.
 (cd "$tree" && zig build -Doptimize="$optimize" -Dcpu=baseline --prefix "$tree/dist" --cache-dir "$repo/.zig-cache")
-[ -x "$tree/dist/bin/game" ] || { echo "no dist/bin/game after the build" >&2; exit 1; }
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) executable="$tree/dist/bin/game.exe" ;;
+  *) executable="$tree/dist/bin/game" ;;
+esac
+[ -x "$executable" ] || { echo "no $executable after the build" >&2; exit 1; }
 echo "CLEAN PACKAGE OK ($optimize)"

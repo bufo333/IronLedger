@@ -73,6 +73,23 @@ simply shows more rows and wider panes.
 Design and contributor notes live in `ARCHITECTURE.md`, `GAMEPLAY.md`,
 `ROADMAP.md`, and `docs/`.
 
+## Release 1.0.0
+
+Release downloads provide native x64 core ZIPs:
+
+- `iron-ledger-1.0.0-macos-x64.zip`
+- `iron-ledger-1.0.0-linux-x64.zip`
+- `iron-ledger-1.0.0-windows-x64.zip`
+
+Each archive contains `bin/game` (or `bin/game.exe`),
+`share/iron-ledger/logos/`, `LICENSE`, `ASSETS.md`, and
+`THIRD-PARTY-NOTICES.md`. Keep that layout intact when unpacking. macOS and
+Linux use the host SQLite library; the Windows archive includes `bin/sqlite3.dll`.
+Verify a release against its accompanying `SHA256SUMS` asset. Core ZIPs do not
+include music. Build a local music-enabled tree only with
+`zig build -Doptimize=ReleaseFast -Dbundle-music --prefix dist`; no music archive
+is published without separate approval.
+
 ---
 
 ## The lobby and starting a campaign

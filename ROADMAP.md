@@ -1341,6 +1341,15 @@ the player reads, and a turn that stops until they have.
   multiplier, paid from local funds, and limited by truck room. Enter on
   the warning opens the box, and so does the advance that stops for it.
 
+## Product Release — 1.0.0 ✅
+
+Native macOS x64, Linux x64, and Windows x64 CI and tag releases publish three
+music-free core ZIPs containing the executable, logo assets, license, asset
+terms, and third-party notices. Windows packages a verified official SQLite
+3.53.4 DLL beside `game.exe`; macOS and Linux use system SQLite. Release
+documentation covers package layout, checksums, optional local music builds,
+and the tag/version release process.
+
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.
 

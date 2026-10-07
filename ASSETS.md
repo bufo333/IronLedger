@@ -11,6 +11,12 @@ projects, selling them, modifying them or distributing them on their own.
 
 Owner: John Burns (GitHub `bufo333`).
 
+## Logos: `data/logos/`
+
+The logo PNGs are included unmodified in each IRON LEDGER core release ZIP under
+the project-only redistribution permission above. They may not be extracted for
+other projects, sold, modified, or distributed on their own.
+
 ## Soundtrack: `data/music/`
 
 | Set | Tracks |
@@ -33,7 +39,8 @@ Owner: John Burns (GitHub `bufo333`).
     them at the link, rather than a copy that may be out of date.
 - **Packaging:** the soundtrack is not part of the Zig package
   (`build.zig.zon` leaves it out). It is installed only with
-  `-Dbundle-music` or shipped as a separate archive.
+  `-Dbundle-music` or shipped as a separately approved archive. Core release
+  ZIPs deliberately omit the soundtrack.
 
 ## Covered by the GPL with the code
 

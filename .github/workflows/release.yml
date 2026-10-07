@@ -1,15 +1,43 @@
-name: CI
+name: Release
 
 on:
-  pull_request:
   push:
-    branches: [main]
+    tags: ['v*']
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  verify-tag:
+    runs-on: ubuntu-24.04
+    steps:
+      # actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Require tag to match the product version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(python3 - <<'PY'
+          import re
+          text = open("build.zig.zon", encoding="utf-8").read()
+          match = re.search(r'\.version\s*=\s*"([^"]+)"', text)
+          if not match:
+              raise SystemExit("build.zig.zon has no product version")
+          print(match.group(1))
+          PY
+          )
+          [ "$RELEASE_TAG" = "v$version" ] || { echo "tag $RELEASE_TAG does not match v$version" >&2; exit 1; }
+
   native:
+    needs: verify-tag
     name: ${{ matrix.label }} native
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -30,7 +58,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-
       - name: Install Zig 0.16 (macOS and Linux)
         if: runner.os != 'Windows'
         shell: bash
@@ -51,7 +78,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/zig"
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
           printf '%s\n' "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
-
       - name: Install Zig 0.16 (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -67,7 +93,6 @@ jobs:
           $zigDirectory = Get-ChildItem -LiteralPath $destination -Directory | Select-Object -First 1
           if ($null -eq $zigDirectory) { throw 'Zig archive has no root directory' }
           $zigDirectory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
       - name: Install Linux SQLite headers
         if: runner.os == 'Linux'
         shell: bash
@@ -75,7 +100,6 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install --yes libsqlite3-dev
-
       - name: Prepare verified Windows SQLite
         if: runner.os == 'Windows'
         shell: pwsh
@@ -91,7 +115,6 @@ jobs:
           if ($LASTEXITCODE -eq 0) { throw 'altered SQLite archive unexpectedly verified' }
           $lib = Get-Command lib.exe -ErrorAction Stop
           python scripts/package_release.py prepare-windows-sqlite --sqlite-archive $sqliteArchive --output (Join-Path $env:RUNNER_TEMP 'sqlite') --lib-exe $lib.Source
-
       - name: Run native gate (macOS and Linux)
         if: runner.os != 'Windows'
         shell: bash
@@ -104,7 +127,6 @@ jobs:
           python3 docs/data-fixtures.py
           python3 docs/tui_smoke.py zig-out/bin/game "$RUNNER_TEMP/tui-smoke.db"
           bash docs/repl_smoke.sh zig-out/bin/game "$RUNNER_TEMP/repl-smoke.db"
-
       - name: Run native gate (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -117,7 +139,6 @@ jobs:
           bash docs/clean-package.sh ReleaseFast
           python docs/data-fixtures.py
           powershell -ExecutionPolicy Bypass -File docs/windows_smoke.ps1 zig-out/bin/game.exe (Join-Path $env:RUNNER_TEMP 'windows-smoke.db')
-
       - name: Package core ZIP (macOS and Linux)
         if: runner.os != 'Windows'
         shell: bash
@@ -126,10 +147,9 @@ jobs:
           prefix="$RUNNER_TEMP/dist"
           release="$RUNNER_TEMP/release"
           zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix "$prefix"
-          python3 scripts/package_release.py package --prefix "$prefix" --version 1.0.0 --target "${{ matrix.label }}" --output "$release" --source-root .
-          python3 scripts/package_release.py validate --archive "$release/iron-ledger-1.0.0-${{ matrix.label }}.zip" --version 1.0.0 --target "${{ matrix.label }}" --source-root .
-          (cd "$release" && shasum -a 256 "iron-ledger-1.0.0-${{ matrix.label }}.zip") > "$release/${{ matrix.label }}.sha256"
-
+          python3 scripts/package_release.py package --prefix "$prefix" --version "${GITHUB_REF_NAME#v}" --target "${{ matrix.label }}" --output "$release" --source-root .
+          python3 scripts/package_release.py validate --archive "$release/iron-ledger-${GITHUB_REF_NAME#v}-${{ matrix.label }}.zip" --version "${GITHUB_REF_NAME#v}" --target "${{ matrix.label }}" --source-root .
+          (cd "$release" && shasum -a 256 "iron-ledger-${GITHUB_REF_NAME#v}-${{ matrix.label }}.zip") > "$release/${{ matrix.label }}.sha256"
       - name: Package core ZIP (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -138,12 +158,12 @@ jobs:
           $sqlite = Join-Path $env:RUNNER_TEMP 'sqlite'
           $prefix = Join-Path $env:RUNNER_TEMP 'dist'
           $release = Join-Path $env:RUNNER_TEMP 'release'
+          $version = $env:GITHUB_REF_NAME.Substring(1)
           zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix $prefix "-Dwindows-sqlite-lib-dir=$sqlite" "-Dwindows-sqlite-dll=$(Join-Path $sqlite 'sqlite3.dll')"
-          python scripts/package_release.py package --prefix $prefix --version 1.0.0 --target windows-x64 --output $release --source-root . --sqlite-archive (Join-Path $env:RUNNER_TEMP 'sqlite-dll-win-x64.zip')
-          python scripts/package_release.py validate --archive (Join-Path $release 'iron-ledger-1.0.0-windows-x64.zip') --version 1.0.0 --target windows-x64 --source-root .
+          python scripts/package_release.py package --prefix $prefix --version $version --target windows-x64 --output $release --source-root . --sqlite-archive (Join-Path $env:RUNNER_TEMP 'sqlite-dll-win-x64.zip')
+          python scripts/package_release.py validate --archive (Join-Path $release "iron-ledger-$version-windows-x64.zip") --version $version --target windows-x64 --source-root .
           powershell -ExecutionPolicy Bypass -File docs/windows_smoke.ps1 (Join-Path $prefix 'bin/game.exe') (Join-Path $env:RUNNER_TEMP 'windows-package-smoke.db')
-          (Get-FileHash -Algorithm SHA256 (Join-Path $release 'iron-ledger-1.0.0-windows-x64.zip')).Hash.ToLowerInvariant() + '  iron-ledger-1.0.0-windows-x64.zip' | Set-Content -NoNewline (Join-Path $release 'windows-x64.sha256')
-
+          (Get-FileHash -Algorithm SHA256 (Join-Path $release "iron-ledger-$version-windows-x64.zip")).Hash.ToLowerInvariant() + "  iron-ledger-$version-windows-x64.zip" | Set-Content -NoNewline (Join-Path $release 'windows-x64.sha256')
       # actions/upload-artifact@v4
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -151,3 +171,34 @@ jobs:
           path: ${{ runner.temp }}/release/
           if-no-files-found: error
           overwrite: false
+
+  publish:
+    needs: native
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      # actions/download-artifact@v4
+      - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          pattern: core-*
+          path: release-artifacts
+          merge-multiple: true
+      - name: Validate release assets and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          expected="iron-ledger-${version}-linux-x64.zip iron-ledger-${version}-macos-x64.zip iron-ledger-${version}-windows-x64.zip"
+          actual=$(printf '%s\n' release-artifacts/*.zip | xargs -n1 basename | sort | tr '\n' ' ' | sed 's/ $//')
+          [ "$actual" = "$expected" ] || { echo "unexpected release ZIPs: $actual" >&2; exit 1; }
+          cat release-artifacts/*.sha256 | sort > SHA256SUMS
+          (cd release-artifacts && sha256sum -c ../SHA256SUMS)
+      # softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            release-artifacts/*.zip
+            SHA256SUMS
+          fail_on_unmatched_files: true
