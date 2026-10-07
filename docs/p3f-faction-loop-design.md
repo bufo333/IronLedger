@@ -648,7 +648,7 @@ rule-72 gate before the next increment is dispatched.
 |-------------|--------------------------------------------------------------------------------------------------|
 | TUI         | `src/tui/app.zig`: confirm auto-fills `w_outfit` with `titleCaseLogoKey(selected_stem)`         |
 | New fn      | `src/gen/logo_name.zig`: `titleCaseLogoKey` (pure)                                              |
-| Seed        | `roster_seed.zig`: rivals draw from logo pool excluding player's pick                            |
+| Seed        | `roster_seed.zig`: merc companies draw from the logo pool excluding the player's pick            |
 | Assets      | `data/logos/` (35 PNG files) committed to the repository                                        |
 | Tests (r67) | Pure unit test of `titleCaseLogoKey` over worked examples and odd filenames                     |
 | Tests (r67) | TUI picker: row identity and key-dispatch test                                                   |
@@ -751,9 +751,8 @@ them `// TUNE`.
 
 The dispersed black market design is consistent with AtB's black-market contact
 event (the existing 12C.17 event in `contract_events.zig`), extended to cover
-hull listings from battle salvage.  `docs/mekhq-map.md` maps the existing AtB
-rows; the P3f implementer adds the rows for hull black-market, NPC competition,
-and company retirement/replacement.
+hull listings from battle salvage. `docs/mekhq-map.md` records the delivered
+P3f black-market, NPC-competition, and merc-company lifecycle mappings.
 
 The merc-company death-and-replacement cycle maps to AtB's retirement/creation
 flow (`PersonnelMarket`, `UnitMarket`). The replacement company draws its

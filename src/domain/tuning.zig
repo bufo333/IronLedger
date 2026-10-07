@@ -782,8 +782,8 @@ pub const Tuning = struct {
         /// Hulls the pirate pool gains per campaign year from dispersed
         /// black-market recovery (docs/p3f-faction-loop-design.md §2.6). // TUNE
         pirate_replenishment_hulls_per_year: u8,
-        /// Minimum C-bill price floor for a merc-company replacement hull
-        /// acquired from the black market (docs/p3f-faction-loop-design.md §2.6). // TUNE
+        /// Starting C-bill balance injected when a replacement merc company
+        /// forms (docs/p3f-faction-loop-design.md §2.6). // TUNE
         merc_replacement_cbill_floor: types.CBills,
     },
     /// Real loss: how hulls die, what a rebuild needs, and when one is not
