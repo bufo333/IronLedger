@@ -875,9 +875,9 @@ item: tests green, both smokes, ROADMAP tick, one commit.
   72% clean / 17% fault / 11% redo" before the work starts.
 - ✅ 12C.13 **Quality drift** (MekHQ maintenance quality; A worst … F
   best). The weekly maintenance roll already moved the letter; the
-  margins are now knobs (`quality_drop_margin` 2, `quality_rise_margin` 7
-  — a skilled, covered tech lifts a hull roughly one week in six, an
-  uncovered hull slips most weeks), every move is a [maintenance] log
+  margins are now knobs (`quality_drop_margin` 3, `quality_rise_margin` 5
+  — field maintenance requires a clear miss to slip and can gradually
+  restore a covered hull), every move is a [maintenance] log
   line, and quality now prices resale (`quality_sale_bp_per_step`, ±5%
   per step from C) on top of reactivation days, the maintenance target
   and the repair check (12C.12).

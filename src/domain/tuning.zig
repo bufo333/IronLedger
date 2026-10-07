@@ -1008,4 +1008,6 @@ test "spot checks against the values the formulas were built on" {
     try std.testing.expectEqual(@as(u32, 6), t.battle.mounts_per_ammo_ton);
     try std.testing.expectEqual(@as(types.Bp, 1_200), t.finance.loan_rate_bp);
     try std.testing.expectEqual(@as(types.CBills, 2_000), t.logistics.freight_per_ly);
+    try std.testing.expectEqual(@as(i32, 3), t.maintenance.quality_drop_margin);
+    try std.testing.expectEqual(@as(i32, 5), t.maintenance.quality_rise_margin);
 }
