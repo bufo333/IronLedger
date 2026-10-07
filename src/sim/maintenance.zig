@@ -91,6 +91,14 @@ fn activeTech(gs: *GameState, u: *const unit_mod.Unit) ?*person_mod.Person {
     return if (t.isAvailable(gs.clock.day_index)) t else null;
 }
 
+const QualityDrift = enum { drop, hold, rise };
+
+fn qualityDrift(total: i32, target: i32) QualityDrift {
+    if (total <= target - tuning.maintenance.quality_drop_margin) return .drop;
+    if (total >= target + tuning.maintenance.quality_rise_margin) return .rise;
+    return .hold;
+}
+
 // ── The weekly tech-time budget ──────────────────────────────────────
 
 /// Weekly hours a hull wants from a regular tech: the class
@@ -232,38 +240,42 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
         const total: i32 = @as(i32, raw) + person_mod.skillRollBonus(skill);
 
         const before_q = u.quality;
-        if (total <= tn - tuning.maintenance.quality_drop_margin) {
-            // Clear miss: quality drifts toward A; a snake-eyes week also
-            // breaks a piece of gear (weapon, equipment, ammo feed, armor —
-            // field-fixable). Neglect never cores a torso: structure is
-            // battle damage.
-            const q = @intFromEnum(u.quality);
-            if (q > 0) u.quality = @enumFromInt(q - 1);
-            if (raw == 2 and u.slots.items.len > 0) {
-                var gear: u32 = 0;
-                for (u.slots.items) |s| if (s.class != .structure) {
-                    gear += 1;
-                };
-                if (gear > 0) {
-                    var pick = gs.rng.random(.maintenance).uintLessThan(u32, gear);
-                    for (u.slots.items) |*slot| {
-                        if (slot.class == .structure) continue;
-                        if (pick == 0) {
-                            slot.condition = switch (slot.condition) {
-                                .ok => .damaged,
-                                .damaged => .destroyed,
-                                else => slot.condition,
-                            };
-                            break;
+        switch (qualityDrift(total, tn)) {
+            .drop => {
+                // Clear miss: quality drifts toward A; a snake-eyes week also
+                // breaks a piece of gear (weapon, equipment, ammo feed, armor —
+                // field-fixable). Neglect never cores a torso: structure is
+                // battle damage.
+                const q = @intFromEnum(u.quality);
+                if (q > 0) u.quality = @enumFromInt(q - 1);
+                if (raw == 2 and u.slots.items.len > 0) {
+                    var gear: u32 = 0;
+                    for (u.slots.items) |s| if (s.class != .structure) {
+                        gear += 1;
+                    };
+                    if (gear > 0) {
+                        var pick = gs.rng.random(.maintenance).uintLessThan(u32, gear);
+                        for (u.slots.items) |*slot| {
+                            if (slot.class == .structure) continue;
+                            if (pick == 0) {
+                                slot.condition = switch (slot.condition) {
+                                    .ok => .damaged,
+                                    .damaged => .destroyed,
+                                    else => slot.condition,
+                                };
+                                break;
+                            }
+                            pick -= 1;
                         }
-                        pick -= 1;
                     }
                 }
-            }
-        } else if (total >= tn + tuning.maintenance.quality_rise_margin) {
-            // Exceptional work slowly restores a machine (rare by design).
-            const q = @intFromEnum(u.quality);
-            if (q < 5) u.quality = @enumFromInt(q + 1);
+            },
+            .hold => {},
+            .rise => {
+                // Exceptional work slowly restores a machine (rare by design).
+                const q = @intFromEnum(u.quality);
+                if (q < 5) u.quality = @enumFromInt(q + 1);
+            },
         }
         // Quality drift is news: the letter on the resale ticket moved.
         if (u.quality != before_q) try gs.log(.construction, .{ .company = gs.companyOf(u.force) }, "[maintenance] {s} #{d} quality {s} {s} → {s}{s}", .{
@@ -725,6 +737,14 @@ test "no tech, no maintenance: an unassigned hull rots; an assigned one holds" {
     for (0..52) |_| try runWeeklyMaintenance(&gs2);
     try std.testing.expect(@intFromEnum(gs2.unit(uid2).?.quality) >= @intFromEnum(neglected));
     try std.testing.expect(gs2.ledger.balance() < 0); // consumables were paid for
+}
+
+test "quality drift uses the configured margins at their boundaries" {
+    const target: i32 = 7;
+    try std.testing.expectEqual(QualityDrift.drop, qualityDrift(target - 3, target));
+    try std.testing.expectEqual(QualityDrift.hold, qualityDrift(target - 2, target));
+    try std.testing.expectEqual(QualityDrift.hold, qualityDrift(target + 4, target));
+    try std.testing.expectEqual(QualityDrift.rise, qualityDrift(target + 5, target));
 }
 
 test "a worn or exotic hull wants more hours; a sharper tech needs fewer" {
