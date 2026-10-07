@@ -287,8 +287,8 @@ destroyed enemy hulls and call the new owner `disperseEnemyWrecks`:
 ```zig
 // P3f.2: drawn destroyed enemy hulls need a terminal disposition on the
 // lost field. Enemy recovers up to capacity; remainder disperses.
-try battle.disperseEnemyWrecks(gs, alloc, drawn_destroyed_enemy_hulls.items,
-    gs.clock.day_index, contract.planet_key, &rng_copy);
+try black_market.disperseEnemyWrecks(gs, alloc, drawn_destroyed_enemy_hulls.items,
+    contract.enemy_key, gs.clock.day_index, contract.planet_key, &rng_copy);
 break :blk "";
 ```
 
@@ -372,14 +372,11 @@ recruitment from untracked periphery raiders.
 ```zig
 /// Monthly pirate hull trickle (independent of market listings).
 /// Mints up to tuning.generation.pirate_replenishment_hulls_per_year/12
-/// new HullInstances drawn from PER's RAT (reuse faction_surplus draw
-/// pattern on stream .market), adds them to faction_rosters["PER"].
+/// new HullInstances drawn from PER's RAT on stream .rosters, adds them to
+/// faction_rosters["PER"].
 /// Called from tick.zig runMarkets on gs.clock.date.day == 1, after
 /// faction_surplus.runMonthly and after runNpcBlackMarketDraw.
-pub fn runPirateReplenishment(
-    gs: *state.GameState,
-    alloc: std.mem.Allocator,
-) !void
+pub fn runPirateReplenishment(gs: *state.GameState) !void
 ```
 
 The RAT used is the existing PER faction's configured table (drawn by the

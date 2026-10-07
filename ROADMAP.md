@@ -1360,10 +1360,11 @@ autoresolve participation. Every purchased vehicle or fighter is a unique
 economy, their markets replenish and are not limited by faction manufacturing.
 
 This foundation lets player and NPC companies buy the same assets from the
-market. NPC merc companies require four active mek lances (16 meks) for
-readiness; combat vehicles and aerospace may be retained as additional reserve
-assets and contribute their normal combat value without filling those mek
-slots. The exact P2 delivery order is in `TODO.md` after design approval.
+market. The later NPC merc-company economy work sets the four-active-lance
+(16-mek) readiness rule; combat vehicles and aerospace may then be retained as
+additional reserve assets and contribute their normal combat value without
+filling those mek slots. The exact P2 delivery order is in `TODO.md` after
+design approval.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.
