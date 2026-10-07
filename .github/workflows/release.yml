@@ -35,6 +35,9 @@ jobs:
           PY
           )
           [ "$RELEASE_TAG" = "v$version" ] || { echo "tag $RELEASE_TAG does not match v$version" >&2; exit 1; }
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          tag_commit=$(git rev-list -n 1 "$GITHUB_REF")
+          git merge-base --is-ancestor "$tag_commit" origin/main || { echo "tag commit $tag_commit is not reachable from origin/main" >&2; exit 1; }
 
   native:
     needs: verify-tag

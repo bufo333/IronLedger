@@ -413,11 +413,10 @@ test "R on a sound mount shows canonical MountIsFine refusal" {
     try std.testing.expect(std.mem.startsWith(u8, c.app.msg.slice(), "refused"));
 }
 
-test "m commits the refit plan (previously Enter)" {
+test "m refuses an empty refit plan" {
     const c = try app.clientForTest(std.testing.allocator);
     defer app.deinitForTest(c, std.testing.allocator);
     try toTab(c, .lab);
-    // 'm' now commits (was Enter); with an empty plan the command is refused.
     try app.pressForTest(c, .{ .char = 'm' });
     // An empty plan commit is refused ("nothing staged").
     try std.testing.expect(std.mem.startsWith(u8, c.app.msg.slice(), "refused"));
@@ -456,7 +455,6 @@ test "Enter on a free slot opens the install_at modal" {
     c.app.cur(0).* = target_idx.?;
     // Press Enter.
     try app.pressForTest(c, .enter);
-    // The modal should now be install_at.
     const is_install_at = switch (c.app.modal) {
         .install_at => true,
         else => false,
