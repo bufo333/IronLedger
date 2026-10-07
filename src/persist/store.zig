@@ -4321,7 +4321,7 @@ test "a battle report round-trips as fields, not as a row count" {
     }
 }
 
-test "battle reports beyond the former retention cap survive save and load" {
+test "battle reports beyond forty survive save and load" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 9_021 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);

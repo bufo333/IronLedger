@@ -1100,6 +1100,7 @@ fn writeHullCombatRecords(
 }
 
 pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
+    try gs.battle_reports.prepareRecord(gs.allocator());
     // Where and in what: the world's ground, the day's weather.
     const env: terrain_mod.Environment = blk: {
         const world = planet_mod.find(c.planet_key) orelse break :blk .{};
@@ -1486,7 +1487,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     for (try after_action.render(gs.allocator(), &report)) |line| try gs.log(.battle, ctx, "{s}", .{line});
     // The structured report is the permanent account; the log carries its
     // rendered campaign narrative.
-    try gs.battle_reports.record(gs.allocator(), report);
+    gs.battle_reports.recordAssumeCapacity(report);
     // Hulls left on the field pass into enemy hands — off
     // our books once the AAR has named them, but held, not struck off:
     // a recovery raid has something to win back.
@@ -1651,7 +1652,7 @@ fn forfeit(gs: *GameState, c: *contract_mod.Contract) !void {
     };
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
     for (try after_action.render(gs.allocator(), &report)) |line| try gs.log(.battle, ctx, "{s}", .{line});
-    try gs.battle_reports.record(gs.allocator(), report);
+    gs.battle_reports.recordAssumeCapacity(report);
     try @import("contract_control.zig").recordBattle(gs, c, 0, score_delta);
 }
 
@@ -1751,7 +1752,7 @@ fn concede(gs: *GameState, c: *contract_mod.Contract) !void {
     };
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
     for (try after_action.render(gs.allocator(), &report)) |line| try gs.log(.battle, ctx, "{s}", .{line});
-    try gs.battle_reports.record(gs.allocator(), report);
+    gs.battle_reports.recordAssumeCapacity(report);
     try @import("contract_control.zig").recordBattle(gs, c, 0, score_delta);
 }
 
@@ -2055,6 +2056,37 @@ test "battles resolve with consequences and stronger forces win more" {
         crated += o.quantity;
     };
     try std.testing.expect(wrecks + crated > 0);
+}
+
+test "resolveEngagement: report reservation is failure-atomic under OOM" {
+    const digest = @import("digest.zig");
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 777 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+
+    const before = digest.stateHash(&gs);
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+
+    try std.testing.expectError(error.OutOfMemory, resolveEngagement(&gs, gs.contracts.getPtr(@enumFromInt(1)).?));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(usize, 0), gs.battle_reports.kept.items.len);
 }
 
 test "hard hits wound pilots: a season of fighting sends someone to the medbay" {

@@ -248,9 +248,19 @@ pub const BattleReport = struct {
 pub const Journal = struct {
     kept: std.ArrayListUnmanaged(BattleReport) = .empty,
 
+    /// Reserves one report slot before battle resolution mutates campaign state.
+    pub fn prepareRecord(self: *Journal, alloc: std.mem.Allocator) !void {
+        try self.kept.ensureUnusedCapacity(alloc, 1);
+    }
+
     /// Keep a resolved engagement for the campaign lifetime.
     pub fn record(self: *Journal, alloc: std.mem.Allocator, report: BattleReport) !void {
         try self.kept.append(alloc, report);
+    }
+
+    /// Commits a report after `prepareRecord` reserved its slot.
+    pub fn recordAssumeCapacity(self: *Journal, report: BattleReport) void {
+        self.kept.appendAssumeCapacity(report);
     }
 
     /// One retained engagement, or null when no report with that ID exists.

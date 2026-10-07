@@ -6368,7 +6368,7 @@ test "the after-action panes read from the record" {
     // terminal loses the layout and nothing else.
     try std.testing.expect(view.flat.len >= 4);
 
-    // An id that aged out (or never was) is a miss, not a wrong report.
+    // An unknown report ID is a miss, not a wrong report.
     try std.testing.expect((try afterAction(al, &gs, @enumFromInt(9999))) == null);
 }
 
