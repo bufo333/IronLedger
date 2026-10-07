@@ -16,13 +16,14 @@ const tabName = app.tabName;
 const Report = struct {
     name: []const u8,
     desc: []const u8,
-    target: enum { summary, readiness, battles },
+    target: enum { summary, readiness, battles, leaderboard },
 };
 
 const reports = [_]Report{
     .{ .name = "Campaign summary", .desc = "the campaign in aggregate", .target = .summary },
     .{ .name = "Readiness", .desc = "every company: fatigue, morale, wounded, banked XP, depot", .target = .readiness },
     .{ .name = "Battles", .desc = "the engagements still on record", .target = .battles },
+    .{ .name = "Merc companies", .desc = "all merc outfits: founding, funds, hulls", .target = .leaderboard },
 };
 
 pub fn draw(self: *App) anyerror!void {
@@ -176,6 +177,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
                     self.battles_from_list = true;
                     self.openModal(.battle_list);
                 },
+                .leaderboard => self.openModal(.leaderboard),
             }
         },
         .battles => {
@@ -239,6 +241,12 @@ test "the reports pane opens the selected report under the cursor" {
     c.app.cur(3).* = 2;
     try app.pressForTest(c, .enter);
     try std.testing.expect(c.app.modal == .battle_list);
+
+    c.app.modal = .none;
+    c.app.focus = 3;
+    c.app.cur(3).* = 3;
+    try app.pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .leaderboard);
 }
 
 test "Enter on a checklist warning goes where the warning says; e opens the emblem picker" {

@@ -148,6 +148,10 @@ const Modal = union(enum) {
     operation_report: types.ContractId,
     /// Hull lifecycle record: combat history, maintenance log, ownership chain (P3c.6).
     mech: MechRef,
+    /// Read-only leaderboard of all NPC merc companies (Desk Reports hub).
+    leaderboard,
+    /// Detail sheet for one NPC merc company, entered from the leaderboard.
+    leaderboard_detail: types.MercCompanyId,
 };
 
 const MechView = enum { summary, combat, maintenance, ownership };
@@ -1465,7 +1469,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech => try self.drawList(al),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -2091,15 +2095,40 @@ pub const App = struct {
     };
     pub const global_legend = keys.entries(GlobalAction, &global_bindings);
 
-    /// The help modal's key reference: the keys every screen shares, then
-    /// each screen's, from the same tables that dispatch them.
-    fn keyHelpRows(al: std.mem.Allocator) ![]const []const u8 {
+    /// The help modal's key reference, filtered to the active context.
+    /// In-game: the shared global keys plus the focused screen's keys only.
+    /// Welcome: the welcome-screen keys.
+    /// Wizard: the current wizard-step keys.
+    fn keyHelpRows(self: *App, al: std.mem.Allocator) ![]const []const u8 {
         var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-        try rows.append(al, "  {a}everywhere{/}");
-        for (try keys.helpLines(al, &global_legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
-        for (screen_table) |spec| {
-            try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}}", .{spec.name}));
-            for (try keys.helpLines(al, spec.legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
+        switch (self.mode) {
+            .game => {
+                try rows.append(al, "  {a}everywhere{/}");
+                for (try keys.helpLines(al, &global_legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
+                const spec = screenSpec(self.tab);
+                try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}}", .{spec.name}));
+                for (try keys.helpLines(al, spec.legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
+            },
+            .welcome => {
+                try rows.append(al, "  {a}Welcome{/}");
+                for (try keys.helpLines(al, &welcome_legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
+            },
+            .wizard => {
+                const step_legend: []const keys.Entry = switch (self.step) {
+                    .commander => &commander_legend,
+                    .outfit => &outfit_legend,
+                    .company => &company_legend,
+                    .review => &review_legend,
+                };
+                const step_name = switch (self.step) {
+                    .commander => "New campaign · commander",
+                    .outfit => "New campaign · outfit and emblem",
+                    .company => "New campaign · company and back office",
+                    .review => "New campaign · review",
+                };
+                try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}}", .{step_name}));
+                for (try keys.helpLines(al, step_legend)) |l| try rows.append(al, try std.fmt.allocPrint(al, "    {s}", .{l}));
+            },
         }
         return rows.toOwnedSlice(al);
     }
@@ -2952,21 +2981,23 @@ pub const App = struct {
                     "  {a}turn rules{/}  wounded must be admitted and a negative treasury covered before the day can end; bankruptcy ends the game",
                 };
                 const concepts_b = [_][]const u8{
-                    "               skulls difficulty for the readiest company: ☠ one, ◐ half, green easy → amber → red; rating the same as a number (0.5–5), a range when intel cannot count the enemy, ! outmatched",
+                    "               difficulty for the readiest company: ● one pip per skull, green easy → amber → red; the number beside it is the exact rating (0.5–5), a range when intel cannot count the enemy, ! outmatched",
                     "               tons your company's mek tonnage · weight mix L light M medium H heavy A assault meks · enemy tons ~ estimated opposing tonnage · opposition lances, quality, faction (≈BV a fight at good intel)",
                 };
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 try rows.append(al, "");
-                try rows.appendSlice(al, try keyHelpRows(al));
-                try rows.append(al, "");
-                try rows.appendSlice(al, &concepts_a);
-                var bp_lo: [16]u8 = undefined;
-                var bp_hi: [16]u8 = undefined;
-                var bp_bb: [16]u8 = undefined;
-                try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}reputation{{/}}  Dragoons rating letter sets pay (F={s} … A*={s}); letter rises with combat record · complete +1 (+VP) · breach −2 · decisions show their rep effect", .{ types.bpText(&bp_lo, q.rating_pay_lo_bp), types.bpText(&bp_hi, q.rating_pay_hi_bp) }));
-                try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}board cols{{/}}  emp employer · LY light-years off · band in ring / beachhead (pay {s}, hardship, slow resupply) · mo months · salv salvage % (cash = salvage exchange: paid in cash, no wrecks) · rights command rights · transit days out", .{types.bpText(&bp_bb, q.beachhead_pay_bp)}));
-                try rows.appendSlice(al, &concepts_b);
-                try rows.append(al, try std.fmt.allocPrint(al, "               factions {s}", .{try q.factionLegend(al)}));
+                try rows.appendSlice(al, try self.keyHelpRows(al));
+                if (self.mode == .game) {
+                    try rows.append(al, "");
+                    try rows.appendSlice(al, &concepts_a);
+                    var bp_lo: [16]u8 = undefined;
+                    var bp_hi: [16]u8 = undefined;
+                    var bp_bb: [16]u8 = undefined;
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}reputation{{/}}  Dragoons rating letter sets pay (F={s} … A*={s}); letter rises with combat record · complete +1 (+VP) · breach −2 · decisions show their rep effect", .{ types.bpText(&bp_lo, q.rating_pay_lo_bp), types.bpText(&bp_hi, q.rating_pay_hi_bp) }));
+                    try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}board cols{{/}}  emp employer · LY light-years off · band in ring / beachhead (pay {s}, hardship, slow resupply) · mo months · salv salvage % (cash = salvage exchange: paid in cash, no wrecks) · rights command rights · transit days out", .{types.bpText(&bp_bb, q.beachhead_pay_bp)}));
+                    try rows.appendSlice(al, &concepts_b);
+                    try rows.append(al, try std.fmt.allocPrint(al, "               factions {s}", .{try q.factionLegend(al)}));
+                }
                 try rows.append(al, "");
                 try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keyHint(SheetAction, al, &sheet_bindings, .close, "close")}));
                 return .{ .title = "HELP", .rows = rows.items, .read_only = true, .w = layout.modal.help_w, .max_h = layout.modal.help_h };
@@ -3211,6 +3242,29 @@ pub const App = struct {
                     .table = try q.tableOf(al, q.battle_cols, rows),
                     .n = rows.len,
                     .empty = "{d}no engagements on record yet — take a combat contract{/}",
+                    .w = layout.modal.battle_list_w,
+                    .max_h = full_h,
+                };
+            },
+            .leaderboard => {
+                const rows = try q.leaderboard(al, self.state());
+                return .{
+                    .title = try listTitle(al, "MERC COMPANIES", "read", "close", false),
+                    .right_title = "most funds first",
+                    .table = try q.tableOf(al, q.leaderboard_cols, rows),
+                    .n = rows.len,
+                    .empty = "{d}no merc companies on record yet{/}",
+                    .w = layout.modal.battle_list_w,
+                    .max_h = full_h,
+                };
+            },
+            .leaderboard_detail => |id| {
+                const rows = try q.mercCompanyDetail(al, self.state(), id);
+                return .{
+                    .title = try listTitle(al, "MERC COMPANY", null, "close", false),
+                    .rows = rows,
+                    .scroll = true,
+                    .read_only = true,
                     .w = layout.modal.battle_list_w,
                     .max_h = full_h,
                 };
@@ -3786,6 +3840,11 @@ pub const App = struct {
                 if (rows.len == 0) return;
                 self.battles_from_list = true;
                 self.openModal(.{ .after_action = rows[@min(self.modal_cursor, rows.len - 1)].id });
+            },
+            .leaderboard => {
+                const rows = try q.leaderboard(al, self.state());
+                if (rows.len == 0) return;
+                self.openModal(.{ .leaderboard_detail = rows[@min(self.modal_cursor, rows.len - 1)].id });
             },
             .raise_hulls => try self.raiseTake(),
             .raise_support => try self.raiseBuySupport(),
@@ -4383,7 +4442,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech => try self.listKey(key),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {
@@ -5232,4 +5291,38 @@ test "generateCampaign force-loads selected thumbnail before reading its bytes (
     // After generateCampaign the thumbnail should be decoded (PNG is on disk).
     try std.testing.expect(app.w_thumbs[5] != null);
     try std.testing.expect(app.w_thumbs[5].?.bytes.len > 0);
+}
+
+test "help overlay is context-aware: game shows focused screen only; switching tabs changes it" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    // clientForTest starts in game mode on the Desk screen.
+    try std.testing.expectEqual(Mode.game, c.app.mode);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+
+    // On Desk: help rows must contain "F1 Desk" and must NOT contain "F8 Lab".
+    const desk_rows = try c.app.keyHelpRows(al);
+    var found_desk = false;
+    var found_lab = false;
+    for (desk_rows) |row| {
+        if (std.mem.indexOf(u8, row, "F1 Desk") != null) found_desk = true;
+        if (std.mem.indexOf(u8, row, "F8 Lab") != null) found_lab = true;
+    }
+    try std.testing.expect(found_desk);
+    try std.testing.expect(!found_lab);
+
+    // Switch to Lab (F8); help rows must now contain "F8 Lab" and not "F1 Desk".
+    try pressForTest(c, .{ .f = 8 });
+    try std.testing.expectEqual(Tab.lab, c.app.tab);
+    const lab_rows = try c.app.keyHelpRows(al);
+    var found_lab2 = false;
+    var found_desk2 = false;
+    for (lab_rows) |row| {
+        if (std.mem.indexOf(u8, row, "F8 Lab") != null) found_lab2 = true;
+        if (std.mem.indexOf(u8, row, "F1 Desk") != null) found_desk2 = true;
+    }
+    try std.testing.expect(found_lab2);
+    try std.testing.expect(!found_desk2);
 }

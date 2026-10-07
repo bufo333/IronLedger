@@ -163,11 +163,10 @@ pub const Screen = struct {
                 .glyph => |g| g,
             };
             if (col >= limit) break;
-            // Skulls fall back to letters under --ascii, and a replaced
-            // byte to a question mark.
+            // Difficulty pips fall back to a letter under --ascii, and a
+            // replaced byte to a question mark.
             const glyph: u21 = if (self.ascii) switch (cp) {
-                '☠' => 'X',
-                '◐' => 'x',
+                '●' => 'O',
                 0xFFFD => '?',
                 else => cp,
             } else cp;

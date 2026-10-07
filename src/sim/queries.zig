@@ -659,7 +659,7 @@ pub const board_cols: []const table.Col = &.{
     .{ .name = "id", .justify = .right },               .{ .name = "kind" },                  .{ .name = "world" },                   .{ .name = "emp" },
     .{ .name = "LY", .justify = .right, .drop = 3 },    .{ .name = "band" },                  .{ .name = "mo", .justify = .right },   .{ .name = "pay/mo", .justify = .right },
     .{ .name = "total", .justify = .right, .drop = 3 }, .{ .name = "enemy" },                 .{ .name = "salv", .justify = .right }, .{ .name = "rights" },
-    .{ .name = "transit", .justify = .right },          .{ .name = "skulls" },                .{ .name = "rating" },                  .{ .name = "readiest co." },
+    .{ .name = "transit", .justify = .right },          .{ .name = "difficulty" },            .{ .name = "rating" },                  .{ .name = "readiest co." },
     .{ .name = "tons", .justify = .right, .drop = 1 },  .{ .name = "weight mix", .drop = 2 }, .{ .name = "enemy tons", .drop = 2 },   .{ .name = "opposition" },
     .{ .name = "" },
 };
@@ -768,7 +768,7 @@ pub fn bestRating(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) !?Of
     return null;
 }
 
-/// "☠☠☠◐ 3.5 Alpha 610t (L4 M8 H0 A0) vs ~720t" for a board row, coloured
+/// "●●●● 3.5 Alpha 610t (L4 M8 H0 A0) vs ~720t" for a board row, coloured
 /// by difficulty.
 pub fn boardSkulls(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) ![]const u8 {
     const r = (try bestRating(alloc, gs, offer_id)) orelse return "{d}no company in range{/}";
@@ -781,18 +781,14 @@ pub fn ratingLine(alloc: Alloc, gs: *GameState, r: OfferRating) ![]const u8 {
     return try std.fmt.allocPrint(alloc, "{s}{s}{{/}} {s} {s} · {s}", .{ mk, try skullGlyphs(alloc, r.half_hi), try skullText(alloc, r), try forceName(alloc, gs, r.company), try tonnageText(alloc, r) });
 }
 
-/// "☠ ☠ ☠ ◐" (or "X X X x" with ascii) for half skulls; the TUI swaps
-/// glyphs. Spaced so a terminal like kitty can draw each symbol two cells
+/// "● ● ● ●" (or "O O O O" with ascii) for difficulty pips; each pip is one
+/// full skull. Spaced so a terminal like kitty can draw each symbol two cells
 /// wide.
 pub fn skullGlyphs(alloc: Alloc, half: u8) ![]const u8 {
     var out: std.ArrayListUnmanaged(u8) = .empty;
-    for (0..half / 2) |i| {
+    for (0..half / 2 + half % 2) |i| {
         if (i > 0) try out.append(alloc, ' ');
-        try out.appendSlice(alloc, "☠");
-    }
-    if (half % 2 == 1) {
-        if (half > 1) try out.append(alloc, ' ');
-        try out.appendSlice(alloc, "◐");
+        try out.appendSlice(alloc, "●");
     }
     return out.items;
 }
@@ -907,10 +903,10 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             const roe = @import("battle.zig").effectiveRoe(gs, c, c.assigned_company);
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    ROE         {s}{s}", .{ roe.describe(), if (c.terms.command_rights.overridesRoe()) " {d}(set by integrated command){/}" else " {d}(Forces o on the company row){/}" }));
         }
-        // Live skulls: what the company can field today against the
+        // Live difficulty: what the company can field today against the
         // opposition — a mauled company's odds fall as it wears down.
         if (try rateOffer(alloc, gs, c, c.assigned_company)) |rt| {
-            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    skulls      {s} · wins {d}% of fights, loses the field {d}%{s}", .{
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    difficulty  {s} · wins {d}% of fights, loses the field {d}%{s}", .{
                 try ratingLine(alloc, gs, rt), rt.win_pct, rt.lose_field_pct,
                 if (rt.warrantsWarning()) " {c}— outmatched: consider cautious ROE or recall{/}" else "",
             }));
@@ -5012,7 +5008,7 @@ pub const Candidate = struct {
 pub const candidates_cols: []const table.Col = &.{
     .{ .name = "company" },                    .{ .name = "stands" },                    .{ .name = "jumps", .justify = .right }, .{ .name = "days", .justify = .right },
     .{ .name = "fatigue", .justify = .right }, .{ .name = "morale", .justify = .right }, .{ .name = "depot", .justify = .right }, .{ .name = "spent", .justify = .right },
-    .{ .name = "wounded", .justify = .right }, .{ .name = "skulls" },                    .{ .name = "rating" },                   .{ .name = "win / lose field" },
+    .{ .name = "wounded", .justify = .right }, .{ .name = "difficulty" },                .{ .name = "rating" },                   .{ .name = "win / lose field" },
     .{ .name = "tonnage" },                    .{ .name = "" },
 };
 
@@ -5683,7 +5679,7 @@ test "skulls on the board, the candidates, the active pane — and an outmatched
     try std.testing.expect(view.board.len > 0);
     for (view.board) |row| {
         try std.testing.expectEqual(board_cols.len, row.cells.len);
-        try std.testing.expect(std.mem.indexOf(u8, row.cells[13], "☠") != null or std.mem.indexOf(u8, row.cells[13], "◐") != null);
+        try std.testing.expect(std.mem.indexOf(u8, row.cells[13], "●") != null);
     }
     // The board renders at natural width with every column under its name.
     const lines = try (try view.boardTable(a)).render(a);
@@ -5715,6 +5711,157 @@ test "skulls on the board, the candidates, the active pane — and an outmatched
         pane_ok = true;
     };
     try std.testing.expect(pane_ok);
+}
+
+// ----------------------------------------------------------- leaderboard
+
+pub const leaderboard_cols: []const table.Col = &.{
+    .{ .name = "id", .justify = .right },      .{ .name = "company" },               .{ .name = "founder" },
+    .{ .name = "founded", .justify = .right }, .{ .name = "dissolved" },             .{ .name = "cbills", .justify = .right },
+    .{ .name = "hulls", .justify = .right },   .{ .name = "bv", .justify = .right }, .{ .name = "" },
+};
+
+pub const LeaderboardRow = struct {
+    id: types.MercCompanyId,
+    cells: table.Row,
+};
+
+/// Every merc company as one sortable row, sorted by cbills descending.
+/// Insolvent active companies carry an amber tag. Pure, arena-allocated.
+pub fn leaderboard(alloc: Alloc, gs: *GameState) ![]LeaderboardRow {
+    var out: std.ArrayListUnmanaged(LeaderboardRow) = .empty;
+    var it = gs.merc_companies.iterator();
+    while (it.next()) |e| {
+        const mc = e.value_ptr;
+        const roster = gs.merc_company_rosters.get(mc.id);
+        const hull_count: usize = if (roster) |r| r.items.len else 0;
+        const bv = rivals_m.mercCompanyFieldableBv(gs, mc.id);
+        const insolvent = rivals_m.mercCompanyInsolvent(gs, mc.id);
+        const name_cell = if (insolvent)
+            try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{try table.plain(alloc, mc.unit_name)})
+        else
+            try table.plain(alloc, mc.unit_name);
+        const dissolved_cell = if (mc.dissolved_day == 0)
+            "{g}active{/}"
+        else
+            try std.fmt.allocPrint(alloc, "d{d}", .{mc.dissolved_day});
+        try out.append(alloc, .{
+            .id = mc.id,
+            .cells = try table.row(alloc, &.{
+                try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(mc.id)}),
+                name_cell,
+                try std.fmt.allocPrint(alloc, "{s} {s}", .{ mc.commander_first, mc.commander_last }),
+                try std.fmt.allocPrint(alloc, "d{d}", .{mc.founded_day}),
+                dissolved_cell,
+                try moneyShort(alloc, mc.cbills),
+                try std.fmt.allocPrint(alloc, "{d}", .{hull_count}),
+                try moneyShort(alloc, bv),
+                "",
+            }),
+        });
+    }
+    std.mem.sort(LeaderboardRow, out.items, gs, struct {
+        fn lt(gs2: *GameState, a: LeaderboardRow, b: LeaderboardRow) bool {
+            const mc_a = gs2.merc_companies.getPtr(a.id) orelse return false;
+            const mc_b = gs2.merc_companies.getPtr(b.id) orelse return true;
+            if (mc_a.cbills != mc_b.cbills) return mc_a.cbills > mc_b.cbills;
+            return @intFromEnum(a.id) < @intFromEnum(b.id);
+        }
+    }.lt);
+    return out.toOwnedSlice(alloc);
+}
+
+/// Detail sheet for one merc company: identity, lifecycle, treasury,
+/// strength, hull roster, and linked rival standing when present.
+/// Returns markup lines suitable for a scrolling sheet modal.
+pub fn mercCompanyDetail(alloc: Alloc, gs: *GameState, id: types.MercCompanyId) ![]const []const u8 {
+    const mc = gs.merc_companies.getPtr(id) orelse return &.{};
+    var lines: std.ArrayListUnmanaged([]const u8) = .empty;
+    try lines.append(alloc, "");
+    // Identity.
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  {{a}}{s}{{/}}", .{try table.plain(alloc, mc.unit_name)}));
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  commander   {s} {s}", .{ mc.commander_first, mc.commander_last }));
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  archetype   {s}", .{mc.archetype_key}));
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  faction     {s}  side {s}  doctrine {s}", .{ mc.faction_key, @tagName(mc.side), @tagName(mc.doctrine) }));
+    try lines.append(alloc, "");
+    // Lifecycle.
+    const diss: []const u8 = if (mc.dissolved_day == 0) "{g}active{/}" else try std.fmt.allocPrint(alloc, "d{d}", .{mc.dissolved_day});
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  founded     d{d}  dissolved  {s}", .{ mc.founded_day, diss }));
+    // Treasury and strength.
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  treasury    {s}", .{try money(alloc, mc.cbills)}));
+    const bv = rivals_m.mercCompanyFieldableBv(gs, id);
+    const insolvent = rivals_m.mercCompanyInsolvent(gs, id);
+    const ins_tag: []const u8 = if (insolvent) "  {c}(insolvent){/}" else "";
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  fieldable   {s} BV{s}", .{ try money(alloc, bv), ins_tag }));
+    // Hull roster breakdown.
+    if (gs.merc_company_rosters.get(id)) |roster| {
+        try lines.append(alloc, "");
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "  hulls ({d})", .{roster.items.len}));
+        for (roster.items) |hid| {
+            const inst = gs.hull_instances.getPtr(hid) orelse continue;
+            const status_tag: []const u8 = if (inst.status == .permanently_destroyed) " {c}(destroyed){/}" else "";
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "    {s}{s}", .{ inst.base_key, status_tag }));
+        }
+    }
+    // Linked rival standing.
+    var rv_it = gs.rivals.iterator();
+    while (rv_it.next()) |rv_e| {
+        const rv = rv_e.value_ptr;
+        if (rv.merc_company_id != id) continue;
+        try lines.append(alloc, "");
+        const status_label = rivals_m.statusFor(rv.standing).label();
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "  rival       {s}  standing {d}  status {s}", .{ try table.plain(alloc, rv.unit_name), rv.standing, status_label }));
+        break;
+    }
+    try lines.append(alloc, "");
+    return lines.toOwnedSlice(alloc);
+}
+
+test "leaderboard: row per company, sorted by cbills desc, active/dissolved tags, hull count" {
+    // Use a bare GameState so no campaign merc companies are auto-generated.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 42 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const alloc = gs.allocator();
+
+    // Seed two merc companies with IDs unlikely to collide.
+    const mc1: types.MercCompanyId = @enumFromInt(501);
+    const mc2: types.MercCompanyId = @enumFromInt(502);
+    try gs.merc_companies.put(alloc, mc1, .{ .id = mc1, .unit_name = "Alpha Wolves", .commander_first = "Hans", .commander_last = "Reinhardt", .faction_key = "LC", .cbills = 2_000_000, .founded_day = 10, .dissolved_day = 0 });
+    try gs.merc_companies.put(alloc, mc2, .{ .id = mc2, .unit_name = "Iron Vipers", .commander_first = "Yuki", .commander_last = "Sato", .faction_key = "DC", .cbills = 1_000_000, .founded_day = 5, .dissolved_day = 42 });
+
+    // Roster with one hull for mc1.
+    const hid: types.HullInstanceId = @enumFromInt(9001);
+    try gs.hull_instances.put(alloc, hid, .{ .id = hid, .base_key = "SHD-2H", .status = .active });
+    var r1: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+    try r1.append(alloc, hid);
+    try gs.merc_company_rosters.put(alloc, mc1, r1);
+
+    const rows = try leaderboard(a, &gs);
+    try std.testing.expectEqual(@as(usize, 2), rows.len);
+    // mc1 has more cbills → comes first.
+    try std.testing.expectEqual(mc1, rows[0].id);
+    try std.testing.expectEqual(mc2, rows[1].id);
+    // dissolved cell: mc1 active, mc2 dissolved on day 42.
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].cells[4], "active") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[1].cells[4], "d42") != null);
+    // hull count column (index 6).
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].cells[6], "1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[1].cells[6], "0") != null);
+
+    // mercCompanyDetail for mc1 returns non-empty lines naming the commander and faction.
+    const detail = try mercCompanyDetail(a, &gs, mc1);
+    try std.testing.expect(detail.len > 0);
+    var found_commander = false;
+    var found_faction = false;
+    for (detail) |l| {
+        if (std.mem.indexOf(u8, l, "Reinhardt") != null) found_commander = true;
+        if (std.mem.indexOf(u8, l, "LC") != null) found_faction = true;
+    }
+    try std.testing.expect(found_commander);
+    try std.testing.expect(found_faction);
 }
 
 // ------------------------------------------------------------ REPL views

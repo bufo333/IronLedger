@@ -102,7 +102,10 @@ Keys map to actions through binding tables (`src/tui/keys.zig`): one
 table for the keys every screen shares, one per screen. The screen's
 handler switches on the action, so a key works only if it is listed, and
 the footer, pane titles, help modal and the reference under **Keys** below
-are all generated from the same tables. Screen keys are shortcuts for
+are all generated from the same tables. The help overlay (`?`) shows only
+the context-relevant keys: in-game it shows the shared global keys plus the
+focused screen's keys only; the lobby shows the welcome-screen keys; the new
+campaign wizard shows the current step's keys. Screen keys are shortcuts for
 commands the command line can also run.
 
 The command line and the REPL share one parser, `src/sim/cli.zig`
@@ -139,7 +142,7 @@ no room.
 
 | Tab | Screen | Panes |
 |---|---|---|
-| F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs · Reports |
+| F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs · Reports (Campaign summary · Readiness · Battles · Merc companies leaderboard — Enter drills into a per-company detail sheet) |
 | F2 | Map | Star map · World |
 | F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool |
 | F4 | Contracts | Board · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log |
@@ -154,7 +157,8 @@ no room.
 
 Every key the client answers, from the binding tables that dispatch them
 (`src/tui/keys.zig`, each screen's `bindings`). The footer, the pane
-titles and the help modal come from the same tables.
+titles and the help modal come from the same tables. The help overlay
+filters to the active context (see the Keys description above).
 
 <!-- keys: generated from the binding tables by `game --keys-markdown`; a test compares this block -->
 
@@ -665,6 +669,10 @@ and the TUI:
 - `hqList`, `hqDetailView`, `hqCompanies`, `hqLinks` and `hqRoster`
 - `lab(unit)` (from `meklab.validate` + `state.labItems`)
 - `people(filter)` and `personRecord(id)`
+- `leaderboard` (all NPC merc companies sorted by C-bills; each row carries
+  a `LeaderboardRow.id` the Desk Reports hub uses to open the detail sheet)
+- `mercCompanyDetail(id)` (read-only lines: identity, lifecycle, treasury,
+  fieldable BV, hull roster, linked rival standing)
 
 Every query is pure and allocator-parameterized so the TUI can rebuild its
 view model each frame from an arena.
