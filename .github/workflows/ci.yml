@@ -128,7 +128,7 @@ jobs:
           ./docs/verify-contract.sh
           bash docs/clean-package.sh ReleaseFast "-Dwindows-sqlite-lib-dir=$sqlite" "-Dwindows-sqlite-dll=$(Join-Path $sqlite 'sqlite3.dll')"
           python docs/data-fixtures.py
-          powershell -ExecutionPolicy Bypass -File docs/windows_smoke.ps1 zig-out/bin/game.exe (Join-Path $env:RUNNER_TEMP 'windows-smoke.db')
+          pwsh -ExecutionPolicy Bypass -File docs/windows_smoke.ps1 zig-out/bin/game.exe (Join-Path $env:RUNNER_TEMP 'windows-smoke.db')
 
       - name: Package core ZIP (macOS and Linux)
         if: runner.os != 'Windows'
@@ -153,7 +153,7 @@ jobs:
           zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix $prefix "-Dwindows-sqlite-lib-dir=$sqlite" "-Dwindows-sqlite-dll=$(Join-Path $sqlite 'sqlite3.dll')"
           python scripts/package_release.py package --prefix $prefix --version 1.0.0 --target windows-x64 --output $release --source-root . --sqlite-archive (Join-Path $env:RUNNER_TEMP 'sqlite-dll-win-x64.zip')
           python scripts/package_release.py validate --archive (Join-Path $release 'iron-ledger-1.0.0-windows-x64.zip') --version 1.0.0 --target windows-x64 --source-root .
-          powershell -ExecutionPolicy Bypass -File docs/windows_smoke.ps1 (Join-Path $prefix 'bin/game.exe') (Join-Path $env:RUNNER_TEMP 'windows-package-smoke.db')
+          pwsh -ExecutionPolicy Bypass -File docs/windows_smoke.ps1 (Join-Path $prefix 'bin/game.exe') (Join-Path $env:RUNNER_TEMP 'windows-package-smoke.db')
           (Get-FileHash -Algorithm SHA256 (Join-Path $release 'iron-ledger-1.0.0-windows-x64.zip')).Hash.ToLowerInvariant() + '  iron-ledger-1.0.0-windows-x64.zip' | Set-Content -NoNewline (Join-Path $release 'windows-x64.sha256')
 
       # actions/upload-artifact@v4
