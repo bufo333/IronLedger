@@ -125,7 +125,7 @@ jobs:
           } finally {
             $env:PATH = $originalPath
           }
-          ./docs/verify-contract.sh
+          bash docs/verify-contract.sh
           bash docs/clean-package.sh ReleaseFast "-Dwindows-sqlite-lib-dir=$sqlite" "-Dwindows-sqlite-dll=$(Join-Path $sqlite 'sqlite3.dll')"
           python docs/data-fixtures.py
           pwsh -ExecutionPolicy Bypass -File docs/windows_smoke.ps1 zig-out/bin/game.exe (Join-Path $env:RUNNER_TEMP 'windows-smoke.db')
