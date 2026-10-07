@@ -677,6 +677,12 @@ pub const GameState = struct {
         key: ?[]const u8,
     };
 
+    /// Apply a standing delta to a known current value, clamped to the
+    /// campaign's standing bounds.
+    pub fn adjustedStandingValue(current: i32, delta: i32) i32 {
+        return std.math.clamp(current + delta, -100, 100);
+    }
+
     /// Calculate a clamped standing result, reserve map capacity, and own a
     /// new faction key when necessary. Preparation changes no standing value.
     pub fn prepareStandingAdjustment(self: *GameState, faction: []const u8, delta: i32) !PreparedStandingAdjustment {
@@ -685,7 +691,7 @@ pub const GameState = struct {
         const key = if (existing) null else try self.allocator().dupe(u8, faction);
         return .{
             .faction = faction,
-            .value = std.math.clamp(self.standing(faction) + delta, -100, 100),
+            .value = adjustedStandingValue(self.standing(faction), delta),
             .key = key,
         };
     }

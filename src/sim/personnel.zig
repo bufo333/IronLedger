@@ -937,6 +937,40 @@ test "prepared profit shares and tour awards leave no partial personnel effects 
     try std.testing.expect(complete.ledger.balance() < 100_000);
 }
 
+test "prepared profit shares leave morale, ledger, and log unchanged on every allocation failure" {
+    const digest = @import("digest.zig");
+    var i: usize = 0;
+    var failed = false;
+    while (true) : (i += 1) {
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+        var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
+        const holder = try gs.hirePerson("Share", "Holder", .mekwarrior);
+        gs.person(holder).?.shares = 1;
+        const contract: types.ContractId = @enumFromInt(1);
+        try gs.postTransaction(.{ .day = 0, .amount = 100_000, .category = .contract_payment, .contract = contract });
+        const before = digest.stateHash(&gs);
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
+        gs.arena.child_allocator = failing.allocator();
+        var scratch = std.heap.ArenaAllocator.init(gs.scratch());
+        defer scratch.deinit();
+        if (prepareProfitShare(scratch.allocator(), &gs, contract, .none, 0)) |prepared| {
+            commitProfitShare(&gs, contract, .none, prepared);
+            try std.testing.expect(gs.person(holder).?.morale > 50);
+            try std.testing.expectEqual(@as(usize, 2), gs.ledger.transactions.items.len);
+            try std.testing.expectEqual(@as(usize, 1), gs.event_log.items.len);
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+            failed = true;
+        }
+    }
+    try std.testing.expect(failed);
+}
+
 test "a raised company is an empty skeleton; hulls bought for it land in a lance or ship with the map transit; halls crew it" {
     const unit_mod = @import("../domain/unit.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12 });

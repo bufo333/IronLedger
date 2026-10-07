@@ -102,6 +102,8 @@ pub const PreparedCompletion = struct {
     gain: i32,
     employer: GameState.PreparedStandingAdjustment,
     enemy: ?GameState.PreparedStandingAdjustment,
+    employer_result: i32,
+    enemy_result: ?i32,
     finish_tour: PreparedFinishTour,
     tour: personnel.PreparedContractTour,
     shares: personnel.PreparedProfitShare,
@@ -146,7 +148,7 @@ fn onBooks(gs: *GameState) u32 {
 fn prepareCompletion(gs: *GameState, c: *const contract_mod.Contract, broken: bool) !PreparedCompletion {
     var scratch = std.heap.ArenaAllocator.init(gs.scratch());
     errdefer scratch.deinit();
-    if (c.status != .active) return .{ .scratch = scratch, .active = false, .id = c.id, .company = c.assigned_company, .bonus = null, .gain = 0, .employer = undefined, .enemy = null, .finish_tour = undefined, .tour = undefined, .shares = undefined, .standing_log = "", .morale_log = null, .completion_log = "" };
+    if (c.status != .active) return .{ .scratch = scratch, .active = false, .id = c.id, .company = c.assigned_company, .bonus = null, .gain = 0, .employer = undefined, .enemy = null, .employer_result = 0, .enemy_result = null, .finish_tour = undefined, .tour = undefined, .shares = undefined, .standing_log = "", .morale_log = null, .completion_log = "" };
     const months: i64 = if (c.end_day) |end| @divTrunc(@as(i64, end) - @as(i64, gs.clock.day_index), types.days_per_month) else 0;
     const amount: types.CBills = if (broken and months > 0) @divTrunc(c.monthly_net * @max(0, months), 2) else 0;
     const bonus = if (amount > 0) try gs.prepareTreasuryPosting(.outfit, .{ .day = gs.clock.day_index, .amount = amount, .category = .contract_payment, .company = c.assigned_company, .contract = c.id, .note = "early completion bonus" }) else null;
@@ -154,8 +156,13 @@ fn prepareCompletion(gs: *GameState, c: *const contract_mod.Contract, broken: bo
     const vp_bonus = std.math.clamp(@divTrunc(c.victory_points, t.rep_vp_per_point), t.rep_vp_bonus_min, t.rep_vp_bonus_max);
     const gain: i32 = if (c.victory_points < 0) vp_bonus else 1 + vp_bonus;
     const delta = @max(t.standing_gain_floor, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)) + @as(i32, @intFromBool(c.beachhead)) * t.standing_beachhead_bonus;
-    const employer = try gs.prepareStandingAdjustment(c.employer_key, delta);
-    const enemy = if (!std.mem.eql(u8, c.enemy_key, "PER")) try gs.prepareStandingAdjustment(c.enemy_key, -t.standing_enemy_loss) else null;
+    var employer = try gs.prepareStandingAdjustment(c.employer_key, delta);
+    const employer_result = employer.value;
+    const enemy = if (!std.mem.eql(u8, c.enemy_key, "PER") and !std.mem.eql(u8, c.enemy_key, c.employer_key)) try gs.prepareStandingAdjustment(c.enemy_key, -t.standing_enemy_loss) else null;
+    const enemy_result = if (std.mem.eql(u8, c.enemy_key, "PER")) null else if (std.mem.eql(u8, c.enemy_key, c.employer_key)) blk: {
+        employer.value = GameState.adjustedStandingValue(employer_result, -t.standing_enemy_loss);
+        break :blk employer.value;
+    } else enemy.?.value;
     const finish_tour = prepareFinishTour(gs, c);
     const strong = @intFromEnum(c.gradeOf()) >= @intFromEnum(contract_mod.Contract.Grade.strong);
     const tour = try personnel.prepareContractTour(scratch.allocator(), gs, c.assigned_company, c.gradeOf() == .outstanding);
@@ -164,12 +171,12 @@ fn prepareCompletion(gs: *GameState, c: *const contract_mod.Contract, broken: bo
     try gs.reserveLog(tour.log_slots + shares.logSlots() + 2 + @as(usize, @intFromBool(strong)));
     try gs.faction_standing.ensureUnusedCapacity(gs.allocator(), @as(usize, @intFromBool(employer.key != null)) + @as(usize, @intFromBool(if (enemy) |standing| standing.key != null else false)));
     var date: [10]u8 = undefined;
-    const enemy_text = if (enemy) |s| try std.fmt.allocPrint(gs.allocator(), " · {s} −{d} → {d}", .{ c.enemy_key, t.standing_enemy_loss, s.value }) else "";
-    const standing_log = try std.fmt.allocPrint(gs.allocator(), "{s} [standing] {s} +{d} → {d}{s}", .{ gs.clock.date.text(&date), c.employer_key, @max(t.standing_gain_floor, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)), employer.value, enemy_text });
+    const enemy_text = if (enemy_result) |value| try std.fmt.allocPrint(gs.allocator(), " · {s} −{d} → {d}", .{ c.enemy_key, t.standing_enemy_loss, value }) else "";
+    const standing_log = try std.fmt.allocPrint(gs.allocator(), "{s} [standing] {s} +{d} → {d}{s}", .{ gs.clock.date.text(&date), c.employer_key, @max(t.standing_gain_floor, t.standing_complete_gain + @divTrunc(c.victory_points, t.standing_vp_divisor)), employer_result, enemy_text });
     const morale_log = if (strong) try std.fmt.allocPrint(gs.allocator(), "{s} [morale] a {s} tour — spirits lift across the outfit (+{d} morale, {d} people)", .{ gs.clock.date.text(&date), c.grade(), tuning.person.morale_contract_strong, onBooks(gs) }) else null;
     const pay_note: []const u8 = if (months <= 0) "the employer pays in full" else if (broken) "the employer pays in full plus the early-completion bonus" else "closed out early — the remaining payments are forfeited";
     const completion_log = try std.fmt.allocPrint(gs.allocator(), "{s} [{s}] contract COMPLETE — {s} ({s}, {d} VP, score {d}) — reputation {s} ({s}{d}); {s}", .{ gs.clock.date.text(&date), @tagName(c.kind), c.grade(), if (broken) "objectives broken" else "closed out", c.victory_points, c.score, if (vp_bonus > 0) "soars" else if (gain > 0) "rises" else if (gain == 0) "unchanged" else "slips", if (gain >= 0) "+" else "", gain, pay_note });
-    return .{ .scratch = scratch, .active = true, .id = c.id, .company = c.assigned_company, .bonus = bonus, .gain = gain, .employer = employer, .enemy = enemy, .finish_tour = finish_tour, .tour = tour, .shares = shares, .standing_log = standing_log, .morale_log = morale_log, .completion_log = completion_log };
+    return .{ .scratch = scratch, .active = true, .id = c.id, .company = c.assigned_company, .bonus = bonus, .gain = gain, .employer = employer, .enemy = enemy, .employer_result = employer_result, .enemy_result = enemy_result, .finish_tour = finish_tour, .tour = tour, .shares = shares, .standing_log = standing_log, .morale_log = morale_log, .completion_log = completion_log };
 }
 
 pub fn prepareComplete(gs: *GameState, id: types.ContractId, broken: bool) !PreparedCompletion {
@@ -469,49 +476,60 @@ fn completionFixture(gs: *GameState, terminal: bool) !types.ContractId {
 
 test "recordBattle is atomic through terminal completion and retries equivalently" {
     const digest = @import("digest.zig");
-    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer outer.deinit();
-    var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
-    const id = try completionFixture(&gs, true);
-    const before = digest.stateHash(&gs);
     var failed = false;
+    var successful_hash: ?u64 = null;
     var i: usize = 0;
     while (true) : (i += 1) {
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+        var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
+        const id = try completionFixture(&gs, true);
+        const before = digest.stateHash(&gs);
         gs.arena.state.used_list = null;
         gs.arena.state.free_list = null;
         var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
         gs.arena.child_allocator = failing.allocator();
-        if (recordBattle(&gs, gs.contracts.getPtr(id).?, 50, 4)) |_| break else |err| {
+        if (recordBattle(&gs, gs.contracts.getPtr(id).?, 50, 4)) |_| {
+            try std.testing.expectEqual(contract_mod.ContractStatus.completed, gs.contracts.getPtr(id).?.status);
+            try std.testing.expect(gs.person(@enumFromInt(1)).?.hasAward("commendation"));
+            successful_hash = digest.stateHash(&gs);
+            break;
+        } else |err| {
             try std.testing.expectEqual(error.OutOfMemory, err);
             try std.testing.expectEqual(before, digest.stateHash(&gs));
             failed = true;
         }
     }
     try std.testing.expect(failed);
-    try std.testing.expectEqual(contract_mod.ContractStatus.completed, gs.contracts.getPtr(id).?.status);
-    try std.testing.expect(gs.person(@enumFromInt(1)).?.hasAward("commendation"));
-    try std.testing.expect(gs.ledger.transactions.items.len >= 3);
-    try std.testing.expect(gs.event_log.items.len >= 4);
 
     var clean = GameState.init(std.testing.allocator, .{ .start_funds = 1_000_000 });
     defer clean.deinit();
     const clean_id = try completionFixture(&clean, true);
     try recordBattle(&clean, clean.contracts.getPtr(clean_id).?, 50, 4);
-    try std.testing.expectEqual(digest.stateHash(&clean), digest.stateHash(&gs));
+    try std.testing.expectEqual(digest.stateHash(&clean), successful_hash.?);
 }
 
 test "recordBattle leaves a substantially-met attrition contract unchanged on allocation failure" {
     const digest = @import("digest.zig");
-    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer outer.deinit();
-    var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
-    const id = try completionFixture(&gs, false);
-    const before = digest.stateHash(&gs);
-    gs.arena.state.used_list = null;
-    gs.arena.state.free_list = null;
-    gs.arena.child_allocator = std.testing.failing_allocator;
-    try std.testing.expectError(error.OutOfMemory, recordBattle(&gs, gs.contracts.getPtr(id).?, 10, 1));
-    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    var failed = false;
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+        var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
+        const id = try completionFixture(&gs, false);
+        const before = digest.stateHash(&gs);
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
+        gs.arena.child_allocator = failing.allocator();
+        if (recordBattle(&gs, gs.contracts.getPtr(id).?, 10, 1)) |_| break else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+            failed = true;
+        }
+    }
+    try std.testing.expect(failed);
 
     var success = GameState.init(std.testing.allocator, .{ .start_funds = 1_000_000 });
     defer success.deinit();
@@ -536,28 +554,42 @@ test "complete closes ordinarily without an early bonus and leaves inactive cont
     try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
 
+test "completion applies same-faction standing changes sequentially and logs both results" {
+    var gs = GameState.init(std.testing.allocator, .{ .start_funds = 1_000_000 });
+    defer gs.deinit();
+    const id = try completionFixture(&gs, true);
+    const c = gs.contracts.getPtr(id).?;
+    c.enemy_key = c.employer_key;
+    _ = try gs.adjustStanding(c.employer_key, 95);
+    try complete(&gs, c, false);
+    try std.testing.expectEqual(@as(i32, 97), gs.standing("LC"));
+    try std.testing.expect(std.mem.indexOf(u8, gs.event_log.items[0].text, "LC +7 → 100 · LC −3 → 97") != null);
+}
+
 test "complete leaves the full campaign digest unchanged on every preparation failure" {
     const digest = @import("digest.zig");
-    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer outer.deinit();
-    var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
-    const id = try completionFixture(&gs, true);
-    const before = digest.stateHash(&gs);
     var failed = false;
     var i: usize = 0;
     while (true) : (i += 1) {
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+        var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
+        const id = try completionFixture(&gs, true);
+        const before = digest.stateHash(&gs);
         gs.arena.state.used_list = null;
         gs.arena.state.free_list = null;
         var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
         gs.arena.child_allocator = failing.allocator();
-        if (complete(&gs, gs.contracts.getPtr(id).?, true)) |_| break else |err| {
+        if (complete(&gs, gs.contracts.getPtr(id).?, true)) |_| {
+            try std.testing.expectEqual(contract_mod.ContractStatus.completed, gs.contracts.getPtr(id).?.status);
+            break;
+        } else |err| {
             try std.testing.expectEqual(error.OutOfMemory, err);
             try std.testing.expectEqual(before, digest.stateHash(&gs));
             failed = true;
         }
     }
     try std.testing.expect(failed);
-    try std.testing.expectEqual(contract_mod.ContractStatus.completed, gs.contracts.getPtr(id).?.status);
 }
 
 test "execAcceptContract returns the ContractId of the accepted contract" {
