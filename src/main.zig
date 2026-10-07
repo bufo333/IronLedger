@@ -45,6 +45,7 @@ pub fn main(init: std.process.Init) !void {
     var no_music = false;
     var data_dir: ?[]const u8 = null;
     var store_arg: ?[:0]const u8 = null;
+    var seed: ?u64 = null;
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--keys-markdown")) {
             // The key reference block for docs/tui.md, from the binding tables.
@@ -58,6 +59,17 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.eql(u8, arg, "--no-music")) no_music = true;
         if (std.mem.eql(u8, arg, "--store")) store_arg = args.next() orelse store_arg;
         if (std.mem.eql(u8, arg, "--data")) data_dir = args.next() orelse data_dir;
+        if (std.mem.eql(u8, arg, "--seed")) {
+            // A fixed wizard seed for scripted runs; a bad value is refused, not defaulted.
+            const text = args.next() orelse {
+                std.debug.print("--seed needs a number\n", .{});
+                return error.InvalidArgument;
+            };
+            seed = std.fmt.parseInt(u64, text, 10) catch {
+                std.debug.print("--seed: '{s}' is not an unsigned 64-bit integer\n", .{text});
+                return error.InvalidArgument;
+            };
+        }
     }
 
     // Without --store the save lives beside the binary in a source tree and
@@ -66,7 +78,7 @@ pub fn main(init: std.process.Init) !void {
         try paths.defaultStore(init.io, init.arena.allocator(), init.environ_map);
 
     if (tui) {
-        try @import("tui/app.zig").run(init.io, init.gpa, init.environ_map, store_path, .{ .ascii = ascii, .no_splash = no_splash, .no_music = no_music, .data_dir = data_dir });
+        try @import("tui/app.zig").run(init.io, init.gpa, init.environ_map, store_path, .{ .ascii = ascii, .no_splash = no_splash, .no_music = no_music, .data_dir = data_dir, .seed = seed });
     } else if (repl) {
         try runRepl(&session, init.io, init.gpa, store_path);
     } else {

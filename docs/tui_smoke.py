@@ -76,7 +76,7 @@ def finish(child, timeout=10.0):
     raise AssertionError(f"client {child} did not exit within {timeout}s of quitting")
 
 
-pid, fd = spawn(["--tui", "--no-splash", "--no-music", "--store", db])
+pid, fd = spawn(["--tui", "--no-splash", "--no-music", "--seed", "3025", "--store", db])
 
 # 200x50 terminal
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
@@ -488,7 +488,7 @@ finish(pid)
 print(plain()[-6000:])
 
 # ---- second pass: the minimum tier (80x24) and --ascii, every screen ----
-pid, fd = spawn(["--tui", "--ascii", "--no-splash", "--no-music", "--store", db])
+pid, fd = spawn(["--tui", "--ascii", "--no-splash", "--no-music", "--seed", "3025", "--store", db])
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
 out = b""
 assert wait_for("MERCENARY", timeout=20), plain()[-2000:]
@@ -536,7 +536,7 @@ def game_over_phase():
     assert "GAMEOVER FIXTURE OK" in gen.stdout, f"unexpected generator output:\n{gen.stdout}"
 
     # Spawn the TUI with the bankrupt store; no splash so we get the welcome screen fast.
-    go_pid, go_fd = spawn(["--tui", "--no-splash", "--no-music", "--store", gameover_db])
+    go_pid, go_fd = spawn(["--tui", "--no-splash", "--no-music", "--seed", "3025", "--store", gameover_db])
     fcntl.ioctl(go_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
     global fd, out
     saved_fd, saved_out = fd, out

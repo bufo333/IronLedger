@@ -370,6 +370,9 @@ pub const App = struct {
     /// Index into `start_years`.
     w_year: usize = 2,
     w_seed: u64 = 0,
+    /// `--seed`: replaces the wall-clock entropy in the generated campaign's
+    /// seed so scripted runs (docs/tui_smoke.py) are reproducible.
+    seed_override: ?u64 = null,
     // screens
     ledger_sel: usize = 0,
     hq_sel: types.HqId = .none,
@@ -2017,7 +2020,9 @@ pub const App = struct {
     fn generateCampaign(self: *App) !void {
         // Build the replacement session fully before touching the current one
         // (rule 63): on failure the open session stays valid.
-        const seed: u64 = 3025 + self.w_seed * 7919 + @as(u64, @intCast(self.w_faction)) * 13;
+        const now = std.Io.Clock.now(.real, self.io);
+        const entropy: u64 = self.seed_override orelse @truncate(@as(u96, @bitCast(now.nanoseconds)));
+        const seed: u64 = entropy ^ (self.w_seed *% 7919) ^ (@as(u64, @intCast(self.w_faction)) *% 13);
         // Use the selected catalog thumbnail's bytes as the campaign emblem image.
         // Force-load the selected cell before reading its bytes: the draw loop decodes
         // lazily (one cell per frame) so navigating down and immediately pressing next
@@ -4821,6 +4826,9 @@ pub const Options = struct {
     no_music: bool = false,
     /// Asset root overriding the search in paths.zig (`--data`).
     data_dir: ?[]const u8 = null,
+    /// Fixed base for the wizard's campaign seed (`--seed`); null keeps the
+    /// wall-clock entropy.
+    seed: ?u64 = null,
 };
 
 /// Entry point from main: open the store, take the terminal, run the app.
@@ -4845,6 +4853,7 @@ pub fn run(io: std.Io, gpa: std.mem.Allocator, env: *const std.process.Environ.M
     defer app.deinit();
     app.screen.ascii = options.ascii;
     app.show_splash = !options.no_splash;
+    app.seed_override = options.seed;
     app.asset_roots = roots;
     if (options.no_music) {
         app.music_note = "music off (--no-music)";
