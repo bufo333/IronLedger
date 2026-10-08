@@ -1158,6 +1158,27 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
         if (c.status != .active) return error.NoSuchListing;
         if (gs.treasuryBalance(.{ .company = co }) < price) return error.CompanyFundsShort;
         if (dispersed_contract == null) {
+            if (listing.kind == .part) {
+                const stock = gs.stockMap(.{ .company = co }) orelse return error.NoSuchListing;
+                _ = std.math.add(u32, gs.stockCount(.{ .company = co }, listing.item_key), listing.quantity) catch return error.StockOverflow;
+                try stock.ensureUnusedCapacity(gs.allocator(), 1);
+                const posting = try gs.prepareTreasuryPosting(.{ .company = co }, .{
+                    .day = gs.clock.day_index,
+                    .amount = -price,
+                    .category = .parts,
+                    .company = co,
+                    .contract = c.id,
+                    .note = listing.item_key,
+                });
+                const log = try gs.prepareLog(.market, .{ .company = co, .contract = c.id }, "[market] {s} bought {d} × {s} on {s} for {d} from local funds", .{
+                    if (gs.force(co)) |f| f.name else "company", listing.quantity, listing.item_key, c.planet_key, price,
+                });
+                gs.commitTreasuryPosting(posting);
+                _ = gs.market_listings.orderedRemove(index);
+                try gs.addStock(.{ .company = co }, listing.item_key, listing.quantity);
+                gs.commitLog(log);
+                return .{};
+            }
             try treasury.debit(gs, .{ .company = co }, .{
                 .day = gs.clock.day_index,
                 .amount = -price,
@@ -1176,7 +1197,7 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
                 if (listing.condition) |cond| market.applyHullCondition(bought_co, cond, gs.rng.random(.market));
                 try gs.recordHullAcquisition(bought_co, .purchase, "unknown");
             }
-            try toe.placeUnitInCompany(gs, uid, co);
+            try toe.placeUnitInCompanyPool(gs, uid, co);
             try gs.log(.market, .{ .company = co, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
                 if (gs.force(co)) |f| f.name else "company", listing.item_key, if (listing.condition) |cd| cd.label() else "new", c.planet_key, price,
             });
@@ -1240,7 +1261,7 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
         const bought_co = gs.unit(uid).?;
         bought_co.hull_instance_id = listing.hull_instance_id;
         gs.commitHullTransfer(hull_transfer.?);
-        try toe.placeUnitInCompany(gs, uid, co);
+        try toe.placeUnitInCompanyPool(gs, uid, co);
         return .{ .unit = uid };
     }
     // The board's own HQ pays and receives.
@@ -1744,13 +1765,32 @@ test "the contract world has a hull board — local funds pay, the hull joins th
     gs.force(co).?.local_funds = 50_000_000;
     const hq_funds = gs.hqs.values()[0].funds;
     const r = try commands.execute(&gs, .{ .buy_listing = found_lid.? });
-    try std.testing.expectEqual(co, gs.companyOf(gs.unit(r.unit).?.force));
+    try std.testing.expectEqual(co, gs.unit(r.unit).?.force);
     try std.testing.expect(gs.force(co).?.local_funds < 50_000_000);
     try std.testing.expectEqual(hq_funds, gs.hqs.values()[0].funds);
     // Not a raise candidate, and gone with the contract at the next refresh.
     gs.contracts.getPtr(cid).?.status = .completed;
     try refreshListings(&gs);
     for (gs.market_listings.items) |l| try std.testing.expect(l.company == .none);
+}
+
+test "a contract-world part purchase stocks the deployed company from local funds" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1208 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const cid: types.ContractId = @enumFromInt(1208);
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .objective_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = "hesperus_ii", .status = .active, .assigned_company = co, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } });
+    gs.force(co).?.location_planet = "hesperus_ii";
+    const listing: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = listing, .kind = .part, .item_key = "ammo_lrm", .rarity = .common, .price = 100, .quantity = 3, .company = co });
+    gs.next_listing_id += 1;
+    gs.force(co).?.local_funds = 1_000;
+    const hq_funds = gs.hqs.values()[0].funds;
+    _ = try commands.execute(&gs, .{ .buy_listing = listing });
+    try std.testing.expectEqual(@as(u32, 3), gs.stockCount(.{ .company = co }, "ammo_lrm"));
+    try std.testing.expectEqual(@as(types.CBills, 900), gs.force(co).?.local_funds);
+    try std.testing.expectEqual(hq_funds, gs.hqs.values()[0].funds);
 }
 
 test "one board per HQ — offers inside its reach, taken only by companies based there" {

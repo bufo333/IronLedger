@@ -971,6 +971,8 @@ test "command line parses the common verbs" {
     try std.testing.expectEqual(types.HqId.none, cmd9.fabricate.hq);
     var it10 = std.mem.tokenizeScalar(u8, "co:1 air Sky Lance", ' ');
     try std.testing.expect((try parseCommand("newlance", &it10)).?.new_lance.kind == .air);
+    var buy_it = std.mem.tokenizeScalar(u8, "42", ' ');
+    try std.testing.expectEqual(@as(u32, 42), @intFromEnum((try parseCommand("buy", &buy_it)).?.buy_listing));
     // task / untask parsing (P4e).
     var it11 = std.mem.tokenizeScalar(u8, "1 2 3 main_effort", ' ');
     const cmd11 = (try parseCommand("task", &it11)).?;

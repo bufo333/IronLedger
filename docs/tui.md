@@ -316,7 +316,7 @@ filters to the active context (see the Keys description above).
 
 | Key | Pane | Does |
 |---|---|---|
-| `[ ]` | any | previous / next HQ's board and treasury |
+| `[ ]` | any | previous / next HQ or deployed-company market board |
 | `/ ,` | any | next / previous market filter |
 | `Enter` | board | buy the board listing under the cursor |
 | `Enter` | catalog | order the catalogue part under the cursor |

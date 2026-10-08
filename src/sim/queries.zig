@@ -2432,6 +2432,13 @@ pub const Market = struct {
     demand: []DemandRow,
 };
 
+/// A selectable market board. HQ boards use their own treasury; active
+/// deployed-company boards use the company's local funds.
+pub const MarketBoard = union(enum) {
+    hq: types.HqId,
+    company: types.ForceId,
+};
+
 const market_mod = @import("../econ/market.zig");
 
 /// Market filter: hull kinds and part categories.
@@ -2575,6 +2582,25 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
         .catalog = try catalog.toOwnedSlice(alloc),
         .demand = try demand.toOwnedSlice(alloc),
     };
+}
+
+/// Lists every HQ board followed by each active deployed company's local board.
+/// Company IDs are traversed in numeric order so board navigation is stable.
+pub fn marketBoards(alloc: Alloc, gs: *GameState) ![]MarketBoard {
+    var boards: std.ArrayListUnmanaged(MarketBoard) = .empty;
+    const hqs = try hqList(alloc, gs);
+    try boards.ensureUnusedCapacity(alloc, hqs.len);
+    for (hqs) |hq| boards.appendAssumeCapacity(.{ .hq = hq.id });
+    var raw_id: u32 = 1;
+    while (raw_id < gs.next_force_id) : (raw_id += 1) {
+        const company: types.ForceId = @enumFromInt(raw_id);
+        const force = gs.force(company) orelse continue;
+        const contract = gs.deploymentContract(company) orelse continue;
+        if (force.echelon == .company and contract.status == .active) {
+            try boards.append(alloc, .{ .company = company });
+        }
+    }
+    return boards.toOwnedSlice(alloc);
 }
 
 /// The local hull board for one company on an active contract. It includes
@@ -4724,6 +4750,22 @@ test "a deployed company's local board shows its dispersed listings without unre
     try std.testing.expectEqual(local, board[0].id);
     try std.testing.expectEqual(dispersed, board[1].id);
     try std.testing.expectEqual(@as(usize, 1), (try market(arena.allocator(), &gs, .all, gs.seat())).board.len);
+}
+
+test "market boards retain HQ boards and add active deployed company boards" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 76 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const company = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const contract_id: types.ContractId = @enumFromInt(76);
+    try gs.contracts.put(gs.allocator(), contract_id, .{ .id = contract_id, .kind = .objective_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = "canopus4", .status = .active, .assigned_company = company, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const boards = try marketBoards(arena.allocator(), &gs);
+    try std.testing.expect(boards.len >= 2);
+    try std.testing.expectEqual(gs.seat(), boards[0].hq);
+    try std.testing.expectEqual(company, boards[boards.len - 1].company);
 }
 
 test "desk and ledger queries build on a fresh campaign" {

@@ -189,6 +189,19 @@ pub fn placeUnitInCompany(gs: *GameState, unit_id: types.UnitId, company: types.
     if (gs.person(u.pilot)) |p| p.assigned_force = dest;
 }
 
+/// Place a purchased hull in the company's unassigned pool. Contract-world
+/// purchases do not silently change a lance's field composition.
+pub fn placeUnitInCompanyPool(gs: *GameState, unit_id: types.UnitId, company: types.ForceId) !void {
+    const u = gs.unit(unit_id) orelse return error.UnknownUnit;
+    const co = gs.force(company) orelse return error.UnknownForce;
+    if (co.echelon != .company) return error.NotACompany;
+    try co.units.ensureUnusedCapacity(gs.allocator(), 1);
+    u.force = company;
+    if (u.status == .in_transit) u.status = if (u.needsDepot()) .damaged else .ready;
+    u.tech = .none;
+    co.units.appendAssumeCapacity(unit_id);
+}
+
 /// Move a hull between forces (lance ↔ lance, into a support lance, or
 /// straight under a company): roster lists and the pilot's posting
 /// follow it; the tech seat is kept.

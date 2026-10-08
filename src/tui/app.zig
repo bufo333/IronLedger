@@ -379,6 +379,7 @@ pub const App = struct {
     hall_filter: q.HallFilter = .all,
     people_filter: q.HallFilter = .all,
     market_filter: q.MarketFilter = .all,
+    market_board: ?q.MarketBoard = null,
     map_cursor: usize = 0,
     /// Forces screen view: index into queries.toeViews (all, each company, unassigned).
     forces_view: usize = 0,
@@ -2750,6 +2751,26 @@ pub const App = struct {
         }
         self.hq_sel = hqs[0].id;
         return @intFromEnum(hqs[0].id);
+    }
+
+    /// Returns the selected market board, falling back to the selected HQ board.
+    /// Revalidated each frame because deployed companies may return home.
+    pub fn marketBoard(self: *App, g: *GameState) !q.MarketBoard {
+        const boards = try q.marketBoards(self.a(), g);
+        if (self.market_board) |selected| {
+            for (boards) |board| if (std.meta.eql(selected, board)) return selected;
+        }
+        const hq: types.HqId = @enumFromInt(try self.hqSelId(g));
+        for (boards) |board| switch (board) {
+            .hq => |id| if (id == hq) {
+                self.market_board = board;
+                return board;
+            },
+            .company => {},
+        };
+        const board = boards[0];
+        self.market_board = board;
+        return board;
     }
 
     pub fn openCommand(self: *App, prefill: []const u8) void {

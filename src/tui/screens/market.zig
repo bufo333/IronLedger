@@ -17,11 +17,21 @@ pub fn draw(self: *App) anyerror!void {
     const al = self.a();
     const g = self.state();
     const b = self.body();
-    const view = try q.market(al, g, self.market_filter, @enumFromInt(try self.hqSelId(g)));
+    const board = try self.marketBoard(g);
     const top_h: u16 = @max(6, layout.minor.of(b.h));
     const hq_id: types.HqId = @enumFromInt(try self.hqSelId(g));
-    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = try std.fmt.allocPrint(al, "MARKET BOARD · {{a}}{s}{{/}} pays from its treasury ({s}) · filter {{a}}{s}{{/}} · {d} listings", .{ try q.hqName(self.a(), g, hq_id), try q.money(al, q.balance(g, .{ .hq = hq_id })), @tagName(self.market_filter), view.board.len }), .focused = self.paneFocused(0), .right_title = try app.keys.paneTitle(al, &legend, 0) });
-    try self.tableOrNote(inner, try q.tableOf(al, q.market_cols, view.board), 0, self.focus == 0, "{d}nothing on the boards — they refresh on the 1st, staples restock as they sell{/}");
+    const board_rows = switch (board) {
+        .hq => |id| (try q.market(al, g, self.market_filter, id)).board,
+        .company => |id| try q.companyMarket(al, g, self.market_filter, id),
+    };
+    const board_title = switch (board) {
+        .hq => |id| try std.fmt.allocPrint(al, "MARKET BOARD · {{a}}{s}{{/}} pays from its treasury ({s}) · filter {{a}}{s}{{/}} · {d} listings", .{ try q.hqName(al, g, id), try q.money(al, q.balance(g, .{ .hq = id })), @tagName(self.market_filter), board_rows.len }),
+        .company => |id| try std.fmt.allocPrint(al, "LOCAL MARKET · {{a}}{s}{{/}} pays from local funds ({s}) · filter {{a}}{s}{{/}} · {d} listings", .{ try q.forceName(al, g, id), try q.money(al, q.balance(g, .{ .company = id })), @tagName(self.market_filter), board_rows.len }),
+    };
+    const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = top_h }, .{ .title = board_title, .focused = self.paneFocused(0), .right_title = try app.keys.paneTitle(al, &legend, 0) });
+    try self.tableOrNote(inner, try q.tableOf(al, q.market_cols, board_rows), 0, self.focus == 0, "{d}nothing on this board{/}");
+
+    const view = try q.market(al, g, self.market_filter, hq_id);
 
     const cw: u16 = if (self.narrow()) b.w else layout.list.of(b.w);
     const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = cw, .h = b.h - top_h }, .{ .title = try std.fmt.allocPrint(al, "ORDER CATALOG · delivered to {s}", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.paneFocused(1), .right_title = try app.keys.paneTitle(al, &legend, 1) });
@@ -39,9 +49,14 @@ pub fn draw(self: *App) anyerror!void {
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
     const g = self.state();
+    const board = try self.marketBoard(g);
+    const board_rows = switch (board) {
+        .hq => |id| (try q.market(al, g, self.market_filter, id)).board,
+        .company => |id| try q.companyMarket(al, g, self.market_filter, id),
+    };
     const view = try q.market(al, g, self.market_filter, @enumFromInt(try self.hqSelId(g)));
     switch (self.focus) {
-        0 => self.moveCursor(0, delta, view.board.len),
+        0 => self.moveCursor(0, delta, board_rows.len),
         1 => self.moveCursor(1, delta, view.catalog.len),
         2 => self.moveCursor(2, delta, view.demand.len),
         else => self.moveCursor(3, delta, (try q.stockPolicies(al, g, @enumFromInt(try self.hqSelId(g)))).len),
@@ -51,8 +66,8 @@ pub fn move(self: *App, delta: i32) anyerror!void {
 const Action = enum { prev_hq, next_hq, filter_next, filter_prev, buy, order, cover_shortfall, edit_keep, fabricate, keep, remove_keep };
 
 pub const bindings = [_]app.keys.Binding(Action){
-    .{ .match = app.keys.Match.char('['), .action = .prev_hq, .label = "HQ board", .group = .navigate, .shown = "[ ]", .title = 0, .help = "previous / next HQ's board and treasury" },
-    .{ .match = app.keys.Match.char(']'), .action = .next_hq, .label = "next HQ", .group = .navigate, .show_footer = false, .show_help = false },
+    .{ .match = app.keys.Match.char('['), .action = .prev_hq, .label = "market board", .group = .navigate, .shown = "[ ]", .title = 0, .help = "previous / next HQ or deployed-company market board" },
+    .{ .match = app.keys.Match.char(']'), .action = .next_hq, .label = "next market board", .group = .navigate, .show_footer = false, .show_help = false },
     .{ .match = app.keys.Match.char('/'), .action = .filter_next, .label = "filter", .group = .navigate, .shown = "/ ,", .title = 0, .help = "next / previous market filter" },
     .{ .match = app.keys.Match.char(','), .action = .filter_prev, .label = "previous filter", .group = .navigate, .show_footer = false, .show_help = false },
     .{ .match = .{ .key = .enter }, .action = .buy, .label = "buy", .group = .act, .pane = 0, .help = "buy the board listing under the cursor" },
@@ -72,9 +87,13 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hq_id: types.HqId = @enumFromInt(try self.hqSelId(g));
     switch (hit.action) {
         .buy => {
-            const view = try q.market(al, g, self.market_filter, hq_id);
-            if (view.board.len > 0) {
-                const l = view.board[@min(self.cur(0).*, view.board.len - 1)];
+            const board = try self.marketBoard(g);
+            const board_rows = switch (board) {
+                .hq => |id| (try q.market(al, g, self.market_filter, id)).board,
+                .company => |id| try q.companyMarket(al, g, self.market_filter, id),
+            };
+            if (board_rows.len > 0) {
+                const l = board_rows[@min(self.cur(0).*, board_rows.len - 1)];
                 const cmd: game.commands.Command = .{ .buy_listing = l.id };
                 const res = self.execResult(cmd) orelse return true;
                 if (res.fraud) {
@@ -158,16 +177,22 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             }
         },
         .next_hq, .prev_hq => {
-            const hqs = try q.hqList(al, g);
-            const n = hqs.len;
+            const boards = try q.marketBoards(al, g);
+            const n = boards.len;
             if (n > 0) {
                 var cur_i: usize = 0;
-                for (hqs, 0..) |row, i| if (row.id == self.hq_sel) {
+                const selected = try self.marketBoard(g);
+                for (boards, 0..) |row, i| if (std.meta.eql(row, selected)) {
                     cur_i = i;
                     break;
                 };
                 const next_i = if (hit.action == .next_hq) (cur_i + 1) % n else (cur_i + n - 1) % n;
-                self.hq_sel = hqs[next_i].id;
+                self.market_board = boards[next_i];
+                switch (boards[next_i]) {
+                    .hq => |id| self.hq_sel = id,
+                    .company => {},
+                }
+                self.cur(0).* = 0;
             }
         },
     }
@@ -191,4 +216,29 @@ test "/ steps the market filter and resets the cursors" {
     try app.pressForTest(c, .{ .char = '/' });
     try std.testing.expect(c.app.market_filter != before);
     try std.testing.expectEqual(@as(usize, 0), c.app.cur(0).*);
+}
+
+test "brackets step from an HQ board to an active company's local board" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    const g = c.app.state();
+    var company: app.types.ForceId = .none;
+    for (try app.q.toeViews(c.app.a(), g)) |view| switch (view.filter) {
+        .company => |id| {
+            company = id;
+            break;
+        },
+        else => {},
+    };
+    try std.testing.expect(company != .none);
+    const contract_id: app.types.ContractId = @enumFromInt(901);
+    try g.contracts.put(g.allocator(), contract_id, .{ .id = contract_id, .kind = .objective_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = "canopus4", .status = .active, .assigned_company = company, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } });
+    const boards = try app.q.marketBoards(c.app.a(), g);
+    c.app.market_board = boards[boards.len - 2];
+    try toTab(c, .market);
+    try app.pressForTest(c, .{ .char = ']' });
+    switch (c.app.market_board.?) {
+        .company => |id| try std.testing.expectEqual(company, id),
+        .hq => return error.ExpectedCompanyMarketBoard,
+    }
 }
