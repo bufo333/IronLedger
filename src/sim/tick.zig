@@ -1396,7 +1396,7 @@ test "scratch operations do not grow the campaign arena" {
     const leopard_lid: types.ListingId = @enumFromInt(gs.next_listing_id);
     try gs.market_listings.append(gs.allocator(), .{ .id = leopard_lid, .kind = .unit, .item_key = "LEOPARD", .rarity = .rare, .price = 20_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
     gs.next_listing_id += 1;
-    _ = try commands.execute(&gs, .{ .buy_listing = leopard_lid });
+    _ = try commands.execute(&gs, .{ .buy_listing = .{ .listing = leopard_lid, .buyer = .{ .hq = hq } } });
     const ship: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
     const dropship_pilot = try gs.hirePerson("Ina", "Voss", .dropship_crew);
     try crew.assignSlot(&gs, ship, .pilot, dropship_pilot);

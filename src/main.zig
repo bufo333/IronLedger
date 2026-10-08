@@ -299,7 +299,7 @@ fn runDemo(gs: *game.state.GameState, gpa: std.mem.Allocator) !void {
         _ = game.commands.execute(gs, .{ .transfer = .{ .from = .outfit, .to = .{ .hq = seat }, .amount = 3_000_000 } }) catch |err| std.debug.print("transfer refused: {s}\n", .{game.cli.errorText(err)});
         _ = try game.commands.execute(gs, .{ .advance_days = 3 });
         if (q.listingId(gs, "slas", true)) |lid| {
-            _ = game.commands.execute(gs, .{ .buy_listing = lid }) catch |err| std.debug.print("buy refused: {s}\n", .{game.cli.errorText(err)});
+            _ = game.commands.execute(gs, .{ .buy_listing = .{ .listing = lid, .buyer = .{ .hq = seat } } }) catch |err| std.debug.print("buy refused: {s}\n", .{game.cli.errorText(err)});
         }
         if (lab.mounts.len > 0) {
             const m = lab.mounts[0];

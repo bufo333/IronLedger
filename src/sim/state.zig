@@ -669,7 +669,7 @@ pub const GameState = struct {
     /// The outfit's seat: the first HQ (lowest insertion order), or `.none`
     /// before any HQ exists. Every rule that reads a seat-level attribute
     /// calls this; use `seatPlanetKey` for the seat's world.
-    pub fn seat(self: *GameState) types.HqId {
+    pub fn seat(self: *const GameState) types.HqId {
         return if (self.hqs.count() > 0) self.hqs.keys()[0] else .none;
     }
 
