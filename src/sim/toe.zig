@@ -192,11 +192,30 @@ pub fn placeUnitInCompany(gs: *GameState, unit_id: types.UnitId, company: types.
 /// Place a purchased hull in the company's unassigned pool. Contract-world
 /// purchases do not silently change a lance's field composition.
 pub fn placeUnitInCompanyPool(gs: *GameState, unit_id: types.UnitId, company: types.ForceId) !void {
-    const u = gs.unit(unit_id) orelse return error.UnknownUnit;
+    const prepared = try prepareCompanyPoolPlacement(gs, company);
+    commitCompanyPoolPlacement(gs, unit_id, prepared);
+}
+
+/// Reserved destination for a purchased hull that enters a company's pool.
+/// Preparation validates the company and reserves its roster before payment or
+/// any other purchase mutation commits.
+pub const PreparedCompanyPoolPlacement = struct {
+    company: types.ForceId,
+};
+
+/// Validate and reserve an unassigned company-pool slot for a purchased hull.
+pub fn prepareCompanyPoolPlacement(gs: *GameState, company: types.ForceId) !PreparedCompanyPoolPlacement {
     const co = gs.force(company) orelse return error.UnknownForce;
     if (co.echelon != .company) return error.NotACompany;
     try co.units.ensureUnusedCapacity(gs.allocator(), 1);
-    u.force = company;
+    return .{ .company = company };
+}
+
+/// Commit a prepared company-pool placement without allocation.
+pub fn commitCompanyPoolPlacement(gs: *GameState, unit_id: types.UnitId, prepared: PreparedCompanyPoolPlacement) void {
+    const u = gs.unit(unit_id).?;
+    const co = gs.force(prepared.company).?;
+    u.force = prepared.company;
     if (u.status == .in_transit) u.status = if (u.needsDepot()) .damaged else .ready;
     u.tech = .none;
     co.units.appendAssumeCapacity(unit_id);

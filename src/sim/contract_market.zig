@@ -1216,8 +1216,8 @@ fn buyContractWorldHull(gs: *GameState, index: usize, listing: market.Listing, p
         try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market")
     else
         null;
-    const company_force = gs.force(company) orelse return error.UnknownForce;
-    try company_force.units.ensureUnusedCapacity(gs.allocator(), 1);
+    const placement = try toe.prepareCompanyPoolPlacement(gs, company);
+    const company_force = gs.force(company).?;
     const posting = try gs.prepareTreasuryPosting(.{ .company = company }, .{ .day = gs.clock.day_index, .amount = -price, .category = .unit_purchase, .company = company, .contract = c.id, .note = listing.item_key });
     const log = try gs.prepareLog(.market, .{ .company = company, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
         company_force.name, listing.item_key, if (listing.condition) |condition| condition.label() else "new", c.planet_key, price,
@@ -1232,9 +1232,7 @@ fn buyContractWorldHull(gs: *GameState, index: usize, listing: market.Listing, p
         bought.hull_instance_id = listing.hull_instance_id;
         gs.commitHullTransfer(transfer.?);
     }
-    bought.force = company;
-    bought.tech = .none;
-    company_force.units.appendAssumeCapacity(uid);
+    toe.commitCompanyPoolPlacement(gs, uid, placement);
     gs.commitLog(log);
     return .{ .unit = uid };
 }
@@ -1870,7 +1868,7 @@ test "one negotiation round per offer — improved, hardened, or withdrawn; neve
     try std.testing.expectError(commands.Error.TermAtCap, commands.execute(&gs, .{ .negotiate = .{ .offer = gs.contract_offers.items[0].id, .term = .advance } }));
 }
 
-test "the contract world has a hull board — local funds pay, the hull joins the company there" {
+test "a contract-world hull purchase spends local funds and places the hull in the company pool" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1207 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
@@ -1888,19 +1886,72 @@ test "the contract world has a hull board — local funds pay, the hull joins th
         };
     }
     try std.testing.expect(found_lid != null);
-    // Broke: refused; funded: bought from local funds, on the company's books at once.
-    gs.force(co).?.local_funds = 0;
-    try std.testing.expectError(commands.Error.CompanyFundsShort, commands.execute(&gs, .{ .buy_listing = .{ .listing = found_lid.?, .buyer = .{ .company = co } } }));
     gs.force(co).?.local_funds = 50_000_000;
     const hq_funds = gs.hqs.values()[0].funds;
     const r = try commands.execute(&gs, .{ .buy_listing = .{ .listing = found_lid.?, .buyer = .{ .company = co } } });
     try std.testing.expectEqual(co, gs.unit(r.unit).?.force);
+    var placed = false;
+    for (gs.force(co).?.units.items) |unit_id| {
+        if (unit_id == r.unit) placed = true;
+    }
+    try std.testing.expect(placed);
     try std.testing.expect(gs.force(co).?.local_funds < 50_000_000);
     try std.testing.expectEqual(hq_funds, gs.hqs.values()[0].funds);
     // Not a raise candidate, and gone with the contract at the next refresh.
     gs.contracts.getPtr(cid).?.status = .completed;
     try refreshListings(&gs);
     for (gs.market_listings.items) |l| try std.testing.expect(l.company == .none);
+}
+
+test "an insufficient-funds contract-world hull purchase leaves the complete digest unchanged" {
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 12071 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const cid: types.ContractId = @enumFromInt(12071);
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .objective_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = "hesperus_ii", .status = .active, .assigned_company = co, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } });
+    const listing: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = listing, .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 400_000, .company = co });
+    gs.next_listing_id += 1;
+    gs.force(co).?.local_funds = 0;
+    const before = digest.stateHash(&gs);
+
+    try std.testing.expectError(commands.Error.CompanyFundsShort, commands.execute(&gs, .{ .buy_listing = .{ .listing = listing, .buyer = .{ .company = co } } }));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "a contract-world hull purchase is failure-atomic through company-pool placement" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var gs = GameState.init(outer.allocator(), .{ .seed = 12072 });
+        _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+        const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+        const cid: types.ContractId = @enumFromInt(12072);
+        try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .objective_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = "hesperus_ii", .status = .active, .assigned_company = co, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } });
+        const listing: types.ListingId = @enumFromInt(gs.next_listing_id);
+        try gs.market_listings.append(gs.allocator(), .{ .id = listing, .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 400_000, .company = co });
+        gs.next_listing_id += 1;
+        gs.force(co).?.local_funds = 5_000_000;
+        const before = digest.stateHash(&gs);
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
+        gs.arena.child_allocator = failing.allocator();
+        if (commands.execute(&gs, .{ .buy_listing = .{ .listing = listing, .buyer = .{ .company = co } } })) |result| {
+            try std.testing.expectEqual(co, gs.unit(result.unit).?.force);
+            try std.testing.expectEqual(result.unit, gs.force(co).?.units.items[0]);
+            gs.deinit();
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+            gs.deinit();
+        }
+    }
 }
 
 test "a contract-world part purchase stocks the deployed company from local funds" {
