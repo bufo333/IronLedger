@@ -277,7 +277,7 @@ fn collectLanceUnits(gs: *GameState, c: *const contract_mod.Contract, lance: *co
     if (lance.role == .training and c.terms.command_rights.allowsTrainingLances()) return;
     for (lance.units.items) |uid| {
         const u = gs.unit(uid) orelse continue;
-        if (aerospace_only and u.kind != .aerospace) continue;
+        if (aerospace_only != (u.kind == .aerospace)) continue;
         if (readiness_m.unitOperational(gs, u)) engaged.appendAssumeCapacity(uid);
     }
 }
