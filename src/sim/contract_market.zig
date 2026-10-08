@@ -1145,8 +1145,13 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
             .unit => {
                 const uid = try gs.addUnit(listing.item_key);
                 const bought_bm = gs.unit(uid).?;
-                if (listing.condition) |cond| market.applyHullCondition(bought_bm, cond, gs.rng.random(.market));
-                try gs.recordHullAcquisition(bought_bm, .purchase, "unknown");
+                if (listing.hull_instance_id != .none) {
+                    bought_bm.hull_instance_id = listing.hull_instance_id;
+                    try gs.transferHullOwnership(listing.hull_instance_id, .player, "market");
+                } else {
+                    if (listing.condition) |cond| market.applyHullCondition(bought_bm, cond, gs.rng.random(.market));
+                    try gs.recordHullAcquisition(bought_bm, .purchase, "unknown");
+                }
                 return .{ .unit = uid };
             },
             .part => try gs.addStock(.{ .hq = hq_id }, listing.item_key, listing.quantity),
@@ -1785,6 +1790,56 @@ test "buying a surplus listing transfers the pre-existing HullInstance to the pl
     for (gs.market_listings.items) |l| {
         try std.testing.expect(l.id != lid);
     }
+}
+
+test "buying a dispersed black-market hull transfers its existing HullInstance on sale" {
+    const hull_mod = @import("../domain/hull_instance.zig");
+    var seed: u64 = 1;
+    var sold = false;
+    while (!sold and seed < 80) : (seed += 1) {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer gs.deinit();
+        _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
+        const hq = gs.seat();
+        gs.hqs.getPtr(hq).?.funds = 50_000_000;
+        gs.clock.day_index = 5;
+
+        const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+        gs.next_hull_instance_id += 1;
+        try gs.hull_instances.put(gs.allocator(), hid, .{ .id = hid, .base_key = "SHD-2H", .owner = .market });
+        try gs.hull_ownership_history.append(gs.allocator(), .{
+            .hull_instance_id = hid,
+            .from_day = 1,
+            .acquisition_type = .transfer,
+            .prior_owner_key = "LC",
+        });
+        const listing_id: types.ListingId = @enumFromInt(gs.next_listing_id);
+        try gs.market_listings.append(gs.allocator(), .{
+            .id = listing_id,
+            .kind = .unit,
+            .item_key = "SHD-2H",
+            .rarity = .common,
+            .price = 900_000,
+            .black_market = true,
+            .planet_key = gs.hqs.getPtr(hq).?.planet_key,
+            .hull_instance_id = hid,
+        });
+        gs.next_listing_id += 1;
+        const instances_before = gs.hull_instances.count();
+        const history_before = gs.hull_ownership_history.items.len;
+
+        const result = try commands.execute(&gs, .{ .buy_listing = listing_id });
+        if (result.fraud) continue;
+        sold = true;
+        try std.testing.expectEqual(instances_before, gs.hull_instances.count());
+        try std.testing.expectEqual(hid, gs.unit(result.unit).?.hull_instance_id);
+        try std.testing.expectEqual(hull_mod.OwnerType.player, std.meta.activeTag(gs.hull_instances.getPtr(hid).?.owner));
+        try std.testing.expectEqual(history_before + 1, gs.hull_ownership_history.items.len);
+        try std.testing.expectEqual(@as(u32, gs.clock.day_index), gs.hull_ownership_history.items[history_before - 1].to_day);
+        try std.testing.expectEqual(@as(u32, 0), gs.hull_ownership_history.items[history_before].to_day);
+        for (gs.market_listings.items) |listing| try std.testing.expect(listing.id != listing_id);
+    }
+    try std.testing.expect(sold);
 }
 
 test "surplus listing age-out returns hull to originating faction pool" {

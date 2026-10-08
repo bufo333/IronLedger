@@ -37,6 +37,7 @@ const clock_mod = @import("../domain/clock.zig");
 const operation_mod = @import("../domain/operation.zig");
 const operations_m = @import("operations.zig");
 const medical = @import("medical.zig");
+const black_market = @import("black_market.zig");
 
 const Alloc = std.mem.Allocator;
 
@@ -2493,6 +2494,8 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
     var board: std.ArrayListUnmanaged(ListingRow) = .empty;
     for (gs.market_listings.items) |l| {
         if (l.hq != hq and l.hq != .none) continue;
+        if (l.black_market and l.planet_key.len > 0 and
+            !black_market.buyerEligible(gs, l, .player, gs.clock.day_index)) continue;
         const keep = switch (l.kind) {
             .unit => filter.matchesUnit(if (chassis_mod.find(l.item_key)) |c| c.kind else .mek),
             .part => filter.matchesPart(l.item_key),
@@ -4610,6 +4613,34 @@ test "each HQ's market board shows only its own listings" {
     const theirs = try market(a, &gs, .all, far);
     try std.testing.expectEqual(@as(usize, 1), theirs.board.len);
     try std.testing.expectEqual(lid_far, theirs.board[0].id); // typed id the buy_listing command takes
+}
+
+test "market board hides delayed and unreachable dispersed black-market listings" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.seat();
+    const hq_world = gs.hqs.getPtr(hq).?.planet_key;
+    gs.market_listings.clearRetainingCapacity();
+
+    const local_fence: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = local_fence, .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hq = hq, .black_market = true });
+    gs.next_listing_id += 1;
+    const reachable: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = reachable, .kind = .unit, .item_key = "SHD-2H", .rarity = .common, .price = 1, .black_market = true, .planet_key = hq_world });
+    gs.next_listing_id += 1;
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "WSP-1A", .rarity = .common, .price = 1, .black_market = true, .planet_key = hq_world, .available_after = gs.clock.day_index + 1 });
+    gs.next_listing_id += 1;
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "VND-1R", .rarity = .common, .price = 1, .black_market = true, .planet_key = "antallos" });
+    gs.next_listing_id += 1;
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const result = try market(arena.allocator(), &gs, .all, hq);
+    try std.testing.expectEqual(@as(usize, 2), result.board.len);
+    try std.testing.expectEqual(local_fence, result.board[0].id);
+    try std.testing.expectEqual(reachable, result.board[1].id);
 }
 
 test "desk and ledger queries build on a fresh campaign" {
