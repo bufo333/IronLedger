@@ -407,7 +407,8 @@ tests.
 P3e.7) and the `cbills < 0` (bankrupt) check in `runMercLifecycle`.
 `mercCompanyEligibleAsOpFor` (delivered P3f.4) is the single owner of the
 "may this company be an OpFor" rule: active (dissolved_day==0), solvent, and
-at full strength (roster.len >= merc_company_hulls_each).
+at its named mek target (`merc_company_hulls_each` active mek hulls). Vehicles
+and aerospace hulls contribute fieldable BV but do not satisfy mek readiness.
 
 **Tick hook:** `src/sim/merc_lifecycle.zig` `runMercLifecycle`, called from
 `tick.zig runMarkets` after `runPirateReplenishment` (lifecycle sees the
