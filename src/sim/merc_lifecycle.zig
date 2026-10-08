@@ -404,8 +404,16 @@ fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *const GameState, listin
             if ((wanted_kind == .vehicle or wanted_kind == .aerospace) and !chassis_mod.conventionalMarketEligible(chassis, gs.clock.date.year)) continue;
             try candidates.append(scratch, i);
         }
-        if (candidates.items.len > 0 or wanted_kind != .mek or company.counts.meks + company.counts.vehicles >= line_target) break :collect;
-        wanted_kind = .vehicle;
+        if (candidates.items.len > 0) break :collect;
+        if (wanted_kind == .mek and company.counts.meks + company.counts.vehicles < line_target) {
+            wanted_kind = .vehicle;
+            continue :collect;
+        }
+        if (wanted_kind != .aerospace and company.counts.aerospace < air_target) {
+            wanted_kind = .aerospace;
+            continue :collect;
+        }
+        return null;
     }
     if (candidates.items.len == 0) return null;
     const listing_index = candidates.items[rng.random(.market).uintLessThan(usize, candidates.items.len)];
@@ -875,8 +883,8 @@ test "selectNpcProcurement: fighters never fill line positions" {
     const counts = companyHullCounts(&gs, company_id);
     try std.testing.expectEqual(@as(usize, 0), counts.meks);
     try std.testing.expectEqual(@as(usize, 0), counts.vehicles);
-    try std.testing.expectEqual(@as(usize, 0), counts.aerospace);
-    try std.testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
+    try std.testing.expectEqual(@as(usize, 1), counts.aerospace);
+    try std.testing.expectEqual(@as(usize, 0), gs.market_listings.items.len);
 }
 
 test "selectNpcProcurement: a full vehicle line does not block a later mek" {
@@ -909,6 +917,48 @@ test "selectNpcProcurement: a full vehicle line does not block a later mek" {
     try std.testing.expectEqual(@as(usize, 0), counts.aerospace);
     try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_hulls_each), gs.market_listings.items.len);
     try std.testing.expectEqual(hull_instance_mod.HullOwner{ .merc_company = company_id }, gs.hull_instances.get(later_mek).?.owner);
+}
+
+test "selectNpcProcurement: a full vehicle line buys air reserve before a later mek" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 20274 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const company_id: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Air Reserve Substitution Co", .faction_key = "DC", .cbills = 100 });
+    var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
+    for (0..tuning.generation.merc_company_hulls_each) |i| {
+        const id: types.HullInstanceId = @enumFromInt(1 + @as(u32, @intCast(i)));
+        try gs.hull_instances.put(gs.allocator(), id, .{ .id = id, .base_key = "SCP-1N", .owner = .{ .merc_company = company_id } });
+        try roster.append(gs.allocator(), id);
+    }
+    try gs.merc_company_rosters.put(gs.allocator(), company_id, roster);
+    gs.next_hull_instance_id = @intCast(tuning.generation.merc_company_hulls_each + 1);
+    const later_mek: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), later_mek, .{ .id = later_mek, .base_key = "LCT-1V", .owner = .market });
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = later_mek, .available_after = 2 });
+    const air_target = @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size;
+    for (0..air_target) |i| {
+        try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(2 + @as(u32, @intCast(i))), .kind = .unit, .item_key = "TR-7", .rarity = .common, .price = 1 });
+    }
+
+    var rng = gs.rng;
+    try buyHullsForCompany(&gs, a, company_id, 1, &rng);
+    var counts = companyHullCounts(&gs, company_id);
+    try std.testing.expectEqual(@as(usize, 0), counts.meks);
+    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_hulls_each), counts.vehicles);
+    try std.testing.expectEqual(air_target, counts.aerospace);
+    try std.testing.expectEqual(hull_instance_mod.HullOwner.market, gs.hull_instances.get(later_mek).?.owner);
+    try std.testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
+
+    try buyHullsForCompany(&gs, a, company_id, 2, &rng);
+    counts = companyHullCounts(&gs, company_id);
+    try std.testing.expectEqual(@as(usize, 1), counts.meks);
+    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_hulls_each), counts.vehicles);
+    try std.testing.expectEqual(air_target, counts.aerospace);
+    try std.testing.expectEqual(hull_instance_mod.HullOwner{ .merc_company = company_id }, gs.hull_instances.get(later_mek).?.owner);
+    try std.testing.expectEqual(@as(usize, 0), gs.market_listings.items.len);
 }
 
 test "selectNpcProcurement: minted vehicle has design loadout and purchase provenance" {
