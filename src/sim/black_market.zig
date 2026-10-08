@@ -45,12 +45,23 @@ pub fn buyerEligible(gs: *const GameState, listing: market.Listing, buyer: Buyer
         .pirate => return std.mem.eql(u8, planet.faction, "PER"),
         .merc_company => return !std.mem.eql(u8, planet.faction, "PER"),
         .player => {
-            for (gs.hqs.values()) |h| {
-                if (std.mem.eql(u8, h.planet_key, listing.planet_key)) return true;
-            }
-            return playerDeploymentAt(gs, listing, current_day) != null;
+            return playerHqAt(gs, listing) != .none or playerDeploymentAt(gs, listing, current_day) != null;
         },
     }
+}
+
+/// Return the player's lowest-ID HQ at a dispersed listing's world, or `.none`.
+/// This is the treasury and delivery site for a purchase made through local HQ
+/// presence; a board selection must not silently use the outfit seat.
+pub fn playerHqAt(gs: *const GameState, listing: market.Listing) types.HqId {
+    if (!listing.black_market or planet_mod.find(listing.planet_key) == null) return .none;
+    var result: types.HqId = .none;
+    for (gs.hqs.keys()) |id| {
+        const hq = gs.hqs.getPtr(id).?;
+        if (std.mem.eql(u8, hq.planet_key, listing.planet_key) and
+            (result == .none or @intFromEnum(id) < @intFromEnum(result))) result = id;
+    }
+    return result;
 }
 
 /// Returns the active contract that gives the player local access to a

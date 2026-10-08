@@ -636,6 +636,23 @@ pub const GameState = struct {
         });
     }
 
+    /// Format and reserve one log entry without changing the campaign.
+    pub fn prepareLog(self: *GameState, category: LogCategory, ctx: LogCtx, comptime fmt: []const u8, args: anytype) !LogEntry {
+        var date_buf: [10]u8 = undefined;
+        const text = try std.fmt.allocPrint(
+            self.allocator(),
+            "{s} " ++ fmt,
+            .{self.clock.date.text(&date_buf)} ++ args,
+        );
+        try self.reserveLog(1);
+        return .{ .day = self.clock.day_index, .category = category, .company = ctx.company, .hq = ctx.hq, .contract = ctx.contract, .text = text };
+    }
+
+    /// Append a prepared log entry without allocation.
+    pub fn commitLog(self: *GameState, entry: LogEntry) void {
+        self.event_log.appendAssumeCapacity(entry);
+    }
+
     // ------------------------------------------- physical stock
     // Stock lives at sites: the outfit's fallback depot (pre-HQ), each HQ's
     // warehouse (capped by warehouse level), each deployed company's field
@@ -805,14 +822,14 @@ pub const GameState = struct {
 
     pub const AddUnitError = error{UnknownChassis} || std.mem.Allocator.Error;
 
-    /// Instantiate a unit from the chassis catalog: structure slots for all
-    /// eight mek locations plus the design's loadout slots — so battle
-    /// damage and repair tiers (ARCH §9.7) have real targets from day one.
-    pub fn addUnit(self: *GameState, chassis_key: []const u8) AddUnitError!types.UnitId {
+    /// A fully allocated unit waiting for the command that requested it to
+    /// commit it. Its ID is the state's next unit ID until committed.
+    pub const PreparedUnit = struct { unit: unit_mod.Unit };
+
+    /// Allocate a unit and reserve its map slot without changing campaign state.
+    pub fn prepareUnit(self: *GameState, chassis_key: []const u8) AddUnitError!PreparedUnit {
         const design = chassis_mod.find(chassis_key) orelse return error.UnknownChassis;
         const id: types.UnitId = @enumFromInt(self.next_unit_id);
-        self.next_unit_id += 1;
-
         var u: unit_mod.Unit = .{
             .id = id,
             .chassis_key = design.key, // catalog memory is static
@@ -840,8 +857,23 @@ pub const GameState = struct {
         for (design.loadout) |l| {
             try u.slots.append(alloc, .{ .slot_key = l.slot, .part_key = l.part, .class = l.class });
         }
-        try self.units.put(alloc, id, u);
-        return id;
+        try self.units.ensureUnusedCapacity(alloc, 1);
+        return .{ .unit = u };
+    }
+
+    /// Insert a prepared unit without allocation and return its assigned ID.
+    pub fn commitPreparedUnit(self: *GameState, prepared: PreparedUnit) types.UnitId {
+        self.units.putAssumeCapacity(prepared.unit.id, prepared.unit);
+        self.next_unit_id += 1;
+        return prepared.unit.id;
+    }
+
+    /// Instantiate a unit from the chassis catalog: structure slots for all
+    /// eight mek locations plus the design's loadout slots — so battle
+    /// damage and repair tiers (ARCH §9.7) have real targets from day one.
+    pub fn addUnit(self: *GameState, chassis_key: []const u8) AddUnitError!types.UnitId {
+        const prepared = try self.prepareUnit(chassis_key);
+        return self.commitPreparedUnit(prepared);
     }
 
     pub fn unit(self: *GameState, id: types.UnitId) ?*unit_mod.Unit {
@@ -999,23 +1031,40 @@ pub const GameState = struct {
     /// and open a new `.salvage` interval naming the prior owner. `prior_owner_key`
     /// is duped into the campaign arena. Pool-path only — the hull instance must
     /// already exist. Used by both the player-salvage and employer-exchange paths.
-    pub fn transferHullOwnership(self: *GameState, hid: types.HullInstanceId, new_owner: hull_instance_mod.HullOwner, prior_owner_key: []const u8) !void {
-        const alloc = self.allocator();
-        const inst = self.hull_instances.getPtr(hid) orelse return;
-        inst.owner = new_owner;
+    pub const PreparedHullTransfer = struct {
+        hull: types.HullInstanceId,
+        owner: hull_instance_mod.HullOwner,
+        prior_owner_key: []const u8,
+    };
+
+    /// Own the provenance text and reserve history capacity for a hull transfer.
+    pub fn prepareHullTransfer(self: *GameState, hid: types.HullInstanceId, new_owner: hull_instance_mod.HullOwner, prior_owner_key: []const u8) !PreparedHullTransfer {
+        const owned_key = try self.allocator().dupe(u8, prior_owner_key);
+        try self.hull_ownership_history.ensureUnusedCapacity(self.allocator(), 1);
+        return .{ .hull = hid, .owner = new_owner, .prior_owner_key = owned_key };
+    }
+
+    /// Commit a prepared hull transfer without allocation.
+    pub fn commitHullTransfer(self: *GameState, prepared: PreparedHullTransfer) void {
+        const inst = self.hull_instances.getPtr(prepared.hull).?;
+        inst.owner = prepared.owner;
         inst.status = .active;
-        const owned_key = try alloc.dupe(u8, prior_owner_key);
-        // Close any open interval for this hull (to_day == 0 → stamp it).
         for (self.hull_ownership_history.items) |*h| {
-            if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = self.clock.day_index;
+            if (h.hull_instance_id == prepared.hull and h.to_day == 0) h.to_day = self.clock.day_index;
         }
-        try self.hull_ownership_history.append(alloc, .{
-            .hull_instance_id = hid,
+        self.hull_ownership_history.appendAssumeCapacity(.{
+            .hull_instance_id = prepared.hull,
             .from_day = self.clock.day_index,
             .to_day = 0,
             .acquisition_type = .salvage,
-            .prior_owner_key = owned_key,
+            .prior_owner_key = prepared.prior_owner_key,
         });
+    }
+
+    pub fn transferHullOwnership(self: *GameState, hid: types.HullInstanceId, new_owner: hull_instance_mod.HullOwner, prior_owner_key: []const u8) !void {
+        if (self.hull_instances.getPtr(hid) == null) return;
+        const prepared = try self.prepareHullTransfer(hid, new_owner, prior_owner_key);
+        self.commitHullTransfer(prepared);
     }
 
     /// The one writer for returning an unsold market hull to its origin faction
