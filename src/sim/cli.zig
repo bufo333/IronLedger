@@ -307,7 +307,12 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
     if (eq(u8, verb, "ship")) {
         return .{ .ship_stock = .{ .part_key = try need(tokens.next()), .quantity = try num(u32, tokens.next()), .from = try parseSite(try need(tokens.next())), .to = try parseSite(try need(tokens.next())) } };
     }
-    if (eq(u8, verb, "buy")) return .{ .buy_listing = @enumFromInt(try num(u32, tokens.next())) };
+    if (eq(u8, verb, "buy")) {
+        const listing: types.ListingId = @enumFromInt(try num(u32, tokens.next()));
+        const buyer = try parseSite(try need(tokens.next()));
+        if (buyer == .outfit) return error.BadSite;
+        return .{ .buy_listing = .{ .listing = listing, .buyer = buyer } };
+    }
     if (eq(u8, verb, "assign") or eq(u8, verb, "unassign")) {
         // assign <unit> [pilot|tech] <person> — no slot word: the person's
         // role decides. unassign <unit> [pilot|tech] — no slot word: both.
@@ -894,7 +899,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "resolve", "resolve <event-id> <option#> (the id the inbox prints, not the row)" },
         .{ "order", "order <part> [qty] [hq:N|co:N]" },
         .{ "ship", "ship <part> <qty> <from site> <to site>" },
-        .{ "buy", "buy <listing#>" },
+        .{ "buy", "buy <listing#> <hq:N|co:N>" },
         .{ "assign", "assign <unit> [pilot|tech] <person>  (no slot word: the role decides)" },
         .{ "unassign", "unassign <unit> [pilot|tech]  (no slot word: both)" },
         .{ "autoassign", "autoassign co:N" },
@@ -971,8 +976,10 @@ test "command line parses the common verbs" {
     try std.testing.expectEqual(types.HqId.none, cmd9.fabricate.hq);
     var it10 = std.mem.tokenizeScalar(u8, "co:1 air Sky Lance", ' ');
     try std.testing.expect((try parseCommand("newlance", &it10)).?.new_lance.kind == .air);
-    var buy_it = std.mem.tokenizeScalar(u8, "42", ' ');
-    try std.testing.expectEqual(@as(u32, 42), @intFromEnum((try parseCommand("buy", &buy_it)).?.buy_listing));
+    var buy_it = std.mem.tokenizeScalar(u8, "42 hq:7", ' ');
+    const buy = (try parseCommand("buy", &buy_it)).?.buy_listing;
+    try std.testing.expectEqual(@as(u32, 42), @intFromEnum(buy.listing));
+    try std.testing.expectEqual(@as(u32, 7), @intFromEnum(buy.buyer.hq));
     // task / untask parsing (P4e).
     var it11 = std.mem.tokenizeScalar(u8, "1 2 3 main_effort", ' ');
     const cmd11 = (try parseCommand("task", &it11)).?;

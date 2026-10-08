@@ -711,9 +711,9 @@ pub fn execNegotiate(gs: *GameState, n: @FieldType(Command, "negotiate")) Error!
     } };
 }
 
-pub fn execBuyListing(gs: *GameState, lid: @FieldType(Command, "buy_listing")) Error!Result {
-    const index = findListing(gs, lid) orelse return Error.NoSuchListing;
-    const res = buyListing(gs, index) catch |err| return @errorCast(err);
+pub fn execBuyListing(gs: *GameState, buy: @FieldType(Command, "buy_listing")) Error!Result {
+    const index = findListing(gs, buy.listing) orelse return Error.NoSuchListing;
+    const res = buyListing(gs, index, buy.buyer) catch |err| return @errorCast(err);
     return .{ .unit = res.unit, .fraud = res.fraud };
 }
 
@@ -1128,36 +1128,61 @@ fn buyDispersedListingAtHq(gs: *GameState, index: usize, listing: market.Listing
     return .{ .unit = uid };
 }
 
-/// Buy a listing off the market board.
-pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
+/// Whether a listing belongs to the selected buyer's market board. HQ listings
+/// without an owner belong to the outfit seat's board.
+pub fn listingOnBoard(gs: *const GameState, listing: market.Listing, buyer: types.Site) bool {
+    switch (buyer) {
+        .outfit => return false,
+        .hq => |hq| {
+            if (listing.company != .none) return false;
+            if (listing.hq != .none) return listing.hq == hq;
+            if (!listing.black_market or listing.planet_key.len == 0) return hq == gs.seat();
+            const board_hq = gs.hqs.getPtr(hq) orelse return false;
+            return black_market.buyerEligible(gs, listing, .player, gs.clock.day_index) and
+                std.mem.eql(u8, board_hq.planet_key, listing.planet_key);
+        },
+        .company => |company| {
+            var deployment: ?*const contract.Contract = null;
+            for (gs.contracts.values()) |*candidate| {
+                if (candidate.status == .active and candidate.assigned_company == company) {
+                    deployment = candidate;
+                    break;
+                }
+            }
+            if (listing.company != .none) return deployment != null and listing.company == company;
+            if (!listing.black_market or listing.planet_key.len == 0 or
+                !black_market.buyerEligible(gs, listing, .player, gs.clock.day_index) or
+                black_market.playerHqAt(gs, listing) != .none) return false;
+            return if (deployment) |active| std.mem.eql(u8, active.planet_key, listing.planet_key) else false;
+        },
+    }
+}
+
+/// Buy a listing from the selected market board.
+pub fn buyListing(gs: *GameState, index: usize, buyer: types.Site) !BuyResult {
     if (index >= gs.market_listings.items.len) return error.NoSuchListing;
-    if (gs.hqs.count() == 0) return error.NoHq;
     const listing = gs.market_listings.items[index];
-    // Dispersed black-market wrecks require presence at their listed world.
-    // Local fence offers remain bound to their existing HQ board.
-    if (listing.black_market and listing.planet_key.len > 0 and
-        !black_market.buyerEligible(gs, listing, .player, gs.clock.day_index))
-        return error.NoSuchListing;
+    if (!listingOnBoard(gs, listing, buyer)) return error.NoSuchListing;
     const price = types.applyBp(listing.price, gs.diff().purchase_bp); // difficulty
-    const dispersed_hq = black_market.playerHqAt(gs, listing);
-    const dispersed_contract = if (listing.black_market and listing.planet_key.len > 0 and dispersed_hq == .none)
-        black_market.playerDeploymentAt(gs, listing, gs.clock.day_index)
-    else
-        null;
-    if (listing.black_market and listing.planet_key.len > 0 and listing.hull_instance_id != .none and dispersed_hq != .none) {
-        return buyDispersedListingAtHq(gs, index, listing, price, dispersed_hq);
+    const selected_hq = switch (buyer) {
+        .hq => |hq| hq,
+        else => .none,
+    };
+    const selected_company = switch (buyer) {
+        .company => |company| company,
+        else => .none,
+    };
+    if (listing.black_market and listing.planet_key.len > 0 and listing.hull_instance_id != .none and selected_hq != .none) {
+        return buyDispersedListingAtHq(gs, index, listing, price, selected_hq);
     }
     // The contract world's board: the company buys where it
     // stands, from its local funds, and the hull joins it there.
-    if (listing.company != .none or dispersed_contract != null) {
-        const c = if (dispersed_contract) |contract_id|
-            gs.contracts.getPtr(contract_id) orelse return error.NoSuchListing
-        else
-            gs.deploymentContract(listing.company) orelse return error.NoSuchListing;
-        const co = c.assigned_company;
+    if (selected_company != .none) {
+        const c = gs.deploymentContract(selected_company) orelse return error.NoSuchListing;
+        const co = selected_company;
         if (c.status != .active) return error.NoSuchListing;
         if (gs.treasuryBalance(.{ .company = co }) < price) return error.CompanyFundsShort;
-        if (dispersed_contract == null) {
+        if (listing.company != .none) {
             if (listing.kind == .part) {
                 const stock = gs.stockMap(.{ .company = co }) orelse return error.NoSuchListing;
                 _ = std.math.add(u32, gs.stockCount(.{ .company = co }, listing.item_key), listing.quantity) catch return error.StockOverflow;
@@ -1265,7 +1290,7 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
         return .{ .unit = uid };
     }
     // The board's own HQ pays and receives.
-    const hq_id: types.HqId = if (listing.hq != .none) listing.hq else if (dispersed_hq != .none) dispersed_hq else gs.seat();
+    const hq_id = selected_hq;
     // Transports need a berth at the board's HQ.
     var berth_kind: ?unit_mod.UnitKind = null;
     if (listing.kind == .unit) if (chassis_mod.find(listing.item_key)) |design| if (design.kind.isTransport()) {
@@ -1362,7 +1387,7 @@ pub fn buyHullFor(gs: *GameState, listing: usize, company: types.ForceId, lance:
     const board_hq: types.HqId = if (l.hq != .none) l.hq else gs.seat();
     // A defrauded purchase creates no hull and returns none: there is
     // nothing to place.
-    const buy_res = try buyListing(gs, listing);
+    const buy_res = try buyListing(gs, listing, .{ .hq = board_hq });
     const uid = buy_res.unit;
     if (uid == .none) return .{ .fraud = buy_res.fraud };
     const home = gs.homeHqFor(company);
@@ -1498,7 +1523,7 @@ test "a black-market buy is a fraud or a sale, and the house notices either way"
         gs.next_listing_id += 1;
         const before = gs.stockCount(.{ .hq = hq }, "ppc");
         const funds = gs.hqs.getPtr(hq).?.funds;
-        const res = try commands.execute(&gs, .{ .buy_listing = new_lid });
+        const res = try commands.execute(&gs, .{ .buy_listing = .{ .listing = new_lid, .buyer = .{ .hq = hq } } });
         try std.testing.expectEqual(funds - 600_000, gs.hqs.getPtr(hq).?.funds); // paid either way
         try std.testing.expectEqual(len_before, gs.market_listings.items.len); // the offer is gone either way
         if (gs.stockCount(.{ .hq = hq }, "ppc") == before) {
@@ -1535,7 +1560,7 @@ test "a dispersed black-market listing requires player presence on its planet" {
     const funds_before = gs.hqs.getPtr(hq).?.funds;
     const listings_before = gs.market_listings.items.len;
 
-    try std.testing.expectError(commands.Error.NoSuchListing, commands.execute(&gs, .{ .buy_listing = listing_id }));
+    try std.testing.expectError(commands.Error.NoSuchListing, commands.execute(&gs, .{ .buy_listing = .{ .listing = listing_id, .buyer = .{ .hq = hq } } }));
     try std.testing.expectEqual(funds_before, gs.hqs.getPtr(hq).?.funds);
     try std.testing.expectEqual(listings_before, gs.market_listings.items.len);
 }
@@ -1550,7 +1575,7 @@ test "a dispersed listing bought through a local HQ uses that HQ treasury" {
     const listing_id: types.ListingId = @enumFromInt(gs.next_listing_id);
     try gs.market_listings.append(gs.allocator(), .{ .id = listing_id, .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 500_000, .black_market = true, .planet_key = "canopus4" });
     const seat_funds = gs.hqs.getPtr(seat).?.funds;
-    _ = try commands.execute(&gs, .{ .buy_listing = listing_id });
+    _ = try commands.execute(&gs, .{ .buy_listing = .{ .listing = listing_id, .buyer = .{ .hq = local } } });
     try std.testing.expectEqual(seat_funds, gs.hqs.getPtr(seat).?.funds);
     try std.testing.expectEqual(@as(types.CBills, 500_000), gs.hqs.getPtr(local).?.funds);
     try std.testing.expectEqual(local, gs.event_log.items[gs.event_log.items.len - 1].hq);
@@ -1608,7 +1633,7 @@ test "a failed dispersed HQ fraud purchase changes no state" {
         var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
         gs.arena.child_allocator = failing.allocator();
 
-        if (commands.execute(&gs, .{ .buy_listing = listing })) |result| {
+        if (commands.execute(&gs, .{ .buy_listing = .{ .listing = listing, .buyer = .{ .hq = @enumFromInt(99) } } })) |result| {
             try std.testing.expect(result.fraud);
             try std.testing.expect(digest.stateHash(&gs) != before);
             gs.deinit();
@@ -1676,7 +1701,7 @@ test "buying a wreck buys a project" {
     gs.next_listing_id += 1;
     const wreck_lid: types.ListingId = gs.market_listings.items[gs.market_listings.items.len - 1].id;
     const units_before = gs.units.count();
-    _ = try commands.execute(&gs, .{ .buy_listing = wreck_lid });
+    _ = try commands.execute(&gs, .{ .buy_listing = .{ .listing = wreck_lid, .buyer = .{ .hq = gs.seat() } } });
     try std.testing.expectEqual(units_before + 1, gs.units.count());
 
     const u = &gs.units.values()[gs.units.count() - 1];
@@ -1699,7 +1724,7 @@ test "buying a wreck buys a project" {
         }
     }
     const qty = gs.market_listings.items[staple_array_idx.?].quantity;
-    _ = try commands.execute(&gs, .{ .buy_listing = staple_lid.? });
+    _ = try commands.execute(&gs, .{ .buy_listing = .{ .listing = staple_lid.?, .buyer = .{ .hq = gs.seat() } } });
     try std.testing.expectEqual(qty - 1, gs.market_listings.items[staple_array_idx.?].quantity);
 }
 
@@ -1761,10 +1786,10 @@ test "the contract world has a hull board — local funds pay, the hull joins th
     try std.testing.expect(found_lid != null);
     // Broke: refused; funded: bought from local funds, on the company's books at once.
     gs.force(co).?.local_funds = 0;
-    try std.testing.expectError(commands.Error.CompanyFundsShort, commands.execute(&gs, .{ .buy_listing = found_lid.? }));
+    try std.testing.expectError(commands.Error.CompanyFundsShort, commands.execute(&gs, .{ .buy_listing = .{ .listing = found_lid.?, .buyer = .{ .company = co } } }));
     gs.force(co).?.local_funds = 50_000_000;
     const hq_funds = gs.hqs.values()[0].funds;
-    const r = try commands.execute(&gs, .{ .buy_listing = found_lid.? });
+    const r = try commands.execute(&gs, .{ .buy_listing = .{ .listing = found_lid.?, .buyer = .{ .company = co } } });
     try std.testing.expectEqual(co, gs.unit(r.unit).?.force);
     try std.testing.expect(gs.force(co).?.local_funds < 50_000_000);
     try std.testing.expectEqual(hq_funds, gs.hqs.values()[0].funds);
@@ -1787,10 +1812,49 @@ test "a contract-world part purchase stocks the deployed company from local fund
     gs.next_listing_id += 1;
     gs.force(co).?.local_funds = 1_000;
     const hq_funds = gs.hqs.values()[0].funds;
-    _ = try commands.execute(&gs, .{ .buy_listing = listing });
+    _ = try commands.execute(&gs, .{ .buy_listing = .{ .listing = listing, .buyer = .{ .company = co } } });
     try std.testing.expectEqual(@as(u32, 3), gs.stockCount(.{ .company = co }, "ammo_lrm"));
     try std.testing.expectEqual(@as(types.CBills, 900), gs.force(co).?.local_funds);
     try std.testing.expectEqual(hq_funds, gs.hqs.values()[0].funds);
+}
+
+test "market purchases use the selected company or co-located HQ board" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1209 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const alpha = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const world = "canopus4";
+    const company_hq: types.HqId = @enumFromInt(120);
+    try gs.hqs.put(gs.allocator(), company_hq, .{ .id = company_hq, .name = "Company HQ", .tier = .field, .planet_key = gs.hqs.getPtr(gs.seat()).?.planet_key });
+    const bravo = (try commands.execute(&gs, .{ .new_company_at = .{ .name = "Bravo", .hq = company_hq } })).created_force;
+    try gs.contracts.put(gs.allocator(), @enumFromInt(12091), .{ .id = @enumFromInt(12091), .kind = .objective_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = world, .status = .active, .assigned_company = alpha, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } });
+    try gs.contracts.put(gs.allocator(), @enumFromInt(12092), .{ .id = @enumFromInt(12092), .kind = .objective_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = world, .status = .active, .assigned_company = bravo, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } });
+    gs.force(alpha).?.local_funds = 1_000;
+    gs.force(bravo).?.local_funds = 1_000;
+    const company_listing: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = company_listing, .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 100, .company = alpha });
+    gs.next_listing_id += 1;
+    const alpha_funds = gs.force(alpha).?.local_funds;
+    const bravo_funds = gs.force(bravo).?.local_funds;
+    try std.testing.expectError(commands.Error.NoSuchListing, commands.execute(&gs, .{ .buy_listing = .{ .listing = company_listing, .buyer = .{ .company = bravo } } }));
+    try std.testing.expectEqual(alpha_funds, gs.force(alpha).?.local_funds);
+    try std.testing.expectEqual(bravo_funds, gs.force(bravo).?.local_funds);
+    const bought = try commands.execute(&gs, .{ .buy_listing = .{ .listing = company_listing, .buyer = .{ .company = alpha } } });
+    try std.testing.expectEqual(alpha, gs.companyOf(gs.unit(bought.unit).?.force));
+    try std.testing.expectEqual(alpha, gs.event_log.items[gs.event_log.items.len - 1].company);
+
+    const first = gs.seat();
+    const second: types.HqId = @enumFromInt(121);
+    try gs.hqs.put(gs.allocator(), second, .{ .id = second, .name = "Second", .tier = .field, .planet_key = gs.hqs.getPtr(first).?.planet_key, .funds = 1_000 });
+    gs.hqs.getPtr(first).?.funds = 1_000;
+    const hq_listing: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = hq_listing, .kind = .part, .item_key = "ammo_lrm", .rarity = .common, .price = 100, .black_market = true, .planet_key = gs.hqs.getPtr(first).?.planet_key });
+    gs.next_listing_id += 1;
+    const first_funds = gs.hqs.getPtr(first).?.funds;
+    _ = try commands.execute(&gs, .{ .buy_listing = .{ .listing = hq_listing, .buyer = .{ .hq = second } } });
+    try std.testing.expectEqual(first_funds, gs.hqs.getPtr(first).?.funds);
+    try std.testing.expectEqual(@as(types.CBills, 900), gs.hqs.getPtr(second).?.funds);
+    try std.testing.expectEqual(second, gs.event_log.items[gs.event_log.items.len - 1].hq);
 }
 
 test "one board per HQ — offers inside its reach, taken only by companies based there" {
@@ -1946,7 +2010,7 @@ test "buying a hull listing creates a HullInstance and an open purchase ownershi
     });
     gs.next_listing_id += 1;
     const lid = gs.market_listings.items[gs.market_listings.items.len - 1].id;
-    _ = try commands.execute(&gs, .{ .buy_listing = lid });
+    _ = try commands.execute(&gs, .{ .buy_listing = .{ .listing = lid, .buyer = .{ .hq = gs.seat() } } });
 
     // Bought unit must have a linked instance and a purchase ownership row.
     // Faction-pool rows seeded at campaign creation (P3e.4) precede it.
@@ -1981,7 +2045,7 @@ test "a funds-short buy refusal creates no HullInstance and no ownership row" {
     // Record the hull_ownership_history count before the failed buy (includes seeded faction-pool
     // rows from P3e.4 create_commander seeding); a failed buy must add nothing.
     const before_count = gs.hull_ownership_history.items.len;
-    try std.testing.expectError(error.HqTreasuryShort, commands.execute(&gs, .{ .buy_listing = lid }));
+    try std.testing.expectError(error.HqTreasuryShort, commands.execute(&gs, .{ .buy_listing = .{ .listing = lid, .buyer = .{ .hq = gs.seat() } } }));
     try std.testing.expectEqual(before_count, gs.hull_ownership_history.items.len);
     // No new unit added.
     for (gs.units.values()) |u| try std.testing.expectEqual(@import("../domain/types.zig").HullInstanceId.none, u.hull_instance_id);
@@ -2028,7 +2092,7 @@ test "buying a surplus listing transfers the pre-existing HullInstance to the pl
     const lid = gs.market_listings.items[gs.market_listings.items.len - 1].id;
 
     const unit_count_before = gs.units.count();
-    _ = try commands.execute(&gs, .{ .buy_listing = lid });
+    _ = try commands.execute(&gs, .{ .buy_listing = .{ .listing = lid, .buyer = .{ .hq = gs.seat() } } });
 
     // A unit was created.
     try std.testing.expectEqual(unit_count_before + 1, gs.units.count());
@@ -2086,7 +2150,7 @@ test "buying a dispersed black-market hull transfers its existing HullInstance o
         const instances_before = gs.hull_instances.count();
         const history_before = gs.hull_ownership_history.items.len;
 
-        const result = try commands.execute(&gs, .{ .buy_listing = listing_id });
+        const result = try commands.execute(&gs, .{ .buy_listing = .{ .listing = listing_id, .buyer = .{ .hq = hq } } });
         if (result.fraud) continue;
         sold = true;
         try std.testing.expectEqual(instances_before, gs.hull_instances.count());
@@ -2245,7 +2309,7 @@ test "a deployed company buys dispersed black-market hulls with local funds and 
         gs.arena.state.used_list = null;
         gs.arena.state.free_list = null;
         gs.arena.child_allocator = std.testing.failing_allocator;
-        try std.testing.expectError(error.OutOfMemory, commands.execute(&gs, .{ .buy_listing = listing_id }));
+        try std.testing.expectError(error.OutOfMemory, commands.execute(&gs, .{ .buy_listing = .{ .listing = listing_id, .buyer = .{ .company = company } } }));
         try std.testing.expectEqual(before_failure, digest.stateHash(&gs));
         gs.arena.child_allocator = original_allocator;
 
@@ -2254,7 +2318,7 @@ test "a deployed company buys dispersed black-market hulls with local funds and 
         const moc_standing = gs.standing("MOC");
         const pirates_standing = gs.standing("PER");
         const units_before = gs.units.count();
-        const result = try commands.execute(&gs, .{ .buy_listing = listing_id });
+        const result = try commands.execute(&gs, .{ .buy_listing = .{ .listing = listing_id, .buyer = .{ .company = company } } });
 
         try std.testing.expectEqual(seat_funds, gs.hqs.getPtr(gs.seat()).?.funds);
         try std.testing.expectEqual(local_funds - 500_000, gs.force(company).?.local_funds);

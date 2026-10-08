@@ -2500,11 +2500,7 @@ pub const MarketFilter = enum {
 pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId) !Market {
     var board: std.ArrayListUnmanaged(ListingRow) = .empty;
     for (gs.market_listings.items) |l| {
-        if (l.company != .none) continue;
-        if (l.hq != hq and l.hq != .none) continue;
-        if (l.black_market and l.hq == .none and l.planet_key.len > 0 and
-            (!black_market.buyerEligible(gs, l, .player, gs.clock.day_index) or
-                black_market.playerHqAt(gs, l) != hq)) continue;
+        if (!@import("contract_market.zig").listingOnBoard(gs, l, .{ .hq = hq })) continue;
         const keep = switch (l.kind) {
             .unit => filter.matchesUnit(if (chassis_mod.find(l.item_key)) |c| c.kind else .mek),
             .part => filter.matchesPart(l.item_key),
@@ -2612,12 +2608,7 @@ pub fn companyMarket(alloc: Alloc, gs: *GameState, filter: MarketFilter, company
     if (contract.status != .active) return board.toOwnedSlice(alloc);
     const hq = gs.homeHqFor(company);
     for (gs.market_listings.items) |l| {
-        const local_listing = l.company == company;
-        const dispersed_listing = l.company == .none and l.black_market and l.planet_key.len > 0 and
-            std.mem.eql(u8, l.planet_key, contract.planet_key) and
-            black_market.buyerEligible(gs, l, .player, gs.clock.day_index) and
-            black_market.playerHqAt(gs, l) == .none;
-        if (!local_listing and !dispersed_listing) continue;
+        if (!@import("contract_market.zig").listingOnBoard(gs, l, .{ .company = company })) continue;
         const keep = switch (l.kind) {
             .unit => filter.matchesUnit(if (chassis_mod.find(l.item_key)) |c| c.kind else .mek),
             .part => filter.matchesPart(l.item_key),
@@ -4698,7 +4689,7 @@ test "market board hides delayed and unreachable dispersed black-market listings
     try std.testing.expectEqual(reachable, result.board[1].id);
 }
 
-test "a dispersed listing appears only on the HQ board at its world" {
+test "a dispersed listing appears on each co-located HQ board" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 74 });
     defer gs.deinit();
     const commands = @import("commands.zig");
@@ -4713,7 +4704,7 @@ test "a dispersed listing appears only on the HQ board at its world" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     try std.testing.expectEqual(@as(usize, 1), (try market(arena.allocator(), &gs, .all, home)).board.len);
-    try std.testing.expectEqual(@as(usize, 0), (try market(arena.allocator(), &gs, .all, other)).board.len);
+    try std.testing.expectEqual(@as(usize, 1), (try market(arena.allocator(), &gs, .all, other)).board.len);
 }
 
 test "a deployed company's local board shows its dispersed listings without unrelated boards" {
@@ -7318,15 +7309,15 @@ pub fn resultText(
         else
             "hired (details unavailable)",
         .crew_company => return try std.fmt.allocPrint(alloc, "{d} hired to fill the manning table, {d} lines still open (no candidates)", .{ result.hired_count, result.still_open }),
-        .buy_listing => {
+        .buy_listing => |buy| {
             if (result.fraud) return cmd_mod.hull_fraud_text;
             if (result.unit == .none) return "no hull acquired";
             const u = gs.unit(result.unit) orelse return "bought";
             if (u.kind.isTransport()) {
                 const hq_name = try hqName(alloc, gs, u.berth_hq);
-                return try std.fmt.allocPrint(alloc, "bought listing [{d}] — berthed at {s}; hire a ship crew from the hall and it lifts the next deployment", .{ @intFromEnum(cmd.buy_listing), hq_name });
+                return try std.fmt.allocPrint(alloc, "bought listing [{d}] — berthed at {s}; hire a ship crew from the hall and it lifts the next deployment", .{ @intFromEnum(buy.listing), hq_name });
             }
-            return try std.fmt.allocPrint(alloc, "bought listing [{d}]", .{@intFromEnum(cmd.buy_listing)});
+            return try std.fmt.allocPrint(alloc, "bought listing [{d}]", .{@intFromEnum(buy.listing)});
         },
         .buy_hull_for => return if (result.fraud)
             cmd_mod.hull_fraud_text

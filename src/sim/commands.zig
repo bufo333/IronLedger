@@ -95,8 +95,8 @@ pub const Command = union(enum) {
     order_part: struct { part_key: []const u8, quantity: u32, dest: ?types.Site = null },
     /// Move stock between sites as a shipment (freight paid by the sender).
     ship_stock: struct { part_key: []const u8, quantity: u32, from: types.Site, to: types.Site },
-    /// Buy off the site-market board (unit or part listing).
-    buy_listing: types.ListingId,
+    /// Buy one listing from the selected HQ or deployed-company board.
+    buy_listing: struct { listing: types.ListingId, buyer: types.Site },
     /// Cold storage (§9.8): mothball at home for 20% upkeep...
     mothball: types.UnitId,
     /// ...and pay the reactivation tech-days to wake it back up.
@@ -605,7 +605,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .promote => |pr| return personnel.execPromote(gs, pr),
         .order_part => |o| return sites.execOrderPart(gs, o),
         .ship_stock => |s| return sites.execShipStock(gs, s),
-        .buy_listing => |lid| return contract_market.execBuyListing(gs, lid),
+        .buy_listing => |b| return contract_market.execBuyListing(gs, b),
         .mothball => |unit_id| return held_hulls.execMothball(gs, unit_id),
         .move_unit => |m| return toe.execMoveUnit(gs, m),
         .new_lance => |nl| return toe.execNewLance(gs, nl),
@@ -789,10 +789,10 @@ test "ships need berths, lift the company for less charter, and come home with i
     const leo2_id: types.ListingId = @enumFromInt(gs.next_listing_id);
     try gs.market_listings.append(gs.allocator(), .{ .id = leo2_id, .kind = .unit, .item_key = "LEOPARD", .rarity = .rare, .price = 20_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
     gs.next_listing_id += 1;
-    _ = try execute(&gs, .{ .buy_listing = leo1_id });
+    _ = try execute(&gs, .{ .buy_listing = .{ .listing = leo1_id, .buyer = .{ .hq = hq } } });
     const ship: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
     try std.testing.expectEqual(hq, gs.unit(ship).?.berth_hq);
-    try std.testing.expectError(Error.NoBerth, execute(&gs, .{ .buy_listing = leo2_id }));
+    try std.testing.expectError(Error.NoBerth, execute(&gs, .{ .buy_listing = .{ .listing = leo2_id, .buyer = .{ .hq = hq } } }));
     try std.testing.expectEqual(@as(u32, 1), lift_mod.transportsBerthedAt(&gs, hq, .dropship));
 
     // No jumpship: a dedicated line is refused; charter and scheduled are fine.
@@ -858,7 +858,7 @@ test "ships need berths, lift the company for less charter, and come home with i
     const scout_id: types.ListingId = @enumFromInt(gs.next_listing_id);
     try gs.market_listings.append(gs.allocator(), .{ .id = scout_id, .kind = .unit, .item_key = "SCOUT", .rarity = .rare, .price = 50_000_000, .hq = hq, .listed_day = 0, .expires_day = 400 });
     gs.next_listing_id += 1;
-    _ = try execute(&gs, .{ .buy_listing = scout_id });
+    _ = try execute(&gs, .{ .buy_listing = .{ .listing = scout_id, .buyer = .{ .hq = hq } } });
     const jump: types.UnitId = @enumFromInt(gs.next_unit_id - 1);
     try std.testing.expectError(Error.NoJumpship, execute(&gs, .{ .link = .{ .a = hq, .b = far, .level = 3 } }));
     try crew.assignSlot(&gs, jump, .pilot, try gs.hirePerson("Oda", "Ferro", .jumpship_crew));

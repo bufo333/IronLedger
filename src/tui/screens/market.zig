@@ -94,7 +94,11 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             };
             if (board_rows.len > 0) {
                 const l = board_rows[@min(self.cur(0).*, board_rows.len - 1)];
-                const cmd: game.commands.Command = .{ .buy_listing = l.id };
+                const buyer: types.Site = switch (board) {
+                    .hq => |id| .{ .hq = id },
+                    .company => |id| .{ .company = id },
+                };
+                const cmd: game.commands.Command = .{ .buy_listing = .{ .listing = l.id, .buyer = buyer } };
                 const res = self.execResult(cmd) orelse return true;
                 if (res.fraud) {
                     self.say(.crit, "{s}", .{game.cli.hull_fraud_text});
