@@ -411,6 +411,7 @@ fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *const GameState, listin
     const listing_index = candidates.items[rng.random(.market).uintLessThan(usize, candidates.items.len)];
     const listing = listings.items[listing_index].listing;
     const acquisition: PurchaseAcquisition = if (listing.hull_instance_id == .none) blk: {
+        if (next_hull_instance_id.* == std.math.maxInt(u32)) return error.HullInstanceIdExhausted;
         const id: types.HullInstanceId = @enumFromInt(next_hull_instance_id.*);
         next_hull_instance_id.* += 1;
         break :blk .{ .mint = id };
@@ -926,6 +927,38 @@ test "selectNpcProcurement: minted vehicle has design loadout and purchase prove
     try std.testing.expectEqual(@as(usize, chassis_mod.find("SCP-1N").?.loadout.len), hull.loadout.items.len);
     try std.testing.expectEqual(hull_instance_mod.AcquisitionType.purchase, gs.hull_ownership_history.items[0].acquisition_type);
     try std.testing.expectEqualStrings("market", gs.hull_ownership_history.items[0].prior_owner_key);
+}
+
+test "buyHullsForCompany: saturated minted hull ID refuses without mutation or RNG draw" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 2030 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const company_id: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(gs.allocator(), company_id, .{
+        .id = company_id,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Saturated Co",
+        .faction_key = "DC",
+        .cbills = 10,
+    });
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = @enumFromInt(1),
+        .kind = .unit,
+        .item_key = "SCP-1N",
+        .rarity = .common,
+        .price = 1,
+    });
+    gs.next_hull_instance_id = std.math.maxInt(u32);
+
+    const state_before = digest.stateHash(&gs);
+    const id_before = gs.next_hull_instance_id;
+    var rng = gs.rng;
+    const rng_before = rng;
+    try std.testing.expectError(error.HullInstanceIdExhausted, buyHullsForCompany(&gs, a, company_id, 1, &rng));
+    try std.testing.expectEqual(state_before, digest.stateHash(&gs));
+    try std.testing.expectEqual(id_before, gs.next_hull_instance_id);
+    try std.testing.expectEqual(rng_before, rng);
 }
 
 test "selectNpcProcurement: future listing admits no candidate, mutation, or RNG draw" {

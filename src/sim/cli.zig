@@ -678,6 +678,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.KeepStocked => "that would drop the line under its keep-stocked minimum — lower the policy first (K)",
         error.StorageFull => "the destination cannot hold that tonnage",
         error.StockOverflow => "stock quantity would exceed the maximum counter — the stores are full",
+        error.HullInstanceIdExhausted => "no hull instance IDs remain — nothing was changed",
         error.CompanyDeployed => "that company is deployed — hire at an HQ hall and `xfer person <id> co:N` to send people out to it",
         error.NotReachable => "outside your influence rings and beachhead bands",
         error.CapacityFull => "that HQ has no free company slot — a field HQ hosts none (HQ screen: T raises it to regional); a regional HQ hosts one",
@@ -1127,6 +1128,7 @@ test "every verb is listed once" {
 }
 
 test "every command refusal and parse error has a sentence, never an error name" {
+    try std.testing.expectEqualStrings("no hull instance IDs remain — nothing was changed", errorText(error.HullInstanceIdExhausted));
     inline for (@typeInfo(game.commands.Error).error_set.?) |e| {
         const text = errorText(@field(anyerror, e.name));
         try std.testing.expect(!std.mem.eql(u8, text, "an unexpected internal error"));

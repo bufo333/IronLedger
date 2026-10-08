@@ -429,6 +429,8 @@ pub const Error = error{
     NothingToRush,
     /// A stock quantity addition would overflow the u32 counter (rule 47).
     StockOverflow,
+    /// No `HullInstanceId` remains for an NPC conventional procurement.
+    HullInstanceIdExhausted,
     /// `set_office_staff` with delta < 0 and no one in that role to release.
     NoOneInRole,
     /// `buy_support_hull`: the staple line for that hull kind is not on the
