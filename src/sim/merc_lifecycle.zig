@@ -387,9 +387,10 @@ fn planReplacement(scratch: std.mem.Allocator, gs: *const GameState, companies: 
 /// then aerospace reserve; candidate order is the market board's stable order.
 /// Failed availability or affordability searches draw no RNG.
 fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *const GameState, listings: *std.ArrayListUnmanaged(PlannedListing), company: *PlannedCompany, day: u32, rng: *rng_mod.Rng, next_hull_instance_id: *u32) !?Purchase {
-    const mek_target: usize = tuning.generation.merc_company_hulls_each;
+    const line_target: usize = tuning.generation.merc_company_hulls_each;
+    const mek_target = line_target;
     const air_target: usize = @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size;
-    var wanted_kind: unit.UnitKind = if (company.counts.meks < mek_target) .mek else if (company.counts.meks + company.counts.vehicles < mek_target) .vehicle else if (company.counts.aerospace < air_target) .aerospace else return null;
+    var wanted_kind: unit.UnitKind = if (company.counts.meks < mek_target) .mek else if (company.counts.meks + company.counts.vehicles < line_target) .vehicle else if (company.counts.aerospace < air_target) .aerospace else return null;
     var candidates = std.ArrayListUnmanaged(usize).empty;
     collect: while (true) {
         for (listings.items, 0..) |planned, i| {
@@ -403,7 +404,7 @@ fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *const GameState, listin
             if ((wanted_kind == .vehicle or wanted_kind == .aerospace) and !chassis_mod.conventionalMarketEligible(chassis, gs.clock.date.year)) continue;
             try candidates.append(scratch, i);
         }
-        if (candidates.items.len > 0 or wanted_kind != .mek or company.counts.meks + company.counts.vehicles >= mek_target) break :collect;
+        if (candidates.items.len > 0 or wanted_kind != .mek or company.counts.meks + company.counts.vehicles >= line_target) break :collect;
         wanted_kind = .vehicle;
     }
     if (candidates.items.len == 0) return null;
@@ -877,7 +878,7 @@ test "selectNpcProcurement: fighters never fill line positions" {
     try std.testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
 }
 
-test "selectNpcProcurement: vehicles never fill air positions" {
+test "selectNpcProcurement: a full vehicle line does not block a later mek" {
     const a = std.testing.allocator;
     var gs = GameState.init(a, .{ .seed = 20272 });
     defer gs.deinit();
@@ -892,15 +893,21 @@ test "selectNpcProcurement: vehicles never fill air positions" {
         try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1 + @as(u32, @intCast(i))), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1 });
     }
     try gs.merc_company_rosters.put(gs.allocator(), company_id, roster);
+    gs.next_hull_instance_id = @intCast(tuning.generation.merc_company_hulls_each + 1);
+    const later_mek: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), later_mek, .{ .id = later_mek, .base_key = "LCT-1V", .owner = .market });
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(tuning.generation.merc_company_hulls_each + 1), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = later_mek });
 
     var rng = gs.rng;
     try buyHullsForCompany(&gs, a, company_id, 1, &rng);
 
     const counts = companyHullCounts(&gs, company_id);
-    try std.testing.expectEqual(@as(usize, 0), counts.meks);
+    try std.testing.expectEqual(@as(usize, 1), counts.meks);
     try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_hulls_each), counts.vehicles);
     try std.testing.expectEqual(@as(usize, 0), counts.aerospace);
     try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_hulls_each), gs.market_listings.items.len);
+    try std.testing.expectEqual(hull_instance_mod.HullOwner{ .merc_company = company_id }, gs.hull_instances.get(later_mek).?.owner);
 }
 
 test "selectNpcProcurement: minted vehicle has design loadout and purchase provenance" {
