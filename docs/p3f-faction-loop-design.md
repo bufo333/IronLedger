@@ -466,7 +466,7 @@ pub fn spawnReplacementCompany(
     alloc: std.mem.Allocator,
     day: u32,
     rng: *rng_mod.Rng,
-) !void
+) !types.MercCompanyId
 ```
 
 ### 5.4  New `MercCompany` fields (schema v58, P3f.4)

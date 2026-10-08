@@ -292,6 +292,9 @@ pub fn disperseEnemyWrecks(
 /// black-market offers and part listings (rule 1).
 pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
     const day = gs.clock.day_index;
+    var scratch_arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer scratch_arena.deinit();
+    const scratch = scratch_arena.allocator();
     const alloc = gs.allocator();
 
     // Locate the PER faction key (fail-closed if absent).
@@ -325,7 +328,7 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
 
     // Consumed marker: one bool per listing, prevents two buyers from
     // taking the same hull (rule 1).
-    const consumed = try alloc.alloc(bool, gs.market_listings.items.len);
+    const consumed = try scratch.alloc(bool, gs.market_listings.items.len);
     @memset(consumed, false);
 
     // Build consumption plan: for each buyer in order, build that buyer's
@@ -343,14 +346,14 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
             if (!buyerEligible(gs, l, buyers_buf[bi].kind, day)) continue;
             if (l.kind != .unit) continue;
             if (l.hull_instance_id == .none) continue;
-            try elig.append(alloc, i);
+            try elig.append(scratch, i);
         }
         if (elig.items.len == 0) continue;
         const take = @min(tuning.market.npc_black_market_draws_per_month, elig.items.len);
         for (0..take) |_| {
             const j = rng_copy.random(.market).uintLessThan(usize, elig.items.len);
             const idx = elig.items[j];
-            try plan.append(alloc, .{ .buyer_idx = bi, .listing_idx = idx });
+            try plan.append(scratch, .{ .buyer_idx = bi, .listing_idx = idx });
             consumed[idx] = true;
             _ = elig.swapRemove(j);
         }
@@ -373,31 +376,46 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
         if (merc_takes_buf[mi] > 0) distinct_mercs += 1;
     }
 
-    // Reserve capacity: one ownership history row per consumed hull.
-    try gs.hull_ownership_history.ensureUnusedCapacity(alloc, plan.items.len);
+    // Stage roster maps so a later OOM cannot leave a newly inserted map entry
+    // in campaign state. Untouched roster buffers remain shared with the stage.
+    var staged_faction_rosters = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.HullInstanceId)).empty;
+    try staged_faction_rosters.ensureTotalCapacity(alloc, gs.faction_rosters.count());
+    for (gs.faction_rosters.keys(), gs.faction_rosters.values()) |key, roster| {
+        staged_faction_rosters.putAssumeCapacity(key, roster);
+    }
+    var staged_merc_company_rosters = std.AutoArrayHashMapUnmanaged(types.MercCompanyId, std.ArrayListUnmanaged(types.HullInstanceId)).empty;
+    try staged_merc_company_rosters.ensureTotalCapacity(alloc, gs.merc_company_rosters.count());
+    for (gs.merc_company_rosters.keys(), gs.merc_company_rosters.values()) |id, roster| {
+        staged_merc_company_rosters.putAssumeCapacity(id, roster);
+    }
 
-    // Reserve PER roster capacity.
     if (pirate_take > 0) {
-        try gs.faction_rosters.ensureUnusedCapacity(alloc, 1);
-        const gop = try gs.faction_rosters.getOrPut(alloc, per_key);
-        if (!gop.found_existing) gop.value_ptr.* = .empty;
+        const gop = try staged_faction_rosters.getOrPut(alloc, per_key);
+        if (gop.found_existing) {
+            var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+            try roster.appendSlice(alloc, gop.value_ptr.items);
+            gop.value_ptr.* = roster;
+        } else gop.value_ptr.* = .empty;
         try gop.value_ptr.ensureUnusedCapacity(alloc, pirate_take);
     }
 
-    // Reserve merc roster capacities (ensureUnusedCapacity on the map first to
-    // prevent rehash invalidating existing pointers during successive getOrPuts).
     if (distinct_mercs > 0) {
-        try gs.merc_company_rosters.ensureUnusedCapacity(alloc, distinct_mercs);
         for (0..mercs_count) |mi| {
             if (merc_takes_buf[mi] == 0) continue;
             const merc_id = buyers_buf[mi + 1].merc_id;
-            const gop = try gs.merc_company_rosters.getOrPut(alloc, merc_id);
-            if (!gop.found_existing) gop.value_ptr.* = .empty;
+            const gop = try staged_merc_company_rosters.getOrPut(alloc, merc_id);
+            if (gop.found_existing) {
+                var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+                try roster.appendSlice(alloc, gop.value_ptr.items);
+                gop.value_ptr.* = roster;
+            } else gop.value_ptr.* = .empty;
             try gop.value_ptr.ensureUnusedCapacity(alloc, merc_takes_buf[mi]);
-            // Do NOT retain gop.value_ptr across additional getOrPut calls
-            // (rehash hazard); re-fetch via getPtr in the commit phase.
         }
     }
+
+    // This is the final fallible operation. Map entries are staged above, so
+    // preparation never mutates a campaign map.
+    try gs.hull_ownership_history.ensureUnusedCapacity(alloc, plan.items.len);
 
     // ---- Commit (infallible: no allocation past this point) ----
     for (plan.items) |entry| {
@@ -419,7 +437,7 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
                 .acquisition_type = .transfer,
                 .prior_owner_key = "market", // static string literal — no dupe needed
             });
-            gs.faction_rosters.getPtr(per_key).?.appendAssumeCapacity(hid);
+            staged_faction_rosters.getPtr(per_key).?.appendAssumeCapacity(hid);
         } else {
             // Merc company acquisition.
             const merc_id = buyers_buf[entry.buyer_idx].merc_id;
@@ -435,7 +453,7 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
                 .acquisition_type = .transfer,
                 .prior_owner_key = "market",
             });
-            gs.merc_company_rosters.getPtr(merc_id).?.appendAssumeCapacity(hid);
+            staged_merc_company_rosters.getPtr(merc_id).?.appendAssumeCapacity(hid);
         }
     }
 
@@ -450,6 +468,8 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
         _ = gs.market_listings.orderedRemove(entry.listing_idx);
     }
 
+    gs.faction_rosters = staged_faction_rosters;
+    gs.merc_company_rosters = staged_merc_company_rosters;
     gs.rng = rng_copy;
 }
 
@@ -482,13 +502,6 @@ pub fn runPirateReplenishment(gs: *GameState) !void {
     var rng_copy = gs.rng;
     var next_id = gs.next_hull_instance_id;
 
-    try gs.hull_instances.ensureUnusedCapacity(alloc, output);
-    try gs.hull_ownership_history.ensureUnusedCapacity(alloc, output);
-    try gs.faction_rosters.ensureUnusedCapacity(alloc, 1);
-    const roster_gop = try gs.faction_rosters.getOrPut(alloc, per_key);
-    if (!roster_gop.found_existing) roster_gop.value_ptr.* = .empty;
-    try roster_gop.value_ptr.ensureUnusedCapacity(alloc, output);
-
     // Pre-build HullInstance values (loadout appends are fallible — must happen here
     // in the prepare phase, before any gs mutation).
     const built = try alloc.alloc(hull_instance_mod.HullInstance, output);
@@ -511,8 +524,28 @@ pub fn runPirateReplenishment(gs: *GameState) !void {
         built[idx] = inst;
     }
 
+    // Stage the PER roster entry before touching campaign maps. The staged
+    // roster owns its replacement buffer; all other roster buffers are shared.
+    var staged_faction_rosters = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.HullInstanceId)).empty;
+    try staged_faction_rosters.ensureTotalCapacity(alloc, gs.faction_rosters.count());
+    for (gs.faction_rosters.keys(), gs.faction_rosters.values()) |key, roster| {
+        staged_faction_rosters.putAssumeCapacity(key, roster);
+    }
+    const roster_gop = try staged_faction_rosters.getOrPut(alloc, per_key);
+    if (roster_gop.found_existing) {
+        var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+        try roster.appendSlice(alloc, roster_gop.value_ptr.items);
+        roster_gop.value_ptr.* = roster;
+    } else roster_gop.value_ptr.* = .empty;
+    try roster_gop.value_ptr.ensureUnusedCapacity(alloc, output);
+
+    // These are the final fallible reservations. The roster map entry remains
+    // staged until both succeed.
+    try gs.hull_ownership_history.ensureUnusedCapacity(alloc, output);
+    try gs.hull_instances.ensureUnusedCapacity(alloc, output);
+
     // ---- Commit (infallible: no allocation past this point) ----
-    const roster = roster_gop.value_ptr;
+    const roster = staged_faction_rosters.getPtr(per_key).?;
     for (built) |inst| {
         gs.hull_instances.putAssumeCapacity(inst.id, inst);
         gs.hull_ownership_history.appendAssumeCapacity(.{
@@ -524,6 +557,7 @@ pub fn runPirateReplenishment(gs: *GameState) !void {
         });
         roster.appendAssumeCapacity(inst.id);
     }
+    gs.faction_rosters = staged_faction_rosters;
     gs.next_hull_instance_id = next_id;
     gs.rng = rng_copy;
 }
@@ -1049,4 +1083,101 @@ test "runNpcBlackMarketDraw: dissolved merc companies do not buy listings" {
     try testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
     try testing.expectEqual(hull_instance_mod.OwnerType.market, std.meta.activeTag(gs.hull_instances.getPtr(hid).?.owner));
     try testing.expect(gs.merc_company_rosters.get(merc_id) == null);
+}
+
+fn seedNpcDrawAtomicityFixture(gs: *GameState) !void {
+    const merc_id: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id });
+    gs.clock.day_index = 30;
+
+    const listings = [_]struct { planet_key: []const u8, id: types.HullInstanceId }{
+        .{ .planet_key = "antallos", .id = @enumFromInt(1) },
+        .{ .planet_key = "galatea", .id = @enumFromInt(2) },
+    };
+    for (listings) |entry| {
+        try gs.hull_instances.put(gs.allocator(), entry.id, .{
+            .id = entry.id,
+            .base_key = "LCT-1V",
+            .owner = .market,
+        });
+        try gs.hull_ownership_history.append(gs.allocator(), .{
+            .hull_instance_id = entry.id,
+            .from_day = 0,
+            .acquisition_type = .transfer,
+            .prior_owner_key = "market",
+        });
+        try gs.market_listings.append(gs.allocator(), .{
+            .id = @enumFromInt(gs.next_listing_id),
+            .kind = .unit,
+            .item_key = "LCT-1V",
+            .rarity = .common,
+            .price = 0,
+            .black_market = true,
+            .planet_key = entry.planet_key,
+            .hull_instance_id = entry.id,
+        });
+        gs.next_listing_id += 1;
+    }
+}
+
+test "runNpcBlackMarketDraw: OOM preserves stateHash and creates no roster map entries" {
+    // Rule 69: both buyers require absent roster entries, exercising the staged
+    // faction and merc-company map insertions under every allocation failure.
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var gs = GameState.init(outer.allocator(), .{ .seed = 57105 });
+        try seedNpcDrawAtomicityFixture(&gs);
+        const before = digest.stateHash(&gs);
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
+        gs.arena.child_allocator = failing.allocator();
+
+        if (runNpcBlackMarketDraw(&gs)) |_| {
+            try testing.expect(digest.stateHash(&gs) != before);
+            try testing.expect(gs.faction_rosters.contains("PER"));
+            try testing.expect(gs.merc_company_rosters.contains(@enumFromInt(1)));
+            gs.deinit();
+            break;
+        } else |err| {
+            try testing.expectEqual(error.OutOfMemory, err);
+            try testing.expectEqual(before, digest.stateHash(&gs));
+            try testing.expect(gs.faction_rosters.get("PER") == null);
+            try testing.expect(gs.merc_company_rosters.get(@enumFromInt(1)) == null);
+            gs.deinit();
+        }
+    }
+}
+
+test "runPirateReplenishment: OOM preserves stateHash and creates no PER roster entry" {
+    // Rule 69: the fractional monthly output is one hull here, so the staged
+    // absent PER roster entry and every persistent reservation are exercised.
+    var outer = std.heap.ArenaAllocator.init(testing.allocator);
+    defer outer.deinit();
+
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var gs = GameState.init(outer.allocator(), .{ .seed = 57106 });
+        gs.clock.day_index = 183;
+        const before = digest.stateHash(&gs);
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
+        gs.arena.child_allocator = failing.allocator();
+
+        if (runPirateReplenishment(&gs)) |_| {
+            try testing.expect(digest.stateHash(&gs) != before);
+            try testing.expect(gs.faction_rosters.contains("PER"));
+            gs.deinit();
+            break;
+        } else |err| {
+            try testing.expectEqual(error.OutOfMemory, err);
+            try testing.expectEqual(before, digest.stateHash(&gs));
+            try testing.expect(gs.faction_rosters.get("PER") == null);
+            gs.deinit();
+        }
+    }
 }
