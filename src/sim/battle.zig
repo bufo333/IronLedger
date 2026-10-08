@@ -419,12 +419,12 @@ fn opforPool(gs: *GameState, c: *const contract_mod.Contract) PoolResolution {
 }
 
 /// Fisher-Yates partial draw of n hulls from the filtered candidate list.
-/// Uses gs.rng .battle stream. Returns an arena-allocated slice of the
-/// first n drawn ids (arena lifetime = GameState). Fallible: propagates OOM
-/// from the arena allocation. Does not mutate any gs collection — selection only.
-fn drawOpforHulls(gs: *GameState, candidates: []const types.HullInstanceId, n: usize) ![]types.HullInstanceId {
-    // Copy into arena (arena lifetime = GameState), then partial Fisher-Yates for n picks.
-    var buf = try gs.allocator().alloc(types.HullInstanceId, candidates.len);
+/// Uses gs.rng .battle stream. Returns the first n drawn ids in caller-owned
+/// scratch space. Fallible: propagates OOM from the scratch allocation. Does
+/// not mutate any gs collection — selection only.
+fn drawOpforHulls(gs: *GameState, alloc: std.mem.Allocator, candidates: []const types.HullInstanceId, n: usize) ![]types.HullInstanceId {
+    // Copy into resolution scratch, then partial Fisher-Yates for n picks.
+    var buf = try alloc.alloc(types.HullInstanceId, candidates.len);
     @memcpy(buf, candidates);
     var i: usize = 0;
     while (i < n) : (i += 1) {
@@ -1105,6 +1105,9 @@ fn writeHullCombatRecords(
 
 pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     try gs.battle_reports.prepareRecord(gs.allocator());
+    var resolution_scratch = std.heap.ArenaAllocator.init(gs.scratch());
+    defer resolution_scratch.deinit();
+    const resolution_alloc = resolution_scratch.allocator();
     // Pool routing: real hull draw vs. bloodless win vs. abstraction
     // (docs/p3c-economy-design.md §8.E). Single owner: opforPool.
     const resolution = opforPool(gs, c);
@@ -1178,7 +1181,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
 
     switch (resolution) {
         .pool => {
-            drawn = try drawOpforHulls(gs, draw_candidates, draw_count);
+            drawn = try drawOpforHulls(gs, resolution_alloc, draw_candidates, draw_count);
             // Fielded BV = Σ drawn-hull BVs (B2: opposed roll uses real hull BVs).
             var fielded_bv: i64 = 0;
             for (drawn) |hid| {
@@ -1206,8 +1209,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Pool path: per-hull outcomes (fixed position in .battle stream, after open).
     // Abstraction path: drawn is empty so this loop produces nothing.
     // outcomes[] is parallel to drawn[]; only drawn hulls have entries.
-    // Arena-allocated (GameState lifetime): arena frees at gs.deinit().
-    const opfor_outcomes_buf: []opfor.OpforHullOutcome = try gs.allocator().alloc(opfor.OpforHullOutcome, drawn.len);
+    const opfor_outcomes_buf = try resolution_alloc.alloc(opfor.OpforHullOutcome, drawn.len);
     var enemy_destroyed_bv_real: i64 = 0;
     for (drawn, 0..) |hid, i| {
         const oc = opfor.hullOutcome(&gs.rng, .battle, outcome);
@@ -2037,6 +2039,28 @@ fn applyCompanyAftermath(gs: *GameState, company: types.ForceId, morale_delta: i
         if (p.status != .active or !toe.personInCompany(gs, p, company)) continue;
         p.addMorale(morale_delta); // Cool Under Fire halves a loss (Person.addMorale)
         p.addFatigue(fatigue_add);
+    }
+}
+
+test "pool draw scratch buffer is reclaimed between resolutions" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 99 });
+    defer gs.deinit();
+    const candidates = [_]types.HullInstanceId{
+        @enumFromInt(1),
+        @enumFromInt(2),
+        @enumFromInt(3),
+        @enumFromInt(4),
+    };
+    var backing: [1024]u8 = undefined;
+    var fixed = std.heap.FixedBufferAllocator.init(&backing);
+
+    for (0..64) |_| {
+        {
+            var resolution_scratch = std.heap.ArenaAllocator.init(fixed.allocator());
+            defer resolution_scratch.deinit();
+            const drawn = try drawOpforHulls(&gs, resolution_scratch.allocator(), &candidates, 2);
+            try std.testing.expectEqual(@as(usize, 2), drawn.len);
+        }
     }
 }
 
