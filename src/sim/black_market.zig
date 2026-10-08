@@ -183,7 +183,7 @@ pub fn commitEnemyWreckDispersal(
     const recovered_n = @min(wrecks.len, cap);
 
     // Build eligible-world list into a fixed stack buffer (no allocation needed).
-    var worlds: [16][]const u8 = undefined;
+    var worlds: [planet_mod.catalog.len][]const u8 = undefined;
     var worlds_len: usize = 0;
     for (planet_mod.catalog) |*p| {
         if (p.black_market and !std.mem.eql(u8, p.key, battle_planet_key)) {
