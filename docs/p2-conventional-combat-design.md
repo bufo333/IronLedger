@@ -69,12 +69,28 @@ including BV, ammunition, losses, crew outcomes, salvage, and AAR records;
 air-cover remains a separate environmental modifier and grounded aircraft do
 not contribute.
 
-The ordered armor arrays in vehicle/fighter `.blk` files are not imported until
-their location mapping is verified from MegaMek format authority. P2 therefore
-does not infer per-location conventional armor. Fighters use generic field armor
-and field-tier slot repair through `tech_aero`; internal structure remains depot
-work. This establishes no aerospace-specific repair cost, duration, armor-point
-conversion, or other repair value.
+MegaMek mm-data revision `2a62993f8da306f489116233d489d1f6222945e3`
+authorizes the following static aerospace armor arrays for the approved fighter
+catalogue entries:
+
+| Asset | MegaMek path | Armor array |
+|---|---|---|
+| Thrush TR-7 | `data/mekfiles/fighters/TRO3039u/Thrush TR-7.blk` | `7, 6, 6, 5` |
+| Sparrowhawk SPR-H5 | `data/mekfiles/fighters/TRO3039u/Sparrowhawk SPR-H5.blk` | `38, 24, 24, 34` |
+| Slayer SL-15 | `data/mekfiles/fighters/TRO3039u/Slayer SL-15.blk` | `84, 50, 50, 48` |
+
+MegaMek `BLKAeroSpaceFighterFile.java` commit
+`16a45e09583d0832938d7f80163994f16329f35f` is the format authority: its
+required four-value `<armor>` array maps index `0` to nose, index `1` to right
+wing, index `2` to left wing, and index `3` to aft. This authorization is
+limited to static fighter catalogue data. It does not authorize live
+per-location armor state, source-point conversion to `Unit.armor_pct`, armor
+tonnage, repair cost, repair duration, or another repair rule.
+
+Fighters use generic field armor and field-tier slot repair through `tech_aero`;
+internal structure remains depot work. This aerospace-specific mapping does not
+establish a conventional-vehicle armor-array mapping or authorize importing
+vehicle armor locations.
 
 ## NPC Policy
 
