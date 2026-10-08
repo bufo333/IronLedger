@@ -1219,6 +1219,25 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     }
     const opfor_outcomes = opfor_outcomes_buf[0..drawn.len];
 
+    // A lost-field wreck disposition commits after combat records remove hulls
+    // from the pool. Allocate and filter that exact slice before battle state
+    // starts changing so the late commit cannot fail.
+    const withdrew = outcome == .draw and roe == .cautious;
+    const held_field = outcome.heldField() and !withdrew;
+    const pool_path = enemy_bv_override != null;
+    var destroyed_wrecks_storage: ?[]types.HullInstanceId = null;
+    const destroyed_wrecks = if (pool_path and !held_field) blk: {
+        const wrecks = try gs.scratch().alloc(types.HullInstanceId, drawn.len);
+        destroyed_wrecks_storage = wrecks;
+        var wrecks_len: usize = 0;
+        for (drawn, opfor_outcomes) |hid, oc| if (oc == .destroyed) {
+            wrecks[wrecks_len] = hid;
+            wrecks_len += 1;
+        };
+        break :blk wrecks[0..wrecks_len];
+    } else &.{};
+    defer if (destroyed_wrecks_storage) |wrecks| gs.scratch().free(wrecks);
+
     // The detailed AAR: every hit on record — which
     // hull, what it lost, what happened to the crew. The record outlives
     // the fight, so it copies the names it needs (battle_report.HullHit).
@@ -1233,9 +1252,6 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // Spoils: salvage rights over the enemy's wrecks — but only if you held
     // the field (retreating forces strip nothing) — prisoners if you can
     // hold them, employer compensation for your losses.
-    // A cautious company does not wait out a draw: it withdraws.
-    const withdrew = outcome == .draw and roe == .cautious;
-    const held_field = outcome.heldField() and !withdrew;
     // Pool path: enemy_destroyed_bv from real hull BVs (B2).
     // Abstraction path: existing @divTrunc formula.
     const enemy_destroyed_bv = if (enemy_bv_override != null)
@@ -1293,7 +1309,6 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // pays the claim in cash into the company's local funds.
     var exchange_cash: types.CBills = 0;
     // Pool path: real drawn hulls were fielded (enemy_bv_override is set).
-    const pool_path = enemy_bv_override != null;
     const spoils = if (c.terms.salvage_exchange) blk: {
         exchange_cash = types.applyBp(salvage_bv * tuning.contract.salvage_cbills_per_bv, tuning.contract.salvage_exchange_bp);
         if (exchange_cash > 0) try gs.postTreasury(.{ .company = c.assigned_company }, .{
@@ -1585,15 +1600,13 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     // recovery up to capacity, remainder dispersed to the black market
     // (docs/p3f-faction-loop-design.md §3). black_market owns the rule (rule 76).
     if (pool_path and !held_field) {
-        var destroyed_wrecks: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
-        for (drawn, opfor_outcomes) |hid, oc| if (oc == .destroyed) try destroyed_wrecks.append(gs.allocator(), hid);
-        if (destroyed_wrecks.items.len > 0) {
+        if (destroyed_wrecks.len > 0) {
             var rng_copy = gs.rng;
             const source_owner = switch (resolution) {
                 .pool => |pool| pool.owner,
                 else => unreachable,
             };
-            black_market.commitEnemyWreckDispersal(gs, destroyed_wrecks.items, source_owner, gs.clock.day_index, c.planet_key, &rng_copy);
+            black_market.commitEnemyWreckDispersal(gs, destroyed_wrecks, source_owner, gs.clock.day_index, c.planet_key, &rng_copy);
             gs.rng = rng_copy;
         }
     }

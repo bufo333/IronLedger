@@ -274,6 +274,8 @@ pub fn runMercLifecycle(gs: *GameState) !void {
         }
     }
 
+    if (actions.items.len == 0) return;
+
     var transaction_arena = gs.lifecycleArena();
     errdefer transaction_arena.deinit();
     const transaction_alloc = transaction_arena.allocator();

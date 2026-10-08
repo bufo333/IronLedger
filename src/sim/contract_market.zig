@@ -27,6 +27,7 @@ const personnel = @import("personnel.zig");
 const posture = @import("posture.zig");
 const commands = @import("commands.zig");
 const commander = @import("../domain/commander.zig");
+const black_market = @import("black_market.zig");
 
 /// Employer payment multiplier by faction, basis points (data/tables/factions.zon).
 pub fn employerMultBp(faction_key: []const u8) types.Bp {
@@ -1074,6 +1075,11 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
     if (index >= gs.market_listings.items.len) return error.NoSuchListing;
     if (gs.hqs.count() == 0) return error.NoHq;
     const listing = gs.market_listings.items[index];
+    // Dispersed black-market wrecks require presence at their listed world.
+    // Local fence offers remain bound to their existing HQ board.
+    if (listing.black_market and listing.planet_key.len > 0 and
+        !black_market.buyerEligible(gs, listing, .player, gs.clock.day_index))
+        return error.NoSuchListing;
     const price = types.applyBp(listing.price, gs.diff().purchase_bp); // difficulty
     // The contract world's board: the company buys where it
     // stands, from its local funds, and the hull joins it there.
@@ -1344,6 +1350,31 @@ test "a black-market buy is a fraud or a sale, and the house notices either way"
         }
     }
     try std.testing.expect(fraud and sale);
+}
+
+test "a dispersed black-market listing requires player presence on its planet" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 71 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq = gs.seat();
+    gs.hqs.getPtr(hq).?.funds = 100_000_000;
+    const listing_id: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = listing_id,
+        .kind = .unit,
+        .item_key = "LCT-1V",
+        .rarity = .common,
+        .price = 500_000,
+        .black_market = true,
+        .planet_key = "antallos",
+    });
+    gs.next_listing_id += 1;
+    const funds_before = gs.hqs.getPtr(hq).?.funds;
+    const listings_before = gs.market_listings.items.len;
+
+    try std.testing.expectError(commands.Error.NoSuchListing, commands.execute(&gs, .{ .buy_listing = listing_id }));
+    try std.testing.expectEqual(funds_before, gs.hqs.getPtr(hq).?.funds);
+    try std.testing.expectEqual(listings_before, gs.market_listings.items.len);
 }
 
 test "buySupportHull returns StapleOffBoard when the staple line is off the board" {
