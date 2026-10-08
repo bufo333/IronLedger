@@ -32,12 +32,12 @@ const GameState = state_mod.GameState;
 /// commit phase is infallible. On OOM the caller's stateHash is unchanged.
 pub fn liquidateMercCompany(
     gs: *GameState,
-    alloc: std.mem.Allocator,
+    _: std.mem.Allocator,
     company_id: types.MercCompanyId,
     day: u32,
 ) !void {
     if (!gs.merc_companies.contains(company_id)) return;
-    var transaction_arena = std.heap.ArenaAllocator.init(alloc);
+    var transaction_arena = gs.lifecycleArena();
     errdefer transaction_arena.deinit();
     const transaction_alloc = transaction_arena.allocator();
     var next_listing_id = gs.next_listing_id;
@@ -628,9 +628,10 @@ test "liquidateMercCompany: OOM atomicity — stateHash unchanged on failure" {
     try gs.merc_company_rosters.put(alloc, mcid, roster);
 
     const hash_before = digest.stateHash(&gs);
-    // Fail the very first allocation (the built_listings slice in the reserve phase).
+    // Fail the lifecycle arena's first staging allocation.
     var failing = std.testing.FailingAllocator.init(a, .{ .fail_index = 0 });
-    const result = liquidateMercCompany(&gs, failing.allocator(), mcid, 30);
+    gs.arena.child_allocator = failing.allocator();
+    const result = liquidateMercCompany(&gs, alloc, mcid, 30);
     try std.testing.expectError(error.OutOfMemory, result);
     // State must be unchanged.
     try std.testing.expectEqual(hash_before, digest.stateHash(&gs));
