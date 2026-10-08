@@ -1359,12 +1359,18 @@ autoresolve participation. Every purchased vehicle or fighter is a unique
 `HullInstance` with its own provenance, like a mek. Unlike the finite mek
 economy, their markets replenish and are not limited by faction manufacturing.
 
+The approved delivery design is `docs/p2-conventional-combat-design.md`:
+P2a corrects verified chassis facts and provenance; P2b establishes replenishing
+market and player vehicle parity; P2c completes fighter battle parity; and P2d
+adds NPC mech-first conventional procurement and reserves. Candidate chassis
+are filtered by their verified source `year <= 3025`, not by source-directory
+or TRO publication labels.
+
 This foundation lets player and NPC companies buy the same assets from the
 market. The later NPC merc-company economy work sets the four-active-lance
 (16-mek) readiness rule; combat vehicles and aerospace may then be retained as
 additional reserve assets and contribute their normal combat value without
-filling those mek slots. The exact P2 delivery order is in `TODO.md` after
-design approval.
+filling those mek slots. `TODO.md` owns scheduling of the approved increments.
 
 ## Stage 13 — Graphical client
 Architected after the TUI ships, reusing the same command/query boundary.

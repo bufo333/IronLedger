@@ -17,12 +17,16 @@ reschedule only on explicit dispatch.
   staffing/upkeep, capacity/facility effects, eligibility, and one-brigade rule.
 - P1-brigade (P1b-P1d): regional-to-brigade project, shared rules,
   persistence, queries, REPL/TUI, and current-behavior docs.
-- P2-design conventional combat vehicles and aerospace: sourced chassis,
-  combat/readiness, repair, salvage, market, and ownership rules; every bought
-  hull has a unique HullInstanceId, while vehicle and aerospace markets remain
-  replenishing rather than faction-production-limited.
-- P2-vehicles/aerospace: verified data, persistence, acquisition, market
-  availability, battle integration, queries, and player/NPC ownership.
+- P2a conventional data and provenance: correct the approved initial chassis
+  catalogue with verified source facts and source-path provenance.
+- P2b conventional market and vehicle parity: replenishing vehicle/fighter
+  offers, player acquisition, ownership persistence, and vehicle
+  readiness/repair/battle/salvage parity.
+- P2c aerospace combat parity: fighter battle, damage, ammunition, salvage,
+  AAR, and verified aerospace repair behavior.
+- P2d NPC conventional procurement: mech-first vehicle/fighter substitution
+  and replenishing conventional reserves without changing the later 16-mek
+  readiness target.
 - P2-design battle-armor/artillery design approval (P2a).
 - P2-battle-armor (P2b-P2d): verified domain facts, acquisition/attachment,
   crewing, readiness, and persistence.
