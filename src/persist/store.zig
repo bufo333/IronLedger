@@ -4469,6 +4469,12 @@ test "a fighter engagement preserves shared battle rows and rendered AAR through
         burned_ac10 = true;
     };
     try std.testing.expect(burned_ac10);
+    var fighter_hit = false;
+    for (report.hulls) |hit| if (hit.unit == fighter) {
+        try std.testing.expectEqualStrings("SL-15", hit.chassis_key);
+        fighter_hit = true;
+    };
+    try std.testing.expect(fighter_hit);
     try std.testing.expectEqual(hull, gs.hull_combat_records.items[0].hull_instance_id);
 
     const store = try Store.open(":memory:");

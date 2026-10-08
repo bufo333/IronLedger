@@ -142,6 +142,8 @@ const SideState = struct {
     site: types.Site = .outfit,
     /// Tons of each munition family this fight will expend.
     ammo_reserved: std.StringArrayHashMapUnmanaged(u32) = .empty,
+    /// Working selected mounts per munition family, prepared before battle RNG.
+    family_mounts: std.StringArrayHashMapUnmanaged(u32) = .empty,
     silenced_mounts: u32 = 0,
 };
 
@@ -201,62 +203,82 @@ pub fn estimatePower(gs: *GameState, alloc: std.mem.Allocator, c: *const contrac
 /// The player's side under given conditions: night and storms
 /// ground the fighters, close terrain dents recon.
 fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod.Contract, env: terrain_mod.Environment) !SideState {
-    var mods = companyMods(gs, c);
-    if (env.groundsAir()) mods.has_air_cover = false;
-    mods.recon_quality = @intCast(@max(0, @as(i32, mods.recon_quality) + env.reconMod()));
-    var side: SideState = .{ .mods = mods, .site = .{ .company = c.assigned_company } };
+    var side = try preparePlayerSide(gs, alloc, c);
+    populatePlayerSide(gs, c, env, &side);
+    return side;
+}
 
+/// Reserves the entire player battle-line and ammunition census before the
+/// battle stream advances. Weather then determines which reserved slots fly.
+fn preparePlayerSide(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod.Contract) !SideState {
+    const mods = companyMods(gs, c);
+    var side: SideState = .{ .mods = mods, .site = .{ .company = c.assigned_company } };
     const company = gs.force(c.assigned_company) orelse return side;
+
+    var unit_capacity: usize = 0;
+    for (company.children.items) |child_id| {
+        const child = gs.force(child_id) orelse continue;
+        if (child.echelon == .lance) unit_capacity += child.units.items.len;
+        if (child.echelon != .air_company) continue;
+        for (child.children.items) |air_lance_id| {
+            const air_lance = gs.force(air_lance_id) orelse continue;
+            if (air_lance.echelon == .air_lance) unit_capacity += air_lance.units.items.len;
+        }
+    }
+    try side.engaged.ensureUnusedCapacity(alloc, unit_capacity);
+    try side.ammo_reserved.ensureUnusedCapacity(alloc, part_mod.munition_keys.len);
+    try side.family_mounts.ensureUnusedCapacity(alloc, part_mod.munition_keys.len);
+    return side;
+}
+
+fn populatePlayerSide(gs: *GameState, c: *const contract_mod.Contract, env: terrain_mod.Environment, side: *SideState) void {
+    if (env.groundsAir()) side.mods.has_air_cover = false;
+    side.mods.recon_quality = @intCast(@max(0, @as(i32, side.mods.recon_quality) + env.reconMod()));
+    const company = gs.force(c.assigned_company) orelse return;
 
     // Select the battle line before counting ammunition. Air-lance fighters
     // join only when the environment permits flight; the cover modifier above
     // remains independently owned by readiness.companyHasOperationalFighter.
     for (company.children.items) |child_id| {
         const child = gs.force(child_id) orelse continue;
-        if (child.echelon == .lance) try collectLanceUnits(gs, alloc, c, child, false, &side.engaged);
+        if (child.echelon == .lance) collectLanceUnits(gs, c, child, false, &side.engaged);
         if (child.echelon != .air_company or env.groundsAir()) continue;
         for (child.children.items) |air_lance_id| {
             const air_lance = gs.force(air_lance_id) orelse continue;
-            if (air_lance.echelon == .air_lance) try collectLanceUnits(gs, alloc, c, air_lance, true, &side.engaged);
+            if (air_lance.echelon == .air_lance) collectLanceUnits(gs, c, air_lance, true, &side.engaged);
         }
     }
 
     // Count only the selected line's working ballistic/missile mounts, then
     // decide how many each family's stock can feed this fight.
-    var family_mounts = try @import("field_supply.zig").munitionMountsForUnits(alloc, gs, side.engaged.items);
-    defer family_mounts.deinit(alloc);
-    var family_fire_pct: std.StringArrayHashMapUnmanaged(u32) = .empty;
-    defer family_fire_pct.deinit(alloc);
-    var fit = family_mounts.iterator();
+    @import("field_supply.zig").munitionMountsForUnitsPrepared(&side.family_mounts, gs, side.engaged.items);
+    var fit = side.family_mounts.iterator();
     while (fit.next()) |entry| {
         const mounts = entry.value_ptr.*;
         const need = @import("field_supply.zig").tonsPerBattle(mounts);
         const have = gs.stockCount(side.site, entry.key_ptr.*);
         const use = @min(need, have);
-        try side.ammo_reserved.put(alloc, entry.key_ptr.*, use);
-        const fed = @min(mounts, use * mounts_per_ammo_ton);
-        try family_fire_pct.put(alloc, entry.key_ptr.*, if (mounts == 0) 100 else fed * 100 / mounts);
+        side.ammo_reserved.putAssumeCapacity(entry.key_ptr.*, use);
     }
 
     for (company.children.items) |child_id| {
         const child = gs.force(child_id) orelse continue;
-        if (child.echelon == .lance) addLancePower(gs, c, child, &family_fire_pct, &side);
+        if (child.echelon == .lance) addLancePower(gs, c, child, side);
         if (child.echelon != .air_company or env.groundsAir()) continue;
         for (child.children.items) |air_lance_id| {
             const air_lance = gs.force(air_lance_id) orelse continue;
-            if (air_lance.echelon == .air_lance) addLancePower(gs, c, air_lance, &family_fire_pct, &side);
+            if (air_lance.echelon == .air_lance) addLancePower(gs, c, air_lance, side);
         }
     }
-    return side;
 }
 
-fn collectLanceUnits(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod.Contract, lance: *const force_mod.Force, aerospace_only: bool, engaged: *std.ArrayListUnmanaged(types.UnitId)) !void {
+fn collectLanceUnits(gs: *GameState, c: *const contract_mod.Contract, lance: *const force_mod.Force, aerospace_only: bool, engaged: *std.ArrayListUnmanaged(types.UnitId)) void {
     if (!lance.isCombatLance()) return;
     if (lance.role == .training and c.terms.command_rights.allowsTrainingLances()) return;
     for (lance.units.items) |uid| {
         const u = gs.unit(uid) orelse continue;
         if (aerospace_only and u.kind != .aerospace) continue;
-        if (readiness_m.unitOperational(gs, u)) try engaged.append(alloc, uid);
+        if (readiness_m.unitOperational(gs, u)) engaged.appendAssumeCapacity(uid);
     }
 }
 
@@ -265,7 +287,7 @@ fn isEngaged(engaged: []const types.UnitId, id: types.UnitId) bool {
     return false;
 }
 
-fn addLancePower(gs: *GameState, c: *const contract_mod.Contract, lance: *const force_mod.Force, family_fire_pct: *const std.StringArrayHashMapUnmanaged(u32), side: *SideState) void {
+fn addLancePower(gs: *GameState, c: *const contract_mod.Contract, lance: *const force_mod.Force, side: *SideState) void {
     var lance_bv: i64 = 0;
     var gunnery_sum: u32 = 0;
     var piloting_sum: u32 = 0;
@@ -284,7 +306,10 @@ fn addLancePower(gs: *GameState, c: *const contract_mod.Contract, lance: *const 
             if (slot.class != .weapon or slot.condition != .ok) continue;
             mounts += 1;
             const ammo_key = part_mod.munitionFor(slot.part_key) orelse continue;
-            const fire_pct = if (reloaded) family_fire_pct.get(ammo_key) orelse 100 else 0;
+            const family_mounts = side.family_mounts.get(ammo_key) orelse 0;
+            const reserved = side.ammo_reserved.get(ammo_key) orelse 0;
+            const fed = @min(family_mounts, reserved * mounts_per_ammo_ton);
+            const fire_pct = if (reloaded and family_mounts > 0) fed * 100 / family_mounts else 0;
             silenced_x100 += 100 - fire_pct;
         }
         var unit_bv: i64 = design.bv;
@@ -1121,6 +1146,12 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     var resolution_scratch = std.heap.ArenaAllocator.init(gs.scratch());
     defer resolution_scratch.deinit();
     const resolution_alloc = resolution_scratch.allocator();
+    // Fighter selection and its selected-unit ammunition census reserve all
+    // storage before weather advances the .battle stream.
+    var player = try preparePlayerSide(gs, gs.scratch(), c);
+    defer player.family_mounts.deinit(gs.scratch());
+    defer player.ammo_reserved.deinit(gs.scratch());
+    defer player.engaged.deinit(gs.scratch());
     // Pool routing: real hull draw vs. bloodless win vs. abstraction
     // (docs/p3c-economy-design.md §8.E). Single owner: opforPool.
     const resolution = opforPool(gs, c);
@@ -1187,9 +1218,7 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         const t = terrain_mod.terrainOf(world);
         break :blk .{ .terrain = t, .weather = terrain_mod.rollWeather(&gs.rng, .battle, t) };
     };
-    var player = try playerSideIn(gs, gs.scratch(), c, env);
-    defer player.engaged.deinit(gs.scratch());
-    defer player.ammo_reserved.deinit(gs.scratch());
+    populatePlayerSide(gs, c, env, &player);
     if (player.engaged.items.len == 0) return concede(gs, c);
 
     switch (resolution) {
@@ -2270,6 +2299,7 @@ test "dry mounts are silenced — ammo is combat power" {
     var dry = try playerSide(&gs, c);
     defer dry.engaged.deinit(gs.scratch());
     defer dry.ammo_reserved.deinit(gs.scratch());
+    defer dry.family_mounts.deinit(gs.scratch());
     try std.testing.expect(dry.silenced_mounts > 0);
 
     // Stock every family: full power, and the fight will expend reloads.
@@ -2278,6 +2308,7 @@ test "dry mounts are silenced — ammo is combat power" {
     var armed = try playerSide(&gs, c);
     defer armed.engaged.deinit(gs.scratch());
     defer armed.ammo_reserved.deinit(gs.scratch());
+    defer armed.family_mounts.deinit(gs.scratch());
     try std.testing.expectEqual(@as(u32, 0), armed.silenced_mounts);
     try std.testing.expect(armed.power > dry.power);
 
@@ -2410,11 +2441,13 @@ test "integrated command sends training lances to fight and pulls the scouts' re
     var independent = try playerSide(&gs, c);
     defer independent.engaged.deinit(gs.scratch());
     defer independent.ammo_reserved.deinit(gs.scratch());
+    defer independent.family_mounts.deinit(gs.scratch());
     try std.testing.expectEqual(@as(u8, 2), independent.mods.recon_quality);
     c.terms.command_rights = .integrated;
     var integrated = try playerSide(&gs, c);
     defer integrated.engaged.deinit(gs.scratch());
     defer integrated.ammo_reserved.deinit(gs.scratch());
+    defer integrated.family_mounts.deinit(gs.scratch());
     try std.testing.expect(integrated.engaged.items.len > independent.engaged.items.len);
     try std.testing.expectEqual(@as(u8, 0), integrated.mods.recon_quality);
     // Tempo: integrated fights come sooner on average.
@@ -3100,6 +3133,7 @@ test "an airborne air-lance fighter adds aero power and reserves only its ammuni
     var airborne = try playerSide(&gs, c);
     defer airborne.engaged.deinit(gs.scratch());
     defer airborne.ammo_reserved.deinit(gs.scratch());
+    defer airborne.family_mounts.deinit(gs.scratch());
     try std.testing.expectEqual(@as(usize, 2), airborne.engaged.items.len);
     try std.testing.expectEqual(@as(u32, 1), airborne.ammo_reserved.get("ammo_ac10").?);
     const skilled_power = airborne.power;
@@ -3109,20 +3143,24 @@ test "an airborne air-lance fighter adds aero power and reserves only its ammuni
     var unskilled = try playerSide(&gs, c);
     defer unskilled.engaged.deinit(gs.scratch());
     defer unskilled.ammo_reserved.deinit(gs.scratch());
+    defer unskilled.family_mounts.deinit(gs.scratch());
     try std.testing.expect(skilled_power > unskilled.power);
 
     var grounded = try playerSideIn(&gs, gs.scratch(), c, .{ .weather = .storm });
     defer grounded.engaged.deinit(gs.scratch());
     defer grounded.ammo_reserved.deinit(gs.scratch());
+    defer grounded.family_mounts.deinit(gs.scratch());
     try std.testing.expectEqual(@as(usize, 1), grounded.engaged.items.len);
     try std.testing.expectEqual(chassis_mod.find("SL-15").?.bv, airborne.bv - grounded.bv);
     try std.testing.expectEqual(@as(u32, 0), grounded.ammo_reserved.get("ammo_ac10") orelse 0);
     try std.testing.expect(!grounded.mods.has_air_cover);
 }
 
-test "air-lance battle preparation leaves state unchanged when selection allocation fails" {
+test "fighter selection preparation fails before resolveEngagement advances battle state" {
     const digest = @import("digest.zig");
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 7206 });
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 7206 });
     defer gs.deinit();
     const company = try gs.createForce("Alpha", .company, .none);
     const wing = try gs.createForce("Air Wing", .air_company, company);
@@ -3142,19 +3180,29 @@ test "air-lance battle preparation leaves state unchanged when selection allocat
         .status = .active,
         .assigned_company = company,
     });
+    // Keep the report reservation out of this injected boundary. The first
+    // remaining allocation is the fighter-selected battle line.
+    try gs.battle_reports.prepareRecord(gs.allocator());
     const before = digest.stateHash(&gs);
-    try std.testing.expectError(error.OutOfMemory, playerSideIn(&gs, std.testing.failing_allocator, gs.contracts.getPtr(@enumFromInt(1)).?, .{}));
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+    try std.testing.expectError(error.OutOfMemory, resolveEngagement(&gs, gs.contracts.getPtr(@enumFromInt(1)).?));
     try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
 
-test "fighter hits and hull records use the shared battle aftermath records" {
+test "fighter loss and recovery retain its hull instance without duplication" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7205 });
     defer gs.deinit();
+    const company = try gs.createForce("Alpha", .company, .none);
+    const wing = try gs.createForce("Air Wing", .air_company, company);
+    const air_lance = try gs.createForce("Air", .air_lance, wing);
     const fighter = try gs.addUnit("SPR-H5");
     const pilot = try gs.hirePerson("Air", "Pilot", .aero_pilot);
-    gs.unit(fighter).?.pilot = pilot;
+    try toe.assignUnit(&gs, fighter, air_lance, pilot);
     try gs.recordHullAcquisition(gs.unit(fighter).?, .purchase, "unknown");
     const hull = gs.unit(fighter).?.hull_instance_id;
+    const instances_before = gs.hull_instances.count();
     var hits: std.ArrayListUnmanaged(battle_report.HullHit) = .empty;
     defer hits.deinit(gs.scratch());
     const engaged = [_]types.UnitId{fighter};
@@ -3163,6 +3211,13 @@ test "fighter hits and hull records use the shared battle aftermath records" {
     try std.testing.expectEqualStrings("SPR-H5", hits.items[0].chassis_key);
     try writeHullCombatRecords(&gs, gs.allocator(), &engaged, &.{}, &.{}, @enumFromInt(1), @enumFromInt(1), &.{}, hits.items, .abstraction);
     try std.testing.expectEqual(hull, gs.hull_combat_records.items[0].hull_instance_id);
+    try held_hulls_m.holdUnit(&gs, fighter, "DC", @enumFromInt(1));
+    try std.testing.expectEqual(@as(usize, 1), gs.held_hulls.items.len);
+    try std.testing.expectEqual(hull, gs.held_hulls.items[0].unit.hull_instance_id);
+    try std.testing.expectEqual(instances_before, gs.hull_instances.count());
+    try std.testing.expect(try held_hulls_m.releaseHull(&gs, fighter));
+    try std.testing.expectEqual(hull, gs.unit(fighter).?.hull_instance_id);
+    try std.testing.expectEqual(instances_before, gs.hull_instances.count());
 }
 
 test "vehicle battle damage writes the linked hull combat record" {

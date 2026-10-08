@@ -391,6 +391,14 @@ pub fn munitionMounts(alloc: std.mem.Allocator, gs: *GameState, company: types.F
 /// use the company-wide census above.
 pub fn munitionMountsForUnits(alloc: std.mem.Allocator, gs: *GameState, units: []const types.UnitId) !std.StringArrayHashMapUnmanaged(u32) {
     var out: std.StringArrayHashMapUnmanaged(u32) = .empty;
+    try out.ensureUnusedCapacity(alloc, part_mod.munition_keys.len);
+    munitionMountsForUnitsPrepared(&out, gs, units);
+    return out;
+}
+
+/// Writes the selected units' working munition mounts into pre-reserved
+/// storage. Battle uses it after reserving every family before its RNG draw.
+pub fn munitionMountsForUnitsPrepared(out: *std.StringArrayHashMapUnmanaged(u32), gs: *GameState, units: []const types.UnitId) void {
     for (units) |uid| {
         const u = gs.unit(uid) orelse continue;
         const tech = gs.person(u.tech) orelse continue;
@@ -398,12 +406,9 @@ pub fn munitionMountsForUnits(alloc: std.mem.Allocator, gs: *GameState, units: [
         for (u.slots.items) |s| {
             if (s.class != .weapon or s.condition != .ok) continue;
             const fam = part_mod.munitionFor(s.part_key) orelse continue;
-            const g = try out.getOrPut(alloc, fam);
-            if (!g.found_existing) g.value_ptr.* = 0;
-            g.value_ptr.* += 1;
+            out.putAssumeCapacity(fam, (out.get(fam) orelse 0) + 1);
         }
     }
-    return out;
 }
 
 /// Emergency resupply: the quote from `rushQuote`,
