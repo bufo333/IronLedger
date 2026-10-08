@@ -37,9 +37,9 @@ pub fn liquidateMercCompany(
     day: u32,
 ) !void {
     if (!gs.merc_companies.contains(company_id)) return;
-    var transaction_arena = gs.lifecycleArena();
-    errdefer transaction_arena.deinit();
-    const transaction_alloc = transaction_arena.allocator();
+    const transaction_arena = try gs.lifecycleArena();
+    errdefer gs.discardLifecycleArena(transaction_arena);
+    const transaction_alloc = transaction_arena.arena.allocator();
     var next_listing_id = gs.next_listing_id;
     const listings = try planLiquidation(transaction_alloc, gs, company_id, day, &next_listing_id);
     const actions = [_]LifecycleAction{.{ .liquidate = .{
@@ -47,7 +47,7 @@ pub fn liquidateMercCompany(
         .listings = listings,
     } }};
     const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, next_listing_id, gs.next_merc_company_id, day);
-    try gs.replaceLifecycleArena(&transaction_arena);
+    gs.replaceLifecycleArena(transaction_arena);
     commitLifecycleStage(gs, stage);
 }
 
@@ -95,12 +95,12 @@ pub fn buyHullsForCompany(
         return;
     }
 
-    var transaction_arena = gs.lifecycleArena();
-    errdefer transaction_arena.deinit();
-    const transaction_alloc = transaction_arena.allocator();
+    const transaction_arena = try gs.lifecycleArena();
+    errdefer gs.discardLifecycleArena(transaction_arena);
+    const transaction_alloc = transaction_arena.arena.allocator();
     const actions = [_]LifecycleAction{.{ .buy = buy }};
     const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, gs.next_listing_id, gs.next_merc_company_id, day);
-    try gs.replaceLifecycleArena(&transaction_arena);
+    gs.replaceLifecycleArena(transaction_arena);
     commitLifecycleStage(gs, stage);
     rng.* = rng_copy;
 }
@@ -140,13 +140,13 @@ pub fn spawnReplacementCompany(
     var rng_copy = rng.*;
     var next_company_id = gs.next_merc_company_id;
     const replacement = try planReplacement(scratch, gs, &companies, &listings, day, &rng_copy, &next_company_id);
-    var transaction_arena = gs.lifecycleArena();
-    errdefer transaction_arena.deinit();
-    const transaction_alloc = transaction_arena.allocator();
+    const transaction_arena = try gs.lifecycleArena();
+    errdefer gs.discardLifecycleArena(transaction_arena);
+    const transaction_alloc = transaction_arena.arena.allocator();
     var actions = [_]LifecycleAction{.{ .spawn = replacement }};
     try allocateReplacementNames(transaction_alloc, &actions);
     const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, gs.next_listing_id, next_company_id, day);
-    try gs.replaceLifecycleArena(&transaction_arena);
+    gs.replaceLifecycleArena(transaction_arena);
     commitLifecycleStage(gs, stage);
     rng.* = rng_copy;
     return replacement.company.id;
@@ -277,12 +277,12 @@ pub fn runMercLifecycle(gs: *GameState) !void {
 
     if (actions.items.len == 0) return;
 
-    var transaction_arena = gs.lifecycleArena();
-    errdefer transaction_arena.deinit();
-    const transaction_alloc = transaction_arena.allocator();
+    const transaction_arena = try gs.lifecycleArena();
+    errdefer gs.discardLifecycleArena(transaction_arena);
+    const transaction_alloc = transaction_arena.arena.allocator();
     try allocateReplacementNames(transaction_alloc, actions.items);
     const stage = try stageLifecycleCommit(gs, transaction_alloc, actions.items, next_listing_id, next_company_id, day);
-    try gs.replaceLifecycleArena(&transaction_arena);
+    gs.replaceLifecycleArena(transaction_arena);
 
     commitLifecycleStage(gs, stage);
     gs.rng = rng_copy;
@@ -513,6 +513,7 @@ fn closeOwnershipHistory(history: *std.ArrayListUnmanaged(hull_instance_mod.Hull
 fn commitLifecycleStage(gs: *GameState, stage: LifecycleStage) void {
     gs.merc_companies = stage.merc_companies;
     gs.merc_company_rosters = stage.merc_company_rosters;
+    gs.releaseMercCompanyRosterLifecycleArena();
     gs.market_listings = stage.market_listings;
     gs.hull_ownership_history = stage.hull_ownership_history;
     for (stage.hull_changes.items) |change| {

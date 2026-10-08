@@ -228,7 +228,7 @@ pub const RefitPlan = struct {
 pub const EventMemory = struct { last_day: u32 = 0, last_choice: u8 = 0, streak: u8 = 0 };
 
 pub const GameState = struct {
-    const LifecycleArena = struct {
+    pub const LifecycleArena = struct {
         arena: std.heap.ArenaAllocator,
     };
 
@@ -237,6 +237,10 @@ pub const GameState = struct {
     /// transaction. Its predecessor is released only after its replacement is
     /// complete, so live collection pointers never outlast their allocator.
     lifecycle_arena: ?*LifecycleArena = null,
+    /// Reclaimable owners for roster maps installed by black-market monthly work.
+    /// Each owner is replaced only after its successor map is fully prepared.
+    faction_roster_lifecycle_arena: ?*LifecycleArena = null,
+    merc_company_roster_lifecycle_arena: ?*LifecycleArena = null,
     rng: rng_mod.Rng,
     clock: clock_mod.Clock,
     funds: types.CBills,
@@ -394,7 +398,9 @@ pub const GameState = struct {
     }
 
     pub fn deinit(self: *GameState) void {
-        if (self.lifecycle_arena) |retained| retained.arena.deinit();
+        self.destroyLifecycleArena(self.lifecycle_arena);
+        self.destroyLifecycleArena(self.faction_roster_lifecycle_arena);
+        self.destroyLifecycleArena(self.merc_company_roster_lifecycle_arena);
         self.arena.deinit();
     }
 
@@ -416,20 +422,53 @@ pub const GameState = struct {
         return self.arena.allocator();
     }
 
-    /// Creates a reclaimable arena for lifecycle data pending an atomic commit.
-    pub fn lifecycleArena(self: *GameState) std.heap.ArenaAllocator {
-        return std.heap.ArenaAllocator.init(self.scratch());
+    /// Creates reclaimable storage pending an atomic commit. Callers discard it
+    /// on preparation failure or install it after every live pointer has moved.
+    pub fn lifecycleArena(self: *GameState) !*LifecycleArena {
+        const lifecycle = try self.scratch().create(LifecycleArena);
+        lifecycle.* = .{ .arena = std.heap.ArenaAllocator.init(self.scratch()) };
+        return lifecycle;
     }
 
-    /// Install fully prepared lifecycle storage. The transaction arena owns all
-    /// collections it installs, so replacing the prior transaction reclaims its
-    /// staging storage after the new owner is ready.
-    pub fn replaceLifecycleArena(self: *GameState, arena: *std.heap.ArenaAllocator) !void {
-        const node = try arena.allocator().create(LifecycleArena);
-        node.* = .{ .arena = arena.* };
+    /// Release uncommitted lifecycle storage after preparation fails.
+    pub fn discardLifecycleArena(self: *GameState, lifecycle: *LifecycleArena) void {
+        lifecycle.arena.deinit();
+        self.scratch().destroy(lifecycle);
+    }
+
+    /// Install fully prepared lifecycle storage without allocation.
+    pub fn replaceLifecycleArena(self: *GameState, lifecycle: *LifecycleArena) void {
         const prior = self.lifecycle_arena;
-        self.lifecycle_arena = node;
-        if (prior) |old| old.arena.deinit();
+        self.lifecycle_arena = lifecycle;
+        self.destroyLifecycleArena(prior);
+    }
+
+    /// Install a prepared faction-roster map owner after assigning its map.
+    pub fn replaceFactionRosterLifecycleArena(self: *GameState, lifecycle: *LifecycleArena) void {
+        const prior = self.faction_roster_lifecycle_arena;
+        self.faction_roster_lifecycle_arena = lifecycle;
+        self.destroyLifecycleArena(prior);
+    }
+
+    /// Install a prepared merc-company-roster map owner after assigning its map.
+    pub fn replaceMercCompanyRosterLifecycleArena(self: *GameState, lifecycle: *LifecycleArena) void {
+        const prior = self.merc_company_roster_lifecycle_arena;
+        self.merc_company_roster_lifecycle_arena = lifecycle;
+        self.destroyLifecycleArena(prior);
+    }
+
+    /// A lifecycle transaction replaces the merc roster map with its own arena.
+    pub fn releaseMercCompanyRosterLifecycleArena(self: *GameState) void {
+        const prior = self.merc_company_roster_lifecycle_arena;
+        self.merc_company_roster_lifecycle_arena = null;
+        self.destroyLifecycleArena(prior);
+    }
+
+    fn destroyLifecycleArena(self: *GameState, lifecycle: ?*LifecycleArena) void {
+        if (lifecycle) |owned| {
+            owned.arena.deinit();
+            self.scratch().destroy(owned);
+        }
     }
 
     // ---------------------------------------------------------------- money
@@ -1209,6 +1248,8 @@ pub const GameState = struct {
     pub const field_persistence = [_]struct { []const u8, Persistence }{
         .{ "arena", .session }, // the memory the campaign lives in
         .{ "lifecycle_arena", .session }, // allocation ownership only
+        .{ "faction_roster_lifecycle_arena", .session }, // allocation ownership only
+        .{ "merc_company_roster_lifecycle_arena", .session }, // allocation ownership only
         .{ "campaign_id", .session }, // the save store's row, not the campaign
         .{ "rng", .persisted },
         .{ "clock", .persisted },

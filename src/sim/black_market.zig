@@ -398,40 +398,42 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
         if (merc_takes_buf[mi] > 0) distinct_mercs += 1;
     }
 
-    // Stage roster maps so a later OOM cannot leave a newly inserted map entry
-    // in campaign state. Untouched roster buffers remain shared with the stage.
+    // Stage each live roster map in its own reclaimable owner. The owners are
+    // replaced only after both maps are ready, so an OOM retains no staging data.
+    const faction_lifecycle = try gs.lifecycleArena();
+    errdefer gs.discardLifecycleArena(faction_lifecycle);
+    const faction_alloc = faction_lifecycle.arena.allocator();
+    const merc_lifecycle = try gs.lifecycleArena();
+    errdefer gs.discardLifecycleArena(merc_lifecycle);
+    const merc_alloc = merc_lifecycle.arena.allocator();
     var staged_faction_rosters = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.HullInstanceId)).empty;
-    try staged_faction_rosters.ensureTotalCapacity(alloc, gs.faction_rosters.count());
+    try staged_faction_rosters.ensureTotalCapacity(faction_alloc, gs.faction_rosters.count());
     for (gs.faction_rosters.keys(), gs.faction_rosters.values()) |key, roster| {
-        staged_faction_rosters.putAssumeCapacity(key, roster);
+        var replacement: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+        try replacement.appendSlice(faction_alloc, roster.items);
+        staged_faction_rosters.putAssumeCapacity(key, replacement);
     }
     var staged_merc_company_rosters = std.AutoArrayHashMapUnmanaged(types.MercCompanyId, std.ArrayListUnmanaged(types.HullInstanceId)).empty;
-    try staged_merc_company_rosters.ensureTotalCapacity(alloc, gs.merc_company_rosters.count());
+    try staged_merc_company_rosters.ensureTotalCapacity(merc_alloc, gs.merc_company_rosters.count());
     for (gs.merc_company_rosters.keys(), gs.merc_company_rosters.values()) |id, roster| {
-        staged_merc_company_rosters.putAssumeCapacity(id, roster);
+        var replacement: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+        try replacement.appendSlice(merc_alloc, roster.items);
+        staged_merc_company_rosters.putAssumeCapacity(id, replacement);
     }
 
     if (pirate_take > 0) {
-        const gop = try staged_faction_rosters.getOrPut(alloc, per_key);
-        if (gop.found_existing) {
-            var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
-            try roster.appendSlice(alloc, gop.value_ptr.items);
-            gop.value_ptr.* = roster;
-        } else gop.value_ptr.* = .empty;
-        try gop.value_ptr.ensureUnusedCapacity(alloc, pirate_take);
+        const gop = try staged_faction_rosters.getOrPut(faction_alloc, per_key);
+        if (!gop.found_existing) gop.value_ptr.* = .empty;
+        try gop.value_ptr.ensureUnusedCapacity(faction_alloc, pirate_take);
     }
 
     if (distinct_mercs > 0) {
         for (0..mercs_count) |mi| {
             if (merc_takes_buf[mi] == 0) continue;
             const merc_id = buyers_buf[mi + 1].merc_id;
-            const gop = try staged_merc_company_rosters.getOrPut(alloc, merc_id);
-            if (gop.found_existing) {
-                var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
-                try roster.appendSlice(alloc, gop.value_ptr.items);
-                gop.value_ptr.* = roster;
-            } else gop.value_ptr.* = .empty;
-            try gop.value_ptr.ensureUnusedCapacity(alloc, merc_takes_buf[mi]);
+            const gop = try staged_merc_company_rosters.getOrPut(merc_alloc, merc_id);
+            if (!gop.found_existing) gop.value_ptr.* = .empty;
+            try gop.value_ptr.ensureUnusedCapacity(merc_alloc, merc_takes_buf[mi]);
         }
     }
 
@@ -492,6 +494,8 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
 
     gs.faction_rosters = staged_faction_rosters;
     gs.merc_company_rosters = staged_merc_company_rosters;
+    gs.replaceFactionRosterLifecycleArena(faction_lifecycle);
+    gs.replaceMercCompanyRosterLifecycleArena(merc_lifecycle);
     gs.rng = rng_copy;
 }
 
@@ -546,20 +550,22 @@ pub fn runPirateReplenishment(gs: *GameState) !void {
         built[idx] = inst;
     }
 
-    // Stage the PER roster entry before touching campaign maps. The staged
-    // roster owns its replacement buffer; all other roster buffers are shared.
+    // Stage the PER roster entry in reclaimable storage before touching campaign
+    // state. Every roster buffer moves into the replacement owner before its
+    // predecessor can be released.
+    const faction_lifecycle = try gs.lifecycleArena();
+    errdefer gs.discardLifecycleArena(faction_lifecycle);
+    const faction_alloc = faction_lifecycle.arena.allocator();
     var staged_faction_rosters = std.StringArrayHashMapUnmanaged(std.ArrayListUnmanaged(types.HullInstanceId)).empty;
-    try staged_faction_rosters.ensureTotalCapacity(alloc, gs.faction_rosters.count());
+    try staged_faction_rosters.ensureTotalCapacity(faction_alloc, gs.faction_rosters.count());
     for (gs.faction_rosters.keys(), gs.faction_rosters.values()) |key, roster| {
-        staged_faction_rosters.putAssumeCapacity(key, roster);
+        var replacement: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+        try replacement.appendSlice(faction_alloc, roster.items);
+        staged_faction_rosters.putAssumeCapacity(key, replacement);
     }
-    const roster_gop = try staged_faction_rosters.getOrPut(alloc, per_key);
-    if (roster_gop.found_existing) {
-        var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
-        try roster.appendSlice(alloc, roster_gop.value_ptr.items);
-        roster_gop.value_ptr.* = roster;
-    } else roster_gop.value_ptr.* = .empty;
-    try roster_gop.value_ptr.ensureUnusedCapacity(alloc, output);
+    const roster_gop = try staged_faction_rosters.getOrPut(faction_alloc, per_key);
+    if (!roster_gop.found_existing) roster_gop.value_ptr.* = .empty;
+    try roster_gop.value_ptr.ensureUnusedCapacity(faction_alloc, output);
 
     // These are the final fallible reservations. The roster map entry remains
     // staged until both succeed.
@@ -580,6 +586,7 @@ pub fn runPirateReplenishment(gs: *GameState) !void {
         roster.appendAssumeCapacity(inst.id);
     }
     gs.faction_rosters = staged_faction_rosters;
+    gs.replaceFactionRosterLifecycleArena(faction_lifecycle);
     gs.next_hull_instance_id = next_id;
     gs.rng = rng_copy;
 }
@@ -1203,5 +1210,34 @@ test "runPirateReplenishment: OOM preserves stateHash and creates no PER roster 
             try testing.expect(gs.faction_rosters.get("PER") == null);
             gs.deinit();
         }
+    }
+}
+
+test "monthly black-market passes reclaim replaced roster staging" {
+    var debug_alloc = std.heap.DebugAllocator(.{ .enable_memory_limit = true }){};
+    defer std.testing.expect(debug_alloc.deinit() == .ok) catch @panic("leak");
+    var gs = GameState.init(debug_alloc.allocator(), .{ .seed = 57107 });
+    defer gs.deinit();
+    try seedNpcDrawAtomicityFixture(&gs);
+    try gs.market_listings.ensureUnusedCapacity(gs.allocator(), 2);
+
+    var listings: [2]market.Listing = undefined;
+    std.mem.copyForwards(market.Listing, &listings, gs.market_listings.items);
+
+    try runNpcBlackMarketDraw(&gs);
+    const bytes_after_first_pass = debug_alloc.total_requested_bytes;
+
+    for (0..3) |_| {
+        _ = gs.faction_rosters.orderedRemove("PER");
+        _ = gs.merc_company_rosters.orderedRemove(@enumFromInt(1));
+        for (gs.hull_instances.values()) |*inst| inst.owner = .market;
+        _ = gs.hull_ownership_history.pop();
+        _ = gs.hull_ownership_history.pop();
+        for (gs.hull_ownership_history.items) |*entry| entry.to_day = 0;
+        gs.market_listings.appendAssumeCapacity(listings[0]);
+        gs.market_listings.appendAssumeCapacity(listings[1]);
+
+        try runNpcBlackMarketDraw(&gs);
+        try std.testing.expectEqual(bytes_after_first_pass, debug_alloc.total_requested_bytes);
     }
 }
