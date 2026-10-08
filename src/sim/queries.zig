@@ -2494,8 +2494,9 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
     var board: std.ArrayListUnmanaged(ListingRow) = .empty;
     for (gs.market_listings.items) |l| {
         if (l.hq != hq and l.hq != .none) continue;
-        if (l.black_market and l.planet_key.len > 0 and
-            !black_market.buyerEligible(gs, l, .player, gs.clock.day_index)) continue;
+        if (l.black_market and l.hq == .none and l.planet_key.len > 0 and
+            (!black_market.buyerEligible(gs, l, .player, gs.clock.day_index) or
+                black_market.playerHqAt(gs, l) != hq)) continue;
         const keep = switch (l.kind) {
             .unit => filter.matchesUnit(if (chassis_mod.find(l.item_key)) |c| c.kind else .mek),
             .part => filter.matchesPart(l.item_key),
@@ -4641,6 +4642,24 @@ test "market board hides delayed and unreachable dispersed black-market listings
     try std.testing.expectEqual(@as(usize, 2), result.board.len);
     try std.testing.expectEqual(local_fence, result.board[0].id);
     try std.testing.expectEqual(reachable, result.board[1].id);
+}
+
+test "a dispersed listing appears only on the HQ board at its world" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 74 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const home = gs.seat();
+    const other: types.HqId = @enumFromInt(99);
+    const world = gs.hqs.getPtr(home).?.planet_key;
+    try gs.hqs.put(gs.allocator(), other, .{ .id = other, .name = "Other", .tier = .field, .planet_key = world });
+    gs.market_listings.clearRetainingCapacity();
+    const listing: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = listing, .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .black_market = true, .planet_key = world });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try std.testing.expectEqual(@as(usize, 1), (try market(arena.allocator(), &gs, .all, home)).board.len);
+    try std.testing.expectEqual(@as(usize, 0), (try market(arena.allocator(), &gs, .all, other)).board.len);
 }
 
 test "desk and ledger queries build on a fresh campaign" {
