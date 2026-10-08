@@ -4414,6 +4414,10 @@ test "battle reports beyond forty survive save and load" {
 }
 
 test "permanent report identities and battle backlinks reject corruption" {
+    // The provoked constraint failure is expected; keep its warning out of stderr.
+    const saved_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_log_level;
     const hull_inst_mod = @import("../domain/hull_instance.zig");
     var gs = try buildHullGs(std.testing.allocator);
     defer gs.deinit();
@@ -4684,6 +4688,10 @@ test "an orphan stock row rejects the load as corrupt, not UnknownSite" {
 }
 
 test "a duplicate stock row for the same owner and key is rejected by the schema" {
+    // The provoked constraint failure is expected; keep its warning out of stderr.
+    const saved_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_log_level;
     // Uniqueness of (cid, owner_kind, owner_id, key) is now schema-enforced
     // (UNIQUE constraint on stock, rule 50). The INSERT is rejected at the
     // schema level before the loader sees it; the loader's seen-set guard
@@ -4742,6 +4750,10 @@ test "a NULL in a required enum column rejects the load" {
 }
 
 test "a duplicate primary person id is rejected by the schema" {
+    // The provoked constraint failure is expected; keep its warning out of stderr.
+    const saved_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_log_level;
     // The rebuild in fromDb copies rows into person__new (PRIMARY KEY (cid, id));
     // duplicate (cid, id) fails at the schema level before the loader runs.
     // Uniqueness of (cid, id) is schema-enforced; the loader's getOrPut guard
@@ -4883,6 +4895,10 @@ test "the migrations array is strictly ascending by to and each from < to" {
 }
 
 test "a v58 report with a nullable ID rejects the v59 migration" {
+    // The provoked constraint failure is expected; keep its warning out of stderr.
+    const saved_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_log_level;
     const raw = try sqlite.Db.open(":memory:");
     defer raw.close();
     try raw.exec(
@@ -4899,6 +4915,10 @@ test "a v58 report with a nullable ID rejects the v59 migration" {
 test "foreign keys are enforced on every connection" {
     // Rule 50: Db.open enables PRAGMA foreign_keys = ON. A deferred FK
     // violation is caught at the auto-commit boundary.
+    // The provoked constraint failure is expected; keep its warning out of stderr.
+    const saved_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_log_level;
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7701 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);

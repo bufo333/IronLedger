@@ -326,6 +326,10 @@ test "Stmt.run on a SELECT that yields a row returns an error" {
 }
 
 test "a duplicate primary-key INSERT maps to ConstraintViolation" {
+    // The provoked constraint failure is expected; keep its warning out of stderr.
+    const saved_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_log_level;
     const db = try Db.open(":memory:");
     defer db.close();
     try db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY)");
@@ -338,6 +342,10 @@ test "a duplicate primary-key INSERT maps to ConstraintViolation" {
 }
 
 test "mapResult maps representative primary result codes to typed errors" {
+    // The provoked constraint failure is expected; keep its warning out of stderr.
+    const saved_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_log_level;
     const db = try Db.open(":memory:");
     defer db.close();
     // mapResult is private; test it indirectly through known SQLite behaviours.
