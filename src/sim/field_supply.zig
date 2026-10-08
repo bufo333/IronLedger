@@ -811,7 +811,7 @@ test "takesFieldArmor agreement: plan and rushQuote follow the same predicate" {
     const aero = gs.units.getPtr(aero_id).?;
     aero.force = co;
     aero.status = .ready;
-    aero.armor_pct = 60; // dented but kind .aerospace: must not count
+    aero.armor_pct = 60; // dented aerospace counts through takesFieldArmor
 
     // Dented ready mek: takesFieldArmor = true, armor_pct < 100.
     const mek_id = try gs.addUnit("LCT-1V");
