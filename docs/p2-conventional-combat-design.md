@@ -20,7 +20,8 @@ The implementation re-encodes facts from MegaMek mm-data; it does not copy its
 `.blk` files. A candidate must declare `year <= 3025` in its source file.
 Source directory names and TRO publication dates do not replace that test.
 
-The initial catalogue is limited to these verified candidates:
+The initial replenishing-market catalogue is limited to these verified
+candidates:
 
 | Asset | MegaMek path | Year |
 |---|---|---:|
@@ -33,9 +34,11 @@ The initial catalogue is limited to these verified candidates:
 
 P2a corrects their represented kind, tonnage, intro year, and loadout facts.
 Existing chassis keys remain stable for saved campaigns even when a source file
-has no model field. Each entry gains source-path provenance. BV, cost, rarity,
-repair duration, and salvage values remain sourced separately or explicitly
-`// TUNE`.
+has no model field. Current conventional keys outside this initial market subset
+remain valid persisted campaign data, but do not enter replenishing offers until
+their source facts are audited. Each market entry gains source-path provenance.
+BV, cost, rarity, repair duration, and salvage values remain sourced separately
+or explicitly `// TUNE`.
 
 ## Ownership And Markets
 
@@ -70,10 +73,11 @@ also deferred until that verified repair model exists.
 
 ## NPC Policy
 
-NPC companies prefer mechs. A single named procurement selector first seeks an
-affordable available mech; when none is available or affordable, it may buy an
-available vehicle or fighter to fill an open combat-lance slot. Conventional
-assets may also be stockpiled because their market supply is replenishing.
+NPC procurement uses a single named selector per eligible force slot. For an
+open line lance, it first seeks an affordable available mek and then falls back
+to a vehicle. Aerospace fighters are eligible only for open air-lance slots;
+they never occupy a line lance. Conventional assets may also be stockpiled
+because their market supply is replenishing.
 
 The later NPC economy increment owns the 16-mek readiness target. Vehicles and
 fighters are reserve assets: they contribute their normal battle value when
@@ -89,9 +93,9 @@ repair, salvage, and persistence call the same P2 rule owners as the player.
    tests, and persistence round trips.
 3. **P2c Aerospace combat parity.** Add fighter battle, damage, ammunition,
    salvage, AAR, and aerospace-repair behavior after verified repair facts.
-4. **P2d NPC conventional procurement.** Add mech-first substitution and
-   replenishing conventional reserves to the NPC lifecycle without changing the
-   later 16-mek readiness target.
+4. **P2d NPC conventional procurement.** Add mek-first vehicle substitution
+   for line lances and aerospace procurement for air lances, plus replenishing
+   conventional reserves, without changing the later 16-mek readiness target.
 
 Every increment must preserve failure atomicity across listings, funds, units,
 HullInstances, ownership history, RNG, logs, and persistence rows.

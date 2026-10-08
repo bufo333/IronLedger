@@ -24,9 +24,9 @@ reschedule only on explicit dispatch.
   readiness/repair/battle/salvage parity.
 - P2c aerospace combat parity: fighter battle, damage, ammunition, salvage,
   AAR, and verified aerospace repair behavior.
-- P2d NPC conventional procurement: mech-first vehicle/fighter substitution
-  and replenishing conventional reserves without changing the later 16-mek
-  readiness target.
+- P2d NPC conventional procurement: mek-first vehicle substitution for line
+  lances, aerospace procurement for air lances, and replenishing conventional
+  reserves without changing the later 16-mek readiness target.
 - P2-design battle-armor/artillery design approval (P2a).
 - P2-battle-armor (P2b-P2d): verified domain facts, acquisition/attachment,
   crewing, readiness, and persistence.
