@@ -118,7 +118,7 @@ pub fn spawnReplacementCompany(
     alloc: std.mem.Allocator,
     day: u32,
     rng: *rng_mod.Rng,
-) !void {
+) !types.MercCompanyId {
     var scratch_arena = std.heap.ArenaAllocator.init(alloc);
     defer scratch_arena.deinit();
     const scratch = scratch_arena.allocator();
@@ -149,6 +149,7 @@ pub fn spawnReplacementCompany(
     try gs.retainLifecycleArena(&transaction_arena);
     commitLifecycleStage(gs, stage);
     rng.* = rng_copy;
+    return replacement.company.id;
 }
 
 const PlannedListing = struct {
@@ -775,11 +776,11 @@ test "spawnReplacementCompany: unique id, founded_day, dissolved_day==0, cbills=
     gs.next_merc_company_id = 2;
 
     var rng = gs.rng;
-    try spawnReplacementCompany(&gs, alloc, 60, &rng);
+    const new_id = try spawnReplacementCompany(&gs, alloc, 60, &rng);
 
     // A new company was added.
     try std.testing.expectEqual(@as(usize, 2), gs.merc_companies.count());
-    const new_id: types.MercCompanyId = @enumFromInt(2);
+    try std.testing.expectEqual(@as(types.MercCompanyId, @enumFromInt(2)), new_id);
     const spawned = gs.merc_companies.getPtr(new_id) orelse return error.TestFailed;
     try std.testing.expectEqual(@as(u32, 60), spawned.founded_day);
     try std.testing.expectEqual(@as(u32, 0), spawned.dissolved_day);
@@ -802,9 +803,9 @@ test "spawnReplacementCompany: never picks the player's reserved logo_key" {
     gs.next_merc_company_id = 1;
 
     var rng = gs.rng;
-    try spawnReplacementCompany(&gs, alloc, 10, &rng);
+    const new_id = try spawnReplacementCompany(&gs, alloc, 10, &rng);
 
-    const new_id: types.MercCompanyId = @enumFromInt(1);
+    try std.testing.expectEqual(@as(types.MercCompanyId, @enumFromInt(1)), new_id);
     const spawned = gs.merc_companies.getPtr(new_id) orelse return error.TestFailed;
     // Spawned company must not use the player's reserved logo.
     try std.testing.expect(!std.mem.eql(u8, spawned.logo_key, logo.all_keys[0]));
@@ -825,7 +826,8 @@ test "spawnReplacementCompany: late transaction OOM leaves no company or ID adva
         const rng_before = rng;
         var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
         gs.arena.child_allocator = failing.allocator();
-        if (spawnReplacementCompany(&gs, outer.allocator(), 1, &rng)) |_| {
+        if (spawnReplacementCompany(&gs, outer.allocator(), 1, &rng)) |new_id| {
+            try std.testing.expectEqual(@as(types.MercCompanyId, @enumFromInt(1)), new_id);
             try std.testing.expectEqual(@as(usize, 1), gs.merc_companies.count());
             try std.testing.expectEqual(@as(u32, 2), gs.next_merc_company_id);
             gs.deinit();

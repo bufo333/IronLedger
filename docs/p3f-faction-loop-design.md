@@ -659,10 +659,9 @@ rule-72 gate before the next increment is dispatched.
 | Tests (r67) | TUI picker: row identity and key-dispatch test                                                   |
 | Gate        | `zig fmt`, `zig build test`, `verify-contract.sh`; **BOTH smoke scripts required** (tui change) |
 
-**Durable-doc updates required in each increment's commit (design-docs-in-sync rule):**
-ARCHITECTURE.md (economy/black-market section), GAMEPLAY.md, `docs/tui.md` (P3f.5 picker),
-`docs/schema.sql` (schema bumps), `docs/mekhq-map.md` (AtB black-market / retirement rows),
-ROADMAP.md P3f tick, TODO.md re-file into P3f.2–P3f.5 items (owner action after P3f.1 lands).
+**Delivered documentation:** ARCHITECTURE.md, GAMEPLAY.md, `docs/tui.md`,
+`docs/schema.sql`, `docs/mekhq-map.md`, ROADMAP.md, and TODO.md record the
+completed P3f behavior and remaining work.
 
 ---
 
