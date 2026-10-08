@@ -105,14 +105,22 @@ pub fn mercCompanyInsolvent(gs: *GameState, id: types.MercCompanyId) bool {
 
 /// Single owner of "may this merc company be a contract OpFor" (rule 20).
 /// Eligible iff active (dissolved_day == 0), solvent (!mercCompanyInsolvent),
-/// and at full strength (roster length >= merc_company_hulls_each). A company
+/// and at its named mek target. Vehicles and aerospace hulls contribute BV but
+/// never satisfy mek readiness. A company
 /// with no roster entry is under strength → ineligible (rule 1).
 pub fn mercCompanyEligibleAsOpFor(gs: *GameState, id: types.MercCompanyId) bool {
     const mc = gs.merc_companies.getPtr(id) orelse return false;
     if (mc.dissolved_day != 0) return false;
     if (mercCompanyInsolvent(gs, id)) return false;
     const roster = gs.merc_company_rosters.get(id) orelse return false;
-    return roster.items.len >= tuning.generation.merc_company_hulls_each;
+    var active_meks: usize = 0;
+    for (roster.items) |hid| {
+        const inst = gs.hull_instances.getPtr(hid) orelse continue;
+        if (inst.status != .active) continue;
+        const chassis = chassis_mod.find(inst.base_key) orelse continue;
+        if (chassis.kind == .mek) active_meks += 1;
+    }
+    return active_meks >= tuning.generation.merc_company_hulls_each;
 }
 
 /// Named outcome→delta owner for operation resolution (P4i, rule 20).
@@ -967,4 +975,22 @@ test "mercCompanyEligibleAsOpFor: active+full-strength=true; dissolved=false; in
         .dissolved_day = 0,
     });
     try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, mc_absent));
+}
+
+test "mercCompanyEligibleAsOpFor: conventional BV does not satisfy the active-mek target" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 43 });
+    defer gs.deinit();
+    const id: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(gs.allocator(), id, .{ .id = id, .archetype_key = "enemy_raiders", .unit_name = "Reserve Co", .faction_key = "DC" });
+    var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
+    for (0..tuning.generation.merc_company_hulls_each) |i| {
+        const hull_id: types.HullInstanceId = @enumFromInt(1 + @as(u32, @intCast(i)));
+        try gs.hull_instances.put(gs.allocator(), hull_id, .{ .id = hull_id, .base_key = "SCP-1N" });
+        try roster.append(gs.allocator(), hull_id);
+    }
+    try gs.merc_company_rosters.put(gs.allocator(), id, roster);
+    try std.testing.expect(mercCompanyFieldableBv(&gs, id) > 0);
+    try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, id));
+    for (roster.items) |hull_id| gs.hull_instances.getPtr(hull_id).?.base_key = "LCT-1V";
+    try std.testing.expect(mercCompanyEligibleAsOpFor(&gs, id));
 }

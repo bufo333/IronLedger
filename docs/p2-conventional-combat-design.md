@@ -105,6 +105,14 @@ fighters are reserve assets: they contribute their normal battle value when
 committed but do not consume that preferred mek target. NPC combat, loss,
 repair, salvage, and persistence call the same P2 rule owners as the player.
 
+`sim/merc_lifecycle.zig` owns the delivered selector. It derives logical slots
+from the hull pool: active meks meet the named mek target, vehicles occupy only
+otherwise open line slots, and fighters occupy only the bounded air reserve.
+`tuning.generation.merc_company_air_reserve_lances` is one lance // TUNE,
+because this design authorizes an air reserve without supplying an NPC air-lance
+count. Candidate traversal is market-board insertion order; accepted purchases
+draw from `.market` only after their affordable candidate set is formed.
+
 ## Delivery Order
 
 1. **P2v-a Data and provenance.** Replace verified chassis facts; audit every

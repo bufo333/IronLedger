@@ -8110,14 +8110,24 @@ fn buildRosterGs(alloc: std.mem.Allocator) !GameState {
     });
     gs.next_merc_company_id = 2;
 
-    // Three hull instances. Owners set consistently (hygiene).
+    // Five hull instances, including replenishing conventional vehicle/fighter
+    // purchases owned by the merc company.
     const hid1: types.HullInstanceId = @enumFromInt(1);
     const hid2: types.HullInstanceId = @enumFromInt(2);
     const hid3: types.HullInstanceId = @enumFromInt(3);
+    const hid4: types.HullInstanceId = @enumFromInt(4);
+    const hid5: types.HullInstanceId = @enumFromInt(5);
     try gs.hull_instances.put(a, hid1, .{ .id = hid1, .base_key = "LCT-1V", .status = .active, .owner = .{ .faction = "DC" } });
     try gs.hull_instances.put(a, hid2, .{ .id = hid2, .base_key = "JR7-D", .status = .active, .owner = .{ .faction = "DC" } });
     try gs.hull_instances.put(a, hid3, .{ .id = hid3, .base_key = "LCT-1V", .status = .active, .owner = .{ .merc_company = mcid1 } });
-    gs.next_hull_instance_id = 4;
+    for ([_]struct { id: types.HullInstanceId, key: []const u8 }{ .{ .id = hid4, .key = "SCP-1N" }, .{ .id = hid5, .key = "TR-7" } }) |entry| {
+        const chassis = @import("../domain/chassis.zig").find(entry.key).?;
+        var hull: hull_mod.HullInstance = .{ .id = entry.id, .base_key = chassis.key, .intro_year = chassis.intro_year, .owner = .{ .merc_company = mcid1 } };
+        for (chassis.loadout) |slot| try hull.loadout.append(a, .{ .part_key = slot.part });
+        try gs.hull_instances.put(a, entry.id, hull);
+        try gs.hull_ownership_history.append(a, .{ .hull_instance_id = entry.id, .acquisition_type = .purchase, .prior_owner_key = "market" });
+    }
+    gs.next_hull_instance_id = 6;
 
     // Faction roster: DC owns hulls 1 and 2 (multi-element, tests order preservation).
     const fr_gop = try gs.faction_rosters.getOrPut(a, "DC");
@@ -8125,10 +8135,12 @@ fn buildRosterGs(alloc: std.mem.Allocator) !GameState {
     try fr_gop.value_ptr.append(a, hid1);
     try fr_gop.value_ptr.append(a, hid2);
 
-    // Merc company roster: merc company 1 owns hull 3.
+    // Merc company roster: one mek plus minted vehicle and fighter.
     const mrit_gop = try gs.merc_company_rosters.getOrPut(a, mcid1);
     if (!mrit_gop.found_existing) mrit_gop.value_ptr.* = .empty;
     try mrit_gop.value_ptr.append(a, hid3);
+    try mrit_gop.value_ptr.append(a, hid4);
+    try mrit_gop.value_ptr.append(a, hid5);
 
     _ = hull_mod.HullStatus.active; // suppress unused import warning
     return gs;
@@ -8180,9 +8192,19 @@ test "faction and merc-company rosters survive a save/load round-trip with ident
     try std.testing.expectEqual(@as(usize, 1), loaded.merc_company_rosters.count());
     const mcid1: types.MercCompanyId = @enumFromInt(1);
     const mc_list = loaded.merc_company_rosters.getPtr(mcid1) orelse return error.TestFailed;
-    try std.testing.expectEqual(@as(usize, 1), mc_list.items.len);
+    try std.testing.expectEqual(@as(usize, 3), mc_list.items.len);
     const hid3: types.HullInstanceId = @enumFromInt(3);
     try std.testing.expectEqual(hid3, mc_list.items[0]);
+    const hid4: types.HullInstanceId = @enumFromInt(4);
+    const hid5: types.HullInstanceId = @enumFromInt(5);
+    try std.testing.expectEqual(hid4, mc_list.items[1]);
+    try std.testing.expectEqual(hid5, mc_list.items[2]);
+    try std.testing.expectEqual(@as(usize, @import("../domain/chassis.zig").find("SCP-1N").?.loadout.len), loaded.hull_instances.get(hid4).?.loadout.items.len);
+    try std.testing.expectEqual(@as(usize, @import("../domain/chassis.zig").find("TR-7").?.loadout.len), loaded.hull_instances.get(hid5).?.loadout.items.len);
+    try std.testing.expectEqual(@as(u32, 6), loaded.next_hull_instance_id);
+    try @import("../sim/merc_lifecycle.zig").runMercLifecycle(&gs);
+    try @import("../sim/merc_lifecycle.zig").runMercLifecycle(&loaded);
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
 }
 
 test "a v52 store migrates to v54 with the roster tables created (P3e.3/entity-split)" {

@@ -493,7 +493,7 @@ test "seedMercCompanies: seeded shape matches tuning values" {
             };
             try std.testing.expectEqual(@as(usize, tg.merc_company_hulls_each), roster.items.len);
 
-            // Every pool hull resolves correctly.
+            // Campaign-start NPC pools remain mek-only at the named target.
             for (roster.items) |hid| {
                 const inst = gs.hull_instances.getPtr(hid) orelse {
                     std.debug.print("seedMercCompanies: hull {d} not in hull_instances\n", .{@intFromEnum(hid)});
@@ -505,6 +505,7 @@ test "seedMercCompanies: seeded shape matches tuning values" {
                 });
                 try std.testing.expect(inst.pre_campaign);
                 try std.testing.expectEqual(hull_mod.HullStatus.active, inst.status);
+                try std.testing.expectEqual(@import("../domain/unit.zig").UnitKind.mek, chassis_mod.find(inst.base_key).?.kind);
 
                 // Exactly one open .initial interval per hull.
                 var found: usize = 0;

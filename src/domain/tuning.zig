@@ -769,6 +769,10 @@ pub const Tuning = struct {
         /// Hull pool size for each world merc company at campaign creation
         /// (docs/p3c-economy-design.md §8.D). // TUNE
         merc_company_hulls_each: u16,
+        /// Bounded conventional air reserve for NPC merc companies: lances,
+        /// multiplied by force.lance_size by the procurement selector
+        /// (docs/p2-conventional-combat-design.md §NPC Policy). // TUNE
+        merc_company_air_reserve_lances: u8,
         /// Minimum fieldable BV a world merc company must retain to be selected as a
         /// contract OpFor; below it the company is insolvent/inactive
         /// (docs/p3c-economy-design.md §4 "Rival insolvency", §8.G). // TUNE
