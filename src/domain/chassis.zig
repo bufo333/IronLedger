@@ -228,12 +228,18 @@ test "data: conventional chassis have pinned provenance and explicit market admi
 
 test "data: approved conventional replacements and market pools agree" {
     const scorpion = find("SCP-1N").?;
+    try std.testing.expectEqual(unit.UnitKind.vehicle, scorpion.kind);
+    try std.testing.expectEqual(@as(u8, 25), scorpion.tonnage);
     try std.testing.expectEqual(@as(u16, 2807), scorpion.intro_year);
     try expectLoadout(scorpion, &.{ "ac5", "mg", "ammo_ac5", "ammo_mg" }, &.{ "turret.", "turret.", "body.", "body." });
     const manticore = find("MTR").?;
+    try std.testing.expectEqual(unit.UnitKind.vehicle, manticore.kind);
+    try std.testing.expectEqual(@as(u8, 60), manticore.tonnage);
     try std.testing.expectEqual(@as(u16, 2575), manticore.intro_year);
     try expectLoadout(manticore, &.{ "ppc", "lrm10", "srm6", "mlas", "ammo_lrm", "ammo_srm" }, &.{ "turret.", "turret.", "turret.", "front.", "body.", "body." });
     const carrier = find("SRM-CAR").?;
+    try std.testing.expectEqual(unit.UnitKind.vehicle, carrier.kind);
+    try std.testing.expectEqual(@as(u8, 60), carrier.tonnage);
     try std.testing.expectEqual(@as(u16, 2470), carrier.intro_year);
     try std.testing.expectEqual(@as(usize, 14), carrier.loadout.len);
     for (carrier.loadout[0..10]) |slot| {
@@ -241,12 +247,18 @@ test "data: approved conventional replacements and market pools agree" {
         try std.testing.expect(std.mem.startsWith(u8, slot.slot, "front."));
     }
     const thrush = find("TR-7").?;
+    try std.testing.expectEqual(unit.UnitKind.aerospace, thrush.kind);
+    try std.testing.expectEqual(@as(u8, 25), thrush.tonnage);
     try std.testing.expectEqual(@as(u16, 2798), thrush.intro_year);
     try expectLoadout(thrush, &.{ "mlas", "mlas", "mlas" }, &.{ "nose.", "lw.", "rw." });
     const sparrowhawk = find("SPR-H5").?;
+    try std.testing.expectEqual(unit.UnitKind.aerospace, sparrowhawk.kind);
+    try std.testing.expectEqual(@as(u8, 30), sparrowhawk.tonnage);
     try std.testing.expectEqual(@as(u16, 2520), sparrowhawk.intro_year);
     try expectLoadout(sparrowhawk, &.{ "mlas", "mlas", "slas", "slas" }, &.{ "nose.", "nose.", "lw.", "rw." });
     const slayer = find("SL-15").?;
+    try std.testing.expectEqual(unit.UnitKind.aerospace, slayer.kind);
+    try std.testing.expectEqual(@as(u8, 80), slayer.tonnage);
     try std.testing.expectEqual(@as(u16, 2770), slayer.intro_year);
     try expectLoadout(slayer, &.{ "ac10", "mlas", "mlas", "mlas", "mlas", "mlas", "mlas", "ammo_ac10", "ammo_ac10" }, &.{ "nose.", "nose.", "lw.", "lw.", "rw.", "rw.", "aft.", "fuselage.", "fuselage." });
 
