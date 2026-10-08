@@ -18,8 +18,9 @@ A package has one primary invariant or subsystem outcome.
   lances, aerospace procurement for air lances, and replenishing conventional
   reserves without changing the later 16-mek readiness target.
 - [x] P2-design battle-armor/artillery design approval (P2a).
-- [ ] P2-battle-armor (P2b-P2d): verified domain facts, acquisition/attachment,
-  crewing, readiness, and persistence.
+- [ ] P2-battle-armor (P2b-P2d): P2b remains blocked on the source facts
+  listed in `docs/p2-battle-armor-domain-research.md`; verified domain facts,
+  acquisition/attachment, crewing, readiness, and persistence.
 - [ ] P2-artillery (P2e-P2g): verified domain facts, acquisition/attachment,
   crewing, readiness, and persistence.
 - [ ] P2-battle-ui (P2h-P2i): both battle effects and REPL/TUI surfaces.
