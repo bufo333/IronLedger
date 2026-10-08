@@ -71,8 +71,10 @@ not contribute.
 
 The ordered armor arrays in vehicle/fighter `.blk` files are not imported until
 their location mapping is verified from MegaMek format authority. P2 therefore
-does not infer per-location conventional armor. Aerospace field armor repair is
-also deferred until that verified repair model exists.
+does not infer per-location conventional armor. Fighters use generic field armor
+and field-tier slot repair through `tech_aero`; internal structure remains depot
+work. This establishes no aerospace-specific repair cost, duration, armor-point
+conversion, or other repair value.
 
 ## NPC Policy
 

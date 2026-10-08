@@ -5129,7 +5129,7 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    try std.testing.expectEqual(@as(u64, 7031099491874677131), hash_before);
+    try std.testing.expectEqual(@as(u64, 13565609406863393148), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5636,7 +5636,7 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // The scripted campaign's hash detects any simulation or persistence change.
-    try std.testing.expectEqual(@as(u64, 7031099491874677131), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 13565609406863393148), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();

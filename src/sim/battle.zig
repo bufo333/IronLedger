@@ -1142,8 +1142,12 @@ fn writeHullCombatRecords(
 }
 
 pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
+    return resolveEngagementWithResolutionScratch(gs, c, gs.scratch());
+}
+
+fn resolveEngagementWithResolutionScratch(gs: *GameState, c: *contract_mod.Contract, resolution_backing: std.mem.Allocator) !void {
     try gs.battle_reports.prepareRecord(gs.allocator());
-    var resolution_scratch = std.heap.ArenaAllocator.init(gs.scratch());
+    var resolution_scratch = std.heap.ArenaAllocator.init(resolution_backing);
     defer resolution_scratch.deinit();
     const resolution_alloc = resolution_scratch.allocator();
     // Fighter selection and its selected-unit ammunition census reserve all
@@ -1212,15 +1216,6 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         },
     }
 
-    // Where and in what: the world's ground, the day's weather.
-    const env: terrain_mod.Environment = blk: {
-        const world = planet_mod.find(c.planet_key) orelse break :blk .{};
-        const t = terrain_mod.terrainOf(world);
-        break :blk .{ .terrain = t, .weather = terrain_mod.rollWeather(&gs.rng, .battle, t) };
-    };
-    populatePlayerSide(gs, c, env, &player);
-    if (player.engaged.items.len == 0) return concede(gs, c);
-
     switch (resolution) {
         .pool => {
             drawn = try drawOpforHulls(gs, resolution_alloc, draw_candidates, draw_count);
@@ -1234,6 +1229,16 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
         },
         else => {},
     }
+
+    // Complete every fallible OpFor allocation and draw before weather consumes
+    // the battle stream, so a failed draw allocation leaves the engagement unchanged.
+    const env: terrain_mod.Environment = blk: {
+        const world = planet_mod.find(c.planet_key) orelse break :blk .{};
+        const t = terrain_mod.terrainOf(world);
+        break :blk .{ .terrain = t, .weather = terrain_mod.rollWeather(&gs.rng, .battle, t) };
+    };
+    populatePlayerSide(gs, c, env, &player);
+    if (player.engaged.items.len == 0) return concede(gs, c);
 
     const open = openingRoll(gs, c, &player, env, enemy_bv_override);
     const scenario = open.scenario;
@@ -4484,13 +4489,13 @@ test "forfeit: would-be pool present but empty, and key absent for replenishment
     }
 }
 
-test "pool draw determinism: two same-seed campaigns with equal seeded pools produce equal state hash" {
-    // Tests plan 7: determinism on the pool path.
+test "pool draw stages hull BV before weather and remains deterministic" {
+    // Equal seeds and pools must produce the same staged draw and battle result.
     var gs1 = GameState.init(std.testing.allocator, .{ .seed = 3006 });
     defer gs1.deinit();
     _ = try founding.createCommander(&gs1, "T", .LC, .line_officer);
     const co1 = try @import("starter_company.zig").generateInto(&gs1, "Alpha");
-    _ = try seedOpforHulls(&gs1, "DC", 4);
+    const pool_ids1 = try seedOpforHulls(&gs1, "DC", 4);
     try gs1.contracts.put(gs1.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .kind = .recon_raid,
@@ -4506,6 +4511,19 @@ test "pool draw determinism: two same-seed campaigns with equal seeded pools pro
     const site1: types.Site = .{ .company = co1 };
     try gs1.addStock(site1, "armor", 60);
     for (@import("../domain/part.zig").munition_keys) |key| try gs1.addStock(site1, key, 40);
+
+    var staged_state = gs1;
+    var staged_scratch = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer staged_scratch.deinit();
+    const staged_drawn = try drawOpforHulls(&staged_state, staged_scratch.allocator(), pool_ids1, pool_ids1.len);
+    for (staged_drawn) |drawn_id| {
+        var found = false;
+        for (pool_ids1) |pool_id| {
+            if (drawn_id == pool_id) found = true;
+        }
+        try std.testing.expect(found);
+    }
+    const expected_weather = terrain_mod.rollWeather(&staged_state.rng, .battle, terrain_mod.terrainOf(planet_mod.find("galatea").?));
 
     var gs2 = GameState.init(std.testing.allocator, .{ .seed = 3006 }); // same seed
     defer gs2.deinit();
@@ -4536,9 +4554,52 @@ test "pool draw determinism: two same-seed campaigns with equal seeded pools pro
     try answerBattleDecisions(&gs1);
     try answerBattleDecisions(&gs2);
 
+    const report1 = gs1.battle_reports.kept.items[gs1.battle_reports.kept.items.len - 1];
+    const report2 = gs2.battle_reports.kept.items[gs2.battle_reports.kept.items.len - 1];
+    const expected_bv = chassis_mod.find("LCT-1V").?.bv * @as(i64, @intCast(pool_ids1.len));
+    const expected_power = (autoresolve.Element{ .base_strength = expected_bv, .avg_gunnery = 4, .avg_piloting = 5 }).effectivePower(.{});
+    try std.testing.expectEqual(expected_power, report1.enemy_power);
+    try std.testing.expectEqualStrings(terrain_mod.weatherRow(expected_weather).name, report1.weather);
+    try std.testing.expectEqual(report1.enemy_power, report2.enemy_power);
+    try std.testing.expectEqualStrings(report1.weather, report2.weather);
+
     const hash1 = @import("digest.zig").stateHash(&gs1);
     const hash2 = @import("digest.zig").stateHash(&gs2);
     try std.testing.expectEqual(hash1, hash2);
+}
+
+test "pool draw allocation failure preserves the complete engagement state" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 3008 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    _ = try seedOpforHulls(&gs, "DC", 4);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .enemy_lances = 1,
+    });
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (part_mod.munition_keys) |key| try gs.addStock(site, key, 40);
+
+    const before = digest.stateHash(&gs);
+    var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = 0 });
+    try std.testing.expectError(
+        error.OutOfMemory,
+        resolveEngagementWithResolutionScratch(&gs, gs.contracts.getPtr(@enumFromInt(1)).?, failing.allocator()),
+    );
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
 
 test "pool draw atomicity: hull_combat_records and hull_instances are consistent after pool-path battles" {
