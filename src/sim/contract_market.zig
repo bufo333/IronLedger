@@ -1070,6 +1070,64 @@ pub const BuyResult = struct {
     fraud: bool = false,
 };
 
+/// Purchase a dispersed black-market hull through an HQ at its listed world.
+/// All fallible state changes are prepared before payment, listing removal, or
+/// the market RNG stream commits.
+fn buyDispersedListingAtHq(gs: *GameState, index: usize, listing: market.Listing, price: types.CBills, hq: types.HqId) !BuyResult {
+    if (listing.kind != .unit or listing.hull_instance_id == .none) return error.NoSuchListing;
+    const world = planet.find(listing.planet_key) orelse return error.NoSuchListing;
+    var staged_rng = gs.rng;
+    const roll = staged_rng.roll2d6(.market);
+    const fraud = roll <= tuning.market.black_market_fraud_target;
+    const posting = try gs.prepareTreasuryPosting(.{ .hq = hq }, .{
+        .day = gs.clock.day_index,
+        .amount = -price,
+        .category = .unit_purchase,
+        .hq = hq,
+        .note = "black market",
+    });
+    const house_change = if (!std.mem.eql(u8, world.faction, "PER"))
+        try gs.prepareStandingAdjustment(world.faction, if (fraud) -tuning.market.black_market_standing_loss else -1)
+    else
+        null;
+    const pirate_change = if (fraud) null else try gs.prepareStandingAdjustment("PER", 1);
+    const hull_return = if (fraud)
+        try gs.prepareMarketHullReturn(listing.hull_instance_id)
+    else
+        null;
+    const hull_transfer = if (!fraud)
+        try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market")
+    else
+        null;
+    var prepared_unit: ?GameState.PreparedUnit = null;
+    if (!fraud) {
+        var unit = try gs.prepareUnit(listing.item_key);
+        if (listing.condition) |cond| market.applyHullCondition(&unit.unit, cond, staged_rng.random(.market));
+        prepared_unit = unit;
+    }
+    const house_now = if (house_change) |change| change.value else 0;
+    const pirate_now = if (pirate_change) |change| change.value else 0;
+    const log = if (fraud)
+        try gs.prepareLog(.market, .{ .hq = hq }, "[black market] the fence vanished with {s} c-bills — no {s} (2d6 = {d}); {s} standing −{d} → {d}", .{ try types.moneyText(gs.allocator(), price), listing.item_key, roll, world.faction, tuning.market.black_market_standing_loss, house_now })
+    else
+        try gs.prepareLog(.market, .{ .hq = hq }, "[black market] {s} changed hands for {s} c-bills, no questions asked — {s} standing −1 → {d}, pirates +1 → {d}", .{ listing.item_key, try types.moneyText(gs.allocator(), price), world.faction, house_now, pirate_now });
+
+    gs.commitTreasuryPosting(posting);
+    gs.rng = staged_rng;
+    _ = gs.market_listings.orderedRemove(index);
+    if (house_change) |change| gs.commitStandingAdjustment(change);
+    if (pirate_change) |change| gs.commitStandingAdjustment(change);
+    gs.commitLog(log);
+    if (fraud) {
+        if (hull_return) |prepared| gs.commitMarketHullReturn(prepared);
+        return .{ .fraud = true };
+    }
+    const uid = gs.commitPreparedUnit(prepared_unit.?);
+    gs.unit(uid).?.hull_instance_id = listing.hull_instance_id;
+    gs.commitHullTransfer(hull_transfer.?);
+    return .{ .unit = uid };
+}
+
 /// Buy a listing off the market board.
 pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
     if (index >= gs.market_listings.items.len) return error.NoSuchListing;
@@ -1086,6 +1144,9 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
         black_market.playerDeploymentAt(gs, listing, gs.clock.day_index)
     else
         null;
+    if (listing.black_market and listing.planet_key.len > 0 and listing.hull_instance_id != .none and dispersed_hq != .none) {
+        return buyDispersedListingAtHq(gs, index, listing, price, dispersed_hq);
+    }
     // The contract world's board: the company buys where it
     // stands, from its local funds, and the hull joins it there.
     if (listing.company != .none or dispersed_contract != null) {
@@ -1140,6 +1201,10 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
         else
             null;
         const pirate_change = if (fraud) null else try gs.prepareStandingAdjustment("PER", 1);
+        const hull_return = if (fraud)
+            try gs.prepareMarketHullReturn(listing.hull_instance_id)
+        else
+            null;
         var prepared_unit: ?GameState.PreparedUnit = null;
         const hull_transfer = if (!fraud)
             try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market")
@@ -1168,7 +1233,7 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
         if (pirate_change) |change| gs.commitStandingAdjustment(change);
         gs.commitLog(log);
         if (fraud) {
-            if (listing.hull_instance_id != .none) try gs.returnMarketHullToFaction(listing.hull_instance_id);
+            if (hull_return) |prepared| gs.commitMarketHullReturn(prepared);
             return .{ .fraud = true };
         }
         const uid = gs.commitPreparedUnit(prepared_unit.?);
@@ -1468,6 +1533,71 @@ test "a dispersed listing bought through a local HQ uses that HQ treasury" {
     try std.testing.expectEqual(seat_funds, gs.hqs.getPtr(seat).?.funds);
     try std.testing.expectEqual(@as(types.CBills, 500_000), gs.hqs.getPtr(local).?.funds);
     try std.testing.expectEqual(local, gs.event_log.items[gs.event_log.items.len - 1].hq);
+}
+
+fn seedDispersedHqPurchaseFixture(gs: *GameState) !types.ListingId {
+    _ = try commands.execute(gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const hq: types.HqId = @enumFromInt(99);
+    try gs.hqs.put(gs.allocator(), hq, .{ .id = hq, .name = "Local", .tier = .field, .planet_key = "canopus4", .funds = 5_000_000 });
+    const hull: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hull, .{ .id = hull, .base_key = "LCT-1V", .owner = .market });
+    try gs.hull_ownership_history.append(gs.allocator(), .{
+        .hull_instance_id = hull,
+        .from_day = gs.clock.day_index,
+        .acquisition_type = .transfer,
+        .prior_owner_key = "MOC",
+    });
+    const listing: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = listing,
+        .kind = .unit,
+        .item_key = "LCT-1V",
+        .rarity = .common,
+        .price = 500_000,
+        .black_market = true,
+        .planet_key = "canopus4",
+        .hull_instance_id = hull,
+    });
+    gs.next_listing_id += 1;
+    return listing;
+}
+
+test "a failed dispersed HQ fraud purchase changes no state" {
+    const digest = @import("digest.zig");
+    var seed: u64 = 1;
+    while (true) : (seed += 1) {
+        var probe = GameState.init(std.testing.allocator, .{ .seed = seed });
+        _ = try seedDispersedHqPurchaseFixture(&probe);
+        var staged_rng = probe.rng;
+        const fraud = staged_rng.roll2d6(.market) <= tuning.market.black_market_fraud_target;
+        probe.deinit();
+        if (fraud) break;
+    }
+
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var gs = GameState.init(outer.allocator(), .{ .seed = seed });
+        const listing = try seedDispersedHqPurchaseFixture(&gs);
+        const before = digest.stateHash(&gs);
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
+        gs.arena.child_allocator = failing.allocator();
+
+        if (commands.execute(&gs, .{ .buy_listing = listing })) |result| {
+            try std.testing.expect(result.fraud);
+            try std.testing.expect(digest.stateHash(&gs) != before);
+            gs.deinit();
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+            gs.deinit();
+        }
+    }
 }
 
 test "buySupportHull returns StapleOffBoard when the staple line is off the board" {

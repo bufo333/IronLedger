@@ -2493,6 +2493,7 @@ pub const MarketFilter = enum {
 pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId) !Market {
     var board: std.ArrayListUnmanaged(ListingRow) = .empty;
     for (gs.market_listings.items) |l| {
+        if (l.company != .none) continue;
         if (l.hq != hq and l.hq != .none) continue;
         if (l.black_market and l.hq == .none and l.planet_key.len > 0 and
             (!black_market.buyerEligible(gs, l, .player, gs.clock.day_index) or
@@ -2511,23 +2512,6 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
             cond_base;
         const name: []const u8 = if (l.kind == .unit) (if (chassis_mod.find(l.item_key)) |c| c.name else l.item_key) else (if (@import("../domain/part.zig").find(l.item_key)) |p| p.name else l.item_key);
         const transport = l.kind == .unit and chassis_mod.find(l.item_key) != null and chassis_mod.find(l.item_key).?.kind.isTransport();
-        if (l.company != .none) {
-            // A contract world's hull.
-            const world: []const u8 = if (gs.deploymentContract(l.company)) |c| planetName(c.planet_key) else "?";
-            try board.append(alloc, .{ .id = l.id, .hq = l.hq, .company = l.company, .transport = transport, .cells = try table.row(alloc, &.{
-                try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(l.id)}),
-                try std.fmt.allocPrint(alloc, "{{a}}@{s}{{/}}", .{world}),
-                l.item_key,
-                name,
-                try money(alloc, types.applyBp(l.price, gs.diff().purchase_bp)),
-                "",
-                "",
-                "",
-                "",
-                try std.fmt.allocPrint(alloc, "{s} local funds {s} · {s}", .{ try forceName(alloc, gs, l.company), try money(alloc, gs.treasuryBalance(.{ .company = l.company })), cond }),
-            }) });
-            continue;
-        }
         try board.append(alloc, .{ .id = l.id, .hq = l.hq, .transport = transport, .cells = try table.row(alloc, &.{
             try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(l.id)}),
             @tagName(l.kind),
@@ -2591,6 +2575,50 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
         .catalog = try catalog.toOwnedSlice(alloc),
         .demand = try demand.toOwnedSlice(alloc),
     };
+}
+
+/// The local hull board for one company on an active contract. It includes
+/// only the company's contract-world listings and dispersed black-market
+/// listings at that world when no HQ supplies access.
+pub fn companyMarket(alloc: Alloc, gs: *GameState, filter: MarketFilter, company: types.ForceId) ![]ListingRow {
+    var board: std.ArrayListUnmanaged(ListingRow) = .empty;
+    const contract = gs.deploymentContract(company) orelse return board.toOwnedSlice(alloc);
+    if (contract.status != .active) return board.toOwnedSlice(alloc);
+    const hq = gs.homeHqFor(company);
+    for (gs.market_listings.items) |l| {
+        const local_listing = l.company == company;
+        const dispersed_listing = l.company == .none and l.black_market and l.planet_key.len > 0 and
+            std.mem.eql(u8, l.planet_key, contract.planet_key) and
+            black_market.buyerEligible(gs, l, .player, gs.clock.day_index) and
+            black_market.playerHqAt(gs, l) == .none;
+        if (!local_listing and !dispersed_listing) continue;
+        const keep = switch (l.kind) {
+            .unit => filter.matchesUnit(if (chassis_mod.find(l.item_key)) |c| c.kind else .mek),
+            .part => filter.matchesPart(l.item_key),
+        };
+        if (!keep) continue;
+        const cond: []const u8 = if (l.condition) |c|
+            try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} armor {s} · {d} dmg · {d} missing", .{ c.label(), try armorPct(alloc, c.armor_pct), c.damaged_slots, c.missing_components })
+        else if (l.kind == .unit)
+            "{g}new{/}"
+        else
+            "";
+        const name: []const u8 = if (l.kind == .unit) (if (chassis_mod.find(l.item_key)) |c| c.name else l.item_key) else (if (@import("../domain/part.zig").find(l.item_key)) |p| p.name else l.item_key);
+        const transport = l.kind == .unit and chassis_mod.find(l.item_key) != null and chassis_mod.find(l.item_key).?.kind.isTransport();
+        try board.append(alloc, .{ .id = l.id, .hq = hq, .company = company, .transport = transport, .cells = try table.row(alloc, &.{
+            try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(l.id)}),
+            try std.fmt.allocPrint(alloc, "{{a}}@{s}{{/}}", .{planetName(contract.planet_key)}),
+            l.item_key,
+            name,
+            try money(alloc, types.applyBp(l.price, gs.diff().purchase_bp)),
+            "",
+            "",
+            "",
+            "",
+            try std.fmt.allocPrint(alloc, "{s} local funds {s} · {s}", .{ try forceName(alloc, gs, company), try money(alloc, gs.treasuryBalance(.{ .company = company })), cond }),
+        }) });
+    }
+    return board.toOwnedSlice(alloc);
 }
 
 const isStaple = market_mod.isStaple;
@@ -4660,6 +4688,42 @@ test "a dispersed listing appears only on the HQ board at its world" {
     defer arena.deinit();
     try std.testing.expectEqual(@as(usize, 1), (try market(arena.allocator(), &gs, .all, home)).board.len);
     try std.testing.expectEqual(@as(usize, 0), (try market(arena.allocator(), &gs, .all, other)).board.len);
+}
+
+test "a deployed company's local board shows its dispersed listings without unrelated boards" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 75 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const company = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const contract_id: types.ContractId = @enumFromInt(75);
+    try gs.contracts.put(gs.allocator(), contract_id, .{
+        .id = contract_id,
+        .kind = .objective_raid,
+        .employer_key = "MOC",
+        .enemy_key = "DC",
+        .planet_key = "canopus4",
+        .status = .active,
+        .assigned_company = company,
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+    });
+    gs.force(company).?.location_planet = "canopus4";
+    gs.market_listings.clearRetainingCapacity();
+    const local: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = local, .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .company = company });
+    gs.next_listing_id += 1;
+    const dispersed: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = dispersed, .kind = .unit, .item_key = "SHD-2H", .rarity = .common, .price = 1, .black_market = true, .planet_key = "canopus4" });
+    gs.next_listing_id += 1;
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "WSP-1A", .rarity = .common, .price = 1, .hq = gs.seat() });
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const board = try companyMarket(arena.allocator(), &gs, .all, company);
+    try std.testing.expectEqual(@as(usize, 2), board.len);
+    try std.testing.expectEqual(local, board[0].id);
+    try std.testing.expectEqual(dispersed, board[1].id);
+    try std.testing.expectEqual(@as(usize, 1), (try market(arena.allocator(), &gs, .all, gs.seat())).board.len);
 }
 
 test "desk and ledger queries build on a fresh campaign" {

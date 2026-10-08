@@ -1075,29 +1075,53 @@ pub const GameState = struct {
     /// `prior_owner_key` is duped into the campaign arena.
     /// (docs/p3c-economy-design.md §2 "HullInstance ownership extension").
     pub fn returnMarketHullToFaction(self: *GameState, hid: types.HullInstanceId) !void {
-        const alloc = self.allocator();
-        const inst = self.hull_instances.getPtr(hid) orelse return;
-        // Find the open ownership interval to recover the origin faction key.
+        const prepared = (try self.prepareMarketHullReturn(hid)) orelse return;
+        self.commitMarketHullReturn(prepared);
+    }
+
+    /// A market hull return prepared so its ownership history and origin roster
+    /// can commit without allocation.
+    pub const PreparedMarketHullReturn = struct {
+        hull: types.HullInstanceId,
+        origin_key: []const u8,
+        existing_roster: bool,
+    };
+
+    /// Prepare a return of a market hull to its origin faction. Null means the
+    /// hull no longer exists; preparation otherwise owns all required storage.
+    pub fn prepareMarketHullReturn(self: *GameState, hid: types.HullInstanceId) !?PreparedMarketHullReturn {
+        _ = self.hull_instances.getPtr(hid) orelse return null;
         var origin_key: []const u8 = "";
-        for (self.hull_ownership_history.items) |*h| {
-            if (h.hull_instance_id == hid and h.to_day == 0) {
-                origin_key = h.prior_owner_key;
-                h.to_day = self.clock.day_index;
-            }
+        for (self.hull_ownership_history.items) |h| {
+            if (h.hull_instance_id == hid and h.to_day == 0) origin_key = h.prior_owner_key;
         }
-        const owned_key = try alloc.dupe(u8, origin_key);
-        inst.owner = .{ .faction = owned_key };
-        try self.hull_ownership_history.append(alloc, .{
-            .hull_instance_id = hid,
+        const owned_key = try self.allocator().dupe(u8, origin_key);
+        try self.hull_ownership_history.ensureUnusedCapacity(self.allocator(), 1);
+        const existing_roster = self.faction_rosters.getPtr(origin_key) != null;
+        if (existing_roster) {
+            try self.faction_rosters.getPtr(origin_key).?.ensureUnusedCapacity(self.allocator(), 1);
+        } else {
+            try self.faction_rosters.ensureUnusedCapacity(self.allocator(), 1);
+        }
+        return .{ .hull = hid, .origin_key = owned_key, .existing_roster = existing_roster };
+    }
+
+    /// Return a prepared market hull to its origin faction without allocation.
+    pub fn commitMarketHullReturn(self: *GameState, prepared: PreparedMarketHullReturn) void {
+        const inst = self.hull_instances.getPtr(prepared.hull).?;
+        inst.owner = .{ .faction = prepared.origin_key };
+        for (self.hull_ownership_history.items) |*h| {
+            if (h.hull_instance_id == prepared.hull and h.to_day == 0) h.to_day = self.clock.day_index;
+        }
+        self.hull_ownership_history.appendAssumeCapacity(.{
+            .hull_instance_id = prepared.hull,
             .from_day = self.clock.day_index,
             .to_day = 0,
             .acquisition_type = .transfer,
-            .prior_owner_key = owned_key,
+            .prior_owner_key = prepared.origin_key,
         });
-        // Re-enter the hull in the faction's roster (canonical pool; rule 1).
-        const roster_gop = try self.faction_rosters.getOrPut(alloc, owned_key);
-        if (!roster_gop.found_existing) roster_gop.value_ptr.* = .empty;
-        try roster_gop.value_ptr.append(alloc, hid);
+        if (!prepared.existing_roster) self.faction_rosters.putAssumeCapacity(prepared.origin_key, .empty);
+        self.faction_rosters.getPtr(prepared.origin_key).?.appendAssumeCapacity(prepared.hull);
     }
 
     /// The one writer for discarding an unchosen pool-path wreck (rule 20/3):
