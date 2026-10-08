@@ -172,35 +172,38 @@
     // Slot keys prefix the airframe location (nose/lw/rw/aft); the MekLab
     // ignores non-mek kinds. Fighters fly from an HQ's air company slot
     // (spaceport ≥ 3) and give the company air cover in battle.
-    .{ .key = "SPR-H5", .name = "Sparrowhawk", .tonnage = 30, .bv = 605, .cost = 1_402_000, .rarity = .uncommon, .kind = .aerospace, .loadout = .{
+    .{ .key = "SPR-H5", .name = "Sparrowhawk", .tonnage = 30, .bv = 605, .cost = 1_402_000, .rarity = .uncommon, .intro_year = 2520, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Sparrowhawk SPR-H5.blk", .market_eligible = true, .loadout = .{
         .{ .slot = "nose.mlas.1", .part = "mlas", .class = .weapon },
-        .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
-        .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },
-        .{ .slot = "aft.slas.1", .part = "slas", .class = .weapon },
+        .{ .slot = "nose.mlas.2", .part = "mlas", .class = .weapon },
+        .{ .slot = "lw.slas.1", .part = "slas", .class = .weapon },
+        .{ .slot = "rw.slas.1", .part = "slas", .class = .weapon },
     } },
-    .{ .key = "CSR-V12", .name = "Corsair", .tonnage = 50, .bv = 1050, .cost = 2_311_000, .rarity = .uncommon, .kind = .aerospace, .loadout = .{
+    .{ .key = "CSR-V12", .name = "Corsair", .tonnage = 50, .bv = 1050, .cost = 2_311_000, .rarity = .uncommon, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Corsair CSR-V12.blk", .loadout = .{
         .{ .slot = "nose.llas.1", .part = "llas", .class = .weapon },
         .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "lw.slas.1", .part = "slas", .class = .weapon },
         .{ .slot = "rw.slas.1", .part = "slas", .class = .weapon },
     } },
-    .{ .key = "LCF-R15", .name = "Lucifer", .tonnage = 65, .bv = 1145, .cost = 3_598_000, .rarity = .rare, .kind = .aerospace, .loadout = .{
+    .{ .key = "LCF-R15", .name = "Lucifer", .tonnage = 65, .bv = 1145, .cost = 3_598_000, .rarity = .rare, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Lucifer LCF-R15.blk", .loadout = .{
         .{ .slot = "nose.llas.1", .part = "llas", .class = .weapon },
         .{ .slot = "nose.lrm10.1", .part = "lrm10", .class = .weapon },
         .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "aft.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
     } },
-    .{ .key = "SL-15", .name = "Slayer", .tonnage = 80, .bv = 1410, .cost = 4_478_000, .rarity = .rare, .kind = .aerospace, .loadout = .{
-        .{ .slot = "nose.ac5.1", .part = "ac5", .class = .weapon },
+    .{ .key = "SL-15", .name = "Slayer", .tonnage = 80, .bv = 1410, .cost = 4_478_000, .rarity = .rare, .intro_year = 2770, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Slayer SL-15.blk", .market_eligible = true, .loadout = .{
+        .{ .slot = "nose.ac10.1", .part = "ac10", .class = .weapon },
         .{ .slot = "nose.mlas.1", .part = "mlas", .class = .weapon },
-        .{ .slot = "lw.llas.1", .part = "llas", .class = .weapon },
-        .{ .slot = "rw.llas.1", .part = "llas", .class = .weapon },
+        .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "lw.mlas.2", .part = "mlas", .class = .weapon },
+        .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "rw.mlas.2", .part = "mlas", .class = .weapon },
         .{ .slot = "aft.mlas.1", .part = "mlas", .class = .weapon },
-        .{ .slot = "aft.ammo_ac5.1", .part = "ammo_ac5", .class = .ammo },
+        .{ .slot = "fuselage.ammo_ac10.1", .part = "ammo_ac10", .class = .ammo },
+        .{ .slot = "fuselage.ammo_ac10.2", .part = "ammo_ac10", .class = .ammo },
     } },
-    .{ .key = "STU-K5", .name = "Stuka", .tonnage = 100, .bv = 1625, .cost = 5_912_000, .rarity = .very_rare, .kind = .aerospace, .loadout = .{
+    .{ .key = "STU-K5", .name = "Stuka", .tonnage = 100, .bv = 1625, .cost = 5_912_000, .rarity = .very_rare, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Stuka STU-K5.blk", .loadout = .{
         .{ .slot = "nose.llas.1", .part = "llas", .class = .weapon },
         .{ .slot = "nose.llas.2", .part = "llas", .class = .weapon },
         .{ .slot = "lw.lrm10.1", .part = "lrm10", .class = .weapon },
@@ -632,32 +635,32 @@
     } },
 
     // ------- combat vehicles (TRO:3026; line-lance hulls, vehicle_crew + tech_mechanic) -------
-    .{ .key = "SCP-1N", .name = "Scorpion", .tonnage = 25, .bv = 350, .cost = 400_000, .rarity = .common, .kind = .vehicle, .loadout = .{
+    .{ .key = "SCP-1N", .name = "Scorpion", .tonnage = 25, .bv = 350, .cost = 400_000, .rarity = .common, .intro_year = 2807, .kind = .vehicle, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/vehicles/3039u/Scorpion Light Tank.blk", .market_eligible = true, .loadout = .{
+        .{ .slot = "turret.ac5.1", .part = "ac5", .class = .weapon },
+        .{ .slot = "turret.mg.1", .part = "mg", .class = .weapon },
+        .{ .slot = "body.ammo_ac5.1", .part = "ammo_ac5", .class = .ammo },
+        .{ .slot = "body.ammo_mg.1", .part = "ammo_mg", .class = .ammo },
+    } },
+    .{ .key = "VDT", .name = "Vedette", .tonnage = 50, .bv = 470, .cost = 700_000, .rarity = .common, .kind = .vehicle, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/vehicles/3039u/Vedette Medium Tank.blk", .loadout = .{
         .{ .slot = "turret.ac5.1", .part = "ac5", .class = .weapon },
         .{ .slot = "front.mg.1", .part = "mg", .class = .weapon },
         .{ .slot = "body.ammo_ac5.1", .part = "ammo_ac5", .class = .ammo },
         .{ .slot = "body.ammo_mg.1", .part = "ammo_mg", .class = .ammo },
     } },
-    .{ .key = "VDT", .name = "Vedette", .tonnage = 50, .bv = 470, .cost = 700_000, .rarity = .common, .kind = .vehicle, .loadout = .{
-        .{ .slot = "turret.ac5.1", .part = "ac5", .class = .weapon },
-        .{ .slot = "front.mg.1", .part = "mg", .class = .weapon },
-        .{ .slot = "body.ammo_ac5.1", .part = "ammo_ac5", .class = .ammo },
-        .{ .slot = "body.ammo_mg.1", .part = "ammo_mg", .class = .ammo },
-    } },
-    .{ .key = "HTZ", .name = "Hetzer", .tonnage = 40, .bv = 500, .cost = 650_000, .rarity = .common, .kind = .vehicle, .loadout = .{
+    .{ .key = "HTZ", .name = "Hetzer", .tonnage = 40, .bv = 500, .cost = 650_000, .rarity = .common, .kind = .vehicle, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/vehicles/3039u/Hetzer Wheeled Assault Gun.blk", .loadout = .{
         .{ .slot = "front.ac20.1", .part = "ac20", .class = .weapon },
         .{ .slot = "body.ammo_ac20.1", .part = "ammo_ac20", .class = .ammo },
         .{ .slot = "body.ammo_ac20.2", .part = "ammo_ac20", .class = .ammo },
     } },
-    .{ .key = "MTR", .name = "Manticore", .tonnage = 60, .bv = 990, .cost = 1_800_000, .rarity = .uncommon, .kind = .vehicle, .loadout = .{
+    .{ .key = "MTR", .name = "Manticore", .tonnage = 60, .bv = 990, .cost = 1_800_000, .rarity = .uncommon, .intro_year = 2575, .kind = .vehicle, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/vehicles/3039u/Manticore Heavy Tank.blk", .market_eligible = true, .loadout = .{
         .{ .slot = "turret.ppc.1", .part = "ppc", .class = .weapon },
         .{ .slot = "turret.lrm10.1", .part = "lrm10", .class = .weapon },
-        .{ .slot = "front.srm6.1", .part = "srm6", .class = .weapon },
-        .{ .slot = "turret.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "turret.srm6.1", .part = "srm6", .class = .weapon },
+        .{ .slot = "front.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "body.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
         .{ .slot = "body.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
     } },
-    .{ .key = "DMO", .name = "Demolisher", .tonnage = 80, .bv = 900, .cost = 2_100_000, .rarity = .uncommon, .kind = .vehicle, .loadout = .{
+    .{ .key = "DMO", .name = "Demolisher", .tonnage = 80, .bv = 900, .cost = 2_100_000, .rarity = .uncommon, .kind = .vehicle, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/vehicles/3039u/Demolisher Heavy Tank (Mk. I).blk", .loadout = .{
         .{ .slot = "turret.ac20.1", .part = "ac20", .class = .weapon },
         .{ .slot = "turret.ac20.2", .part = "ac20", .class = .weapon },
         .{ .slot = "body.ammo_ac20.1", .part = "ammo_ac20", .class = .ammo },
@@ -665,12 +668,12 @@
         .{ .slot = "body.ammo_ac20.3", .part = "ammo_ac20", .class = .ammo },
         .{ .slot = "body.ammo_ac20.4", .part = "ammo_ac20", .class = .ammo },
     } },
-    .{ .key = "SRK", .name = "Schrek", .tonnage = 80, .bv = 1050, .cost = 2_600_000, .rarity = .rare, .kind = .vehicle, .loadout = .{
+    .{ .key = "SRK", .name = "Schrek", .tonnage = 80, .bv = 1050, .cost = 2_600_000, .rarity = .rare, .kind = .vehicle, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/vehicles/3039u/Schrek PPC Carrier.blk", .loadout = .{
         .{ .slot = "turret.ppc.1", .part = "ppc", .class = .weapon },
         .{ .slot = "turret.ppc.2", .part = "ppc", .class = .weapon },
         .{ .slot = "turret.ppc.3", .part = "ppc", .class = .weapon },
     } },
-    .{ .key = "LRM-CAR", .name = "LRM Carrier", .tonnage = 60, .bv = 800, .cost = 1_200_000, .rarity = .uncommon, .kind = .vehicle, .loadout = .{
+    .{ .key = "LRM-CAR", .name = "LRM Carrier", .tonnage = 60, .bv = 800, .cost = 1_200_000, .rarity = .uncommon, .kind = .vehicle, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/vehicles/3039u/LRM Carrier.blk", .loadout = .{
         .{ .slot = "body.lrm20.1", .part = "lrm20", .class = .weapon },
         .{ .slot = "body.lrm20.2", .part = "lrm20", .class = .weapon },
         .{ .slot = "body.lrm20.3", .part = "lrm20", .class = .weapon },
@@ -678,17 +681,23 @@
         .{ .slot = "body.ammo_lrm.2", .part = "ammo_lrm", .class = .ammo },
         .{ .slot = "body.ammo_lrm.3", .part = "ammo_lrm", .class = .ammo },
     } },
-    .{ .key = "SRM-CAR", .name = "SRM Carrier", .tonnage = 60, .bv = 650, .cost = 900_000, .rarity = .uncommon, .kind = .vehicle, .loadout = .{
-        .{ .slot = "body.srm6.1", .part = "srm6", .class = .weapon },
-        .{ .slot = "body.srm6.2", .part = "srm6", .class = .weapon },
-        .{ .slot = "body.srm6.3", .part = "srm6", .class = .weapon },
-        .{ .slot = "body.srm6.4", .part = "srm6", .class = .weapon },
-        .{ .slot = "body.srm6.5", .part = "srm6", .class = .weapon },
-        .{ .slot = "body.srm6.6", .part = "srm6", .class = .weapon },
+    .{ .key = "SRM-CAR", .name = "SRM Carrier", .tonnage = 60, .bv = 650, .cost = 900_000, .rarity = .uncommon, .intro_year = 2470, .kind = .vehicle, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/vehicles/3039u/SRM Carrier.blk", .market_eligible = true, .loadout = .{
+        .{ .slot = "front.srm6.1", .part = "srm6", .class = .weapon },
+        .{ .slot = "front.srm6.2", .part = "srm6", .class = .weapon },
+        .{ .slot = "front.srm6.3", .part = "srm6", .class = .weapon },
+        .{ .slot = "front.srm6.4", .part = "srm6", .class = .weapon },
+        .{ .slot = "front.srm6.5", .part = "srm6", .class = .weapon },
+        .{ .slot = "front.srm6.6", .part = "srm6", .class = .weapon },
+        .{ .slot = "front.srm6.7", .part = "srm6", .class = .weapon },
+        .{ .slot = "front.srm6.8", .part = "srm6", .class = .weapon },
+        .{ .slot = "front.srm6.9", .part = "srm6", .class = .weapon },
+        .{ .slot = "front.srm6.10", .part = "srm6", .class = .weapon },
         .{ .slot = "body.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
         .{ .slot = "body.ammo_srm.2", .part = "ammo_srm", .class = .ammo },
+        .{ .slot = "body.ammo_srm.3", .part = "ammo_srm", .class = .ammo },
+        .{ .slot = "body.ammo_srm.4", .part = "ammo_srm", .class = .ammo },
     } },
-    .{ .key = "ONT", .name = "Ontos", .tonnage = 95, .bv = 880, .cost = 2_400_000, .rarity = .rare, .kind = .vehicle, .loadout = .{
+    .{ .key = "ONT", .name = "Ontos", .tonnage = 95, .bv = 880, .cost = 2_400_000, .rarity = .rare, .kind = .vehicle, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/vehicles/3039u/Ontos Heavy Tank.blk", .loadout = .{
         .{ .slot = "turret.llas.1", .part = "llas", .class = .weapon },
         .{ .slot = "turret.llas.2", .part = "llas", .class = .weapon },
         .{ .slot = "turret.mlas.1", .part = "mlas", .class = .weapon },
@@ -698,42 +707,42 @@
         .{ .slot = "turret.mlas.5", .part = "mlas", .class = .weapon },
         .{ .slot = "turret.mlas.6", .part = "mlas", .class = .weapon },
     } },
-    .{ .key = "PGS", .name = "Pegasus", .tonnage = 35, .bv = 500, .cost = 900_000, .rarity = .common, .kind = .vehicle, .loadout = .{
+    .{ .key = "PGS", .name = "Pegasus", .tonnage = 35, .bv = 500, .cost = 900_000, .rarity = .common, .kind = .vehicle, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/vehicles/3039u/Pegasus Scout Hover Tank.blk", .loadout = .{
         .{ .slot = "turret.srm6.1", .part = "srm6", .class = .weapon },
         .{ .slot = "turret.srm6.2", .part = "srm6", .class = .weapon },
         .{ .slot = "front.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "body.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
     } },
-    .{ .key = "SCM", .name = "Saracen", .tonnage = 35, .bv = 550, .cost = 950_000, .rarity = .common, .kind = .vehicle, .loadout = .{
+    .{ .key = "SCM", .name = "Saracen", .tonnage = 35, .bv = 550, .cost = 950_000, .rarity = .common, .kind = .vehicle, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/vehicles/3039u/Saracen Medium Hover Tank.blk", .loadout = .{
         .{ .slot = "turret.lrm10.1", .part = "lrm10", .class = .weapon },
         .{ .slot = "front.srm2.1", .part = "srm2", .class = .weapon },
         .{ .slot = "front.srm2.2", .part = "srm2", .class = .weapon },
         .{ .slot = "body.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
         .{ .slot = "body.ammo_srm.1", .part = "ammo_srm", .class = .ammo },
     } },
-    .{ .key = "GAL", .name = "Galleon", .tonnage = 30, .bv = 300, .cost = 350_000, .rarity = .common, .kind = .vehicle, .loadout = .{
+    .{ .key = "GAL", .name = "Galleon", .tonnage = 30, .bv = 300, .cost = 350_000, .rarity = .common, .kind = .vehicle, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/vehicles/3039u/Galleon Light Tank.blk", .loadout = .{
         .{ .slot = "turret.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "front.slas.1", .part = "slas", .class = .weapon },
         .{ .slot = "front.slas.2", .part = "slas", .class = .weapon },
     } },
 
     // ------- more aerospace fighters (TRO:3025) -------
-    .{ .key = "TR-7", .name = "Thrush", .tonnage = 25, .bv = 420, .cost = 980_000, .rarity = .common, .kind = .aerospace, .loadout = .{
+    .{ .key = "TR-7", .name = "Thrush", .tonnage = 25, .bv = 420, .cost = 980_000, .rarity = .common, .intro_year = 2798, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Thrush TR-7.blk", .market_eligible = true, .loadout = .{
         .{ .slot = "nose.mlas.1", .part = "mlas", .class = .weapon },
-        .{ .slot = "lw.slas.1", .part = "slas", .class = .weapon },
-        .{ .slot = "rw.slas.1", .part = "slas", .class = .weapon },
+        .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
+        .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },
     } },
-    .{ .key = "SYD-Z1", .name = "Seydlitz", .tonnage = 20, .bv = 380, .cost = 900_000, .rarity = .common, .kind = .aerospace, .loadout = .{
+    .{ .key = "SYD-Z1", .name = "Seydlitz", .tonnage = 20, .bv = 380, .cost = 900_000, .rarity = .common, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Seydlitz SYD-Z1.blk", .loadout = .{
         .{ .slot = "nose.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
     } },
-    .{ .key = "LTN-G15", .name = "Lightning", .tonnage = 50, .bv = 900, .cost = 2_200_000, .rarity = .uncommon, .kind = .aerospace, .loadout = .{
+    .{ .key = "LTN-G15", .name = "Lightning", .tonnage = 50, .bv = 900, .cost = 2_200_000, .rarity = .uncommon, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Lightning LTN-G15.blk", .loadout = .{
         .{ .slot = "nose.ac10.1", .part = "ac10", .class = .weapon },
         .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "aft.ammo_ac10.1", .part = "ammo_ac10", .class = .ammo },
     } },
-    .{ .key = "EGL-R6", .name = "Eagle", .tonnage = 75, .bv = 1300, .cost = 3_900_000, .rarity = .rare, .kind = .aerospace, .loadout = .{
+    .{ .key = "EGL-R6", .name = "Eagle", .tonnage = 75, .bv = 1300, .cost = 3_900_000, .rarity = .rare, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Eagle EGL-R6.blk", .loadout = .{
         .{ .slot = "nose.llas.1", .part = "llas", .class = .weapon },
         .{ .slot = "lw.lrm10.1", .part = "lrm10", .class = .weapon },
         .{ .slot = "rw.lrm10.1", .part = "lrm10", .class = .weapon },
@@ -741,14 +750,14 @@
         .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "aft.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
     } },
-    .{ .key = "RVR", .name = "Riever", .tonnage = 70, .bv = 1250, .cost = 3_700_000, .rarity = .rare, .kind = .aerospace, .loadout = .{
+    .{ .key = "RVR", .name = "Riever", .tonnage = 70, .bv = 1250, .cost = 3_700_000, .rarity = .rare, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Riever F-700.blk", .loadout = .{
         .{ .slot = "nose.ac10.1", .part = "ac10", .class = .weapon },
         .{ .slot = "lw.llas.1", .part = "llas", .class = .weapon },
         .{ .slot = "rw.llas.1", .part = "llas", .class = .weapon },
         .{ .slot = "aft.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "aft.ammo_ac10.1", .part = "ammo_ac10", .class = .ammo },
     } },
-    .{ .key = "CHP-W5", .name = "Chippewa", .tonnage = 90, .bv = 1550, .cost = 5_100_000, .rarity = .very_rare, .kind = .aerospace, .loadout = .{
+    .{ .key = "CHP-W5", .name = "Chippewa", .tonnage = 90, .bv = 1550, .cost = 5_100_000, .rarity = .very_rare, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Chippewa CHP-W5.blk", .loadout = .{
         .{ .slot = "nose.llas.1", .part = "llas", .class = .weapon },
         .{ .slot = "nose.llas.2", .part = "llas", .class = .weapon },
         .{ .slot = "lw.lrm15.1", .part = "lrm15", .class = .weapon },

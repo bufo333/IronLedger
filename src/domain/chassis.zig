@@ -9,6 +9,10 @@ const unit = @import("unit.zig");
 
 pub const WeightClass = enum { light, medium, heavy, assault };
 
+/// Pinned MegaMek mm-data revision for P2v-a conventional chassis facts.
+/// Source paths are repository-relative to this revision (P2 design §2).
+pub const conventional_source_revision = "2a62993f8da306f489116233d489d1f6222945e3";
+
 /// Arm actuator complement (TechManual standard-IS construction rules;
 /// the reconciliation identity in meklab.fixedOccupants governs).
 /// .full         = shoulder + upper arm + lower arm + hand  (4 fixed crit slots)
@@ -34,6 +38,12 @@ pub const Chassis = struct {
     /// the market, RATs and salvage only field what exists in the campaign year.
     intro_year: u16 = 2400,
     kind: unit.UnitKind = .mek,
+    /// Pinned MegaMek mm-data provenance for conventional chassis. Empty for
+    /// non-conventional entries, which are not admitted by the P2 market rule.
+    source_revision: []const u8 = "",
+    source_path: []const u8 = "",
+    /// Explicit P2 market admission, independent of rarity and source era.
+    market_eligible: bool = false,
     // Construction facts (MekLab; meks only, defaults for others).
     walk_mp: u8 = 0,
     jump_mp: u8 = 0,
@@ -114,6 +124,39 @@ pub fn ofKind(kind: unit.UnitKind, year: u16, buf: []*const Chassis) []*const Ch
     return buf[0..n];
 }
 
+/// P2 conventional market admission: a sourced, explicitly approved vehicle
+/// or aerospace chassis that exists in the requested campaign year.
+pub fn conventionalMarketEligible(c: *const Chassis, year: u16) bool {
+    return (c.kind == .vehicle or c.kind == .aerospace) and c.market_eligible and availableIn(c, year);
+}
+
+/// The only catalogue selector for P2 conventional market offers.
+pub fn conventionalMarketPool(kind: unit.UnitKind, year: u16, buf: []*const Chassis) []*const Chassis {
+    var n: usize = 0;
+    for (catalog) |*c| {
+        if (c.kind == kind and conventionalMarketEligible(c, year) and n < buf.len) {
+            buf[n] = c;
+            n += 1;
+        }
+    }
+    return buf[0..n];
+}
+
+fn approvedConventionalMarketKey(key: []const u8) bool {
+    const keys = [_][]const u8{ "SCP-1N", "MTR", "SRM-CAR", "TR-7", "SPR-H5", "SL-15" };
+    for (keys) |approved| if (std.mem.eql(u8, key, approved)) return true;
+    return false;
+}
+
+fn expectLoadout(c: *const Chassis, parts: []const []const u8, prefixes: []const []const u8) !void {
+    try std.testing.expectEqual(parts.len, c.loadout.len);
+    try std.testing.expectEqual(parts.len, prefixes.len);
+    for (c.loadout, parts, prefixes) |slot, part_key, prefix| {
+        try std.testing.expectEqualStrings(part_key, slot.part);
+        try std.testing.expect(std.mem.startsWith(u8, slot.slot, prefix));
+    }
+}
+
 /// Meks suitable for a scout lance: at or under `max_tonnage`.
 pub fn scoutPool(max_tonnage: u8, year: u16, buf: []*const Chassis) []*const Chassis {
     var n: usize = 0;
@@ -137,6 +180,85 @@ test "data: catalog loads from zon with sane values and unique keys" {
             try std.testing.expect(!std.mem.eql(u8, c.key, other.key));
         }
     }
+}
+
+test "data: conventional chassis have pinned provenance and explicit market admission" {
+    const audited = [_]struct { []const u8, []const u8 }{
+        .{ "SCP-1N", "data/mekfiles/vehicles/3039u/Scorpion Light Tank.blk" },
+        .{ "VDT", "data/mekfiles/vehicles/3039u/Vedette Medium Tank.blk" },
+        .{ "HTZ", "data/mekfiles/vehicles/3039u/Hetzer Wheeled Assault Gun.blk" },
+        .{ "MTR", "data/mekfiles/vehicles/3039u/Manticore Heavy Tank.blk" },
+        .{ "DMO", "data/mekfiles/vehicles/3039u/Demolisher Heavy Tank (Mk. I).blk" },
+        .{ "SRK", "data/mekfiles/vehicles/3039u/Schrek PPC Carrier.blk" },
+        .{ "LRM-CAR", "data/mekfiles/vehicles/3039u/LRM Carrier.blk" },
+        .{ "SRM-CAR", "data/mekfiles/vehicles/3039u/SRM Carrier.blk" },
+        .{ "ONT", "data/mekfiles/vehicles/3039u/Ontos Heavy Tank.blk" },
+        .{ "PGS", "data/mekfiles/vehicles/3039u/Pegasus Scout Hover Tank.blk" },
+        .{ "SCM", "data/mekfiles/vehicles/3039u/Saracen Medium Hover Tank.blk" },
+        .{ "GAL", "data/mekfiles/vehicles/3039u/Galleon Light Tank.blk" },
+        .{ "SPR-H5", "data/mekfiles/fighters/TRO3039u/Sparrowhawk SPR-H5.blk" },
+        .{ "CSR-V12", "data/mekfiles/fighters/TRO3039u/Corsair CSR-V12.blk" },
+        .{ "LCF-R15", "data/mekfiles/fighters/TRO3039u/Lucifer LCF-R15.blk" },
+        .{ "SL-15", "data/mekfiles/fighters/TRO3039u/Slayer SL-15.blk" },
+        .{ "STU-K5", "data/mekfiles/fighters/TRO3039u/Stuka STU-K5.blk" },
+        .{ "TR-7", "data/mekfiles/fighters/TRO3039u/Thrush TR-7.blk" },
+        .{ "SYD-Z1", "data/mekfiles/fighters/TRO3039u/Seydlitz SYD-Z1.blk" },
+        .{ "LTN-G15", "data/mekfiles/fighters/TRO3039u/Lightning LTN-G15.blk" },
+        .{ "EGL-R6", "data/mekfiles/fighters/TRO3039u/Eagle EGL-R6.blk" },
+        .{ "RVR", "data/mekfiles/fighters/TRO3039u/Riever F-700.blk" },
+        .{ "CHP-W5", "data/mekfiles/fighters/TRO3039u/Chippewa CHP-W5.blk" },
+    };
+    var seen: usize = 0;
+    for (catalog) |c| {
+        if (c.kind != .vehicle and c.kind != .aerospace) continue;
+        seen += 1;
+        try std.testing.expectEqualStrings(conventional_source_revision, c.source_revision);
+        try std.testing.expect(c.source_path.len > 0);
+        const prefix = if (c.kind == .vehicle) "data/mekfiles/vehicles/" else "data/mekfiles/fighters/";
+        try std.testing.expect(std.mem.startsWith(u8, c.source_path, prefix));
+        try std.testing.expectEqual(approvedConventionalMarketKey(c.key), c.market_eligible);
+        if (c.market_eligible) try std.testing.expect(c.intro_year <= 3025);
+    }
+    try std.testing.expectEqual(audited.len, seen);
+    for (audited) |entry| {
+        const c = find(entry[0]).?;
+        try std.testing.expectEqualStrings(entry[1], c.source_path);
+    }
+}
+
+test "data: approved conventional replacements and market pools agree" {
+    const scorpion = find("SCP-1N").?;
+    try std.testing.expectEqual(@as(u16, 2807), scorpion.intro_year);
+    try expectLoadout(scorpion, &.{ "ac5", "mg", "ammo_ac5", "ammo_mg" }, &.{ "turret.", "turret.", "body.", "body." });
+    const manticore = find("MTR").?;
+    try std.testing.expectEqual(@as(u16, 2575), manticore.intro_year);
+    try expectLoadout(manticore, &.{ "ppc", "lrm10", "srm6", "mlas", "ammo_lrm", "ammo_srm" }, &.{ "turret.", "turret.", "turret.", "front.", "body.", "body." });
+    const carrier = find("SRM-CAR").?;
+    try std.testing.expectEqual(@as(u16, 2470), carrier.intro_year);
+    try std.testing.expectEqual(@as(usize, 14), carrier.loadout.len);
+    for (carrier.loadout[0..10]) |slot| {
+        try std.testing.expectEqualStrings("srm6", slot.part);
+        try std.testing.expect(std.mem.startsWith(u8, slot.slot, "front."));
+    }
+    const thrush = find("TR-7").?;
+    try std.testing.expectEqual(@as(u16, 2798), thrush.intro_year);
+    try expectLoadout(thrush, &.{ "mlas", "mlas", "mlas" }, &.{ "nose.", "lw.", "rw." });
+    const sparrowhawk = find("SPR-H5").?;
+    try std.testing.expectEqual(@as(u16, 2520), sparrowhawk.intro_year);
+    try expectLoadout(sparrowhawk, &.{ "mlas", "mlas", "slas", "slas" }, &.{ "nose.", "nose.", "lw.", "rw." });
+    const slayer = find("SL-15").?;
+    try std.testing.expectEqual(@as(u16, 2770), slayer.intro_year);
+    try expectLoadout(slayer, &.{ "ac10", "mlas", "mlas", "mlas", "mlas", "mlas", "mlas", "ammo_ac10", "ammo_ac10" }, &.{ "nose.", "nose.", "lw.", "lw.", "rw.", "rw.", "aft.", "fuselage.", "fuselage." });
+
+    var buf: [16]*const Chassis = undefined;
+    const vehicles = conventionalMarketPool(.vehicle, 3025, &buf);
+    try std.testing.expectEqual(@as(usize, 3), vehicles.len);
+    for (vehicles) |c| try std.testing.expect(conventionalMarketEligible(c, 3025));
+    const fighters = conventionalMarketPool(.aerospace, 3025, &buf);
+    try std.testing.expectEqual(@as(usize, 3), fighters.len);
+    for (fighters) |c| try std.testing.expect(conventionalMarketEligible(c, 3025));
+    try std.testing.expect(!conventionalMarketEligible(find("VDT").?, 3025));
+    try std.testing.expect(!conventionalMarketEligible(find("CSR-V12").?, 3025));
 }
 
 test "arm actuator fields: identity crit_slots[arm] + fixed_count == 12" {

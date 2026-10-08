@@ -412,7 +412,7 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         // from anywhere; fighters and ships have their own slot below.
         const design = if (r.uintLessThan(u8, 4) == 0) blk: { // TUNE: vehicle vs mek lot ratio (1-in-4)
             var vbuf: [32]*const chassis_mod.Chassis = undefined;
-            const vehicles = chassis_mod.ofKind(.vehicle, gs.clock.date.year, &vbuf);
+            const vehicles = chassis_mod.conventionalMarketPool(.vehicle, gs.clock.date.year, &vbuf);
             if (vehicles.len == 0) continue;
             break :blk vehicles[r.uintLessThan(usize, vehicles.len)]; // uniform pick from vehicle pool
         } else @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng, .market), gs.clock.date.year);
@@ -460,7 +460,10 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
             const comms = hq.effectiveFacilityLevel(.comms);
             const kind: unit_mod.UnitKind = if (port >= 4 and comms >= 3 and r.uintLessThan(u8, 3) == 0) .jumpship else if (port >= 3 and r.boolean()) .dropship else .aerospace; // TUNE: transport kind odds by port/comms tier
             var buf: [16]*const chassis_mod.Chassis = undefined;
-            const pool = chassis_mod.ofKind(kind, gs.clock.date.year, &buf);
+            const pool = if (kind == .aerospace)
+                chassis_mod.conventionalMarketPool(.aerospace, gs.clock.date.year, &buf)
+            else
+                chassis_mod.ofKind(kind, gs.clock.date.year, &buf);
             if (pool.len > 0) {
                 const design = pool[r.uintLessThan(usize, pool.len)]; // uniform pick from transport pool
                 if (market.listingAppears(&gs.rng, design.rarity, world.industry, port, 0, .market)) {
@@ -906,8 +909,10 @@ test "the transport slot opens with the spaceport; ordinary lots are meks only" 
         gs.clock.day_index += 31;
         try refreshListings(&gs);
         for (gs.market_listings.items) |l| if (l.kind == .unit) {
-            const k = chassis_mod.find(l.item_key).?.kind;
+            const d = chassis_mod.find(l.item_key).?;
+            const k = d.kind;
             try std.testing.expect(k == .mek or k == .vehicle or l.staple);
+            if (k == .vehicle) try std.testing.expect(chassis_mod.conventionalMarketEligible(d, gs.clock.date.year));
         };
     }
     // Spaceport 4 + comms 3, staffed: over a year something non-mek shows up.
@@ -925,6 +930,7 @@ test "the transport slot opens with the spaceport; ordinary lots are meks only" 
             const d = chassis_mod.find(l.item_key).?;
             if (d.kind != .mek) {
                 seen = true;
+                if (d.kind == .vehicle or d.kind == .aerospace) try std.testing.expect(chassis_mod.conventionalMarketEligible(d, gs.clock.date.year));
                 if (d.kind.isTransport()) try std.testing.expect(l.price < d.cost); // scaled by transport_price_bp
             }
         };
