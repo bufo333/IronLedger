@@ -3161,6 +3161,44 @@ test "an airborne air-lance fighter adds aero power and reserves only its ammuni
     try std.testing.expect(!grounded.mods.has_air_cover);
 }
 
+test "battle fields aerospace units only from airborne air lances" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7207 });
+    defer gs.deinit();
+    const company = try gs.createForce("Alpha", .company, .none);
+    const line = try gs.createForce("Line", .lance, company);
+    const wing = try gs.createForce("Air Wing", .air_company, company);
+    const air_lance = try gs.createForce("Air", .air_lance, wing);
+    const fighter = try gs.addUnit("SL-15");
+    const pilot = try gs.hirePerson("Air", "Pilot", .aero_pilot);
+    try toe.assignUnit(&gs, fighter, line, pilot);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .status = .active,
+        .assigned_company = company,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+
+    {
+        var regular_lance = try playerSide(&gs, c);
+        defer regular_lance.engaged.deinit(gs.scratch());
+        defer regular_lance.ammo_reserved.deinit(gs.scratch());
+        defer regular_lance.family_mounts.deinit(gs.scratch());
+        try std.testing.expectEqual(@as(usize, 0), regular_lance.engaged.items.len);
+    }
+
+    try toe.moveUnitToForce(&gs, fighter, air_lance);
+    var airborne = try playerSide(&gs, c);
+    defer airborne.engaged.deinit(gs.scratch());
+    defer airborne.ammo_reserved.deinit(gs.scratch());
+    defer airborne.family_mounts.deinit(gs.scratch());
+    try std.testing.expectEqualSlices(types.UnitId, &.{fighter}, airborne.engaged.items);
+}
+
 test "fighter selection preparation fails before resolveEngagement advances battle state" {
     const digest = @import("digest.zig");
     var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
