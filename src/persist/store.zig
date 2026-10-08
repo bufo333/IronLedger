@@ -4426,6 +4426,71 @@ test "a battle report round-trips as fields, not as a row count" {
     }
 }
 
+test "a fighter engagement preserves shared battle rows and rendered AAR through save load" {
+    const battle = @import("../sim/battle.zig");
+    const after_action = @import("../sim/after_action.zig");
+    const crew = @import("../sim/crew.zig");
+    const toe = @import("../sim/toe.zig");
+    const seed = rng_mod.seedForFirstRoll(.battle, 6) orelse unreachable;
+    var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const company = try gs.createForce("Alpha", .company, .none);
+    const wing = try gs.createForce("Air Wing", .air_company, company);
+    const air_lance = try gs.createForce("Air", .air_lance, wing);
+    const fighter = try gs.addUnit("SL-15");
+    const pilot = try gs.hirePerson("Air", "Pilot", .aero_pilot);
+    const tech = try gs.hirePerson("Air", "Tech", .tech_aero);
+    gs.person(pilot).?.assigned_force = air_lance;
+    gs.person(tech).?.assigned_force = air_lance;
+    try toe.assignUnit(&gs, fighter, air_lance, pilot);
+    try crew.assignSlot(&gs, fighter, .tech, tech);
+    try gs.recordHullAcquisition(gs.unit(fighter).?, .purchase, "unknown");
+    const hull = gs.unit(fighter).?.hull_instance_id;
+    const site: types.Site = .{ .company = company };
+    try gs.addStock(site, "ammo_ac10", 1);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .status = .active,
+        .assigned_company = company,
+    });
+    gs.next_contract_id = 2;
+    try battle.resolveEngagement(&gs, gs.contracts.getPtr(@enumFromInt(1)).?);
+    const report = gs.battle_reports.kept.items[0];
+    try std.testing.expect(report.player_power > 0);
+    var burned_ac10 = false;
+    for (report.ammo) |line| if (std.mem.eql(u8, line.key, "ammo_ac10")) {
+        try std.testing.expectEqual(@as(u32, 1), line.burned);
+        burned_ac10 = true;
+    };
+    try std.testing.expect(burned_ac10);
+    try std.testing.expectEqual(hull, gs.hull_combat_records.items[0].hull_instance_id);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    const saved = digest.stateHash(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(saved, digest.stateHash(&loaded));
+    try std.testing.expectEqual(gs.unit(fighter).?.armor_pct, loaded.unit(fighter).?.armor_pct);
+    try std.testing.expectEqual(gs.unit(fighter).?.slots.items.len, loaded.unit(fighter).?.slots.items.len);
+    try std.testing.expectEqual(hull, loaded.hull_combat_records.items[0].hull_instance_id);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const before_lines = try after_action.render(arena.allocator(), &report);
+    const after_lines = try after_action.render(arena.allocator(), &loaded.battle_reports.kept.items[0]);
+    try std.testing.expectEqual(before_lines.len, after_lines.len);
+    for (before_lines, after_lines) |before_line, after_line| try std.testing.expectEqualStrings(before_line, after_line);
+}
+
 test "battle reports beyond forty survive save and load" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 9_021 });
     defer gs.deinit();

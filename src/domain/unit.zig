@@ -267,12 +267,12 @@ pub const Unit = struct {
         return !self.isParked() and !self.inShop();
     }
 
-    /// Draws on the company's field-armor stock (ARCH §9.6): meks and
-    /// vehicles that take field work — a ton patches one hull's plating.
+    /// Draws on the company's field-armor stock (ARCH §9.7): combat hulls
+    /// that take field work — a ton patches one hull's plating.
     /// Hulls in the depot draw nothing; hulls in transit ride with their
     /// tech and are patched on the road.
     pub fn takesFieldArmor(self: *const Unit) bool {
-        return self.takesFieldWork() and (self.kind == .mek or self.kind == .vehicle);
+        return self.takesFieldWork() and (self.kind == .mek or self.kind == .vehicle or self.kind == .aerospace);
     }
 
     /// This hull's monthly bill (ARCH §9.8) — owned means billed.
@@ -417,7 +417,7 @@ test "armor and weapons are field work; structure is depot work" {
     try std.testing.expectEqual(RepairTier.depot, repairTier(.structure, .damaged).?);
 }
 
-test "takesFieldArmor: mek/vehicle taking field work yes; others no" {
+test "takesFieldArmor: combat hulls taking field work yes; others no" {
     const cases = .{
         // { kind, status, expected }
         .{ UnitKind.mek, UnitStatus.ready, true },
@@ -426,7 +426,9 @@ test "takesFieldArmor: mek/vehicle taking field work yes; others no" {
         .{ UnitKind.vehicle, UnitStatus.ready, true },
         .{ UnitKind.vehicle, UnitStatus.in_transit, true }, // in-transit vehicle counted
         .{ UnitKind.vehicle, UnitStatus.mothballed, false }, // parked excluded
-        .{ UnitKind.aerospace, UnitStatus.ready, false },
+        .{ UnitKind.aerospace, UnitStatus.ready, true },
+        .{ UnitKind.aerospace, UnitStatus.repairing, false },
+        .{ UnitKind.aerospace, UnitStatus.in_transit, true },
         .{ UnitKind.infantry, UnitStatus.ready, false },
         .{ UnitKind.dropship, UnitStatus.ready, false },
     };

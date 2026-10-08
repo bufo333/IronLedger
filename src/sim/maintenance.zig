@@ -810,6 +810,35 @@ test "vehicle maintenance and field repair use mechanic hours and shared repair 
     try std.testing.expect(budget.hours > 0);
 }
 
+test "aero tech repairs fighter field damage while structure remains depot work" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1217 });
+    defer gs.deinit();
+    const company = try gs.createForce("Air", .company, .none);
+    const fighter = try gs.addUnit("SPR-H5");
+    try toe.assignUnit(&gs, fighter, company, .none);
+    const aero_tech = try gs.hirePerson("Air", "Tech", .tech_aero);
+    gs.person(aero_tech).?.assigned_force = company;
+    try crew.assignSlot(&gs, fighter, .tech, aero_tech);
+    const u = gs.unit(fighter).?;
+    u.armor_pct = 70;
+    u.slots.items[1].condition = .damaged;
+    u.slots.items[0].condition = .damaged;
+    const site = sites.siteForForce(&gs, company);
+    try gs.addStock(site, "armor", 1);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const needs = try repairNeeds(&gs, arena.allocator(), company);
+    try std.testing.expectEqual(@as(usize, 1), needs.len);
+    try std.testing.expectEqual(@as(usize, 1), needs[0].slots.len);
+    try std.testing.expectEqual(unit_mod.techRoleFor(.aerospace).?, gs.person(aero_tech).?.role);
+    try std.testing.expect(u.needsDepot());
+    const plan = try repairPush(&gs, arena.allocator(), company, .worst_first);
+    try std.testing.expect(plan.hours > 0);
+    try std.testing.expect(gs.unit(fighter).?.armor_pct > 70);
+    try std.testing.expectEqual(unit_mod.PartCondition.ok, gs.unit(fighter).?.slots.items[1].condition);
+    try std.testing.expectEqual(unit_mod.PartCondition.damaged, gs.unit(fighter).?.slots.items[0].condition);
+}
+
 test "tech hours are a budget: too many hulls leave some uncovered" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 100 });
     defer gs.deinit();

@@ -27,6 +27,10 @@ pub const LoadoutSlot = struct {
     class: unit.SlotClass,
 };
 
+/// Static aerospace armor points in MegaMek BLK order: nose, right wing,
+/// left wing, aft. This catalog fact is separate from Unit.armor_pct.
+pub const AerospaceArmor = [4]u16;
+
 pub const Chassis = struct {
     key: []const u8, // variant designation, e.g. "SHD-2H"
     name: []const u8, // "Shadow Hawk"
@@ -49,6 +53,7 @@ pub const Chassis = struct {
     jump_mp: u8 = 0,
     heat_sinks: u8 = 10,
     armor_half_tons: u16 = 0,
+    aerospace_armor: AerospaceArmor = .{ 0, 0, 0, 0 },
     /// Free critical slots per location after fixed occupants, indexed in
     /// `meklab.Location` order: hd, ct, lt, rt, la, ra, ll, rl. Default is
     /// the standard IS 'Mech (TechManual): head 1, CT 2, side torso 12,
@@ -251,16 +256,20 @@ test "data: approved conventional replacements and market pools agree" {
     try std.testing.expectEqual(@as(u8, 25), thrush.tonnage);
     try std.testing.expectEqual(@as(u16, 2798), thrush.intro_year);
     try expectLoadout(thrush, &.{ "mlas", "mlas", "mlas" }, &.{ "nose.", "lw.", "rw." });
+    try std.testing.expectEqualSlices(u16, &.{ 7, 6, 6, 5 }, &thrush.aerospace_armor);
     const sparrowhawk = find("SPR-H5").?;
     try std.testing.expectEqual(unit.UnitKind.aerospace, sparrowhawk.kind);
     try std.testing.expectEqual(@as(u8, 30), sparrowhawk.tonnage);
     try std.testing.expectEqual(@as(u16, 2520), sparrowhawk.intro_year);
     try expectLoadout(sparrowhawk, &.{ "mlas", "mlas", "slas", "slas" }, &.{ "nose.", "nose.", "lw.", "rw." });
+    try std.testing.expectEqualSlices(u16, &.{ 38, 24, 24, 34 }, &sparrowhawk.aerospace_armor);
     const slayer = find("SL-15").?;
     try std.testing.expectEqual(unit.UnitKind.aerospace, slayer.kind);
     try std.testing.expectEqual(@as(u8, 80), slayer.tonnage);
     try std.testing.expectEqual(@as(u16, 2770), slayer.intro_year);
     try expectLoadout(slayer, &.{ "ac10", "mlas", "mlas", "mlas", "mlas", "mlas", "mlas", "ammo_ac10", "ammo_ac10" }, &.{ "nose.", "nose.", "lw.", "lw.", "rw.", "rw.", "aft.", "fuselage.", "fuselage." });
+    try std.testing.expectEqualSlices(u16, &.{ 84, 50, 50, 48 }, &slayer.aerospace_armor);
+    try std.testing.expectEqualSlices(u16, &.{ 0, 0, 0, 0 }, &scorpion.aerospace_armor);
 
     var buf: [16]*const Chassis = undefined;
     const vehicles = conventionalMarketPool(.vehicle, 3025, &buf);

@@ -96,7 +96,7 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
     }
 
     // Armor: field repairs patch a ton per hull per week of damage.
-    // Only hulls that take field armor (meks and vehicles not in the depot).
+    // Only hulls that take field armor (combat hulls not in the depot).
     var hulls: u32 = 0;
     var family_mounts = try munitionMounts(alloc, gs, company, false);
     {
@@ -324,7 +324,7 @@ pub fn rushQuote(alloc: std.mem.Allocator, gs: *GameState, c: *const @import("..
         const have = gs.stockCount(site, key);
         if (have < per_battle) try lines.append(alloc, .{ .key = key, .qty = per_battle - have });
     }
-    // Count dented hulls that draw field armor (meks and vehicles, not in depot).
+    // Count dented hulls that draw field armor (combat hulls, not in depot).
     var dented: u32 = 0;
     var uit = gs.units.iterator();
     while (uit.next()) |e| {
@@ -359,7 +359,7 @@ pub fn inboundTons(gs: *GameState, company: types.ForceId) u32 {
 }
 
 /// Working weapon mounts per munition family across a company:
-/// `fighting` counts only the line lances' hulls with a tech to reload
+/// `fighting` counts only combat-lance hulls with a tech to reload
 /// them (what a battle can feed); otherwise every hull that is not parked
 /// (what the trucks must carry). The one census the fight, the plan, the
 /// checklist and the stock list all read.
@@ -375,6 +375,26 @@ pub fn munitionMounts(alloc: std.mem.Allocator, gs: *GameState, company: types.F
             const t = gs.person(u.tech) orelse continue; // nobody to reload it
             if (!t.isAvailable(gs.clock.day_index)) continue;
         }
+        for (u.slots.items) |s| {
+            if (s.class != .weapon or s.condition != .ok) continue;
+            const fam = part_mod.munitionFor(s.part_key) orelse continue;
+            const g = try out.getOrPut(alloc, fam);
+            if (!g.found_existing) g.value_ptr.* = 0;
+            g.value_ptr.* += 1;
+        }
+    }
+    return out;
+}
+
+/// Working weapon mounts per munition family for units selected for one
+/// engagement. Battle uses this narrower census; supply planning continues to
+/// use the company-wide census above.
+pub fn munitionMountsForUnits(alloc: std.mem.Allocator, gs: *GameState, units: []const types.UnitId) !std.StringArrayHashMapUnmanaged(u32) {
+    var out: std.StringArrayHashMapUnmanaged(u32) = .empty;
+    for (units) |uid| {
+        const u = gs.unit(uid) orelse continue;
+        const tech = gs.person(u.tech) orelse continue;
+        if (!tech.isAvailable(gs.clock.day_index)) continue;
         for (u.slots.items) |s| {
             if (s.class != .weapon or s.condition != .ok) continue;
             const fam = part_mod.munitionFor(s.part_key) orelse continue;
@@ -747,7 +767,7 @@ test "the resupply plan keeps a deployed company fed and armed on a long line" {
 
 test "takesFieldArmor agreement: plan and rushQuote follow the same predicate" {
     // Fixture: in-shop mek excluded; in-transit vehicle counted;
-    // dented aerospace excluded from dented count; dented ready mek counted.
+    // dented aerospace and ready mek counted.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7350 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
@@ -781,7 +801,7 @@ test "takesFieldArmor agreement: plan and rushQuote follow the same predicate" {
     veh_transit.status = .in_transit;
     veh_transit.armor_pct = 100; // full armor: not dented
 
-    // Dented aerospace: takesFieldArmor = false (not .mek or .vehicle).
+    // Dented aerospace: takesFieldArmor = true.
     const aero_id = try gs.addUnit("SPR-H5");
     const aero = gs.units.getPtr(aero_id).?;
     aero.force = co;
@@ -809,9 +829,9 @@ test "takesFieldArmor agreement: plan and rushQuote follow the same predicate" {
             }
         }
     }
-    // in-transit vehicle + dented ready mek counted; in-shop mek + aerospace excluded.
+    // In-transit vehicle, dented aerospace, and dented ready mek count; in-shop mek does not.
     try std.testing.expect(expected_hulls >= 2);
-    try std.testing.expect(expected_dented >= 1); // the dented ready mek
+    try std.testing.expect(expected_dented >= 2); // aerospace and ready mek
 
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

@@ -219,6 +219,31 @@ test "render includes a vehicle hull line from the shared report record" {
     try std.testing.expect(found);
 }
 
+test "render includes a fighter hull line from the shared report record" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const hulls = [_]HullHit{.{ .unit = @enumFromInt(10), .chassis_key = "SPR-H5", .chassis_name = "Sparrowhawk", .armor_before = 100, .armor_after = 65, .slot = "nose.mlas.1", .slot_part = "mlas", .slot_result = .damaged, .crew_name = "Lt Vance", .crew = .{ .fate = .kia } }};
+    const report: BattleReport = .{
+        .id = @enumFromInt(1),
+        .day = 1,
+        .contract = @enumFromInt(1),
+        .company = @enumFromInt(1),
+        .kind = "recon raid",
+        .enemy_key = "DC",
+        .scenario = "probe",
+        .terrain = "open",
+        .weather = "clear",
+        .outcome = .victory,
+        .hulls = &hulls,
+    };
+    const lines = try render(arena.allocator(), &report);
+    var found = false;
+    for (lines) |line| {
+        if (std.mem.indexOf(u8, line, "#10 SPR-H5 Sparrowhawk: armor 100%→65% · nose.mlas.1 (mlas) damaged · Lt Vance KIA") != null) found = true;
+    }
+    try std.testing.expect(found);
+}
+
 test "a conceded objective renders one line" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

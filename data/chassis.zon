@@ -172,7 +172,7 @@
     // Slot keys prefix the airframe location (nose/lw/rw/aft); the MekLab
     // ignores non-mek kinds. Fighters fly from an HQ's air company slot
     // (spaceport ≥ 3) and give the company air cover in battle.
-    .{ .key = "SPR-H5", .name = "Sparrowhawk", .tonnage = 30, .bv = 605, .cost = 1_402_000, .rarity = .uncommon, .intro_year = 2520, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Sparrowhawk SPR-H5.blk", .market_eligible = true, .loadout = .{
+    .{ .key = "SPR-H5", .name = "Sparrowhawk", .tonnage = 30, .bv = 605, .cost = 1_402_000, .rarity = .uncommon, .intro_year = 2520, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Sparrowhawk SPR-H5.blk", .market_eligible = true, .aerospace_armor = .{ 38, 24, 24, 34 }, .loadout = .{
         .{ .slot = "nose.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "nose.mlas.2", .part = "mlas", .class = .weapon },
         .{ .slot = "lw.slas.1", .part = "slas", .class = .weapon },
@@ -192,7 +192,7 @@
         .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "aft.ammo_lrm.1", .part = "ammo_lrm", .class = .ammo },
     } },
-    .{ .key = "SL-15", .name = "Slayer", .tonnage = 80, .bv = 1410, .cost = 4_478_000, .rarity = .rare, .intro_year = 2770, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Slayer SL-15.blk", .market_eligible = true, .loadout = .{
+    .{ .key = "SL-15", .name = "Slayer", .tonnage = 80, .bv = 1410, .cost = 4_478_000, .rarity = .rare, .intro_year = 2770, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Slayer SL-15.blk", .market_eligible = true, .aerospace_armor = .{ 84, 50, 50, 48 }, .loadout = .{
         .{ .slot = "nose.ac10.1", .part = "ac10", .class = .weapon },
         .{ .slot = "nose.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
@@ -727,7 +727,7 @@
     } },
 
     // ------- more aerospace fighters (TRO:3025) -------
-    .{ .key = "TR-7", .name = "Thrush", .tonnage = 25, .bv = 420, .cost = 980_000, .rarity = .common, .intro_year = 2798, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Thrush TR-7.blk", .market_eligible = true, .loadout = .{
+    .{ .key = "TR-7", .name = "Thrush", .tonnage = 25, .bv = 420, .cost = 980_000, .rarity = .common, .intro_year = 2798, .kind = .aerospace, .source_revision = "2a62993f8da306f489116233d489d1f6222945e3", .source_path = "data/mekfiles/fighters/TRO3039u/Thrush TR-7.blk", .market_eligible = true, .aerospace_armor = .{ 7, 6, 6, 5 }, .loadout = .{
         .{ .slot = "nose.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "lw.mlas.1", .part = "mlas", .class = .weapon },
         .{ .slot = "rw.mlas.1", .part = "mlas", .class = .weapon },

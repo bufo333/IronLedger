@@ -208,10 +208,22 @@ fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod
 
     const company = gs.force(c.assigned_company) orelse return side;
 
-    // Pass 1: count working ballistic/missile mounts per munition
-    // family across the company, then decide how many each family's stock
-    // can feed this fight. Reserved tons are expended after the battle.
-    var family_mounts = try @import("field_supply.zig").munitionMounts(alloc, gs, c.assigned_company, true);
+    // Select the battle line before counting ammunition. Air-lance fighters
+    // join only when the environment permits flight; the cover modifier above
+    // remains independently owned by readiness.companyHasOperationalFighter.
+    for (company.children.items) |child_id| {
+        const child = gs.force(child_id) orelse continue;
+        if (child.echelon == .lance) try collectLanceUnits(gs, alloc, c, child, false, &side.engaged);
+        if (child.echelon != .air_company or env.groundsAir()) continue;
+        for (child.children.items) |air_lance_id| {
+            const air_lance = gs.force(air_lance_id) orelse continue;
+            if (air_lance.echelon == .air_lance) try collectLanceUnits(gs, alloc, c, air_lance, true, &side.engaged);
+        }
+    }
+
+    // Count only the selected line's working ballistic/missile mounts, then
+    // decide how many each family's stock can feed this fight.
+    var family_mounts = try @import("field_supply.zig").munitionMountsForUnits(alloc, gs, side.engaged.items);
     defer family_mounts.deinit(alloc);
     var family_fire_pct: std.StringArrayHashMapUnmanaged(u32) = .empty;
     defer family_fire_pct.deinit(alloc);
@@ -227,86 +239,87 @@ fn playerSideIn(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod
     }
 
     for (company.children.items) |child_id| {
-        const lance = gs.force(child_id) orelse continue;
-        if (!lance.isCombatLance()) continue;
-        // Lance roles (MekHQ): training lances are held out of the fight —
-        // unless the employer commands (integrated rights).
-        if (lance.role == .training and c.terms.command_rights.allowsTrainingLances()) continue;
-
-        var lance_bv: i64 = 0;
-        var gunnery_sum: u32 = 0;
-        var piloting_sum: u32 = 0;
-        var condition_sum: u32 = 0;
-        var quality_sum: u32 = 0;
-        var n: u32 = 0;
-        for (lance.units.items) |uid| {
-            const u = gs.unit(uid) orelse continue;
-            // A hull that is not operational stays in the hangar.
-            if (!readiness_m.unitOperational(gs, u)) continue;
-            const design = chassis_mod.find(u.chassis_key) orelse continue;
-            const pilot = gs.person(u.pilot).?;
-            const reloaded = hasTech(gs, u);
-
-            // Pass 2: mounts whose family stock can't feed them are silenced,
-            // and the hull fights at reduced strength (energy is unaffected).
-            var mounts: u32 = 0;
-            var silenced_x100: u32 = 0;
-            for (u.slots.items) |slot| {
-                if (slot.class != .weapon or slot.condition != .ok) continue;
-                mounts += 1;
-                const ammo_key = part_mod.munitionFor(slot.part_key) orelse continue;
-                const fire_pct = if (reloaded) family_fire_pct.get(ammo_key) orelse 100 else 0;
-                silenced_x100 += 100 - fire_pct;
-            }
-            var unit_bv: i64 = design.bv;
-            if (mounts > 0 and silenced_x100 > 0) {
-                const penalty_pct: i64 = @divTrunc(tuning.battle.silence_penalty_pct * @as(i64, silenced_x100), 100 * @as(i64, mounts));
-                unit_bv = @divTrunc(unit_bv * (100 - penalty_pct), 100);
-                side.silenced_mounts += (silenced_x100 + 50) / 100;
-            }
-            lance_bv += unit_bv;
-            condition_sum += u.conditionPct();
-            quality_sum += @intFromEnum(u.quality);
-            // Old wounds ride along: a permanent head injury is a point of
-            // skill lost for good.
-            // Specialists count a point better; old wounds a point
-            // worse; a tired pilot one to three worse (fatigue bands).
-            // The skills are the hull kind's: a vehicle fights on gunnery_vee
-            // and driving_vee, a mek on gunnery_mek and piloting_mek.
-            const crew_role = unit_mod.crewRoleFor(u.kind);
-            const gunnery_skill = pilot.skill(crew_role.primarySkill()) orelse 4;
-            const piloting_skill = (if (crew_role.pilotingSkill()) |s| pilot.skill(s) else null) orelse 5;
-            gunnery_sum += (gunnery_skill + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("gunnery_specialist"));
-            piloting_sum += (piloting_skill + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("piloting_specialist"));
-            try side.engaged.append(alloc, uid);
-            n += 1;
+        const child = gs.force(child_id) orelse continue;
+        if (child.echelon == .lance) addLancePower(gs, c, child, &family_fire_pct, &side);
+        if (child.echelon != .air_company or env.groundsAir()) continue;
+        for (child.children.items) |air_lance_id| {
+            const air_lance = gs.force(air_lance_id) orelse continue;
+            if (air_lance.echelon == .air_lance) addLancePower(gs, c, air_lance, &family_fire_pct, &side);
         }
-        if (n == 0) continue;
-
-        const elem: autoresolve.Element = .{
-            .force = child_id,
-            .base_strength = lance_bv,
-            .avg_gunnery = @intCast(gunnery_sum / n),
-            .avg_piloting = @intCast(piloting_sum / n),
-            .avg_condition_pct = @intCast(condition_sum / n),
-            .avg_quality = @enumFromInt(quality_sum / n),
-        };
-        side.bv += lance_bv;
-        var lance_power = elem.effectivePower(side.mods);
-        // Defense lances dig in: +10% on garrison-class work.
-        if (lance.role == .defense and c.kind.isGarrisonClass()) lance_power = types.applyBp(lance_power, tuning.battle.defense_bonus_bp);
-        // A tactical genius leading the lance: +5%.
-        if (gs.person(lance.commander)) |leader| if (leader.has("tactical_genius")) {
-            lance_power = types.applyBp(lance_power, 10_500);
-        };
-        // Lance task power scaling: deterministic modifier via the task owner (P4e).
-        // No new RNG draw; battle.zig MUST NOT import operation_control.zig (rule 5).
-        if (operations_m.committedCombatOp(c)) |op| {
-            lance_power = operations_m.lanceTaskPower(op, child_id, lance_power);
-        }
-        side.power += lance_power;
     }
     return side;
+}
+
+fn collectLanceUnits(gs: *GameState, alloc: std.mem.Allocator, c: *const contract_mod.Contract, lance: *const force_mod.Force, aerospace_only: bool, engaged: *std.ArrayListUnmanaged(types.UnitId)) !void {
+    if (!lance.isCombatLance()) return;
+    if (lance.role == .training and c.terms.command_rights.allowsTrainingLances()) return;
+    for (lance.units.items) |uid| {
+        const u = gs.unit(uid) orelse continue;
+        if (aerospace_only and u.kind != .aerospace) continue;
+        if (readiness_m.unitOperational(gs, u)) try engaged.append(alloc, uid);
+    }
+}
+
+fn isEngaged(engaged: []const types.UnitId, id: types.UnitId) bool {
+    for (engaged) |selected| if (selected == id) return true;
+    return false;
+}
+
+fn addLancePower(gs: *GameState, c: *const contract_mod.Contract, lance: *const force_mod.Force, family_fire_pct: *const std.StringArrayHashMapUnmanaged(u32), side: *SideState) void {
+    var lance_bv: i64 = 0;
+    var gunnery_sum: u32 = 0;
+    var piloting_sum: u32 = 0;
+    var condition_sum: u32 = 0;
+    var quality_sum: u32 = 0;
+    var n: u32 = 0;
+    for (lance.units.items) |uid| {
+        if (!isEngaged(side.engaged.items, uid)) continue;
+        const u = gs.unit(uid) orelse continue;
+        const design = chassis_mod.find(u.chassis_key) orelse continue;
+        const pilot = gs.person(u.pilot) orelse continue;
+        const reloaded = hasTech(gs, u);
+        var mounts: u32 = 0;
+        var silenced_x100: u32 = 0;
+        for (u.slots.items) |slot| {
+            if (slot.class != .weapon or slot.condition != .ok) continue;
+            mounts += 1;
+            const ammo_key = part_mod.munitionFor(slot.part_key) orelse continue;
+            const fire_pct = if (reloaded) family_fire_pct.get(ammo_key) orelse 100 else 0;
+            silenced_x100 += 100 - fire_pct;
+        }
+        var unit_bv: i64 = design.bv;
+        if (mounts > 0 and silenced_x100 > 0) {
+            const penalty_pct: i64 = @divTrunc(tuning.battle.silence_penalty_pct * @as(i64, silenced_x100), 100 * @as(i64, mounts));
+            unit_bv = @divTrunc(unit_bv * (100 - penalty_pct), 100);
+            side.silenced_mounts += (silenced_x100 + 50) / 100;
+        }
+        lance_bv += unit_bv;
+        condition_sum += u.conditionPct();
+        quality_sum += @intFromEnum(u.quality);
+        const crew_role = unit_mod.crewRoleFor(u.kind);
+        const gunnery_skill = pilot.skill(crew_role.primarySkill()) orelse 4;
+        const piloting_skill = (if (crew_role.pilotingSkill()) |s| pilot.skill(s) else null) orelse 5;
+        gunnery_sum += (gunnery_skill + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("gunnery_specialist"));
+        piloting_sum += (piloting_skill + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("piloting_specialist"));
+        n += 1;
+    }
+    if (n == 0) return;
+    const elem: autoresolve.Element = .{
+        .force = lance.id,
+        .base_strength = lance_bv,
+        .avg_gunnery = @intCast(gunnery_sum / n),
+        .avg_piloting = @intCast(piloting_sum / n),
+        .avg_condition_pct = @intCast(condition_sum / n),
+        .avg_quality = @enumFromInt(quality_sum / n),
+    };
+    side.bv += lance_bv;
+    var lance_power = elem.effectivePower(side.mods);
+    if (lance.role == .defense and c.kind.isGarrisonClass()) lance_power = types.applyBp(lance_power, tuning.battle.defense_bonus_bp);
+    if (gs.person(lance.commander)) |leader| {
+        if (leader.has("tactical_genius")) lance_power = types.applyBp(lance_power, 10_500);
+    }
+    if (operations_m.committedCombatOp(c)) |op| lance_power = operations_m.lanceTaskPower(op, lance.id, lance_power);
+    side.power += lance_power;
 }
 
 /// The campaign-state modifiers: every field a lever the player pulled (or
@@ -3049,6 +3062,107 @@ test "vehicle crews fight with their vehicle skills" {
     const green = try vehiclePowerForTest(6, 7);
     try std.testing.expect(elite > 0);
     try std.testing.expect(elite > green);
+}
+
+test "an airborne air-lance fighter adds aero power and reserves only its ammunition" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7204 });
+    defer gs.deinit();
+    const co = try gs.createForce("Alpha", .company, .none);
+    const line = try gs.createForce("Line", .lance, co);
+    const wing = try gs.createForce("Air Wing", .air_company, co);
+    const air = try gs.createForce("Air", .air_lance, wing);
+    const mek = try gs.addUnit("LCT-1V");
+    const mek_pilot = try gs.hirePerson("Line", "Pilot", .mekwarrior);
+    try toe.assignUnit(&gs, mek, line, mek_pilot);
+    const fighter = try gs.addUnit("SL-15");
+    const aero_pilot = try gs.hirePerson("Air", "Pilot", .aero_pilot);
+    const aero_tech = try gs.hirePerson("Air", "Tech", .tech_aero);
+    gs.person(aero_pilot).?.assigned_force = air;
+    gs.person(aero_tech).?.assigned_force = air;
+    try toe.assignUnit(&gs, fighter, air, aero_pilot);
+    try crew.assignSlot(&gs, fighter, .tech, aero_tech);
+    try gs.person(aero_pilot).?.skills.put(gs.allocator(), .gunnery_aero, 2);
+    try gs.person(aero_pilot).?.skills.put(gs.allocator(), .piloting_aero, 3);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .status = .active,
+        .assigned_company = co,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "ammo_ac10", 1);
+
+    var airborne = try playerSide(&gs, c);
+    defer airborne.engaged.deinit(gs.scratch());
+    defer airborne.ammo_reserved.deinit(gs.scratch());
+    try std.testing.expectEqual(@as(usize, 2), airborne.engaged.items.len);
+    try std.testing.expectEqual(@as(u32, 1), airborne.ammo_reserved.get("ammo_ac10").?);
+    const skilled_power = airborne.power;
+
+    try gs.person(aero_pilot).?.skills.put(gs.allocator(), .gunnery_aero, 6);
+    try gs.person(aero_pilot).?.skills.put(gs.allocator(), .piloting_aero, 7);
+    var unskilled = try playerSide(&gs, c);
+    defer unskilled.engaged.deinit(gs.scratch());
+    defer unskilled.ammo_reserved.deinit(gs.scratch());
+    try std.testing.expect(skilled_power > unskilled.power);
+
+    var grounded = try playerSideIn(&gs, gs.scratch(), c, .{ .weather = .storm });
+    defer grounded.engaged.deinit(gs.scratch());
+    defer grounded.ammo_reserved.deinit(gs.scratch());
+    try std.testing.expectEqual(@as(usize, 1), grounded.engaged.items.len);
+    try std.testing.expectEqual(chassis_mod.find("SL-15").?.bv, airborne.bv - grounded.bv);
+    try std.testing.expectEqual(@as(u32, 0), grounded.ammo_reserved.get("ammo_ac10") orelse 0);
+    try std.testing.expect(!grounded.mods.has_air_cover);
+}
+
+test "air-lance battle preparation leaves state unchanged when selection allocation fails" {
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7206 });
+    defer gs.deinit();
+    const company = try gs.createForce("Alpha", .company, .none);
+    const wing = try gs.createForce("Air Wing", .air_company, company);
+    const air_lance = try gs.createForce("Air", .air_lance, wing);
+    const fighter = try gs.addUnit("SL-15");
+    const pilot = try gs.hirePerson("Air", "Pilot", .aero_pilot);
+    try toe.assignUnit(&gs, fighter, air_lance, pilot);
+    const tech = try gs.hirePerson("Air", "Tech", .tech_aero);
+    try crew.assignSlot(&gs, fighter, .tech, tech);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        .status = .active,
+        .assigned_company = company,
+    });
+    const before = digest.stateHash(&gs);
+    try std.testing.expectError(error.OutOfMemory, playerSideIn(&gs, std.testing.failing_allocator, gs.contracts.getPtr(@enumFromInt(1)).?, .{}));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "fighter hits and hull records use the shared battle aftermath records" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7205 });
+    defer gs.deinit();
+    const fighter = try gs.addUnit("SPR-H5");
+    const pilot = try gs.hirePerson("Air", "Pilot", .aero_pilot);
+    gs.unit(fighter).?.pilot = pilot;
+    try gs.recordHullAcquisition(gs.unit(fighter).?, .purchase, "unknown");
+    const hull = gs.unit(fighter).?.hull_instance_id;
+    var hits: std.ArrayListUnmanaged(battle_report.HullHit) = .empty;
+    defer hits.deinit(gs.scratch());
+    const engaged = [_]types.UnitId{fighter};
+    _ = try applyHits(&gs, &.{ .engaged = .empty }, &engaged, 1, &hits);
+    try std.testing.expectEqual(@as(usize, 1), hits.items.len);
+    try std.testing.expectEqualStrings("SPR-H5", hits.items[0].chassis_key);
+    try writeHullCombatRecords(&gs, gs.allocator(), &engaged, &.{}, &.{}, @enumFromInt(1), @enumFromInt(1), &.{}, hits.items, .abstraction);
+    try std.testing.expectEqual(hull, gs.hull_combat_records.items[0].hull_instance_id);
 }
 
 test "vehicle battle damage writes the linked hull combat record" {
