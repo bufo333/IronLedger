@@ -230,13 +230,13 @@ pub const EventMemory = struct { last_day: u32 = 0, last_choice: u8 = 0, streak:
 pub const GameState = struct {
     const LifecycleArena = struct {
         arena: std.heap.ArenaAllocator,
-        next: ?*LifecycleArena,
     };
 
     arena: std.heap.ArenaAllocator,
-    /// Lifecycle transaction arenas retained after their prepared allocations
-    /// become campaign data. Session-only allocation ownership.
-    lifecycle_arenas: ?*LifecycleArena = null,
+    /// The current lifecycle commit owns the collections installed by that
+    /// transaction. Its predecessor is released only after its replacement is
+    /// complete, so live collection pointers never outlast their allocator.
+    lifecycle_arena: ?*LifecycleArena = null,
     rng: rng_mod.Rng,
     clock: clock_mod.Clock,
     funds: types.CBills,
@@ -394,11 +394,7 @@ pub const GameState = struct {
     }
 
     pub fn deinit(self: *GameState) void {
-        var retained = self.lifecycle_arenas;
-        while (retained) |node| {
-            retained = node.next;
-            node.arena.deinit();
-        }
+        if (self.lifecycle_arena) |retained| retained.arena.deinit();
         self.arena.deinit();
     }
 
@@ -425,12 +421,15 @@ pub const GameState = struct {
         return std.heap.ArenaAllocator.init(self.scratch());
     }
 
-    /// Retains lifecycle allocations after all lifecycle preparation succeeds.
-    /// Its node lives in that arena, so this cannot allocate from the campaign arena.
-    pub fn retainLifecycleArena(self: *GameState, arena: *std.heap.ArenaAllocator) !void {
+    /// Install fully prepared lifecycle storage. The transaction arena owns all
+    /// collections it installs, so replacing the prior transaction reclaims its
+    /// staging storage after the new owner is ready.
+    pub fn replaceLifecycleArena(self: *GameState, arena: *std.heap.ArenaAllocator) !void {
         const node = try arena.allocator().create(LifecycleArena);
-        node.* = .{ .arena = arena.*, .next = self.lifecycle_arenas };
-        self.lifecycle_arenas = node;
+        node.* = .{ .arena = arena.* };
+        const prior = self.lifecycle_arena;
+        self.lifecycle_arena = node;
+        if (prior) |old| old.arena.deinit();
     }
 
     // ---------------------------------------------------------------- money
@@ -1209,7 +1208,7 @@ pub const GameState = struct {
     /// and the round-trip digest proves they come back the same.
     pub const field_persistence = [_]struct { []const u8, Persistence }{
         .{ "arena", .session }, // the memory the campaign lives in
-        .{ "lifecycle_arenas", .session }, // allocation ownership only
+        .{ "lifecycle_arena", .session }, // allocation ownership only
         .{ "campaign_id", .session }, // the save store's row, not the campaign
         .{ "rng", .persisted },
         .{ "clock", .persisted },

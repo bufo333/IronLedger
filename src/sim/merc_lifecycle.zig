@@ -47,7 +47,7 @@ pub fn liquidateMercCompany(
         .listings = listings,
     } }};
     const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, next_listing_id, gs.next_merc_company_id, day);
-    try gs.retainLifecycleArena(&transaction_arena);
+    try gs.replaceLifecycleArena(&transaction_arena);
     commitLifecycleStage(gs, stage);
 }
 
@@ -100,7 +100,7 @@ pub fn buyHullsForCompany(
     const transaction_alloc = transaction_arena.allocator();
     const actions = [_]LifecycleAction{.{ .buy = buy }};
     const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, gs.next_listing_id, gs.next_merc_company_id, day);
-    try gs.retainLifecycleArena(&transaction_arena);
+    try gs.replaceLifecycleArena(&transaction_arena);
     commitLifecycleStage(gs, stage);
     rng.* = rng_copy;
 }
@@ -146,7 +146,7 @@ pub fn spawnReplacementCompany(
     var actions = [_]LifecycleAction{.{ .spawn = replacement }};
     try allocateReplacementNames(transaction_alloc, &actions);
     const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, gs.next_listing_id, next_company_id, day);
-    try gs.retainLifecycleArena(&transaction_arena);
+    try gs.replaceLifecycleArena(&transaction_arena);
     commitLifecycleStage(gs, stage);
     rng.* = rng_copy;
     return replacement.company.id;
@@ -282,7 +282,7 @@ pub fn runMercLifecycle(gs: *GameState) !void {
     const transaction_alloc = transaction_arena.allocator();
     try allocateReplacementNames(transaction_alloc, actions.items);
     const stage = try stageLifecycleCommit(gs, transaction_alloc, actions.items, next_listing_id, next_company_id, day);
-    try gs.retainLifecycleArena(&transaction_arena);
+    try gs.replaceLifecycleArena(&transaction_arena);
 
     commitLifecycleStage(gs, stage);
     gs.rng = rng_copy;
@@ -433,7 +433,11 @@ fn stageLifecycleCommit(
         .next_merc_company_id = next_merc_company_id,
     };
     try stage.merc_companies.ensureTotalCapacity(alloc, gs.merc_companies.count());
-    for (gs.merc_companies.keys(), gs.merc_companies.values()) |id, company| {
+    for (gs.merc_companies.keys(), gs.merc_companies.values()) |id, source| {
+        var company = source;
+        // A prior lifecycle transaction can own this name; each replacement
+        // stage must own its copy before its predecessor is released.
+        company.unit_name = try alloc.dupe(u8, source.unit_name);
         stage.merc_companies.putAssumeCapacity(id, company);
     }
     try stage.merc_company_rosters.ensureTotalCapacity(alloc, gs.merc_company_rosters.count());
@@ -1099,5 +1103,53 @@ test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" 
             try std.testing.expectEqual(under_strength_roster_before, gs.merc_company_rosters.get(@enumFromInt(2)).?.items.ptr);
             gs.deinit();
         }
+    }
+}
+
+test "runMercLifecycle: repeated active monthly passes retain bounded staging memory" {
+    var debug_alloc = std.heap.DebugAllocator(.{ .enable_memory_limit = true }){};
+    defer std.testing.expect(debug_alloc.deinit() == .ok) catch @panic("leak");
+    var gs = GameState.init(debug_alloc.allocator(), .{ .seed = 4006 });
+    defer gs.deinit();
+    gs.clock.advance();
+
+    const company_id: types.MercCompanyId = @enumFromInt(1);
+    const hull_id: types.HullInstanceId = @enumFromInt(1);
+    try gs.merc_companies.put(gs.allocator(), company_id, .{
+        .id = company_id,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Under Strength Co",
+        .faction_key = "DC",
+        .cbills = 1,
+        .logo_key = logo.all_keys[0],
+    });
+    gs.next_merc_company_id = 2;
+    try gs.hull_instances.put(gs.allocator(), hull_id, .{
+        .id = hull_id,
+        .base_key = "LCT-1V",
+        .owner = .market,
+    });
+    const listing = market.Listing{
+        .kind = .unit,
+        .item_key = "LCT-1V",
+        .rarity = .common,
+        .price = 1,
+        .id = @enumFromInt(1),
+        .hull_instance_id = hull_id,
+    };
+    try gs.market_listings.append(gs.allocator(), listing);
+
+    try runMercLifecycle(&gs);
+    const bytes_after_first_pass = debug_alloc.total_requested_bytes;
+
+    for (0..3) |_| {
+        gs.merc_companies.getPtr(company_id).?.cbills = 1;
+        _ = gs.merc_company_rosters.orderedRemove(company_id);
+        gs.hull_instances.getPtr(hull_id).?.owner = .market;
+        _ = gs.hull_ownership_history.pop();
+        try gs.market_listings.append(gs.allocator(), listing);
+        gs.clock.advance();
+        try runMercLifecycle(&gs);
+        try std.testing.expectEqual(bytes_after_first_pass, debug_alloc.total_requested_bytes);
     }
 }
