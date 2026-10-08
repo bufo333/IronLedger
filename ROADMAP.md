@@ -1366,6 +1366,13 @@ parity; and P2v-d adds NPC mech-first conventional procurement and reserves.
 Candidate chassis are filtered by their verified source `year <= 3025`, not by
 source-directory or TRO publication labels.
 
+The separate approved battle-armor and artillery design is
+`docs/p2-battle-armor-artillery-design.md`. P2a is design-only: it sets the
+source-verification, ownership, attachment, crewing, readiness, and persistence
+decisions required before implementation. Delivery remains P2b-P2d for battle
+armor, P2e-P2g for artillery, then P2h battle effects and P2i REPL/TUI/query
+surfaces.
+
 This foundation lets player and NPC companies buy the same assets from the
 market. The later NPC merc-company economy work sets the four-active-lance
 (16-mek) readiness rule; combat vehicles and aerospace may then be retained as
