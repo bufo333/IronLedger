@@ -16,9 +16,10 @@ by a faction roster or manufacturing rate.
 
 ## Source Policy
 
-The implementation re-encodes facts from MegaMek mm-data; it does not copy its
-`.blk` files. A candidate must declare `year <= 3025` in its source file.
-Source directory names and TRO publication dates do not replace that test.
+The implementation re-encodes facts from MegaMek mm-data revision
+`2a62993f8da306f489116233d489d1f6222945e3`; it does not copy its `.blk`
+files. A candidate must declare `year <= 3025` in its source file. Source
+directory names and TRO publication dates do not replace that test.
 
 The initial replenishing-market catalogue is limited to these verified
 candidates:
@@ -32,13 +33,15 @@ candidates:
 | Sparrowhawk SPR-H5 | `data/mekfiles/fighters/TRO3039u/Sparrowhawk SPR-H5.blk` | 2520 |
 | Slayer SL-15 | `data/mekfiles/fighters/TRO3039u/Slayer SL-15.blk` | 2770 |
 
-P2a corrects their represented kind, tonnage, intro year, and loadout facts.
-Existing chassis keys remain stable for saved campaigns even when a source file
-has no model field. Current conventional keys outside this initial market subset
-remain valid persisted campaign data, but do not enter replenishing offers until
-their source facts are audited. Each market entry gains source-path provenance.
-BV, cost, rarity, repair duration, and salvage values remain sourced separately
-or explicitly `// TUNE`.
+P2v-a replaces the static facts for these entries: represented kind, tonnage,
+intro year, and loadout. It also audits every remaining current conventional
+catalogue entry before that entry becomes market-eligible. Every market entry
+records its source path and the pinned revision. BV, cost, rarity, repair
+duration, and salvage values remain sourced separately or explicitly `// TUNE`.
+
+The game is unreleased and has no saved campaigns. P2v-a therefore provides no
+legacy campaign migration: it replaces the static catalogue directly, and does
+not preserve obsolete live loadouts or hull-instance snapshots.
 
 ## Ownership And Markets
 
@@ -86,14 +89,15 @@ repair, salvage, and persistence call the same P2 rule owners as the player.
 
 ## Delivery Order
 
-1. **P2a Data and provenance.** Correct verified initial chassis facts; add
-   source-path provenance and data validation.
-2. **P2b Replenishing market and player vehicle parity.** Add the named market
+1. **P2v-a Data and provenance.** Replace verified chassis facts; audit every
+   conventional entry before market use; add pinned source provenance and data
+   validation.
+2. **P2v-b Replenishing market and player vehicle parity.** Add the named market
    owner, unique acquisition identity, vehicle readiness/repair/battle/salvage
    tests, and persistence round trips.
-3. **P2c Aerospace combat parity.** Add fighter battle, damage, ammunition,
+3. **P2v-c Aerospace combat parity.** Add fighter battle, damage, ammunition,
    salvage, AAR, and aerospace-repair behavior after verified repair facts.
-4. **P2d NPC conventional procurement.** Add mek-first vehicle substitution
+4. **P2v-d NPC conventional procurement.** Add mek-first vehicle substitution
    for line lances and aerospace procurement for air lances, plus replenishing
    conventional reserves, without changing the later 16-mek readiness target.
 

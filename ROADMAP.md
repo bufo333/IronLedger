@@ -1360,11 +1360,11 @@ autoresolve participation. Every purchased vehicle or fighter is a unique
 economy, their markets replenish and are not limited by faction manufacturing.
 
 The approved delivery design is `docs/p2-conventional-combat-design.md`:
-P2a corrects verified chassis facts and provenance; P2b establishes replenishing
-market and player vehicle parity; P2c completes fighter battle parity; and P2d
-adds NPC mech-first conventional procurement and reserves. Candidate chassis
-are filtered by their verified source `year <= 3025`, not by source-directory
-or TRO publication labels.
+P2v-a corrects verified chassis facts and provenance; P2v-b establishes
+replenishing market and player vehicle parity; P2v-c completes fighter battle
+parity; and P2v-d adds NPC mech-first conventional procurement and reserves.
+Candidate chassis are filtered by their verified source `year <= 3025`, not by
+source-directory or TRO publication labels.
 
 This foundation lets player and NPC companies buy the same assets from the
 market. The later NPC merc-company economy work sets the four-active-lance

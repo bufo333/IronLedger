@@ -17,14 +17,14 @@ reschedule only on explicit dispatch.
   staffing/upkeep, capacity/facility effects, eligibility, and one-brigade rule.
 - P1-brigade (P1b-P1d): regional-to-brigade project, shared rules,
   persistence, queries, REPL/TUI, and current-behavior docs.
-- P2a conventional data and provenance: correct the approved initial chassis
-  catalogue with verified source facts and source-path provenance.
-- P2b conventional market and vehicle parity: replenishing vehicle/fighter
+- P2v-a conventional data and provenance: replace the static catalogue with
+  verified source facts and pinned source-path provenance.
+- P2v-b conventional market and vehicle parity: replenishing vehicle/fighter
   offers, player acquisition, ownership persistence, and vehicle
   readiness/repair/battle/salvage parity.
-- P2c aerospace combat parity: fighter battle, damage, ammunition, salvage,
+- P2v-c aerospace combat parity: fighter battle, damage, ammunition, salvage,
   AAR, and verified aerospace repair behavior.
-- P2d NPC conventional procurement: mek-first vehicle substitution for line
+- P2v-d NPC conventional procurement: mek-first vehicle substitution for line
   lances, aerospace procurement for air lances, and replenishing conventional
   reserves without changing the later 16-mek readiness target.
 - P2-design battle-armor/artillery design approval (P2a).
