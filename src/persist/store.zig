@@ -3912,6 +3912,56 @@ fn siteFromCols(kind: []const u8, id: i64) error{CorruptSave}!types.Site {
     return error.CorruptSave;
 }
 
+test "purchased conventional vehicle preserves identity and provenance across save load" {
+    const commands = @import("../sim/commands.zig");
+    const hull_instance = @import("../domain/hull_instance.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 918 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const hq = gs.seat();
+    gs.hqs.getPtr(hq).?.funds = 10_000_000;
+    const listing: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = listing,
+        .kind = .unit,
+        .item_key = "SCP-1N",
+        .rarity = .common,
+        .price = 400_000,
+        .hq = hq,
+    });
+    gs.next_listing_id += 1;
+    const bought = (try commands.execute(&gs, .{ .buy_listing = .{ .listing = listing, .buyer = .{ .hq = hq } } })).unit;
+    const hull = gs.unit(bought).?.hull_instance_id;
+    try std.testing.expect(hull != .none);
+    try std.testing.expectEqual(hull_instance.OwnerType.player, std.meta.activeTag(gs.hull_instances.getPtr(hull).?.owner));
+    try std.testing.expectEqual(@import("../domain/chassis.zig").find("SCP-1N").?.loadout.len + 1, gs.hull_instances.getPtr(hull).?.loadout.items.len);
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    try std.testing.expectEqual(hull, loaded.unit(bought).?.hull_instance_id);
+    var purchase_found = false;
+    for (loaded.hull_ownership_history.items) |row| {
+        if (row.hull_instance_id != hull) continue;
+        purchase_found = true;
+        try std.testing.expectEqual(hull_instance.AcquisitionType.purchase, row.acquisition_type);
+        try std.testing.expectEqual(@as(u32, 0), row.to_day);
+    }
+    try std.testing.expect(purchase_found);
+
+    const next_hull = loaded.next_hull_instance_id;
+    const next_listing: types.ListingId = @enumFromInt(loaded.next_listing_id);
+    try loaded.market_listings.append(loaded.allocator(), .{ .id = next_listing, .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 400_000, .hq = hq });
+    loaded.next_listing_id += 1;
+    const second = (try commands.execute(&loaded, .{ .buy_listing = .{ .listing = next_listing, .buyer = .{ .hq = hq } } })).unit;
+    const expected_next_hull: types.HullInstanceId = @enumFromInt(next_hull);
+    try std.testing.expectEqual(expected_next_hull, loaded.unit(second).?.hull_instance_id);
+}
+
 test "save → load → identical hash, and the loaded campaign keeps playing" {
     const commands = @import("../sim/commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1101 });

@@ -1476,6 +1476,26 @@ test "depot repair needs the right components, then holds a bay" {
     try std.testing.expect(!(try queueDepotRepair(&gs, uid2)));
 }
 
+test "vehicle depot repair uses the shared structural demand and mechanic owner" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3201 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .chief_engineer);
+    const hq = gs.seat();
+    const vehicle = try gs.addUnit("SCP-1N");
+    const mechanic = try gs.hirePerson("V", "Tech", .tech_mechanic);
+    gs.unit(vehicle).?.markWrecked();
+    const component = part_mod.componentFor("chassis.structure", gs.unit(vehicle).?.chassis_key);
+    while (gs.takeStock(.{ .hq = hq }, component, 1)) {}
+    try gs.addStock(.{ .hq = hq }, component, 1);
+    try @import("crew.zig").assignSlot(&gs, vehicle, .tech, mechanic);
+    try std.testing.expectEqual(unit_mod.techRoleFor(.vehicle).?, gs.person(mechanic).?.role);
+    var needs: [max_depot_needs]DepotNeed = undefined;
+    try std.testing.expectEqual(component, depotNeedsBuf(gs.unit(vehicle).?, &needs)[0].component);
+    try std.testing.expect(try queueDepotRepair(&gs, vehicle));
+    try std.testing.expect(hasJobForUnit(&gs, vehicle));
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = hq }, component));
+}
+
 test "depot refusal for a destroyed-but-intact hull leaves the hull untouched" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 36 });
     defer gs.deinit();

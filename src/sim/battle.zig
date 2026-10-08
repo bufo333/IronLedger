@@ -3051,6 +3051,48 @@ test "vehicle crews fight with their vehicle skills" {
     try std.testing.expect(elite > green);
 }
 
+test "vehicle battle damage writes the linked hull combat record" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7203 });
+    defer gs.deinit();
+    const vehicle = try gs.addUnit("SCP-1N");
+    const driver = try gs.hirePerson("V", "Crew", .vehicle_crew);
+    gs.unit(vehicle).?.pilot = driver;
+    try gs.recordHullAcquisition(gs.unit(vehicle).?, .purchase, "unknown");
+    const hull = gs.unit(vehicle).?.hull_instance_id;
+    var hits: std.ArrayListUnmanaged(battle_report.HullHit) = .empty;
+    defer hits.deinit(gs.scratch());
+    const engaged = [_]types.UnitId{vehicle};
+    _ = try applyHits(&gs, &.{ .engaged = .empty }, &engaged, 1, &hits);
+    try std.testing.expectEqual(@as(usize, 1), hits.items.len);
+    try writeHullCombatRecords(&gs, gs.allocator(), &engaged, &.{}, &.{}, @enumFromInt(1), @enumFromInt(1), &.{}, hits.items, .abstraction);
+    try std.testing.expectEqual(@as(usize, 1), gs.hull_combat_records.items.len);
+    try std.testing.expectEqual(hull, gs.hull_combat_records.items[0].hull_instance_id);
+    try std.testing.expectEqual(@as(u16, 1), gs.hull_combat_records.items[0].hits_taken);
+}
+
+test "vehicle salvage transfers the offered hull instance without duplication" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7202 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const company = try gs.createForce("Alpha", .company, .none);
+    const hull: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hull, .{ .id = hull, .base_key = "SCP-1N", .owner = .market });
+    try gs.hull_ownership_history.append(gs.allocator(), .{ .hull_instance_id = hull, .acquisition_type = .transfer, .prior_owner_key = "DC" });
+    const design = chassis_mod.find("SCP-1N").?;
+    const candidates = [_]battle_report.SalvageCandidate{.{ .key = design.key, .name = design.name, .bv = design.bv, .armor_pct = 60, .quality = .c, .damaged_slots = 0, .destroyed_slots = 0, .missing_components = 0, .hull_instance_id = hull }};
+    const c: contract_mod.Contract = .{ .id = @enumFromInt(1), .kind = .recon_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = "galatea", .status = .active, .assigned_company = company, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } };
+    const instances_before = gs.hull_instances.count();
+    _ = try takeSalvage(&gs, &c, &candidates, design.bv, .most_hulls);
+    try std.testing.expectEqual(instances_before, gs.hull_instances.count());
+    var linked = false;
+    for (gs.units.values()) |u| {
+        if (u.hull_instance_id == hull) linked = true;
+    }
+    try std.testing.expect(linked);
+    try std.testing.expectEqual(@import("../domain/hull_instance.zig").OwnerType.player, std.meta.activeTag(gs.hull_instances.getPtr(hull).?.owner));
+}
+
 test "a conceded engagement leaves a report that holds the turn and counts as a loss" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7301 });
     defer gs.deinit();

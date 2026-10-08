@@ -97,6 +97,21 @@ test "release restores the hull to the original surviving lance" {
     try std.testing.expectEqual(seats_before, gs.forces.getPtr(lance).?.units.items.len);
 }
 
+test "holding and releasing a vehicle preserves its linked hull instance" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6010 });
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .line_officer);
+    const lance = try gs.createForce("Armor", .lance, .none);
+    const vehicle = try gs.addUnit("SCP-1N");
+    try @import("toe.zig").assignUnit(&gs, vehicle, lance, .none);
+    try gs.recordHullAcquisition(gs.unit(vehicle).?, .purchase, "unknown");
+    const hull = gs.unit(vehicle).?.hull_instance_id;
+    try holdUnit(&gs, vehicle, "DC", @enumFromInt(1));
+    try std.testing.expectEqual(hull, gs.heldHull(vehicle).?.unit.hull_instance_id);
+    try std.testing.expect(try releaseHull(&gs, vehicle));
+    try std.testing.expectEqual(hull, gs.unit(vehicle).?.hull_instance_id);
+}
+
 test "a second release returns false" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 6006 });
     defer gs.deinit();

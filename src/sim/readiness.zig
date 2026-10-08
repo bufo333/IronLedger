@@ -58,6 +58,20 @@ test "ready hull plus available crew is operational" {
     try std.testing.expect(unitOperational(&gs, u));
 }
 
+test "vehicle readiness and force readiness use the vehicle crew owner" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 91 });
+    defer gs.deinit();
+    const uid = try gs.addUnit("SCP-1N");
+    const driver = try gs.hirePerson("T", "R", .vehicle_crew);
+    const lance = try gs.createForce("Armor", .lance, .none);
+    try @import("toe.zig").assignUnit(&gs, uid, lance, driver);
+    try std.testing.expect(unitOperational(&gs, gs.unit(uid).?));
+    try std.testing.expect(forceOperational(&gs, gs.force(lance).?));
+    gs.person(driver).?.status = .wounded;
+    try std.testing.expect(!unitOperational(&gs, gs.unit(uid).?));
+    try std.testing.expect(!forceOperational(&gs, gs.force(lance).?));
+}
+
 test "missing crew (pilot .none) is not operational" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 2 });
     defer gs.deinit();

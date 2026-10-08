@@ -789,6 +789,27 @@ test "a worn or exotic hull wants more hours; a sharper tech needs fewer" {
     try std.testing.expect(techWeeklyHoursFor(&gs, gs.person(tech).?, u) > regular);
 }
 
+test "vehicle maintenance and field repair use mechanic hours and shared repair owners" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1216 });
+    defer gs.deinit();
+    const company = try gs.createForce("Armor", .company, .none);
+    const vehicle = try gs.addUnit("SCP-1N");
+    try toe.assignUnit(&gs, vehicle, company, .none);
+    const mechanic = try gs.hirePerson("V", "Tech", .tech_mechanic);
+    gs.person(mechanic).?.assigned_force = company;
+    try crew.assignSlot(&gs, vehicle, .tech, mechanic);
+    const u = gs.unit(vehicle).?;
+    try std.testing.expectEqual(unit_mod.maintenanceHours(.vehicle, 0), hullHours(&gs, u));
+    try std.testing.expectEqual(unit_mod.techRoleFor(.vehicle).?, gs.person(mechanic).?.role);
+    u.armor_pct = 70;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const needs = try repairNeeds(&gs, arena.allocator(), company);
+    try std.testing.expectEqual(@as(usize, 1), needs.len);
+    const budget = try repairBudget(&gs, arena.allocator(), company, needs);
+    try std.testing.expect(budget.hours > 0);
+}
+
 test "tech hours are a budget: too many hulls leave some uncovered" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 100 });
     defer gs.deinit();

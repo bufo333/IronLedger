@@ -28,6 +28,7 @@ const posture = @import("posture.zig");
 const commands = @import("commands.zig");
 const commander = @import("../domain/commander.zig");
 const black_market = @import("black_market.zig");
+const conventional_market = @import("conventional_market.zig");
 
 /// Employer payment multiplier by faction, basis points (data/tables/factions.zon).
 pub fn employerMultBp(faction_key: []const u8) types.Bp {
@@ -410,12 +411,11 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
     while (hulls < lot_size and attempts < 12) : (attempts += 1) {
         // Meks off the local house's table, the odd combat vehicle
         // from anywhere; fighters and ships have their own slot below.
-        const design = if (r.uintLessThan(u8, 4) == 0) blk: { // TUNE: vehicle vs mek lot ratio (1-in-4)
-            var vbuf: [32]*const chassis_mod.Chassis = undefined;
-            const vehicles = chassis_mod.conventionalMarketPool(.vehicle, gs.clock.date.year, &vbuf);
-            if (vehicles.len == 0) continue;
-            break :blk vehicles[r.uintLessThan(usize, vehicles.len)]; // uniform pick from vehicle pool
-        } else @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng, .market), gs.clock.date.year);
+        if (r.uintLessThan(u8, 4) == 0) { // TUNE: vehicle vs mek lot ratio (1-in-4)
+            if (try conventional_market.appendOffer(gs, hq_id, world.industry, warehouse, .vehicle)) hulls += 1;
+            continue;
+        }
+        const design = @import("../domain/rat.zig").roll(&gs.rng, .market, world.faction, @import("../gen/company_gen.zig").rollWeightClass(&gs.rng, .market), gs.clock.date.year);
         if (!market.listingAppears(&gs.rng, design.rarity, world.industry, warehouse, 0, .market)) continue;
         const cond = market.rollHullCondition(&gs.rng, .market);
         const price_roll = market.priceRollBp(&gs.rng, .market);
@@ -459,27 +459,28 @@ fn refreshBoard(gs: *GameState, hq_id: types.HqId) !void {
         if (!already) {
             const comms = hq.effectiveFacilityLevel(.comms);
             const kind: unit_mod.UnitKind = if (port >= 4 and comms >= 3 and r.uintLessThan(u8, 3) == 0) .jumpship else if (port >= 3 and r.boolean()) .dropship else .aerospace; // TUNE: transport kind odds by port/comms tier
-            var buf: [16]*const chassis_mod.Chassis = undefined;
-            const pool = if (kind == .aerospace)
-                chassis_mod.conventionalMarketPool(.aerospace, gs.clock.date.year, &buf)
-            else
-                chassis_mod.ofKind(kind, gs.clock.date.year, &buf);
-            if (pool.len > 0) {
-                const design = pool[r.uintLessThan(usize, pool.len)]; // uniform pick from transport pool
-                if (market.listingAppears(&gs.rng, design.rarity, world.industry, port, 0, .market)) {
-                    const price_roll = market.priceRollBp(&gs.rng, .market);
-                    const base = if (design.kind == .aerospace) design.cost else types.applyBp(design.cost, market.transport_price_bp);
-                    try gs.market_listings.append(gs.allocator(), .{
-                        .id = @enumFromInt(gs.next_listing_id),
-                        .kind = .unit,
-                        .item_key = design.key,
-                        .rarity = design.rarity,
-                        .price = types.applyBp(base, price_roll),
-                        .listed_day = day,
-                        .expires_day = day + tuning.market.offer_days_base + @as(u32, gs.rng.roll2d6(.market)) * tuning.market.offer_days_per_pip,
-                        .hq = hq_id,
-                    });
-                    gs.next_listing_id += 1;
+            if (kind == .aerospace) {
+                _ = try conventional_market.appendOffer(gs, hq_id, world.industry, port, .aerospace);
+            } else {
+                var buf: [16]*const chassis_mod.Chassis = undefined;
+                const pool = chassis_mod.ofKind(kind, gs.clock.date.year, &buf);
+                if (pool.len > 0) {
+                    const design = pool[r.uintLessThan(usize, pool.len)]; // uniform pick from transport pool
+                    if (market.listingAppears(&gs.rng, design.rarity, world.industry, port, 0, .market)) {
+                        const price_roll = market.priceRollBp(&gs.rng, .market);
+                        const base = types.applyBp(design.cost, market.transport_price_bp);
+                        try gs.market_listings.append(gs.allocator(), .{
+                            .id = @enumFromInt(gs.next_listing_id),
+                            .kind = .unit,
+                            .item_key = design.key,
+                            .rarity = design.rarity,
+                            .price = types.applyBp(base, price_roll),
+                            .listed_day = day,
+                            .expires_day = day + tuning.market.offer_days_base + @as(u32, gs.rng.roll2d6(.market)) * tuning.market.offer_days_per_pip,
+                            .hq = hq_id,
+                        });
+                        gs.next_listing_id += 1;
+                    }
                 }
             }
         }
@@ -1080,7 +1081,7 @@ pub const BuyResult = struct {
 /// All fallible state changes are prepared before payment, listing removal, or
 /// the market RNG stream commits.
 fn buyDispersedListingAtHq(gs: *GameState, index: usize, listing: market.Listing, price: types.CBills, hq: types.HqId) !BuyResult {
-    if (listing.kind != .unit or listing.hull_instance_id == .none) return error.NoSuchListing;
+    if (listing.kind != .unit) return error.NoSuchListing;
     const world = planet.find(listing.planet_key) orelse return error.NoSuchListing;
     var staged_rng = gs.rng;
     const roll = staged_rng.roll2d6(.market);
@@ -1097,18 +1098,20 @@ fn buyDispersedListingAtHq(gs: *GameState, index: usize, listing: market.Listing
     else
         null;
     const pirate_change = if (fraud) null else try gs.prepareStandingAdjustment("PER", 1);
-    const hull_return = if (fraud)
+    const hull_return = if (fraud and listing.hull_instance_id != .none)
         try gs.prepareMarketHullReturn(listing.hull_instance_id)
     else
         null;
-    const hull_transfer = if (!fraud)
+    const hull_transfer = if (!fraud and listing.hull_instance_id != .none)
         try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market")
     else
         null;
     var prepared_unit: ?GameState.PreparedUnit = null;
+    var acquisition: ?GameState.PreparedHullAcquisition = null;
     if (!fraud) {
         var unit = try gs.prepareUnit(listing.item_key);
         if (listing.condition) |cond| market.applyHullCondition(&unit.unit, cond, staged_rng.random(.market));
+        if (listing.hull_instance_id == .none) acquisition = try gs.prepareHullAcquisition(&unit.unit, "unknown");
         prepared_unit = unit;
     }
     const house_now = if (house_change) |change| change.value else 0;
@@ -1129,8 +1132,11 @@ fn buyDispersedListingAtHq(gs: *GameState, index: usize, listing: market.Listing
         return .{ .fraud = true };
     }
     const uid = gs.commitPreparedUnit(prepared_unit.?);
-    gs.unit(uid).?.hull_instance_id = listing.hull_instance_id;
-    gs.commitHullTransfer(hull_transfer.?);
+    const bought = gs.unit(uid).?;
+    if (acquisition) |prepared| _ = gs.commitHullAcquisition(bought, prepared) else {
+        bought.hull_instance_id = listing.hull_instance_id;
+        gs.commitHullTransfer(hull_transfer.?);
+    }
     return .{ .unit = uid };
 }
 
@@ -1162,6 +1168,93 @@ pub fn listingOnBoard(gs: *const GameState, listing: market.Listing, buyer: type
             return if (deployment) |active| std.mem.eql(u8, active.planet_key, listing.planet_key) else false;
         },
     }
+}
+
+/// Purchase an abstraction-path board hull into an HQ hangar. The prepared
+/// instance and provenance row make payment, listing removal, and identity one
+/// infallible commit.
+fn buyAbstractionHullAtHq(gs: *GameState, index: usize, listing: market.Listing, price: types.CBills, hq: types.HqId, berth_kind: ?unit_mod.UnitKind) !BuyResult {
+    var staged_rng = gs.rng;
+    var prepared_unit = try gs.prepareUnit(listing.item_key);
+    if (listing.condition) |condition| market.applyHullCondition(&prepared_unit.unit, condition, staged_rng.random(.market));
+    const prepared_hull = try gs.prepareHullAcquisition(&prepared_unit.unit, "unknown");
+    const posting = try gs.prepareTreasuryPosting(.{ .hq = hq }, .{
+        .day = gs.clock.day_index,
+        .amount = -price,
+        .category = .unit_purchase,
+        .hq = hq,
+        .note = listing.item_key,
+    });
+    const log = try gs.prepareLog(.market, .{ .hq = hq }, "[market] bought {s} ({s}) for {d}{s}", .{
+        listing.item_key,
+        if (listing.condition) |condition| condition.label() else "new",
+        price,
+        if (berth_kind != null) " — berthed here" else "",
+    });
+
+    gs.commitTreasuryPosting(posting);
+    gs.rng = staged_rng;
+    const current = &gs.market_listings.items[index];
+    if (listing.staple and current.quantity > 1) current.quantity -= 1 else _ = gs.market_listings.orderedRemove(index);
+    const uid = gs.commitPreparedUnit(prepared_unit);
+    const bought = gs.unit(uid).?;
+    _ = gs.commitHullAcquisition(bought, prepared_hull);
+    if (berth_kind != null) bought.berth_hq = hq;
+    gs.commitLog(log);
+    return .{ .unit = uid };
+}
+
+fn buyContractWorldHull(gs: *GameState, index: usize, listing: market.Listing, price: types.CBills, company: types.ForceId, c: *const contract.Contract) !BuyResult {
+    var staged_rng = gs.rng;
+    var prepared_unit = try gs.prepareUnit(listing.item_key);
+    if (listing.condition) |condition| market.applyHullCondition(&prepared_unit.unit, condition, staged_rng.random(.market));
+    const acquisition = if (listing.hull_instance_id == .none)
+        try gs.prepareHullAcquisition(&prepared_unit.unit, "unknown")
+    else
+        null;
+    const transfer = if (listing.hull_instance_id != .none)
+        try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market")
+    else
+        null;
+    const company_force = gs.force(company) orelse return error.UnknownForce;
+    try company_force.units.ensureUnusedCapacity(gs.allocator(), 1);
+    const posting = try gs.prepareTreasuryPosting(.{ .company = company }, .{ .day = gs.clock.day_index, .amount = -price, .category = .unit_purchase, .company = company, .contract = c.id, .note = listing.item_key });
+    const log = try gs.prepareLog(.market, .{ .company = company, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
+        company_force.name, listing.item_key, if (listing.condition) |condition| condition.label() else "new", c.planet_key, price,
+    });
+
+    gs.commitTreasuryPosting(posting);
+    gs.rng = staged_rng;
+    _ = gs.market_listings.orderedRemove(index);
+    const uid = gs.commitPreparedUnit(prepared_unit);
+    const bought = gs.unit(uid).?;
+    if (acquisition) |prepared| _ = gs.commitHullAcquisition(bought, prepared) else {
+        bought.hull_instance_id = listing.hull_instance_id;
+        gs.commitHullTransfer(transfer.?);
+    }
+    bought.force = company;
+    bought.tech = .none;
+    company_force.units.appendAssumeCapacity(uid);
+    gs.commitLog(log);
+    return .{ .unit = uid };
+}
+
+fn buyExistingHullAtHq(gs: *GameState, index: usize, listing: market.Listing, price: types.CBills, hq: types.HqId, berth_kind: ?unit_mod.UnitKind) !BuyResult {
+    const prepared_unit = try gs.prepareUnit(listing.item_key);
+    const transfer = try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market");
+    const posting = try gs.prepareTreasuryPosting(.{ .hq = hq }, .{ .day = gs.clock.day_index, .amount = -price, .category = .unit_purchase, .hq = hq, .note = listing.item_key });
+    const log = try gs.prepareLog(.market, .{ .hq = hq }, "[market] bought {s} ({s}) for {d}{s}", .{ listing.item_key, if (listing.condition) |condition| condition.label() else "new", price, if (berth_kind != null) " — berthed here" else "" });
+
+    gs.commitTreasuryPosting(posting);
+    const current = &gs.market_listings.items[index];
+    if (listing.staple and current.quantity > 1) current.quantity -= 1 else _ = gs.market_listings.orderedRemove(index);
+    const uid = gs.commitPreparedUnit(prepared_unit);
+    const bought = gs.unit(uid).?;
+    bought.hull_instance_id = listing.hull_instance_id;
+    if (berth_kind != null) bought.berth_hq = hq;
+    gs.commitHullTransfer(transfer);
+    gs.commitLog(log);
+    return .{ .unit = uid };
 }
 
 /// Buy a listing from the selected market board.
@@ -1210,29 +1303,7 @@ pub fn buyListing(gs: *GameState, index: usize, buyer: types.Site) !BuyResult {
                 gs.commitLog(log);
                 return .{};
             }
-            try treasury.debit(gs, .{ .company = co }, .{
-                .day = gs.clock.day_index,
-                .amount = -price,
-                .category = .unit_purchase,
-                .company = co,
-                .contract = c.id,
-                .note = listing.item_key,
-            });
-            _ = gs.market_listings.orderedRemove(index);
-            const uid = try gs.addUnit(listing.item_key);
-            const bought_co = gs.unit(uid).?;
-            if (listing.hull_instance_id != .none) {
-                bought_co.hull_instance_id = listing.hull_instance_id;
-                try gs.transferHullOwnership(listing.hull_instance_id, .player, "market");
-            } else {
-                if (listing.condition) |cond| market.applyHullCondition(bought_co, cond, gs.rng.random(.market));
-                try gs.recordHullAcquisition(bought_co, .purchase, "unknown");
-            }
-            try toe.placeUnitInCompanyPool(gs, uid, co);
-            try gs.log(.market, .{ .company = co, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
-                if (gs.force(co)) |f| f.name else "company", listing.item_key, if (listing.condition) |cd| cd.label() else "new", c.planet_key, price,
-            });
-            return .{ .unit = uid };
+            return buyContractWorldHull(gs, index, listing, price, co, c);
         }
         const world = planet.find(listing.planet_key) orelse return error.NoSuchListing;
         if (listing.hull_instance_id == .none) return error.NoSuchListing;
@@ -1307,6 +1378,20 @@ pub fn buyListing(gs: *GameState, index: usize, buyer: types.Site) !BuyResult {
         berth_kind = design.kind;
     };
     if (gs.treasuryBalance(.{ .hq = hq_id }) < price) return error.HqTreasuryShort;
+    if (listing.kind == .unit and !listing.black_market and listing.hull_instance_id == .none) {
+        return buyAbstractionHullAtHq(gs, index, listing, price, hq_id, berth_kind);
+    }
+    if (listing.kind == .unit and !listing.black_market and listing.hull_instance_id != .none) {
+        return buyExistingHullAtHq(gs, index, listing, price, hq_id, berth_kind);
+    }
+    if (listing.kind == .unit and listing.black_market) {
+        if (listing.planet_key.len > 0) return buyDispersedListingAtHq(gs, index, listing, price, hq_id);
+        const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
+        const world = planet.find(hq.planet_key) orelse return error.NoSuchListing;
+        var local_listing = listing;
+        local_listing.planet_key = world.key;
+        return buyDispersedListingAtHq(gs, index, local_listing, price, hq_id);
+    }
     try treasury.debit(gs, .{ .hq = hq_id }, .{
         .day = gs.clock.day_index,
         .amount = -price,
@@ -1391,25 +1476,38 @@ pub fn buyHullFor(gs: *GameState, listing: usize, company: types.ForceId, lance:
     const l = gs.market_listings.items[listing];
     if (l.kind != .unit or l.company != .none) return error.NoSuchListing;
     const board_hq: types.HqId = if (l.hq != .none) l.hq else gs.seat();
+    const home = gs.homeHqFor(company);
+    const from = if (gs.hqs.getPtr(board_hq)) |h| planet.find(h.planet_key) else null;
+    const to = if (gs.hqs.getPtr(home)) |h| planet.find(h.planet_key) else null;
+    const days: u32 = if (from != null and to != null) logistics.deliveryDays(from.?, to.?) else 0;
+    const lance_ok = if (gs.force(lance)) |lf| (gs.companyOf(lance) == company and (lf.echelon != .lance or lf.units.items.len < force_mod.lance_size)) else false;
+    const raise_log = if (days == 0)
+        try gs.prepareLog(.market, .{ .company = company }, "[raise] {s} #{d} joins {s}", .{ l.item_key, gs.next_unit_id, dest.name })
+    else
+        try gs.prepareLog(.market, .{ .company = company }, "[raise] {s} #{d} bought at {s} — {d} days to {s}", .{ l.item_key, gs.next_unit_id, gs.hqs.getPtr(board_hq).?.name, days, dest.name });
+    if (days == 0) {
+        if (lance_ok) {
+            try gs.force(lance).?.units.ensureUnusedCapacity(gs.allocator(), 1);
+        } else {
+            // placeUnitInCompany may select any eligible child force based on the
+            // purchased hull's kind, so reserve every possible destination first.
+            try dest.units.ensureUnusedCapacity(gs.allocator(), 1);
+            for (dest.children.items) |child| try gs.force(child).?.units.ensureUnusedCapacity(gs.allocator(), 1);
+        }
+    } else try gs.unit_transfers.ensureUnusedCapacity(gs.allocator(), 1);
     // A defrauded purchase creates no hull and returns none: there is
     // nothing to place.
     const buy_res = try buyListing(gs, listing, .{ .hq = board_hq });
     const uid = buy_res.unit;
     if (uid == .none) return .{ .fraud = buy_res.fraud };
-    const home = gs.homeHqFor(company);
-    const from = if (gs.hqs.getPtr(board_hq)) |h| planet.find(h.planet_key) else null;
-    const to = if (gs.hqs.getPtr(home)) |h| planet.find(h.planet_key) else null;
-    const days: u32 = if (from != null and to != null) logistics.deliveryDays(from.?, to.?) else 0;
     if (days == 0) {
-        const lance_ok = if (gs.force(lance)) |lf| (gs.companyOf(lance) == company and (lf.echelon != .lance or lf.units.items.len < force_mod.lance_size)) else false;
-        if (lance_ok) try toe.moveUnitToForce(gs, uid, lance) else try toe.placeUnitInCompany(gs, uid, company);
-        try gs.log(.market, .{ .company = company }, "[raise] {s} #{d} joins {s}", .{ l.item_key, @intFromEnum(uid), dest.name });
+        if (lance_ok) toe.moveUnitToForce(gs, uid, lance) catch unreachable else toe.placeUnitInCompany(gs, uid, company) catch unreachable;
     } else {
         const u = gs.unit(uid).?;
         u.status = .in_transit;
-        try gs.unit_transfers.append(gs.allocator(), .{ .unit = uid, .to_company = company, .eta_day = gs.clock.day_index + days });
-        try gs.log(.market, .{ .company = company }, "[raise] {s} #{d} bought at {s} — {d} days to {s}", .{ l.item_key, @intFromEnum(uid), gs.hqs.getPtr(board_hq).?.name, days, dest.name });
+        gs.unit_transfers.appendAssumeCapacity(.{ .unit = uid, .to_company = company, .eta_day = gs.clock.day_index + days });
     }
+    gs.commitLog(raise_log);
     return .{ .unit = uid, .eta_days = days };
 }
 
@@ -2055,6 +2153,71 @@ test "a funds-short buy refusal creates no HullInstance and no ownership row" {
     try std.testing.expectEqual(before_count, gs.hull_ownership_history.items.len);
     // No new unit added.
     for (gs.units.values()) |u| try std.testing.expectEqual(@import("../domain/types.zig").HullInstanceId.none, u.hull_instance_id);
+}
+
+test "abstraction listing purchase is failure-atomic at every preparation boundary" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var gs = GameState.init(outer.allocator(), .{ .seed = 7304 });
+        _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+        const hq = gs.seat();
+        gs.hqs.getPtr(hq).?.funds = 5_000_000;
+        const listing: types.ListingId = @enumFromInt(gs.next_listing_id);
+        try gs.market_listings.append(gs.allocator(), .{ .id = listing, .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 400_000, .hq = hq, .condition = .{ .armor_pct = 80, .quality = .c, .damaged_slots = 0, .destroyed_slots = 0, .missing_components = 0 } });
+        gs.next_listing_id += 1;
+        const before = digest.stateHash(&gs);
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
+        gs.arena.child_allocator = failing.allocator();
+        if (commands.execute(&gs, .{ .buy_listing = .{ .listing = listing, .buyer = .{ .hq = hq } } })) |_| {
+            try std.testing.expect(digest.stateHash(&gs) != before);
+            gs.deinit();
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+            gs.deinit();
+        }
+    }
+}
+
+test "real-instance listing transfer is failure-atomic" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var gs = GameState.init(outer.allocator(), .{ .seed = 7305 });
+        _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+        const hq = gs.seat();
+        gs.hqs.getPtr(hq).?.funds = 5_000_000;
+        const hull: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+        gs.next_hull_instance_id += 1;
+        try gs.hull_instances.put(gs.allocator(), hull, .{ .id = hull, .base_key = "SCP-1N", .owner = .market });
+        try gs.hull_ownership_history.append(gs.allocator(), .{ .hull_instance_id = hull, .acquisition_type = .transfer, .prior_owner_key = "LC" });
+        const listing: types.ListingId = @enumFromInt(gs.next_listing_id);
+        try gs.market_listings.append(gs.allocator(), .{ .id = listing, .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 400_000, .hq = hq, .hull_instance_id = hull });
+        gs.next_listing_id += 1;
+        const before = digest.stateHash(&gs);
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
+        gs.arena.child_allocator = failing.allocator();
+        if (commands.execute(&gs, .{ .buy_listing = .{ .listing = listing, .buyer = .{ .hq = hq } } })) |result| {
+            try std.testing.expectEqual(hull, gs.unit(result.unit).?.hull_instance_id);
+            try std.testing.expectEqual(@import("../domain/hull_instance.zig").OwnerType.player, std.meta.activeTag(gs.hull_instances.getPtr(hull).?.owner));
+            gs.deinit();
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+            gs.deinit();
+        }
+    }
 }
 
 test "buying a surplus listing transfers the pre-existing HullInstance to the player" {

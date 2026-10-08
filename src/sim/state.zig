@@ -1064,6 +1064,45 @@ pub const GameState = struct {
         });
     }
 
+    /// A new player-owned hull and its first provenance interval, prepared so a
+    /// compound purchase can commit its unit, instance, and history without allocation.
+    pub const PreparedHullAcquisition = struct {
+        instance: hull_instance_mod.HullInstance,
+        history: hull_instance_mod.HullOwnershipHistory,
+    };
+
+    pub fn prepareHullAcquisition(self: *GameState, u: *const unit_mod.Unit, prior_owner_key: []const u8) !PreparedHullAcquisition {
+        const design = chassis_mod.find(u.chassis_key) orelse return error.UnknownChassis;
+        try self.hull_instances.ensureUnusedCapacity(self.allocator(), 1);
+        try self.hull_ownership_history.ensureUnusedCapacity(self.allocator(), 1);
+        var instance: hull_instance_mod.HullInstance = .{
+            .id = @enumFromInt(self.next_hull_instance_id),
+            .base_key = u.chassis_key,
+            .status = .active,
+            .intro_year = design.intro_year,
+            .owner = .player,
+        };
+        for (u.slots.items) |slot| try instance.loadout.append(self.allocator(), .{ .part_key = slot.part_key });
+        return .{
+            .instance = instance,
+            .history = .{
+                .hull_instance_id = instance.id,
+                .from_day = self.clock.day_index,
+                .acquisition_type = .purchase,
+                .prior_owner_key = try self.allocator().dupe(u8, prior_owner_key),
+            },
+        };
+    }
+
+    /// Commit a prepared new hull acquisition without allocation and return its identity.
+    pub fn commitHullAcquisition(self: *GameState, u: *unit_mod.Unit, prepared: PreparedHullAcquisition) types.HullInstanceId {
+        self.hull_instances.putAssumeCapacity(prepared.instance.id, prepared.instance);
+        u.hull_instance_id = prepared.instance.id;
+        self.hull_ownership_history.appendAssumeCapacity(prepared.history);
+        self.next_hull_instance_id += 1;
+        return prepared.instance.id;
+    }
+
     /// The one writer for a salvage hull transfer (rule 20/3): change the existing
     /// hull's owner and status to `.active`, close any open ownership interval,
     /// and open a new `.salvage` interval naming the prior owner. `prior_owner_key`

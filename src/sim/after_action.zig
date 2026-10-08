@@ -194,6 +194,31 @@ test "render turns a report into the AAR lines, with no markup" {
     for (lines) |l| try std.testing.expect(std.mem.indexOfScalar(u8, l, '{') == null);
 }
 
+test "render includes a vehicle hull line from the shared report record" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const hulls = [_]HullHit{.{ .unit = @enumFromInt(9), .chassis_key = "SCP-1N", .chassis_name = "Scorpion", .armor_before = 100, .armor_after = 65, .slot = "turret.ac5", .slot_part = "ac5", .slot_result = .damaged }};
+    const report: BattleReport = .{
+        .id = @enumFromInt(1),
+        .day = 1,
+        .contract = @enumFromInt(1),
+        .company = @enumFromInt(1),
+        .kind = "recon raid",
+        .enemy_key = "DC",
+        .scenario = "probe",
+        .terrain = "open",
+        .weather = "clear",
+        .outcome = .victory,
+        .hulls = &hulls,
+    };
+    const lines = try render(arena.allocator(), &report);
+    var found = false;
+    for (lines) |line| {
+        if (std.mem.indexOf(u8, line, "#9 SCP-1N Scorpion: armor 100%→65%") != null) found = true;
+    }
+    try std.testing.expect(found);
+}
+
 test "a conceded objective renders one line" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
