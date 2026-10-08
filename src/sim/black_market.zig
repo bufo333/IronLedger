@@ -48,13 +48,22 @@ pub fn buyerEligible(gs: *const GameState, listing: market.Listing, buyer: Buyer
             for (gs.hqs.values()) |h| {
                 if (std.mem.eql(u8, h.planet_key, listing.planet_key)) return true;
             }
-            for (gs.contracts.values()) |c| {
-                if (c.status == .active and c.assigned_company != .none and
-                    std.mem.eql(u8, c.planet_key, listing.planet_key)) return true;
-            }
-            return false;
+            return playerDeploymentAt(gs, listing, current_day) != null;
         },
     }
+}
+
+/// Returns the active contract that gives the player local access to a
+/// dispersed listing, or null when no deployed company is present there.
+/// The listing must pass the black-market availability and world checks.
+pub fn playerDeploymentAt(gs: *const GameState, listing: market.Listing, current_day: u32) ?types.ContractId {
+    if (!listing.black_market or listing.available_after > current_day) return null;
+    _ = planet_mod.find(listing.planet_key) orelse return null;
+    for (gs.contracts.values()) |c| {
+        if (c.status == .active and c.assigned_company != .none and
+            std.mem.eql(u8, c.planet_key, listing.planet_key)) return c.id;
+    }
+    return null;
 }
 
 /// Single owner of dispersed black-market listing construction (rule 20).
@@ -97,6 +106,8 @@ pub fn makeDispersedListing(
         .rarity = ch.rarity,
         .price = market.hullPrice(ch.cost, avg_weapon, factory_cond, 10_000),
         .id = listing_id,
+        .listed_day = battle_day,
+        .expires_day = battle_day + delay_days + tuning.market.faction_surplus_listing_days,
         .black_market = true,
         .planet_key = planet_key,
         .available_after = battle_day + delay_days,
@@ -604,7 +615,8 @@ test "disperseEnemyWrecks: recovers up to capacity, disperses the remainder to o
     // N = enemy_recovery_capacity + 3 wrecks; battle world = "solaris7" (a black-market world).
     // Expect: exactly enemy_recovery_capacity hulls recovered into faction roster;
     // the remaining 3 get market listings on a black-market world != "solaris7",
-    // available_after in [battle_day+min, battle_day+max], hull_instance_id set.
+    // available_after in [battle_day+min, battle_day+max], expiry after its
+    // availability window, hull_instance_id set.
     var gs = GameState.init(testing.allocator, .{ .seed = 7201 });
     defer gs.deinit();
 
@@ -651,6 +663,7 @@ test "disperseEnemyWrecks: recovers up to capacity, disperses the remainder to o
         try testing.expect(!std.mem.eql(u8, listing.planet_key, battle_planet));
         try testing.expect(listing.available_after >= battle_day + tuning.market.black_market_delay_days_min);
         try testing.expect(listing.available_after <= battle_day + tuning.market.black_market_delay_days_max);
+        try testing.expectEqual(listing.available_after + tuning.market.faction_surplus_listing_days, listing.expires_day);
         try testing.expectEqual(hid, listing.hull_instance_id);
         // Verify planet_key is a known black-market world.
         var is_bm_world = false;

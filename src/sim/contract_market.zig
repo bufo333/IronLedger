@@ -1081,11 +1081,18 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
         !black_market.buyerEligible(gs, listing, .player, gs.clock.day_index))
         return error.NoSuchListing;
     const price = types.applyBp(listing.price, gs.diff().purchase_bp); // difficulty
+    const dispersed_contract = if (listing.black_market and listing.planet_key.len > 0)
+        black_market.playerDeploymentAt(gs, listing, gs.clock.day_index)
+    else
+        null;
     // The contract world's board: the company buys where it
     // stands, from its local funds, and the hull joins it there.
-    if (listing.company != .none) {
-        const co = listing.company;
-        const c = gs.deploymentContract(co) orelse return error.NoSuchListing;
+    if (listing.company != .none or dispersed_contract != null) {
+        const c = if (dispersed_contract) |contract_id|
+            gs.contracts.getPtr(contract_id) orelse return error.NoSuchListing
+        else
+            gs.deploymentContract(listing.company) orelse return error.NoSuchListing;
+        const co = c.assigned_company;
         if (c.status != .active) return error.NoSuchListing;
         if (gs.treasuryBalance(.{ .company = co }) < price) return error.CompanyFundsShort;
         try treasury.debit(gs, .{ .company = co }, .{
@@ -1096,11 +1103,31 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
             .contract = c.id,
             .note = listing.item_key,
         });
-        _ = gs.market_listings.orderedRemove(index);
+        if (dispersed_contract != null) {
+            const world = planet.find(listing.planet_key) orelse return error.NoSuchListing;
+            const bm = tuning.market;
+            const roll = gs.rng.roll2d6(.market);
+            if (roll <= bm.black_market_fraud_target) {
+                if (listing.hull_instance_id != .none) try gs.returnMarketHullToFaction(listing.hull_instance_id);
+                _ = gs.market_listings.orderedRemove(index);
+                const now = if (!std.mem.eql(u8, world.faction, "PER")) try gs.adjustStanding(world.faction, -bm.black_market_standing_loss) else 0;
+                try gs.log(.market, .{ .company = co, .contract = c.id }, "[black market] the fence vanished with {s} c-bills — no {s} (2d6 = {d}); {s} standing −{d} → {d}", .{ try types.moneyText(gs.allocator(), price), listing.item_key, roll, world.faction, bm.black_market_standing_loss, now });
+                return .{ .fraud = true };
+            }
+            _ = gs.market_listings.orderedRemove(index);
+            const house_now = if (!std.mem.eql(u8, world.faction, "PER")) try gs.adjustStanding(world.faction, -1) else 0;
+            const pirate_now = try gs.adjustStanding("PER", 1);
+            try gs.log(.market, .{ .company = co, .contract = c.id }, "[black market] {s} changed hands for {s} c-bills, no questions asked — {s} standing −1 → {d}, pirates +1 → {d}", .{ listing.item_key, try types.moneyText(gs.allocator(), price), world.faction, house_now, pirate_now });
+        } else _ = gs.market_listings.orderedRemove(index);
         const uid = try gs.addUnit(listing.item_key);
         const bought_co = gs.unit(uid).?;
-        if (listing.condition) |cond| market.applyHullCondition(bought_co, cond, gs.rng.random(.market));
-        try gs.recordHullAcquisition(bought_co, .purchase, "unknown");
+        if (listing.hull_instance_id != .none) {
+            bought_co.hull_instance_id = listing.hull_instance_id;
+            try gs.transferHullOwnership(listing.hull_instance_id, .player, "market");
+        } else {
+            if (listing.condition) |cond| market.applyHullCondition(bought_co, cond, gs.rng.random(.market));
+            try gs.recordHullAcquisition(bought_co, .purchase, "unknown");
+        }
         try toe.placeUnitInCompany(gs, uid, co);
         try gs.log(.market, .{ .company = co, .contract = c.id }, "[market] {s} bought {s} ({s}) on {s} for {d} from local funds — seat a pilot and a tech", .{
             if (gs.force(co)) |f| f.name else "company", listing.item_key, if (listing.condition) |cd| cd.label() else "new", c.planet_key, price,
@@ -1134,6 +1161,7 @@ pub fn buyListing(gs: *GameState, index: usize) !BuyResult {
         const roll = gs.rng.roll2d6(.market);
         _ = gs.market_listings.orderedRemove(index);
         if (roll <= bm.black_market_fraud_target) {
+            if (listing.planet_key.len > 0 and listing.hull_instance_id != .none) try gs.returnMarketHullToFaction(listing.hull_instance_id);
             const now = if (!std.mem.eql(u8, world_faction, "PER")) try gs.adjustStanding(world_faction, -bm.black_market_standing_loss) else 0;
             try gs.log(.market, .{ .hq = hq_id }, "[black market] the fence vanished with {s} c-bills — no {s} (2d6 = {d}); {s} standing −{d} → {d}", .{ try types.moneyText(gs.allocator(), price), listing.item_key, roll, world_faction, bm.black_market_standing_loss, now });
             return .{ .fraud = true };
@@ -1901,4 +1929,109 @@ test "surplus listing age-out returns hull to originating faction pool" {
     } else {
         try std.testing.expect(false); // roster must exist
     }
+}
+
+test "a dispersed listing survives refresh until its availability window opens" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7403 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
+
+    const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hid, .{ .id = hid, .base_key = "SHD-2H", .owner = .market });
+    try gs.hull_ownership_history.append(gs.allocator(), .{
+        .hull_instance_id = hid,
+        .from_day = 10,
+        .acquisition_type = .transfer,
+        .prior_owner_key = "LC",
+    });
+    const listing = black_market.makeDispersedListing(&gs, hid, @enumFromInt(gs.next_listing_id), "canopus4", 10, 7);
+    try gs.market_listings.append(gs.allocator(), listing);
+    gs.next_listing_id += 1;
+    gs.clock.day_index = listing.available_after - 1;
+
+    try refreshListings(&gs);
+
+    for (gs.market_listings.items) |current| {
+        if (current.id == listing.id) {
+            try std.testing.expectEqual(listing.expires_day, current.expires_day);
+            return;
+        }
+    }
+    return error.DispersedListingRemovedBeforeAvailability;
+}
+
+test "a deployed company buys dispersed black-market hulls with local funds and world standing" {
+    const hull_mod = @import("../domain/hull_instance.zig");
+    var fraud = false;
+    var sale = false;
+    var seed: u64 = 1;
+    while ((!fraud or !sale) and seed < 80) : (seed += 1) {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer gs.deinit();
+        _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .chief_engineer } });
+        const company = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+        const contract_id: types.ContractId = @enumFromInt(7403);
+        try gs.contracts.put(gs.allocator(), contract_id, .{
+            .id = contract_id,
+            .kind = .objective_raid,
+            .employer_key = "MOC",
+            .enemy_key = "DC",
+            .planet_key = "canopus4",
+            .status = .active,
+            .assigned_company = company,
+            .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+        });
+        gs.force(company).?.location_planet = "canopus4";
+        gs.force(company).?.local_funds = 5_000_000;
+
+        const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+        gs.next_hull_instance_id += 1;
+        try gs.hull_instances.put(gs.allocator(), hid, .{ .id = hid, .base_key = "LCT-1V", .owner = .market });
+        try gs.hull_ownership_history.append(gs.allocator(), .{
+            .hull_instance_id = hid,
+            .from_day = 0,
+            .acquisition_type = .transfer,
+            .prior_owner_key = "MOC",
+        });
+        const listing_id: types.ListingId = @enumFromInt(gs.next_listing_id);
+        try gs.market_listings.append(gs.allocator(), .{
+            .id = listing_id,
+            .kind = .unit,
+            .item_key = "LCT-1V",
+            .rarity = .common,
+            .price = 500_000,
+            .black_market = true,
+            .planet_key = "canopus4",
+            .hull_instance_id = hid,
+        });
+        gs.next_listing_id += 1;
+
+        const seat_funds = gs.hqs.getPtr(gs.seat()).?.funds;
+        const local_funds = gs.force(company).?.local_funds;
+        const moc_standing = gs.standing("MOC");
+        const pirates_standing = gs.standing("PER");
+        const units_before = gs.units.count();
+        const result = try commands.execute(&gs, .{ .buy_listing = listing_id });
+
+        try std.testing.expectEqual(seat_funds, gs.hqs.getPtr(gs.seat()).?.funds);
+        try std.testing.expectEqual(local_funds - 500_000, gs.force(company).?.local_funds);
+        if (result.fraud) {
+            fraud = true;
+            try std.testing.expectEqual(moc_standing - tuning.market.black_market_standing_loss, gs.standing("MOC"));
+            try std.testing.expectEqual(pirates_standing, gs.standing("PER"));
+            try std.testing.expectEqual(units_before, gs.units.count());
+            try std.testing.expectEqual(hull_mod.OwnerType.faction, std.meta.activeTag(gs.hull_instances.getPtr(hid).?.owner));
+            try std.testing.expect(gs.faction_rosters.get("MOC") != null);
+        } else {
+            sale = true;
+            try std.testing.expectEqual(moc_standing - 1, gs.standing("MOC"));
+            try std.testing.expectEqual(pirates_standing + 1, gs.standing("PER"));
+            try std.testing.expectEqual(units_before + 1, gs.units.count());
+            try std.testing.expectEqual(company, gs.companyOf(gs.unit(result.unit).?.force));
+            try std.testing.expectEqual(hull_mod.OwnerType.player, std.meta.activeTag(gs.hull_instances.getPtr(hid).?.owner));
+        }
+        for (gs.market_listings.items) |current| try std.testing.expect(current.id != listing_id);
+    }
+    try std.testing.expect(fraud and sale);
 }
