@@ -1,12 +1,15 @@
-# P2 Battle-Armor Domain Blocker Record
+# P2 Battle-Armor Era Deferral Record
 
 ## Status
 
-P2b is blocked. P2a, `docs/p2-battle-armor-artillery-design.md`, remains the
-governing approval: source facts must be verified and then re-encoded, never
-copied from source data. This record authorizes no candidate, data, domain
-code, persistence work, schema, acquisition, attachment, crewing, readiness,
-repair, supply, battle behavior, UI, test, or migration work.
+The campaign era is 3025. The owner decision is that Inner Sphere battle armor
+is unavailable in that era, so P2b through P2d are deferred until an explicitly
+approved campaign-era expansion beyond 3025. P2a,
+`docs/p2-battle-armor-artillery-design.md`, remains the governing approval:
+source facts must be verified and then re-encoded, never copied from source
+data. This era gate authorizes no candidate, data, domain code, persistence
+work, schema, acquisition, attachment, crewing, readiness, repair, supply,
+battle behavior, UI, test, or migration work.
 
 ## Inspected locators
 
@@ -60,14 +63,15 @@ state.
 
 This is project policy, not a source-defined battle-armor fact.
 
-## Unresolved Facts And Candidate Status
+## Historical Observations And Deferred Facts
 
-Rhino is blocked as a catalogue candidate. Elemental is blocked as a catalogue
-candidate. The inspected evidence does not establish the complete P2a-required
-set for either candidate:
+Rhino and Elemental remain previously inspected historical observations and
+locators, not active 3025 catalogue candidates. The model-mismatch observations
+and unresolved P2a-required facts are not actionable while the era gate is
+closed. For a later eligible candidate, research must establish:
 
-- Exact 3025-or-earlier configuration, BV, C-bill cost, and availability
-  policy.
+- Exact configuration, BV, C-bill cost, availability policy, and actual later
+  introduction date.
 - Complete loadout and ammunition representation, and transport or bay
   requirements.
 - Crew and technician responsibility.
@@ -77,8 +81,10 @@ set for either candidate:
 No existing `.ba_trooper`, `.tech_ba`, `UnitKind.battle_armor`, or tuning value
 verifies any required fact above.
 
-## Research Exit
+## Era-Expansion Prerequisite
 
-For each candidate, research must pin a durable source authority and locator
-for every P2a-required fact. A separately approved plan is then required before
-any domain, data, or persistence implementation begins.
+Before the battle-armor track can resume, an approved campaign-era expansion
+past 3025 must source and pin MegaMek GitHub records for each proposed
+candidate's actual later introduction date. It must then complete the full
+P2a-required candidate research. A separately approved implementation plan is
+required before any domain, data, or persistence implementation begins.

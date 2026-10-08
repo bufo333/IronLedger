@@ -6,6 +6,11 @@ This is the sole durable approval authority for P2a. It is a design-only
 approval that identifies the delivery boundaries for P2b through P2i. It does
 not approve candidates, source facts, values, schemas, or gameplay behavior.
 
+The campaign era is 3025. Inner Sphere battle armor is unavailable in that era,
+so P2b through P2d are deferred until an explicitly approved campaign-era
+expansion beyond 3025. This is an era gate, not approval for a battle-armor
+candidate, source fact, identity model, schema, command, or behavior.
+
 Battle armor and artillery are separate asset tracks. They are also separate
 from the approved conventional vehicle and aerospace foundation in
 `docs/p2-conventional-combat-design.md`; P2a neither changes nor renumbers
@@ -38,6 +43,11 @@ particular, the unused `artillery_bp = 1_000` is not an approved artillery
 rule. Each later fact table must cite its authority as required by the coding
 contract. Unknown page references remain unknown; no candidate, value, role,
 capacity, or formula may be invented.
+
+Any future battle-armor return requires a later era-expansion plan to source
+and pin MegaMek GitHub records for each proposed candidate and verify its
+actual introduction date is later than 3025. Current research gaps,
+source-directory labels, and project placeholders are not availability rules.
 
 ## Ownership and acquisition
 
@@ -99,28 +109,43 @@ tests. P2a adds no state and therefore no migration.
 
 ## Ordered delivery
 
+Battle armor and artillery are separate delivery tracks. Battle armor remains
+deferred at P2b through P2d while the 3025 scope is unchanged. Artillery
+continues in order from P2e through P2i.
+
+### Deferred battle-armor track
+
 1. `P2b`: Battle-armor verified catalogue and domain facts and provenance,
    including its chosen identity and persistence classification boundary.
 2. `P2c`: Battle-armor acquisition and attachment through the approved
    ownership, market, force, transport, and command owners.
 3. `P2d`: Battle-armor crewing, maintenance and readiness, repair and supply
-   behavior, persistence completion, and required focused coverage.
-4. `P2e`: Artillery verified catalogue and domain facts and provenance,
-   including its distinct identity or category and persistence classification
-   boundary.
-5. `P2f`: Artillery acquisition and attachment through the approved ownership,
-   market, force, transport, and command owners.
-6. `P2g`: Artillery crewing, maintenance and readiness, repair, ammunition,
-   and supply behavior, persistence completion, and required focused coverage.
-7. `P2h`: Source-backed battle effects for both approved asset classes through
-   existing autoresolve and battle owners, with deterministic RNG and AAR or
-   report boundaries; no UI controls.
-8. `P2i`: REPL, TUI, and query surfaces for already-delivered commands and
-   reports, using the command and query boundary and both smoke scripts.
+    behavior, persistence completion, and required focused coverage.
 
-This order keeps battle armor before artillery, and both asset-flow tracks
-before effects and UI. Each increment has one cohesive primary outcome and
-must describe interfaces and acceptance boundaries without unsourced values.
+Before this track may resume, a separately approved campaign-era expansion
+must verify and pin MegaMek GitHub records for each candidate's actual later
+introduction date, complete the P2a-required candidate research, and approve a
+separate implementation plan.
+
+### Active artillery track
+
+1. `P2e`: Artillery verified catalogue and domain facts and provenance,
+    including its distinct identity or category and persistence classification
+    boundary.
+2. `P2f`: Artillery acquisition and attachment through the approved ownership,
+    market, force, transport, and command owners.
+3. `P2g`: Artillery crewing, maintenance and readiness, repair, ammunition,
+    and supply behavior, persistence completion, and required focused coverage.
+4. `P2h`: Source-backed artillery battle effects through existing autoresolve
+    and battle owners, with deterministic RNG and AAR or report boundaries; no
+    UI controls. Its battle-armor portion remains deferred with P2b through
+    P2d.
+5. `P2i`: Artillery REPL, TUI, and query surfaces for already-delivered
+    commands and reports, using the command and query boundary and both smoke
+    scripts. Its battle-armor portion remains deferred with P2b through P2d.
+
+Each active increment has one cohesive primary outcome and must describe
+interfaces and acceptance boundaries without unsourced values.
 
 ## Later acceptance evidence
 

@@ -1369,9 +1369,12 @@ source-directory or TRO publication labels.
 The separate approved battle-armor and artillery design is
 `docs/p2-battle-armor-artillery-design.md`. P2a is design-only: it sets the
 source-verification, ownership, attachment, crewing, readiness, and persistence
-decisions required before implementation. Delivery remains P2b-P2d for battle
-armor, P2e-P2g for artillery, then P2h battle effects and P2i REPL/TUI/query
-surfaces.
+decisions required before implementation. The 3025 campaign era excludes Inner
+Sphere battle armor, so P2b-P2d and the battle-armor portions of P2h-P2i are
+deferred pending an explicitly approved campaign-era expansion beyond 3025 and
+pinned MegaMek GitHub records verifying each proposed candidate's actual later
+introduction date. Artillery continues in order through P2e-P2g, P2h artillery
+battle effects, and P2i artillery REPL/TUI/query surfaces.
 
 This foundation lets player and NPC companies buy the same assets from the
 market. The later NPC merc-company economy work sets the four-active-lance
