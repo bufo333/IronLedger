@@ -2497,14 +2497,30 @@ pub const Store = struct {
     fn loadHullInstances(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
         const hull_mod = @import("../domain/hull_instance.zig");
-        const st = try self.db.prepare("SELECT id, base_key, name, nickname, status, intro_year, pre_campaign, owner_type, owner_faction_key, owner_merc_company_id, catalogue FROM hull_instance WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare(
+            \\SELECT id,base_key,name,nickname,status,intro_year,pre_campaign,
+            \\       owner_type,owner_faction_key,owner_merc_company_id,catalogue,ord,
+            \\       typeof(cid)='integer' AND typeof(ord)='integer' AND typeof(id)='integer'
+            \\       AND typeof(base_key)='text' AND typeof(name) IN ('text','null')
+            \\       AND typeof(nickname) IN ('text','null') AND typeof(status)='text'
+            \\       AND typeof(intro_year)='integer' AND typeof(pre_campaign)='integer'
+            \\       AND typeof(owner_type)='text' AND typeof(owner_faction_key)='text'
+            \\       AND typeof(owner_merc_company_id)='integer' AND typeof(catalogue)='text'
+            \\FROM hull_instance WHERE cid=?1 ORDER BY ord
+        );
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
-            const status = st.enumValue(hull_mod.HullStatus, 4) orelse return error.CorruptSave;
+            // Check original storage classes before SQLite's column helpers can
+            // coerce malformed carrier identity or provenance (contract rule 47).
+            if (st.int(12) != 1) return error.CorruptSave;
+            _ = try st.intAs(usize, 11);
+            const pre_campaign = try st.intAs(u8, 6);
+            if (pre_campaign > 1) return error.CorruptSave;
+            const status = std.meta.stringToEnum(hull_mod.HullStatus, try st.text(4, alloc)) orelse return error.CorruptSave;
             // Reconstruct owner union fail-closed (rule 47). Unknown tag → CorruptSave;
             // inconsistent payload (e.g. faction key present but owner_type != merc_company) → CorruptSave.
-            const ot = st.enumValue(hull_mod.OwnerType, 7) orelse return error.CorruptSave;
+            const ot = std.meta.stringToEnum(hull_mod.OwnerType, try st.text(7, alloc)) orelse return error.CorruptSave;
             const faction_key = try st.text(8, alloc); // NOT NULL DEFAULT '' — "" for non-faction
             const merc_company_id_raw = st.int(9); // NOT NULL DEFAULT 0 — 0 for non-merc_company
             const owner: hull_mod.HullOwner = switch (ot) {
@@ -2537,9 +2553,9 @@ pub const Store = struct {
                 .nickname = try st.optText(3, alloc),
                 .status = status,
                 .intro_year = try st.intAs(u16, 5),
-                .pre_campaign = st.int(6) != 0,
+                .pre_campaign = pre_campaign != 0,
                 .owner = owner,
-                .catalogue = st.enumValue(hull_mod.HullCatalogue, 10) orelse return error.CorruptSave,
+                .catalogue = std.meta.stringToEnum(hull_mod.HullCatalogue, try st.text(10, alloc)) orelse return error.CorruptSave,
             };
             const gop = try gs.hull_instances.getOrPut(alloc, inst.id);
             if (gop.found_existing) return error.CorruptSave; // duplicate id
@@ -2609,14 +2625,22 @@ pub const Store = struct {
     fn loadHullOwnershipHistory(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
         const hull_inst_mod = @import("../domain/hull_instance.zig");
-        const st = try self.db.prepare("SELECT hull_instance_id, from_day, to_day, acquisition_type, prior_owner_key, typeof(to_day) IN ('integer','null') FROM hull_ownership_history WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare(
+            \\SELECT hull_instance_id,from_day,to_day,acquisition_type,prior_owner_key,ord,
+            \\       typeof(cid)='integer' AND typeof(ord)='integer'
+            \\       AND typeof(hull_instance_id)='integer' AND typeof(from_day)='integer'
+            \\       AND typeof(to_day) IN ('integer','null')
+            \\       AND typeof(acquisition_type)='text' AND typeof(prior_owner_key)='text'
+            \\FROM hull_ownership_history WHERE cid=?1 ORDER BY ord
+        );
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
-            if (st.int(5) != 1) return error.CorruptSave;
+            if (st.int(6) != 1) return error.CorruptSave;
+            _ = try st.intAs(usize, 5);
             const hid = try toId(types.HullInstanceId, st.int(0));
             _ = gs.hull_instances.getPtr(hid) orelse return error.CorruptSave; // orphan FK
-            const acq = st.enumValue(hull_inst_mod.AcquisitionType, 3) orelse return error.CorruptSave;
+            const acq = std.meta.stringToEnum(hull_inst_mod.AcquisitionType, try st.text(3, alloc)) orelse return error.CorruptSave;
             try gs.hull_ownership_history.append(alloc, .{
                 .hull_instance_id = hid,
                 .from_day = try st.intAs(u32, 1),
@@ -9245,6 +9269,121 @@ test "artillery load rejects malformed payloads and every new counter without re
         try store.db.exec("PRAGMA foreign_keys=ON; PRAGMA ignore_check_constraints=OFF");
         try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
     }
+}
+
+test "artillery carrier introduction year rejects fractional SQLite payload through load" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try artilleryCampaignForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("UPDATE hull_instance SET intro_year=intro_year+0.5 WHERE catalogue='artillery'");
+    var loaded = store.load(std.testing.allocator, gs.campaign_id) catch |err| {
+        try std.testing.expectEqual(error.CorruptSave, err);
+        return;
+    };
+    loaded.deinit();
+    return error.TestExpectedError;
+}
+
+test "artillery ownership starting day rejects fractional SQLite payload through load" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try artilleryCampaignForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("UPDATE hull_ownership_history SET from_day=0.5");
+    var loaded = store.load(std.testing.allocator, gs.campaign_id) catch |err| {
+        try std.testing.expectEqual(error.CorruptSave, err);
+        return;
+    };
+    loaded.deinit();
+    return error.TestExpectedError;
+}
+
+fn expectSharedHullPayloadRejected(store: Store, cid: i64, table: []const u8, column: []const u8, expression: []const u8) !void {
+    const sql = try std.fmt.allocPrintSentinel(std.testing.allocator, "UPDATE {s} SET {s}={s}", .{ table, column, expression }, 0);
+    defer std.testing.allocator.free(sql);
+    try store.db.exec("SAVEPOINT malformed_shared_hull");
+    errdefer store.db.exec("ROLLBACK TO malformed_shared_hull; RELEASE malformed_shared_hull") catch {};
+    try store.db.exec(sql);
+    var loaded = store.load(std.testing.allocator, cid) catch |err| {
+        try std.testing.expectEqual(error.CorruptSave, err);
+        try store.db.exec("ROLLBACK TO malformed_shared_hull; RELEASE malformed_shared_hull");
+        return;
+    };
+    loaded.deinit();
+    std.debug.print("accepted malformed shared hull payload: {s}\n", .{sql});
+    return error.TestExpectedError;
+}
+
+test "shared carrier and ownership rows reject malformed storage classes through full load" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try artilleryCampaignForTest(&gs);
+    const hid = gs.artillery_formations.get(id).?.hull;
+    gs.hull_instances.getPtr(hid).?.name = "Carrier";
+    gs.hull_instances.getPtr(hid).?.nickname = "";
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .sell_artillery = id });
+    _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Company");
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var valid = try store.load(std.testing.allocator, gs.campaign_id);
+    defer valid.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&valid));
+    try std.testing.expectEqual(@as(?u32, 0), valid.hull_ownership_history.items[0].to_day);
+    try std.testing.expect(valid.hull_ownership_history.items[1].isOpen());
+
+    // Unconstrained, affinity-free copies expose raw payload classes even when
+    // normal DDL would reject NULL or convert numeric text during insertion.
+    try store.db.exec("PRAGMA foreign_keys=OFF");
+    try store.db.exec(
+        \\CREATE TABLE carrier_payload (cid,ord,id,base_key,name,nickname,status,intro_year,pre_campaign,owner_type,owner_faction_key,owner_merc_company_id,catalogue);
+        \\INSERT INTO carrier_payload SELECT * FROM hull_instance;
+        \\DROP TABLE hull_instance;
+        \\ALTER TABLE carrier_payload RENAME TO hull_instance;
+        \\CREATE TABLE ownership_payload (cid,hull_instance_id,ord,from_day,to_day,acquisition_type,prior_owner_key);
+        \\INSERT INTO ownership_payload SELECT * FROM hull_ownership_history;
+        \\DROP TABLE hull_ownership_history;
+        \\ALTER TABLE ownership_payload RENAME TO hull_ownership_history;
+    );
+    var copied = try store.load(std.testing.allocator, gs.campaign_id);
+    defer copied.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&copied));
+
+    for ([_]struct { table: []const u8, integers: []const []const u8, texts: []const []const u8 }{
+        .{ .table = "hull_instance", .integers = &.{ "cid", "ord", "id", "intro_year", "pre_campaign", "owner_merc_company_id" }, .texts = &.{ "base_key", "status", "owner_type", "owner_faction_key", "catalogue" } },
+        .{ .table = "hull_ownership_history", .integers = &.{ "cid", "hull_instance_id", "ord", "from_day" }, .texts = &.{ "acquisition_type", "prior_owner_key" } },
+    }) |row| {
+        for (row.integers) |column| {
+            for ([_][]const u8{ "0.5", "'0'", "X'30'", "NULL", "-1" }) |expression|
+                try expectSharedHullPayloadRejected(store, gs.campaign_id, row.table, column, expression);
+        }
+        for (row.texts) |column| {
+            const blob = try std.fmt.allocPrint(std.testing.allocator, "CAST({s} AS BLOB)", .{column});
+            defer std.testing.allocator.free(blob);
+            for ([_][]const u8{ "0.5", "0", blob, "NULL" }) |expression|
+                try expectSharedHullPayloadRejected(store, gs.campaign_id, row.table, column, expression);
+        }
+    }
+    for ([_][]const u8{ "0.5", "'0'", "X'30'", "-1", "4294967296" }) |expression|
+        try expectSharedHullPayloadRejected(store, gs.campaign_id, "hull_ownership_history", "to_day", expression);
+    for ([_][]const u8{ "name", "nickname" }) |column| {
+        for ([_][]const u8{ "0.5", "0", "X'30'" }) |expression|
+            try expectSharedHullPayloadRejected(store, gs.campaign_id, "hull_instance", column, expression);
+    }
+    for ([_][]const u8{ "status", "owner_type", "catalogue" }) |column| {
+        const suffix = try std.fmt.allocPrint(std.testing.allocator, "{s}||char(0)||'invalid'", .{column});
+        defer std.testing.allocator.free(suffix);
+        try expectSharedHullPayloadRejected(store, gs.campaign_id, "hull_instance", column, suffix);
+    }
+    try expectSharedHullPayloadRejected(store, gs.campaign_id, "hull_ownership_history", "acquisition_type", "acquisition_type||char(0)||'invalid'");
+    try expectSharedHullPayloadRejected(store, gs.campaign_id, "hull_instance", "pre_campaign", "2");
+    try expectSharedHullPayloadRejected(store, gs.campaign_id, "hull_instance", "intro_year", "65536");
+    try store.db.exec("PRAGMA foreign_keys=ON");
 }
 
 test "nullable ownership closing dates reject silent coercion and preserve closed day zero" {
