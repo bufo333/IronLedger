@@ -1379,7 +1379,8 @@ battle effects, and P2i artillery REPL/TUI/query surfaces.
 P2f delivers Mobile Long Tom formation and physical carrier identities,
 player-only monthly HQ acquisition, direct company attachment, HQ pool/freight
 placement, shared lift demand and ownership carrying/resale accounting in schema
-v60. The explicit game abstractions and typed command boundary are recorded in
+v61, including persisted retired-HQ identity for preserved acquisition and freight
+history after an emptied HQ is sold. The explicit game abstractions and typed command boundary are recorded in
 `docs/p2-artillery-acquisition-design.md`. P2g retains crewing, readiness,
 reloads, repairs, supply and their operational persistence; P2h retains battle
 effects; P2i retains artillery query, REPL and TUI actions.

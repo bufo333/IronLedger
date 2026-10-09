@@ -1077,6 +1077,8 @@ pub fn foundHq(gs: *GameState, name: []const u8, planet_key: []const u8) !types.
     const hq = founding.prepareHq(gs, name, .field, world.key) catch |err| switch (err) {
         error.UnknownPlanet => return error.UnknownPlanet,
         error.NotReachable => return error.NotReachable,
+        error.HqIdExhausted => return error.HqIdExhausted,
+        error.CorruptSave => return error.CorruptSave,
         error.OutOfMemory => return error.OutOfMemory,
     };
     try gs.hqs.ensureUnusedCapacity(gs.allocator(), 1);
@@ -1190,10 +1192,26 @@ pub fn sellHq(gs: *GameState, hq_id: types.HqId) !void {
     if (gs.hqs.count() <= 1) return error.LastHq;
     if (toe.companiesAtHq(gs, hq_id) > 0) return error.HqInUse;
     if (artillery.hqHasCarriers(gs, hq_id)) return error.HqInUse;
+    for (gs.forces.values()) |f| if (f.supplying_hq == hq_id) return error.HqInUse;
+    if (gs.retired_hqs.contains(hq_id)) return error.CorruptSave;
+    // Names are campaign-arena owned (founding/load); removing a map entry
+    // never frees its bytes. The archive retains those exact lifetime-safe bytes.
+    const retired: hq_mod.RetiredHq = .{ .id = hq_id, .name = h.name, .planet_key = h.planet_key, .tier = h.tier, .sold_day = gs.clock.day_index };
+    const surviving_seat = if (gs.seat() == hq_id) gs.hqs.keys()[1] else gs.seat();
+    try gs.retired_hqs.ensureUnusedCapacity(gs.allocator(), 1);
     const value = market_mod.hqSaleProceeds(h);
     const name = h.name;
     const posting = try gs.prepareTreasuryPosting(.outfit, .{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = "HQ sold" });
-    const log = try gs.prepareLog(.market, .{}, "[sale] {s} sold off for {d}", .{ name, value });
+    const log = try gs.prepareLog(.market, .{ .hq = hq_id }, "[sale] {s} sold off for {d}", .{ name, value });
+    // ---- commit: archive, cleanup, proceeds and log cannot fail ----
+    gs.retired_hqs.putAssumeCapacity(hq_id, retired);
+    cleanupSoldHq(gs, hq_id, surviving_seat);
+    gs.commitTreasuryPosting(posting);
+    gs.commitLog(log);
+}
+
+/// Remove operational children only; retained history keeps the permanent ID.
+fn cleanupSoldHq(gs: *GameState, hq_id: types.HqId, surviving_seat: types.HqId) void {
     var pit = gs.people.iterator();
     while (pit.next()) |e| if (e.value_ptr.posted_hq == hq_id) {
         e.value_ptr.posted_hq = .none;
@@ -1239,15 +1257,67 @@ pub fn sellHq(gs: *GameState, hq_id: types.HqId) !void {
         c.to = .outfit;
     };
     artillery.removeHqOffers(gs, hq_id);
+    i = 0;
+    while (i < gs.contract_offers.items.len) {
+        if (gs.contract_offers.items[i].offer_hq == hq_id) _ = gs.contract_offers.orderedRemove(i) else i += 1;
+    }
     _ = gs.hqs.orderedRemove(hq_id);
-    const seat: types.HqId = gs.seat();
     var uit2 = gs.units.iterator();
     while (uit2.next()) |e| if (e.value_ptr.berth_hq == hq_id) {
-        e.value_ptr.berth_hq = seat;
+        e.value_ptr.berth_hq = surviving_seat;
     };
     refreshHqStaffing(gs);
-    gs.commitTreasuryPosting(posting);
-    gs.commitLog(log);
+}
+
+/// One HQ reference owner: historical provenance may name a retired identity;
+/// actionable services and destinations always require a live HQ.
+pub fn validateHqReference(gs: *const GameState, id: types.HqId, historical: bool) error{CorruptSave}!void {
+    if (id == .none) return;
+    if (gs.hqs.contains(id)) return;
+    if (historical and gs.retired_hqs.contains(id)) return;
+    return error.CorruptSave;
+}
+
+pub fn maxHqIdentity(gs: *const GameState) u32 {
+    var max: u32 = 0;
+    for (gs.hqs.keys()) |id| max = @max(max, @intFromEnum(id));
+    for (gs.retired_hqs.keys()) |id| max = @max(max, @intFromEnum(id));
+    return max;
+}
+
+/// Integrity of the archive and the bounded HQ reference matrix. Persistence
+/// consumes this after decoding; no operational owner consults the archive.
+pub fn validateHqHistory(gs: *const GameState) error{CorruptSave}!void {
+    for (gs.retired_hqs.keys(), gs.retired_hqs.values()) |id, h| {
+        if (id == .none or h.id != id or gs.hqs.contains(id) or h.sold_day > gs.clock.day_index or planet_mod.find(h.planet_key) == null) return error.CorruptSave;
+    }
+    for (gs.ledger.transactions.items) |t| try validateHqReference(gs, t.hq, true);
+    for (gs.event_log.items) |e| try validateHqReference(gs, e.hq, true);
+    for (gs.contracts.values()) |c| try validateHqReference(gs, c.offer_hq, true);
+    for (gs.contract_offers.items) |c| try validateHqReference(gs, c.offer_hq, false);
+    for (gs.part_orders.items) |o| switch (o.dest) {
+        .hq => |id| try validateHqReference(gs, id, !o.inFlight()),
+        else => {},
+    };
+    for (gs.units.values()) |u| try validateHqReference(gs, u.berth_hq, false);
+    for (gs.forces.values()) |f| try validateHqReference(gs, f.supplying_hq, false);
+    for (gs.people.values()) |p| try validateHqReference(gs, p.posted_hq, false);
+    for (gs.bay_jobs.items) |j| try validateHqReference(gs, j.hq, false);
+    for (gs.hq_links.items) |l| {
+        try validateHqReference(gs, l.a, false);
+        try validateHqReference(gs, l.b, false);
+    }
+    for (gs.candidates.items) |c| try validateHqReference(gs, c.hq, false);
+    for (gs.market_listings.items) |l| try validateHqReference(gs, l.hq, false);
+    for (gs.stock_policies.items) |p| try validateHqReference(gs, p.hq, false);
+    for (gs.fund_couriers.items) |c| switch (c.to) {
+        .hq => |id| try validateHqReference(gs, id, false),
+        else => {},
+    };
+    for (gs.policies.items) |p| switch (p.entity) {
+        .hq => |id| try validateHqReference(gs, id, false),
+        else => {},
+    };
 }
 
 test "free HQ sale prepares ledger and log before deleting its artillery offers" {
@@ -2537,4 +2607,160 @@ test "bayCanRebuild delegates to canFabricate with the hull's ct.structure compo
         bayCanRebuild(&gs, seat, "AS7-D"),
         canFabricate(&gs, seat, part_mod.componentFor("ct.structure", "AS7-D")),
     );
+}
+
+test "HQ retirement is atomic at every failing arena allocation and retry credits once" {
+    const digest = @import("digest.zig");
+    var failures: usize = 0;
+    for (0..16) |fail_index| {
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+        var gs = GameState.init(outer.allocator(), .{});
+        defer gs.deinit();
+        _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+        const name = try gs.allocator().alloc(u8, 32_768);
+        @memset(name, 'H');
+        const other = try founding.foundHq(&gs, name, .regional, "skye");
+        try artillery.syncMarkets(&gs);
+        // Force actual ledger/log capacity preparation as well as archive storage.
+        gs.ledger.transactions.capacity = gs.ledger.transactions.items.len;
+        gs.event_log.capacity = gs.event_log.items.len;
+        const before = digest.stateHash(&gs);
+        const funds = gs.funds;
+        const proceeds = market_mod.hqSaleProceeds(gs.hqs.getPtr(other).?);
+        const txns = gs.ledger.transactions.items.len;
+        const logs = gs.event_log.items.len;
+        const arena_state = gs.arena.state;
+        const child = gs.arena.child_allocator;
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
+        gs.arena.state = .{};
+        gs.arena.child_allocator = failing.allocator();
+        const result = commands.execute(&gs, .{ .sell_hq = other });
+        gs.arena.state = arena_state;
+        gs.arena.child_allocator = child;
+        if (result) |_| {
+            try std.testing.expect(!failing.has_induced_failure);
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+            failures += 1;
+            _ = try commands.execute(&gs, .{ .sell_hq = other });
+        }
+        try std.testing.expectEqual(funds + proceeds, gs.funds);
+        try std.testing.expectEqual(txns + 1, gs.ledger.transactions.items.len);
+        try std.testing.expectEqual(logs + 1, gs.event_log.items.len);
+        try std.testing.expectEqual(@as(usize, 1), gs.retired_hqs.count());
+        try std.testing.expectEqual(@as(u32, 0), gs.retired_hqs.get(other).?.sold_day);
+        const sold = digest.stateHash(&gs);
+        try std.testing.expectError(error.UnknownHq, commands.execute(&gs, .{ .sell_hq = other }));
+        try std.testing.expectEqual(sold, digest.stateHash(&gs));
+        if (!failing.has_induced_failure) break;
+    }
+    try std.testing.expect(failures >= 2);
+}
+
+test "retirement retains contract log and terminal order provenance and removes live children" {
+    const contract_mod = @import("../domain/contract.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const home = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const other = try founding.foundHq(&gs, "Other", .regional, "skye");
+    try artillery.syncMarkets(&gs);
+    try @import("contract_market.zig").refresh(&gs);
+    try @import("contract_market.zig").refreshListings(&gs);
+    try @import("contract_market.zig").refreshCandidates(&gs);
+    const company = try gs.createForce("Unassigned", .company, .none);
+    gs.force(company).?.supplying_hq = other;
+    const before = @import("digest.zig").stateHash(&gs);
+    try std.testing.expectError(error.HqInUse, commands.execute(&gs, .{ .sell_hq = other }));
+    try std.testing.expectEqual(before, @import("digest.zig").stateHash(&gs));
+    gs.force(company).?.supplying_hq = home;
+    const retained: contract_mod.Contract = .{ .id = @enumFromInt(gs.next_contract_id), .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "skye", .status = .completed, .offer_hq = other, .terms = .{ .length_months = 1, .base_pay_month = 0 } };
+    gs.next_contract_id += 1;
+    try gs.contracts.put(gs.allocator(), retained.id, retained);
+    for ([_]part_mod.OrderStatus{ .sourcing, .in_transit, .delivered, .failed, .cancelled }) |status| {
+        try gs.part_orders.append(gs.allocator(), .{ .part_key = "armor", .quantity = 1, .dest = .{ .hq = other }, .ordered_day = 0, .cost = 0, .status = status });
+    }
+    const transport = try gs.addUnit("UNION");
+    gs.unit(transport).?.berth_hq = other;
+    gs.people.values()[0].posted_hq = other;
+    try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = other, .level = 1, .established_day = 0 });
+    _ = try commands.execute(&gs, .{ .sell_hq = other });
+    try validateHqHistory(&gs);
+    try std.testing.expectEqual(other, gs.contracts.get(retained.id).?.offer_hq);
+    try std.testing.expectEqual(other, gs.event_log.items[gs.event_log.items.len - 1].hq);
+    try std.testing.expectEqual(home, gs.unit(transport).?.berth_hq);
+    try std.testing.expectEqual(types.HqId.none, gs.people.values()[0].posted_hq);
+    for (gs.part_orders.items) |o| {
+        try std.testing.expect(!o.inFlight());
+        try std.testing.expectEqual(other, o.dest.hq);
+    }
+    for (gs.contract_offers.items) |c| try std.testing.expect(c.offer_hq != other);
+    for (gs.market_listings.items) |l| try std.testing.expect(l.hq != other);
+    for (gs.candidates.items) |c| try std.testing.expect(c.hq != other);
+    try std.testing.expectEqual(@as(usize, 0), gs.hq_links.items.len);
+    try std.testing.expectError(error.CorruptSave, validateHqReference(&gs, other, false));
+    try validateHqReference(&gs, other, true);
+    try std.testing.expectError(error.CorruptSave, validateHqReference(&gs, @enumFromInt(999), true));
+    // Historical board provenance does not resurrect comms or supply services.
+    try std.testing.expectEqual(home, @import("offer_rating.zig").intelHq(&gs, &retained));
+    try std.testing.expectEqual(home, @import("contract_market.zig").offerBoardHq(&gs, &retained));
+    const local_price = @import("field_supply.zig").localPriceMultBp(&gs, &retained);
+    const liquidation = try treasury.liquidationValue(std.testing.allocator, &gs);
+    const archived = gs.retired_hqs.getPtr(other).?;
+    archived.tier = .brigade;
+    archived.planet_key = "galatea";
+    try std.testing.expectEqual(local_price, @import("field_supply.zig").localPriceMultBp(&gs, &retained));
+    try std.testing.expectEqual(liquidation, try treasury.liquidationValue(std.testing.allocator, &gs));
+    try std.testing.expect(gs.stockMap(.{ .hq = other }) == null);
+    try std.testing.expectEqual(@as(u32, 0), baySlots(&gs, other));
+    try std.testing.expectEqual(@as(types.CBills, 0), gs.treasuryBalance(.{ .hq = other }));
+}
+
+test "operational HQ reference categories never resolve through a retired identity" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const home = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const other = try founding.foundHq(&gs, "Other", .regional, "skye");
+    _ = try commands.execute(&gs, .{ .sell_hq = other });
+    try validateHqHistory(&gs);
+    // Each category is exercised independently, then removed again.
+    try gs.contract_offers.append(gs.allocator(), .{ .id = .none, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "skye", .offer_hq = other, .terms = .{ .length_months = 1, .base_pay_month = 0 } });
+    try std.testing.expectError(error.CorruptSave, validateHqHistory(&gs));
+    gs.contract_offers.clearRetainingCapacity();
+    try gs.part_orders.append(gs.allocator(), .{ .part_key = "armor", .quantity = 1, .dest = .{ .hq = other }, .ordered_day = 0, .cost = 0 });
+    try std.testing.expectError(error.CorruptSave, validateHqHistory(&gs));
+    gs.part_orders.items[0].status = .delivered;
+    try validateHqHistory(&gs);
+    gs.part_orders.clearRetainingCapacity();
+    const uid = try gs.addUnit("UNION");
+    gs.unit(uid).?.berth_hq = other;
+    try std.testing.expectError(error.CorruptSave, validateHqHistory(&gs));
+    gs.unit(uid).?.berth_hq = home;
+    try gs.bay_jobs.append(gs.allocator(), .{ .hq = other, .kind = .refit, .unit = uid, .duration_days = 1, .queued_day = 0 });
+    try std.testing.expectError(error.CorruptSave, validateHqHistory(&gs));
+    gs.bay_jobs.clearRetainingCapacity();
+    try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = other, .level = 1, .established_day = 0 });
+    try std.testing.expectError(error.CorruptSave, validateHqHistory(&gs));
+    gs.hq_links.clearRetainingCapacity();
+    try gs.stock_policies.append(gs.allocator(), .{ .hq = other, .part_key = "armor", .min = 1, .target = 2 });
+    try std.testing.expectError(error.CorruptSave, validateHqHistory(&gs));
+    gs.stock_policies.clearRetainingCapacity();
+    try gs.policies.append(gs.allocator(), .{ .entity = .{ .hq = other }, .floor = 0, .monthly_cap = 0 });
+    try std.testing.expectError(error.CorruptSave, validateHqHistory(&gs));
+    gs.policies.clearRetainingCapacity();
+    try gs.fund_couriers.append(gs.allocator(), .{ .to = .{ .hq = other }, .amount = 1, .sent_day = 0, .eta_day = 1 });
+    try std.testing.expectError(error.CorruptSave, validateHqHistory(&gs));
+    gs.fund_couriers.clearRetainingCapacity();
+    try @import("contract_market.zig").refreshListings(&gs);
+    try @import("contract_market.zig").refreshCandidates(&gs);
+    try std.testing.expect(gs.market_listings.items.len > 0);
+    try std.testing.expect(gs.candidates.items.len > 0);
+    gs.market_listings.items[0].hq = other;
+    try std.testing.expectError(error.CorruptSave, validateHqHistory(&gs));
+    gs.market_listings.items[0].hq = home;
+    gs.candidates.items[0].hq = other;
+    try std.testing.expectError(error.CorruptSave, validateHqHistory(&gs));
+    gs.candidates.items[0].hq = home;
+    try validateHqHistory(&gs);
 }

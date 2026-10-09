@@ -335,3 +335,37 @@ test "every field, element and string byte moves the digest" {
     // Splitting one string into two is not the same value.
     try std.testing.expect(of([_][]const u8{ "ab", "c" }) != of([_][]const u8{ "a", "bc" }));
 }
+
+test "every archived HQ field and active archive membership affects the complete digest" {
+    const founding = @import("founding.zig");
+    const hq_ops = @import("hq_ops.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const id = try founding.foundHq(&gs, "Other", .regional, "skye");
+    const live = gs.hqs.get(id).?;
+    const active_hash = stateHash(&gs);
+    try hq_ops.sellHq(&gs, id);
+    const archived = gs.retired_hqs.get(id).?;
+    const base = stateHash(&gs);
+    try std.testing.expect(active_hash != base);
+    const h = gs.retired_hqs.getPtr(id).?;
+    h.id = @enumFromInt(@intFromEnum(id) + 1);
+    try std.testing.expect(base != stateHash(&gs));
+    h.* = archived;
+    h.name = "Renamed";
+    try std.testing.expect(base != stateHash(&gs));
+    h.* = archived;
+    h.planet_key = "galatea";
+    try std.testing.expect(base != stateHash(&gs));
+    h.* = archived;
+    h.tier = .brigade;
+    try std.testing.expect(base != stateHash(&gs));
+    h.* = archived;
+    h.sold_day += 1;
+    try std.testing.expect(base != stateHash(&gs));
+    _ = gs.retired_hqs.orderedRemove(id);
+    try std.testing.expect(base != stateHash(&gs));
+    try gs.hqs.put(gs.allocator(), id, live);
+    try std.testing.expect(base != stateHash(&gs));
+}

@@ -393,6 +393,7 @@ pub const Error = error{
     CreditExceeded,
     LastHq,
     HqInUse,
+    HqIdExhausted,
     /// Outfit treasury negative: the turn waits for a loan or a sale.
     Insolvent,
     /// Nothing left to sell or borrow: game over.

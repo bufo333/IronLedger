@@ -707,6 +707,7 @@ pub fn errorText(err: anyerror) []const u8 {
         error.Bankrupt => "the outfit is bankrupt",
         error.CreditExceeded => "that exceeds the remaining credit line (see the Ledger)",
         error.LastHq => "you cannot sell your only HQ",
+        error.HqIdExhausted => "no HQ IDs remain — nothing was changed",
         error.HqInUse => "reassign the companies at that HQ first (:assignco co:N hq:M)",
         error.NotWounded => "that person is not wounded",
         error.NoSuchLoan => "no such loan (or nothing to repay)",

@@ -19,7 +19,7 @@ const commands = @import("commands.zig");
 const artillery = @import("artillery.zig");
 const roster_seed = @import("roster_seed.zig");
 
-pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld, UnknownSite, ArtilleryIdExhausted } || std.mem.Allocator.Error;
+pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld, UnknownSite, ArtilleryIdExhausted, HqIdExhausted, CorruptSave } || std.mem.Allocator.Error;
 
 /// A generous fixed bound on the starter HQ's staff plan (rule 11-13:
 /// every founding allocation is pre-sized before anything commits). Derived
@@ -44,6 +44,7 @@ pub fn createCommander(
 ) CreateCommanderError!types.HqId {
     // ---- validate ----
     if (gs.commander != null) return error.CommanderExists;
+    try gs.checkNextHqId();
 
     // ---- prepare: RNG draws and allocations; no gs.* mutation ----
     var rng_copy = gs.rng;
@@ -195,7 +196,7 @@ pub fn createCommander(
 
 // ------------------------------------- the HQ network
 
-pub const FoundError = error{ UnknownPlanet, NotReachable } || std.mem.Allocator.Error;
+pub const FoundError = error{ UnknownPlanet, NotReachable, HqIdExhausted, CorruptSave } || std.mem.Allocator.Error;
 
 /// Stand up an HQ on a world. Field HQs open with a bay, a warehouse
 /// and a mess; regional ones add comms, a spaceport, a hospital and a
@@ -209,6 +210,7 @@ pub fn foundHq(gs: *GameState, name: []const u8, tier: hq_mod.HqTier, planet_key
 /// A new HQ with every allocation done but no id and nothing on the
 /// books; `commitHq` registers it.
 pub fn prepareHq(gs: *GameState, name: []const u8, tier: hq_mod.HqTier, planet_key: []const u8) FoundError!hq_mod.Hq {
+    try gs.checkNextHqId();
     const world = planet_mod.find(planet_key) orelse return error.UnknownPlanet;
     var hq: hq_mod.Hq = .{
         .id = .none,
@@ -374,4 +376,34 @@ test "the start year sets the calendar and gates the catalogue" {
     for (gs.market_listings.items) |l| if (l.kind == .unit) {
         try std.testing.expect(chassis_mod.find(l.item_key).?.intro_year <= 3010);
     };
+}
+
+test "HQ creation rejects exhausted invalid and retired counters without mutation" {
+    const digest = @import("digest.zig");
+    for ([_]u32{ 0, 1, std.math.maxInt(u32) }) |counter| {
+        var gs = GameState.init(std.testing.allocator, .{});
+        defer gs.deinit();
+        _ = try createCommander(&gs, "T", .LC, .quartermaster);
+        const other = try foundHq(&gs, "Other", .regional, "skye");
+        _ = try commands.execute(&gs, .{ .sell_hq = other });
+        gs.next_hq_id = counter;
+        const before = digest.stateHash(&gs);
+        const expected = if (counter == std.math.maxInt(u32)) error.HqIdExhausted else error.CorruptSave;
+        try std.testing.expectError(expected, commands.execute(&gs, .{ .found_hq = .{ .name = "No", .planet_key = gs.hqs.values()[0].planet_key } }));
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+        gs.next_hq_id = @intFromEnum(other);
+        const retired_counter = digest.stateHash(&gs);
+        try std.testing.expectError(error.CorruptSave, foundHq(&gs, "No", .regional, "skye"));
+        try std.testing.expectEqual(retired_counter, digest.stateHash(&gs));
+        gs.next_hq_id = @intFromEnum(other) + 1;
+        const new = try foundHq(&gs, "New", .field, "skye");
+        try std.testing.expect(@intFromEnum(new) > @intFromEnum(other));
+        try std.testing.expect(gs.retired_hqs.contains(other));
+    }
+    var fresh = GameState.init(std.testing.allocator, .{});
+    defer fresh.deinit();
+    fresh.next_hq_id = std.math.maxInt(u32);
+    const before = digest.stateHash(&fresh);
+    try std.testing.expectError(error.HqIdExhausted, createCommander(&fresh, "No", .LC, .quartermaster));
+    try std.testing.expectEqual(before, digest.stateHash(&fresh));
 }

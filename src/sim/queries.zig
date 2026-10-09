@@ -136,7 +136,7 @@ pub fn personName(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const u8 
 }
 
 pub fn hqName(alloc: Alloc, gs: *GameState, id: types.HqId) ![]const u8 {
-    return if (gs.hqs.getPtr(id)) |h| table.plain(alloc, h.name) else "—";
+    return if (gs.historicalHqName(id)) |name| table.plain(alloc, name) else "—";
 }
 
 pub fn forceName(alloc: Alloc, gs: *GameState, id: types.ForceId) ![]const u8 {
@@ -9494,4 +9494,39 @@ test "labLayout: no location box exceeds physicalTotal; crits_free matches valid
             }
         }
     }
+}
+
+test "retired HQ history preserves typed selection and safe names without actionable treasury rows" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .quartermaster);
+    const name = "{g}Depot\x1b";
+    const other = try @import("founding.zig").foundHq(&gs, name, .regional, "skye");
+    try gs.postTreasury(.{ .hq = other }, .{ .day = 0, .amount = 123, .category = .fund_transfer, .hq = other, .note = name });
+    try gs.log(.misc, .{ .hq = other }, "History {s}", .{name});
+    _ = try commands.execute(&gs, .{ .sell_hq = other });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const before = @import("digest.zig").stateHash(&gs);
+    const escaped = try hqName(a, &gs, other);
+    try std.testing.expectEqualStrings(name, gs.retired_hqs.get(other).?.name);
+    try std.testing.expect(std.mem.indexOfScalar(u8, escaped, '\x1b') == null);
+    try std.testing.expectEqualStrings("{g}Depot?", try table.plainText(a, escaped));
+    const selected = try ledger(a, &gs, .{ .hq = other }, 30, 20);
+    try std.testing.expectEqual(@as(usize, 1), selected.ledger.len);
+    const lines = try ledgerLines(a, &gs, .{ .hq = other }, 20);
+    try std.testing.expectEqual(@as(usize, 1), lines.len);
+    try std.testing.expect(std.mem.indexOfScalar(u8, lines[0], '\x1b') == null);
+    const logs = try logLines(a, &gs, 20, .{ .hq = other });
+    try std.testing.expectEqual(@as(usize, 2), logs.len);
+    for (logs) |line| try std.testing.expect(std.mem.indexOfScalar(u8, line, '\x1b') == null);
+    for (try allTreasuries(a, &gs)) |t| try std.testing.expect(!std.meta.eql(t, state_mod.Treasury{ .hq = other }));
+    for (try hqList(a, &gs)) |h| try std.testing.expect(h.id != other);
+    try std.testing.expect(hqSaleQuote(&gs, other) == null);
+    try std.testing.expectError(error.OutOfMemory, hqName(std.testing.failing_allocator, &gs, other));
+    try std.testing.expectError(error.OutOfMemory, ledgerLines(std.testing.failing_allocator, &gs, .{ .hq = other }, 20));
+    try std.testing.expectError(error.OutOfMemory, logLines(std.testing.failing_allocator, &gs, 20, .{ .hq = other }));
+    try std.testing.expectEqual(before, @import("digest.zig").stateHash(&gs));
 }

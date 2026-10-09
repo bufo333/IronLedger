@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 60. The executable DDL and its column migrations
+-- Matches schema_version 61. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -87,6 +87,10 @@ CREATE TABLE campaign (
 -- a nonnegative serialization completeness check, computed from the offer list
 -- on save and checked on load; not an independent GameState field. A missing
 -- board must not be mistaken for a newly eligible HQ awaiting its first phase.
+-- v61 requires retired_hq_count (including zero), the exact archive row count.
+-- It is serialization completeness metadata, not GameState state. Current
+-- next_hq_id is required, an original SQLite INTEGER, nonzero, and greater
+-- than all live and retired identities; current corruption is never repaired.
 CREATE TABLE meta (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,
@@ -422,6 +426,28 @@ CREATE TABLE hq (
     upkeep          INTEGER,                         -- monthly
     funds           INTEGER,                         -- HQ treasury
     PRIMARY KEY (cid, id),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+
+-- Persisted historical identity only: no operational funds/stock/facilities.
+-- Live hq and retired_hq IDs are disjoint and share next_hq_id. Ledger/log,
+-- retained contract offer_hq, and terminal order HQ destinations resolve to
+-- either collection. Live boards, postings, supply assignments, berths,
+-- jobs, links, candidates, listings, policies and freight require active hq.
+-- Schema 60 -> 61 creates an empty archive; missing legacy identity is corrupt
+-- and cannot be inferred. v61 decoding checks original SQLite storage classes,
+-- known planet/tier, sold_day <= campaign day, uniqueness and row-count metadata.
+-- Contiguous ord preserves the archive's insertion order in the full digest.
+CREATE TABLE retired_hq (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL CHECK (ord >= 0 AND ord <= 4294967295),
+    id              INTEGER NOT NULL CHECK (id > 0 AND id <= 4294967295),
+    name            TEXT NOT NULL,
+    planet          TEXT NOT NULL,
+    tier            TEXT NOT NULL CHECK (tier IN ('field','regional','brigade')),
+    sold_day        INTEGER NOT NULL CHECK (sold_day >= 0 AND sold_day <= 4294967295),
+    PRIMARY KEY (cid, id),
+    UNIQUE (cid, ord),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 

@@ -48,3 +48,42 @@ All formation and offer records, acquisition facts, placement payloads and count
 are persisted. Catalogue facts and attached physical position are derived; quotes
 and preparation records are operation-local scratch. P2g owns operational fields;
 P2h owns artillery battle effects; P2i owns artillery query and textual/UI actions.
+
+HQ sale preserves permanent historical identity in a separate `retired_hqs`
+archive: original typed HQ ID, exact name, planet, tier and sale day (including
+zero). Active and retired IDs are disjoint and never reused. The archive has no
+funds, stock, facilities, projects or board. Operational services, upkeep,
+liquidation, capacity, influence and site choices consume live HQs only.
+
+Ledger and event-log HQ tags, retained contracts' board provenance, and terminal
+part-order destinations resolve to exactly one live or retired identity. Sale
+cancels inbound orders, removes unaccepted contract offers and other live boards,
+unposts people, restores removed bay-job unit statuses, removes links/policies,
+redirects fund couriers to the outfit, and moves transport berths to the surviving
+seat. Remaining force supply assignments, pooled artillery and either live
+artillery freight endpoint refuse sale before mutation. Historical identity never
+makes an archived site an actionable supply or transport destination.
+
+Retirement prepares archive capacity, proceeds posting and owned log text/capacity
+before any cleanup. The arena-owned name outlives removal of its live map entry.
+Commit installs the archive, removes active children/HQ, credits the unchanged
+HQ-sale proceeds owner and records one HQ-tagged log. The outfit receives the
+sale proceeds, including the disposed treasury, exactly once.
+
+Schema 60 to 61 transactionally creates `retired_hq`; older campaigns receive an
+empty archive. Lost legacy HQ names/worlds/tiers/days cannot be reconstructed:
+legacy dangling historical tags are rejected as corrupt, including historical
+references that old versions did not validate. Unexpected legacy archive rows
+and inconsistent partially upgraded payloads also fail closed. Schema 59 to 60
+ownership migration remains unchanged.
+
+Current saves require a strictly checked archive row-count metadata value,
+including zero, and original SQLite integer/text storage classes for every archive
+field. IDs, tier, world and sale day are validated; current next-HQ metadata must
+be an integer, nonzero and greater than every live/archived identity. Only the
+legacy version boundary reconciles a counter after reference validation. Founding
+checks HQ identity collision/exhaustion before allocation or gameplay mutation.
+
+Existing typed history queries safely render archived names and retain original
+HQ filters. Archived HQs never appear in treasury/action lists. This is shared
+history integrity; P2i still owns artillery views, parser verbs and UI actions.

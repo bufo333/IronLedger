@@ -273,6 +273,7 @@ pub const GameState = struct {
     units: std.AutoArrayHashMapUnmanaged(types.UnitId, unit_mod.Unit) = .empty,
     forces: std.AutoArrayHashMapUnmanaged(types.ForceId, force_mod.Force) = .empty,
     hqs: std.AutoArrayHashMapUnmanaged(types.HqId, hq_mod.Hq) = .empty,
+    retired_hqs: std.AutoArrayHashMapUnmanaged(types.HqId, hq_mod.RetiredHq) = .empty,
     contracts: std.AutoArrayHashMapUnmanaged(types.ContractId, contract_mod.Contract) = .empty,
     /// Current contract market offers (replaced wholesale each refresh).
     contract_offers: std.ArrayListUnmanaged(contract_mod.Contract) = .empty,
@@ -635,6 +636,24 @@ pub const GameState = struct {
         self.next_hq_id += 1;
         self.hqs.putAssumeCapacity(hq.id, hq);
         return hq.id;
+    }
+
+    /// Primitive creation boundary: no reused permanent identity or overflowing
+    /// next counter. Policy and allocation preparation remain in founding.
+    pub fn checkNextHqId(self: *const GameState) error{ HqIdExhausted, CorruptSave }!void {
+        if (self.next_hq_id == 0) return error.CorruptSave;
+        if (self.next_hq_id == std.math.maxInt(u32)) return error.HqIdExhausted;
+        const id: types.HqId = @enumFromInt(self.next_hq_id);
+        if (self.hqs.contains(id) or self.retired_hqs.contains(id)) return error.CorruptSave;
+        for (self.hqs.keys()) |owned| if (@intFromEnum(owned) >= self.next_hq_id) return error.CorruptSave;
+        for (self.retired_hqs.keys()) |owned| if (@intFromEnum(owned) >= self.next_hq_id) return error.CorruptSave;
+    }
+
+    /// Historical identity access only. Operational callers use `hqs`.
+    pub fn historicalHqName(self: *const GameState, id: types.HqId) ?[]const u8 {
+        if (self.hqs.get(id)) |h| return h.name;
+        if (self.retired_hqs.get(id)) |h| return h.name;
+        return null;
     }
 
     /// The HQ that supplies a force: its company's assignment, else the
@@ -1313,6 +1332,7 @@ pub const GameState = struct {
         .{ "units", .persisted },
         .{ "forces", .persisted },
         .{ "hqs", .persisted },
+        .{ "retired_hqs", .persisted },
         .{ "contracts", .persisted },
         .{ "contract_offers", .persisted },
         .{ "market_listings", .persisted },

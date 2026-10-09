@@ -912,6 +912,12 @@ transaction is tagged (company, HQ, contract), so **every entity has its
 own browsable ledger and P&L**, and the structured campaign log (battles,
 decisions, deliveries, construction, medical — all tagged the same way) can
 be filtered to any company or HQ's full history.
+Sold HQs retain their exact ID, name, planet, tier and sale day in a separate
+persisted historical archive. Live HQs alone provide treasuries, facilities,
+markets, influence and transport capacity. Ledger/log tags, retained contract
+board provenance and terminal order destinations keep their original identities;
+active destinations require live HQs. See the
+[HQ retirement policy](docs/p2-artillery-acquisition-design.md).
 
 **Breach clause** (Stage 9E). Failing or abandoning a contract — recall, or
 combat-ineffectiveness with no affordable local replacements — costs a

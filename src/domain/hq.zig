@@ -33,6 +33,16 @@ pub const HqTier = enum {
     }
 };
 
+/// Persisted identity after an HQ sale. No treasury, facilities, stock or
+/// operational services survive in this historical record.
+pub const RetiredHq = struct {
+    id: types.HqId,
+    name: []const u8,
+    planet_key: []const u8,
+    tier: HqTier,
+    sold_day: u32,
+};
+
 pub const FacilityKind = enum {
     mek_bay, // repair/refit capacity; gates refit class & combat-lance cap
     warehouse, // logistics/parts depot: stocking depth, hub pass-through quality

@@ -45,7 +45,7 @@ const artillery_store = @import("artillery_store.zig");
 const artillery = @import("../sim/artillery.zig");
 const artillery_catalogue = @import("../domain/artillery_catalogue.zig");
 
-pub const schema_version = 60;
+pub const schema_version = 61;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -68,6 +68,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS force_child (cid INTEGER NOT NULL, force_id INTEGER NOT NULL, ord INTEGER NOT NULL, child_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, force_id) REFERENCES force(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, child_id) REFERENCES force(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS stock (cid INTEGER NOT NULL, owner_kind TEXT NOT NULL, owner_id INTEGER NOT NULL, ord INTEGER NOT NULL, key TEXT NOT NULL, qty INTEGER NOT NULL, UNIQUE (cid, owner_kind, owner_id, key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hq (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, name TEXT, tier TEXT, planet TEXT, staff_assigned INTEGER, upkeep INTEGER, funds INTEGER, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS retired_hq (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0 AND ord <= 4294967295), id INTEGER NOT NULL CHECK (id > 0 AND id <= 4294967295), name TEXT NOT NULL, planet TEXT NOT NULL, tier TEXT NOT NULL CHECK (tier IN ('field','regional','brigade')), sold_day INTEGER NOT NULL CHECK (sold_day >= 0 AND sold_day <= 4294967295), PRIMARY KEY (cid, id), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hq_facility (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, level INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hq_id) REFERENCES hq(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hq_project (cid INTEGER NOT NULL, hq_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, facility TEXT, target_level INTEGER, started INTEGER, paperwork_done INTEGER, construction_done INTEGER, cost INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hq_id) REFERENCES hq(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS contract (cid INTEGER NOT NULL, is_offer INTEGER NOT NULL CHECK (is_offer IN (0,1)), ord INTEGER NOT NULL, id INTEGER, kind TEXT, employer TEXT, enemy TEXT, planet TEXT, status TEXT, company INTEGER, start_day INTEGER, score INTEGER, dist_ly INTEGER, beachhead INTEGER, transit_days INTEGER, arrive_day INTEGER, end_day INTEGER, monthly_net INTEGER, next_battle INTEGER, battles INTEGER, casualties INTEGER, objective TEXT, committed_bv INTEGER, pool INTEGER, pool_remaining INTEGER, vp INTEGER, ineffective_since INTEGER, breach_day INTEGER, length_months INTEGER, base_pay INTEGER, advance_pct INTEGER, signing_bonus INTEGER, transport_pct INTEGER, overhead_pct INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, salvage_exchange INTEGER CHECK (salvage_exchange IN (0,1)), command_rights TEXT, negotiated INTEGER NOT NULL DEFAULT 0 CHECK (negotiated IN (0,1)), enemy_lances INTEGER NOT NULL DEFAULT 0, enemy_quality TEXT NOT NULL DEFAULT 'regular', enemy_lance_bv INTEGER NOT NULL DEFAULT 0, enemy_lance_tons INTEGER NOT NULL DEFAULT 0, offer_hq INTEGER NOT NULL DEFAULT 0, orders_day INTEGER, arc_key TEXT NOT NULL DEFAULT '', arc_beat INTEGER NOT NULL DEFAULT 0, escalation_clock INTEGER NOT NULL DEFAULT 0, arc_finale_key TEXT NOT NULL DEFAULT '', command_capacity INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
@@ -122,7 +123,7 @@ const tables = [_][]const u8{
     "supply_policy",       "stock_policy",           "faction_cooling",    "faction_standing",  "event_memory",           "listing",            "part_order",            "event_log",           "pending_event",
     "refit_plan",          "refit_op",               "rating_snapshot",    "battle_report",     "battle_report_hit",      "battle_report_ammo", "battle_report_salvage", "rng_stream",          "operation",
     "operation_task",      "operation_intervention", "battle_report_task", "actor",             "world_state",            "rival",              "officer_arc",           "hull_instance",       "hull_loadout",
-    "artillery_formation", "artillery_offer",        "hull_combat_record", "maintenance_entry", "hull_ownership_history", "faction_roster",     "merc_company",          "merc_company_roster",
+    "artillery_formation", "artillery_offer",        "hull_combat_record", "maintenance_entry", "hull_ownership_history", "faction_roster",     "merc_company",          "merc_company_roster", "retired_hq",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -432,6 +433,9 @@ pub const Store = struct {
         // transaction rather than leaving an ambiguous permanent report.
         if (stored >= 1 and stored < 59) try rebuildBattleReportToV59(db);
         if (stored >= 1 and stored < 60) try rebuildOwnershipToV60(db);
+        // v60 -> v61 adds retired_hq through the transactional DDL above.
+        // Campaigns retain their saved version until their first successful
+        // save; the versioned decoder requires an empty legacy archive.
         try store.setSetting("schema_version", schema_version);
         try db.exec("COMMIT");
         // Re-enable FK enforcement for all subsequent operations (rule 50).
@@ -788,6 +792,7 @@ pub const Store = struct {
         try self.saveForce(gs, cid);
         try self.saveStock(cid, "outfit", 0, &gs.spare_parts);
         try self.saveHq(gs, cid);
+        try self.saveRetiredHq(gs, cid);
         try self.saveContracts(gs, cid);
         try self.saveOperations(gs, cid);
         try self.saveActors(gs, cid);
@@ -859,24 +864,25 @@ pub const Store = struct {
         const st = try self.db.prepare("INSERT INTO meta VALUES (?1, ?2, ?3)");
         defer st.finalize();
         const ints = [_]struct { []const u8, i64 }{
-            .{ "day_index", gs.clock.day_index },                               .{ "year", gs.clock.date.year },
-            .{ "month", gs.clock.date.month },                                  .{ "day", gs.clock.date.day },
-            .{ "funds", gs.funds },                                             .{ "reputation", gs.reputation },
-            .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) },               .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
-            .{ "difficulty", difficulty_int },                                  .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
-            .{ "stat_battles_won", gs.stats.battles_won },                      .{ "stat_battles_drawn", gs.stats.battles_drawn },
-            .{ "stat_battles_lost", gs.stats.battles_lost },                    .{ "stat_hulls_lost", gs.stats.hulls_lost },
-            .{ "stat_hulls_salvaged", gs.stats.hulls_salvaged },                .{ "stat_people_kia", gs.stats.people_kia },
-            .{ "stat_enemy_bv", enemy_bv_i64 },                                 .{ "next_person_id", gs.next_person_id },
-            .{ "next_unit_id", gs.next_unit_id },                               .{ "next_force_id", gs.next_force_id },
-            .{ "next_hq_id", gs.next_hq_id },                                   .{ "next_contract_id", gs.next_contract_id },
-            .{ "next_battle_id", gs.next_battle_id },                           .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },
-            .{ "next_event_id", gs.event_queue.next_id },                       .{ "next_listing_id", gs.next_listing_id },
-            .{ "next_candidate_id", gs.next_candidate_id },                     .{ "next_loan_id", gs.next_loan_id },
-            .{ "next_operation_id", gs.next_operation_id },                     .{ "next_actor_id", gs.next_actor_id },
-            .{ "next_rival_id", gs.next_rival_id },                             .{ "next_officer_arc_id", gs.next_officer_arc_id },
-            .{ "next_artillery_formation_id", gs.next_artillery_formation_id }, .{ "next_artillery_offer_id", gs.next_artillery_offer_id },
-            .{ "next_hull_instance_id", gs.next_hull_instance_id },             .{ "next_merc_company_id", gs.next_merc_company_id },
+            .{ "day_index", gs.clock.day_index },                       .{ "year", gs.clock.date.year },
+            .{ "month", gs.clock.date.month },                          .{ "day", gs.clock.date.day },
+            .{ "funds", gs.funds },                                     .{ "reputation", gs.reputation },
+            .{ "bankrupt", @as(i64, @intFromBool(gs.bankrupt)) },       .{ "auto_admit", @as(i64, @intFromBool(gs.auto_admit)) },
+            .{ "difficulty", difficulty_int },                          .{ "share_profit_bp", @as(i64, gs.share_profit_bp) },
+            .{ "stat_battles_won", gs.stats.battles_won },              .{ "stat_battles_drawn", gs.stats.battles_drawn },
+            .{ "stat_battles_lost", gs.stats.battles_lost },            .{ "stat_hulls_lost", gs.stats.hulls_lost },
+            .{ "stat_hulls_salvaged", gs.stats.hulls_salvaged },        .{ "stat_people_kia", gs.stats.people_kia },
+            .{ "stat_enemy_bv", enemy_bv_i64 },                         .{ "next_person_id", gs.next_person_id },
+            .{ "next_unit_id", gs.next_unit_id },                       .{ "next_force_id", gs.next_force_id },
+            .{ "next_hq_id", gs.next_hq_id },                           .{ "next_contract_id", gs.next_contract_id },
+            .{ "retired_hq_count", @intCast(gs.retired_hqs.count()) },  .{ "next_battle_id", gs.next_battle_id },
+            .{ "rng_seed", @as(i64, @bitCast(gs.rng.seed)) },           .{ "next_event_id", gs.event_queue.next_id },
+            .{ "next_listing_id", gs.next_listing_id },                 .{ "next_candidate_id", gs.next_candidate_id },
+            .{ "next_loan_id", gs.next_loan_id },                       .{ "next_operation_id", gs.next_operation_id },
+            .{ "next_actor_id", gs.next_actor_id },                     .{ "next_rival_id", gs.next_rival_id },
+            .{ "next_officer_arc_id", gs.next_officer_arc_id },         .{ "next_artillery_formation_id", gs.next_artillery_formation_id },
+            .{ "next_artillery_offer_id", gs.next_artillery_offer_id }, .{ "next_hull_instance_id", gs.next_hull_instance_id },
+            .{ "next_merc_company_id", gs.next_merc_company_id },
         };
         for (ints) |kv| {
             try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -1149,6 +1155,15 @@ pub const Store = struct {
                 try pr.run();
             }
             try self.saveStock(cid, "hq", @intFromEnum(h.id), &h.stock);
+        }
+    }
+
+    fn saveRetiredHq(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO retired_hq VALUES (?1,?2,?3,?4,?5,?6,?7)");
+        defer st.finalize();
+        for (gs.retired_hqs.values(), 0..) |h, ord| {
+            try st.bindAll(.{ cid, @as(i64, @intCast(ord)), @intFromEnum(h.id), h.name, h.planet_key, @tagName(h.tier), h.sold_day });
+            try st.run();
         }
     }
 
@@ -2146,6 +2161,7 @@ pub const Store = struct {
         try self.loadHullOwnershipHistory(&gs, cid);
         try self.loadForce(&gs, cid);
         try self.loadHq(&gs, cid);
+        try self.loadRetiredHq(&gs, cid, saved_version);
         try self.loadStock(&gs, cid);
         try self.loadContract(&gs, cid);
         try self.loadOperations(&gs, cid);
@@ -2193,6 +2209,7 @@ pub const Store = struct {
         // Validate all cross-entity references and reconcile counters before
         // string validation (rules 47, 48).
         try validateReferences(&gs);
+        try hq_ops.validateHqHistory(&gs);
         try artillery.validate(&gs);
         try reconcileCounters(&gs);
         try validateStoredStrings(&gs);
@@ -2697,6 +2714,56 @@ pub const Store = struct {
                 .cost = pr.int(7),
             });
         }
+    }
+
+    /// Versioned archive completeness and permanent HQ counter. typeof checks
+    /// precede conversion because SQLite's integer/text accessors coerce values.
+    fn loadRetiredHq(self: Store, gs: *GameState, cid: i64, version: u32) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare(
+            \\SELECT id,name,planet,tier,sold_day,ord,
+            \\ typeof(cid)='integer' AND typeof(ord)='integer' AND typeof(id)='integer' AND typeof(name)='text'
+            \\ AND typeof(planet)='text' AND typeof(tier)='text' AND typeof(sold_day)='integer'
+            \\ FROM retired_hq WHERE cid=?1 ORDER BY ord
+        );
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            if (version < 61 or st.int(6) != 1) return error.CorruptSave;
+            if (try st.intAs(u32, 5) != gs.retired_hqs.count()) return error.CorruptSave;
+            const id = try toId(types.HqId, st.int(0));
+            if (id == .none) return error.CorruptSave;
+            const h: hq_mod.RetiredHq = .{
+                .id = id,
+                .name = try st.text(1, alloc),
+                .planet_key = try st.text(2, alloc),
+                .tier = st.enumValue(hq_mod.HqTier, 3) orelse return error.CorruptSave,
+                .sold_day = try st.intAs(u32, 4),
+            };
+            const gop = try gs.retired_hqs.getOrPut(alloc, id);
+            if (gop.found_existing) return error.CorruptSave;
+            gop.value_ptr.* = h;
+        }
+        const count = try self.hqMetaUint(cid, "retired_hq_count", version >= 61);
+        if (count) |n| if (n != gs.retired_hqs.count()) return error.CorruptSave;
+        if (version >= 61) {
+            gs.next_hq_id = (try self.hqMetaUint(cid, "next_hq_id", true)).?;
+            if (gs.next_hq_id == 0 or gs.next_hq_id <= hq_ops.maxHqIdentity(gs)) return error.CorruptSave;
+        }
+    }
+
+    fn hqMetaUint(self: Store, cid: i64, key: []const u8, required: bool) !?u32 {
+        const st = try self.db.prepare("SELECT value, typeof(cid)='integer' AND typeof(key)='text' AND typeof(value)='integer' FROM meta WHERE cid=?1 AND key=?2");
+        defer st.finalize();
+        try st.bindAll(.{ cid, key });
+        if (!try st.next()) {
+            if (required) return error.CorruptSave;
+            return null;
+        }
+        if (st.int(1) != 1) return error.CorruptSave;
+        const value = try st.intAs(u32, 0);
+        if (try st.next()) return error.CorruptSave;
+        return value;
     }
 
     // Stock at every site.
@@ -3727,7 +3794,6 @@ fn validateReferences(gs: *GameState) error{CorruptSave}!void {
         try Ref.inMap(types.ForceId, u.force, gs.forces);
         try Ref.inMap(types.PersonId, u.pilot, gs.people);
         try Ref.inMap(types.PersonId, u.tech, gs.people);
-        try Ref.inMap(types.HqId, u.berth_hq, gs.hqs);
         try Ref.inMap(types.HullInstanceId, u.hull_instance_id, gs.hull_instances);
     }
     // Hull instances: merc-company-owned hulls must reference a live merc company (post-load pass;
@@ -3745,7 +3811,6 @@ fn validateReferences(gs: *GameState) error{CorruptSave}!void {
         const f = e.value_ptr;
         try Ref.inMap(types.ForceId, f.parent, gs.forces);
         try Ref.inMap(types.PersonId, f.commander, gs.people);
-        try Ref.inMap(types.HqId, f.supplying_hq, gs.hqs);
         // Each unit/child reference in the list must resolve.
         for (f.units.items) |uid| try Ref.unitExists(uid, gs);
         for (f.children.items) |cid| try Ref.inMap(types.ForceId, cid, gs.forces);
@@ -3755,18 +3820,15 @@ fn validateReferences(gs: *GameState) error{CorruptSave}!void {
     while (pit.next()) |e| {
         const p = e.value_ptr;
         try Ref.inMap(types.ForceId, p.assigned_force, gs.forces);
-        try Ref.inMap(types.HqId, p.posted_hq, gs.hqs);
     }
     // Contracts
     for ([_][]const contract_mod.Contract{ gs.contracts.values(), gs.contract_offers.items }) |list| {
         for (list) |c| {
             try Ref.inMap(types.ForceId, c.assigned_company, gs.forces);
-            try Ref.inMap(types.HqId, c.offer_hq, gs.hqs);
         }
     }
     // Bay jobs
     for (gs.bay_jobs.items) |j| {
-        try Ref.inMap(types.HqId, j.hq, gs.hqs);
         try Ref.unitExists(j.unit, gs);
     }
     // Pending events
@@ -3791,13 +3853,7 @@ fn validateReferences(gs: *GameState) error{CorruptSave}!void {
     // Ledger transactions
     for (gs.ledger.transactions.items) |t| {
         try Ref.inMap(types.ForceId, t.company, gs.forces);
-        try Ref.inMap(types.HqId, t.hq, gs.hqs);
         try Ref.inMap(types.ContractId, t.contract, gs.contracts);
-    }
-    // HQ links
-    for (gs.hq_links.items) |l| {
-        try Ref.inMap(types.HqId, l.a, gs.hqs);
-        try Ref.inMap(types.HqId, l.b, gs.hqs);
     }
     // Unit transfers
     for (gs.unit_transfers.items) |ut| {
@@ -3806,16 +3862,15 @@ fn validateReferences(gs: *GameState) error{CorruptSave}!void {
     }
     // Supply and stock policies
     for (gs.supply_policies.items) |sp| try Ref.inMap(types.ForceId, sp.company, gs.forces);
-    for (gs.stock_policies.items) |sp| try Ref.inMap(types.HqId, sp.hq, gs.hqs);
     // Fund couriers and standing policies
     for (gs.fund_couriers.items) |c| switch (c.to) {
         .outfit => {},
-        .hq => |id| try Ref.inMap(types.HqId, id, gs.hqs),
+        .hq => {},
         .company => |id| try Ref.inMap(types.ForceId, id, gs.forces),
     };
     for (gs.policies.items) |p| switch (p.entity) {
         .outfit => {},
-        .hq => |id| try Ref.inMap(types.HqId, id, gs.hqs),
+        .hq => {},
         .company => |id| try Ref.inMap(types.ForceId, id, gs.forces),
     };
     // Faction/merc-company rosters: every member hull must resolve to a live hull
@@ -3866,9 +3921,7 @@ fn reconcileCounters(gs: *GameState) error{CorruptSave}!void {
         gs.next_force_id = @max(gs.next_force_id, max + 1);
     }
     {
-        var max: u32 = 0;
-        var it = gs.hqs.iterator();
-        while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
+        const max = hq_ops.maxHqIdentity(gs);
         if (max == max_u32) return error.CorruptSave;
         gs.next_hq_id = @max(gs.next_hq_id, max + 1);
     }
@@ -5203,7 +5256,7 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    try std.testing.expectEqual(@as(u64, 6901423606357676232), hash_before);
+    try std.testing.expectEqual(@as(u64, 7222777433613484386), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5218,6 +5271,8 @@ test "every next-ID counter resumes past a higher owned id after load" {
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
+    // v61 rejects corrupt HQ counters; explicit v60 compatibility reconciles them.
+    try store.db.exec("UPDATE campaign SET schema_version=60; DELETE FROM meta WHERE key='retired_hq_count'");
     for ([_][*:0]const u8{
         "UPDATE meta SET value = 0 WHERE key = 'next_person_id'",
         "UPDATE meta SET value = 0 WHERE key = 'next_unit_id'",
@@ -5711,7 +5766,7 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
     // The scripted campaign's hash detects any simulation or persistence change.
     try std.testing.expectEqual(@as(u64, 13565609406863393148), digestBeforeArtilleryForTest(&gs));
-    try std.testing.expectEqual(@as(u64, 6901423606357676232), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 7222777433613484386), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5726,12 +5781,13 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
 }
 
 /// Schema-v59 digest representation checks unchanged conventional evolution.
+/// The new empty HQ archive is excluded only in this historical test projection.
 fn digestBeforeArtilleryForTest(gs: *const GameState) u64 {
     @setEvalBranchQuota(200_000);
     var hash = std.hash.Wyhash.init(0x42544d43);
     inline for (@typeInfo(GameState).@"struct".fields) |field| {
         if (comptime GameState.persistenceOf(field.name) == .persisted or GameState.persistenceOf(field.name) == .derived) {
-            if (comptime std.mem.startsWith(u8, field.name, "artillery_") or std.mem.startsWith(u8, field.name, "next_artillery_")) continue;
+            if (comptime std.mem.eql(u8, field.name, "retired_hqs") or std.mem.startsWith(u8, field.name, "artillery_") or std.mem.startsWith(u8, field.name, "next_artillery_")) continue;
             digest.update(&hash, field.name);
             if (comptime std.mem.eql(u8, field.name, "hull_instances")) {
                 digest.update(&hash, @as(u64, gs.hull_instances.count()));
@@ -9049,6 +9105,7 @@ test "P3f.1: v56 store upgrades to v57, existing listings load with planet_key='
 }
 
 fn removeArtilleryFromLegacyFixture(db: sqlite.Db) !void {
+    try db.exec("DELETE FROM retired_hq; DELETE FROM meta WHERE key='retired_hq_count'");
     try db.exec("DELETE FROM artillery_offer; DELETE FROM artillery_formation; DELETE FROM meta WHERE key IN ('next_artillery_formation_id','next_artillery_offer_id','artillery_offer_count')");
 }
 
@@ -9057,6 +9114,46 @@ fn artilleryCampaignForTest(gs: *GameState) !types.ArtilleryFormationId {
     const home = try founding.createCommander(gs, "T", .LC, .quartermaster);
     gs.hqs.getPtr(home).?.funds = artillery.purchasePrice() * 10;
     return (try commands.execute(gs, .{ .buy_artillery = .{ .hq = home, .offer = gs.artillery_offers.items[0].id } })).artillery_formation;
+}
+
+test "artillery disposal followed by real HQ sale preserves save-load history" {
+    const commands = @import("../sim/commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 625 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    gs.funds = 500_000_000;
+    const created = try commands.execute(&gs, .{ .found_hq = .{ .name = "Historical depot", .planet_key = gs.hqs.values()[0].planet_key } });
+    const hq = created.created_hq;
+    gs.hqs.getPtr(hq).?.funds = 500_000_000;
+    _ = try commands.execute(&gs, .{ .upgrade_tier = hq });
+    const done = gs.hqs.getPtr(hq).?.projects.items[0].construction_done_day;
+    _ = try commands.execute(&gs, .{ .advance_days = done + 1 });
+    try std.testing.expectEqual(hq_mod.HqTier.regional, gs.hqs.getPtr(hq).?.tier);
+    const offer = for (gs.artillery_offers.items) |o| {
+        if (o.hq == hq) break o.id;
+    } else return error.TestExpectedEqual;
+    const bought = try commands.execute(&gs, .{ .buy_artillery = .{ .hq = hq, .offer = offer } });
+    _ = try commands.execute(&gs, .{ .sell_artillery = bought.artillery_formation });
+    _ = try commands.execute(&gs, .{ .sell_hq = hq });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &buf) orelse "");
+    try std.testing.expectEqualStrings("Historical depot", loaded.retired_hqs.get(hq).?.name);
+    try std.testing.expectEqual(bought.hull_instance, loaded.artillery_formations.get(bought.artillery_formation).?.hull);
+    var intervals: usize = 0;
+    for (loaded.hull_ownership_history.items) |h| if (h.hull_instance_id == bought.hull_instance) {
+        intervals += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 2), intervals);
+    for ([_]*GameState{ &gs, &loaded }) |g| _ = try commands.execute(g, .{ .advance_days = 10 });
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &buf) orelse "");
+    const created_again = try commands.execute(&loaded, .{ .found_hq = .{ .name = "New depot", .planet_key = loaded.hqs.values()[0].planet_key } });
+    try std.testing.expect(@intFromEnum(created_again.created_hq) > @intFromEnum(hq));
+    try std.testing.expect(loaded.retired_hqs.contains(hq));
 }
 
 test "artillery sold day-zero identity and freight round trip with continued evolution" {
@@ -9089,9 +9186,16 @@ test "artillery sold day-zero identity and freight round trip with continued evo
     for ([_]*GameState{ &gs, &loaded }) |g| _ = try commands.execute(g, .{ .advance_days = 40 });
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &buf) orelse "");
     try std.testing.expect(loaded.artillery_formations.get(bought.artillery_formation).?.placement == .hq_pool);
+    // The source's purchase and freight ledger remain tagged after its sale.
+    for ([_]*GameState{ &gs, &loaded }) |g| _ = try commands.execute(g, .{ .sell_hq = far });
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &buf) orelse "");
     try store.save(&loaded);
+    var retired_roundtrip = try store.load(std.testing.allocator, gs.campaign_id);
+    defer retired_roundtrip.deinit();
+    try std.testing.expectEqual(digest.stateHash(&loaded), digest.stateHash(&retired_roundtrip));
+    try std.testing.expect(retired_roundtrip.retired_hqs.contains(far));
     try store.deleteCampaign(gs.campaign_id);
-    for ([_][]const u8{ "artillery_formation", "artillery_offer" }) |table| {
+    for ([_][]const u8{ "artillery_formation", "artillery_offer", "retired_hq" }) |table| {
         var sql: [128:0]u8 = undefined;
         _ = try std.fmt.bufPrintZ(&sql, "SELECT count(*) FROM {s}", .{table});
         const query = try store.db.prepare(&sql);
@@ -9295,4 +9399,226 @@ test "malformed v59 ownership migration rejects and leaves schema and rows uncha
         try std.testing.expectEqual(@as(i64, 59), store.getSetting("schema_version", 0));
         try std.testing.expect(!try Store.hasColumnRt(raw, "hull_instance", "catalogue"));
     }
+}
+
+fn retiredCampaignForTest(gs: *GameState) !types.HqId {
+    const commands = @import("../sim/commands.zig");
+    _ = try founding.createCommander(gs, "T", .LC, .quartermaster);
+    const other = try founding.foundHq(gs, "{g}Historical\x1b depot", .regional, "skye");
+    try artillery.syncMarkets(gs);
+    gs.hqs.getPtr(other).?.funds = artillery.purchasePrice() * 4;
+    const bought = try commands.execute(gs, .{ .buy_artillery = .{ .hq = other, .offer = gs.artillery_offers.items[1].id } });
+    _ = try commands.execute(gs, .{ .sell_artillery = bought.artillery_formation });
+    _ = try commands.execute(gs, .{ .sell_hq = other });
+    return other;
+}
+
+test "multiple retired HQs preserve sale order independently of ID order" {
+    const commands = @import("../sim/commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const first = try founding.foundHq(&gs, "First", .regional, "skye");
+    const second = try founding.foundHq(&gs, "Second", .regional, "skye");
+    _ = try commands.execute(&gs, .{ .sell_hq = second });
+    _ = try commands.execute(&gs, .{ .sell_hq = first });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqualSlices(types.HqId, gs.retired_hqs.keys(), loaded.retired_hqs.keys());
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+}
+
+test "retired HQ archive and history reject incomplete malformed and operational-only references" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const retired = try retiredCampaignForTest(&gs);
+    try std.testing.expectEqual(@as(u32, 2), @intFromEnum(retired));
+    _ = try gs.createForce("Company", .company, .none);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    for ([_][*:0]const u8{
+        "DELETE FROM retired_hq",
+        "DELETE FROM meta WHERE key='retired_hq_count'",
+        "UPDATE meta SET value=0 WHERE key='retired_hq_count'",
+        "UPDATE meta SET value=-1 WHERE key='retired_hq_count'",
+        "UPDATE meta SET value=1.5 WHERE key='retired_hq_count'",
+        "UPDATE meta SET value='invalid' WHERE key='retired_hq_count'",
+        "UPDATE meta SET value=X'31' WHERE key='retired_hq_count'",
+        "DELETE FROM meta WHERE key='next_hq_id'",
+        "UPDATE meta SET value=0 WHERE key='next_hq_id'",
+        "UPDATE meta SET value=2 WHERE key='next_hq_id'",
+        "UPDATE meta SET value=-1 WHERE key='next_hq_id'",
+        "UPDATE meta SET value=4294967296 WHERE key='next_hq_id'",
+        "UPDATE meta SET value=3.5 WHERE key='next_hq_id'",
+        "UPDATE meta SET value='invalid' WHERE key='next_hq_id'",
+        "UPDATE meta SET value=X'33' WHERE key='next_hq_id'",
+        "UPDATE retired_hq SET id=0",
+        "UPDATE retired_hq SET id=1",
+        "UPDATE retired_hq SET id=4294967295",
+        "UPDATE retired_hq SET id=4294967296",
+        "UPDATE retired_hq SET id=-1",
+        "UPDATE retired_hq SET id=2.5",
+        "UPDATE retired_hq SET id='invalid'",
+        "UPDATE retired_hq SET id=X'32'",
+        "UPDATE retired_hq SET sold_day=1",
+        "UPDATE retired_hq SET sold_day=-1",
+        "UPDATE retired_hq SET sold_day=4294967296",
+        "UPDATE retired_hq SET sold_day=0.5",
+        "UPDATE retired_hq SET sold_day='invalid'",
+        "UPDATE retired_hq SET sold_day=X'30'",
+        "UPDATE retired_hq SET tier='unknown'",
+        "UPDATE retired_hq SET tier=X'6669656c64'",
+        "UPDATE retired_hq SET planet='unknown'",
+        "UPDATE retired_hq SET planet=X'736b7965'",
+        "UPDATE retired_hq SET name=X'4e616d65'",
+        "UPDATE retired_hq SET ord=1",
+        "UPDATE retired_hq SET ord=-1",
+        "UPDATE retired_hq SET ord=4294967296",
+        "UPDATE retired_hq SET ord=0.5",
+        "UPDATE retired_hq SET ord='invalid'",
+        "UPDATE retired_hq SET ord=X'30'",
+        "UPDATE txn SET hq=999 WHERE hq=2",
+        "UPDATE event_log SET hq=999 WHERE hq=2",
+        "UPDATE force SET supplying_hq=2",
+        "UPDATE person SET posted_hq=2",
+        "UPDATE artillery_offer SET hq=2",
+        "UPDATE campaign SET schema_version=60",
+    }) |tamper| {
+        try store.save(&gs);
+        try store.db.exec("PRAGMA foreign_keys=OFF; PRAGMA ignore_check_constraints=ON");
+        try store.db.exec(tamper);
+        try store.db.exec("PRAGMA foreign_keys=ON; PRAGMA ignore_check_constraints=OFF");
+        var loaded = store.load(std.testing.allocator, gs.campaign_id) catch |err| {
+            try std.testing.expectEqual(error.CorruptSave, err);
+            continue;
+        };
+        loaded.deinit();
+        std.debug.print("accepted malformed HQ archive: {s}\n", .{tamper});
+        return error.TestExpectedError;
+    }
+}
+
+test "archive decoder rejects duplicate NULL and coercible original storage classes" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try retiredCampaignForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    // No affinities/constraints: numeric text remains TEXT and NULL is possible.
+    try store.db.exec("PRAGMA foreign_keys=OFF");
+    try store.db.exec("ALTER TABLE retired_hq RENAME TO archive_original; CREATE TABLE retired_hq(cid,ord,id,name,planet,tier,sold_day)");
+    for ([_][*:0]const u8{
+        "INSERT INTO retired_hq SELECT * FROM archive_original",
+        "UPDATE retired_hq SET id=NULL",
+        "UPDATE retired_hq SET id='2'",
+        "UPDATE retired_hq SET sold_day=NULL",
+        "UPDATE retired_hq SET sold_day='0'",
+        "UPDATE retired_hq SET name=NULL",
+        "UPDATE retired_hq SET planet=NULL",
+        "UPDATE retired_hq SET tier=NULL",
+        "UPDATE retired_hq SET cid='1'",
+        "UPDATE retired_hq SET ord=NULL",
+        "UPDATE retired_hq SET ord='0'",
+    }) |tamper| {
+        try store.db.exec("DELETE FROM retired_hq; INSERT INTO retired_hq SELECT * FROM archive_original");
+        try store.db.exec(tamper);
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    }
+    // Metadata is checked before coercion, including numeric text and NULL.
+    try store.db.exec("DELETE FROM retired_hq; INSERT INTO retired_hq SELECT * FROM archive_original; ALTER TABLE meta RENAME TO meta_original; CREATE TABLE meta(cid,key,value)");
+    for ([_][*:0]const u8{
+        "UPDATE meta SET value=NULL WHERE key='next_hq_id'",
+        "UPDATE meta SET value='3' WHERE key='next_hq_id'",
+        "UPDATE meta SET value=NULL WHERE key='retired_hq_count'",
+        "UPDATE meta SET value='1' WHERE key='retired_hq_count'",
+        "INSERT INTO meta SELECT * FROM meta_original WHERE key='retired_hq_count'",
+    }) |tamper| {
+        try store.db.exec("DELETE FROM meta; INSERT INTO meta SELECT * FROM meta_original");
+        try store.db.exec(tamper);
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    }
+}
+
+test "archive save first-write update overwrite and delete are one transaction per campaign" {
+    const prior_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = prior_log_level;
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try retiredCampaignForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    // Failure occurs after the archive table has been written in save order.
+    try store.db.exec("CREATE TRIGGER reject_after_archive BEFORE INSERT ON txn BEGIN SELECT RAISE(ABORT,'injected'); END");
+    const before = digest.stateHash(&gs);
+    try std.testing.expectError(error.ConstraintViolation, store.save(&gs));
+    try std.testing.expectEqual(@as(i64, 0), gs.campaign_id);
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    const rows = try store.db.prepare("SELECT count(*) FROM retired_hq");
+    defer rows.finalize();
+    try std.testing.expect(try rows.next());
+    try std.testing.expectEqual(@as(i64, 0), rows.int(0));
+    try store.db.exec("DROP TRIGGER reject_after_archive");
+    try store.save(&gs);
+    const original = digest.stateHash(&gs);
+    gs.retired_hqs.getPtr(id).?.name = "Changed";
+    const changed = digest.stateHash(&gs);
+    try store.db.exec("CREATE TRIGGER reject_after_archive BEFORE INSERT ON txn BEGIN SELECT RAISE(ABORT,'injected'); END");
+    try std.testing.expectError(error.ConstraintViolation, store.save(&gs));
+    try std.testing.expectEqual(changed, digest.stateHash(&gs));
+    var old = try store.load(std.testing.allocator, gs.campaign_id);
+    defer old.deinit();
+    try std.testing.expectEqual(original, digest.stateHash(&old));
+    try store.db.exec("DROP TRIGGER reject_after_archive");
+    try store.save(&gs);
+    var updated = try store.load(std.testing.allocator, gs.campaign_id);
+    defer updated.deinit();
+    try std.testing.expectEqual(changed, digest.stateHash(&updated));
+    var independent = GameState.init(std.testing.allocator, .{});
+    defer independent.deinit();
+    _ = try retiredCampaignForTest(&independent);
+    try store.save(&independent);
+    try store.deleteCampaign(gs.campaign_id);
+    var retained = try store.load(std.testing.allocator, independent.campaign_id);
+    defer retained.deinit();
+    try std.testing.expectEqual(@as(usize, 1), retained.retired_hqs.count());
+    try store.deleteCampaign(independent.campaign_id);
+    rows.reset();
+    try std.testing.expect(try rows.next());
+    try std.testing.expectEqual(@as(i64, 0), rows.int(0));
+}
+
+test "real v60 archive migration is empty deterministic repeatable and rejects lost legacy identity" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try artilleryCampaignForTest(&gs);
+    const db = try sqlite.Db.open(":memory:");
+    var initial = try Store.fromDb(db);
+    try initial.save(&gs);
+    try db.exec("DROP TABLE retired_hq; DELETE FROM meta WHERE key='retired_hq_count'; UPDATE setting SET value=60 WHERE key='schema_version'; UPDATE campaign SET schema_version=60; UPDATE meta SET value=0 WHERE key='next_hq_id'");
+    const migrated = try Store.fromDb(db);
+    defer migrated.close();
+    try std.testing.expectEqual(@as(i64, 61), migrated.getSetting("schema_version", 0));
+    var loaded = try migrated.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(@as(usize, 0), loaded.retired_hqs.count());
+    try std.testing.expectEqual(gs.next_hq_id, loaded.next_hq_id);
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    const repeated = try Store.fromDb(db);
+    var again = try repeated.load(std.testing.allocator, gs.campaign_id);
+    defer again.deinit();
+    try std.testing.expectEqual(digest.stateHash(&loaded), digest.stateHash(&again));
+    // A partly upgraded campaign must not have an invented archive payload.
+    try db.exec("INSERT INTO retired_hq VALUES (1,0,2,'Lost','skye','regional',0)");
+    try std.testing.expectError(error.CorruptSave, migrated.load(std.testing.allocator, gs.campaign_id));
+    try db.exec("DELETE FROM retired_hq");
+    // Schema-v60 historical-only tags must resolve despite the empty archive.
+    try db.exec("UPDATE event_log SET hq=99");
+    try std.testing.expectError(error.CorruptSave, migrated.load(std.testing.allocator, gs.campaign_id));
+    try db.exec("UPDATE event_log SET hq=1; UPDATE txn SET hq=99 WHERE hq=1");
+    try std.testing.expectError(error.CorruptSave, migrated.load(std.testing.allocator, gs.campaign_id));
 }

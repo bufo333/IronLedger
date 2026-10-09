@@ -690,6 +690,7 @@ test "attached carrier travels outward redeploys recalls and returns with compan
 }
 
 test "fixed seed artillery acquisition attachment freight and disposal script has pinned digest" {
+    @setEvalBranchQuota(200_000);
     const digest = @import("digest.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 625 });
     defer gs.deinit();
@@ -713,7 +714,19 @@ test "fixed seed artillery acquisition attachment freight and disposal script ha
     try std.testing.expectEqual(@as(usize, 2), gs.hull_ownership_history.items.len);
     try std.testing.expectEqual(@as(?u32, transfer_result.artillery_eta_day), gs.hull_ownership_history.items[0].to_day);
     try std.testing.expect(gs.hull_ownership_history.items[1].isOpen());
-    try std.testing.expectEqual(@as(u64, 3971801592459885178), digest.stateHash(&gs));
+    // The sole representation change is the empty persisted HQ archive;
+    // the full production digest still includes it. Prove the prior script
+    // (all RNG, counters and carrier state) remains identical without it.
+    var prior = std.hash.Wyhash.init(0x42544d43);
+    inline for (@typeInfo(GameState).@"struct".fields) |field| {
+        if (comptime GameState.persistenceOf(field.name) == .persisted or GameState.persistenceOf(field.name) == .derived) {
+            if (comptime std.mem.eql(u8, field.name, "retired_hqs")) continue;
+            digest.update(&prior, field.name);
+            digest.update(&prior, @field(gs, field.name));
+        }
+    }
+    try std.testing.expectEqual(@as(u64, 3971801592459885178), prior.final());
+    try std.testing.expectEqual(@as(u64, 1663881336431027581), digest.stateHash(&gs));
 }
 
 fn validatePlacement(gs: *GameState, f: dom.Formation) error{CorruptSave}!void {
