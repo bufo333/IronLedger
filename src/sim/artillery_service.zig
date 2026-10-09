@@ -213,7 +213,7 @@ fn prepareMaintenance(gs: *GameState, f: *dom.Formation, book: *maintenance.Hour
     const tech = if (mechanic_site != null) gs.person(f.tech) else null;
     const covered = if (tech) |p| try book.spend(gs, p, techHours(gs, f), 0) else false;
     const skill = if (covered) tech.?.skill(.tech_mechanic).? else 7;
-    const target = tuning.maintenance.target_base + f.quality.maintenanceModifier() + (if (site == .company) tuning.maintenance.target_deployed else @as(i32, 0)) + (if (!covered) tuning.maintenance.target_uncovered else @as(i32, 0));
+    const target = maintenance.maintenanceTarget(f.quality, site == .company, covered);
     const raw = gs.rng.roll2d6(.maintenance);
     const drift = maintenance.qualityDrift(@as(i32, raw) + person.skillRollBonus(skill), target);
     const before = f.quality;

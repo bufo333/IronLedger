@@ -107,10 +107,9 @@ pub fn save(db: sqlite.Db, gs: *const GameState, cid: i64) !void {
 /// Decode required current payloads without defaults; schema checks also enforce
 /// disjoint placement, while decoding independently checks absent-column consistency.
 pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
-    if (version >= 60) {
-        gs.next_artillery_formation_id = try requiredCounter(db, cid, "next_artillery_formation_id");
-        gs.next_artillery_offer_id = try requiredCounter(db, cid, "next_artillery_offer_id");
-    }
+    if (version != 62) return error.CorruptSave;
+    gs.next_artillery_formation_id = try requiredCounter(db, cid, "next_artillery_formation_id");
+    gs.next_artillery_offer_id = try requiredCounter(db, cid, "next_artillery_offer_id");
     const fs = try db.prepare(
         \\SELECT id,hull,acquisition_day,paid_price,placement,pool_hq,company,
         \\       from_hq,to_hq,dispatch_day,eta_day,paid_cost,ord,
@@ -159,17 +158,13 @@ pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
         if (armor > dom.intact_condition_pct) return error.CorruptSave;
         const last = try optionalDay(fs, 15);
         const tech = (try optionalId(types.PersonId, fs, 16)) orelse .none;
-        if (version < 62 and (quality != .c or armor != dom.intact_condition_pct or last != null or tech != .none)) return error.CorruptSave;
         const f: dom.Formation = .{ .id = try positiveId(types.ArtilleryFormationId, fs.int(0)), .hull = try positiveId(types.HullInstanceId, fs.int(1)), .acquisition_day = try fs.intAs(u32, 2), .paid_price = fs.int(3), .placement = placement, .quality = quality, .armor_pct = armor, .last_maintenance_day = last, .tech = tech };
         const gop = try gs.artillery_formations.getOrPut(gs.allocator(), f.id);
         if (gop.found_existing) return error.CorruptSave;
         gop.value_ptr.* = f;
     }
-    try loadOperationalRows(db, gs, cid, version);
-    try loadCheckpoint(db, gs, cid, version);
-    if (version < 62) for (gs.bay_jobs.items) |job| {
-        if (job.artillery != .none or job.kind == .artillery_depot_repair) return error.CorruptSave;
-    };
+    try loadOperationalRows(db, gs, cid);
+    try loadCheckpoint(db, gs, cid);
     const os = try db.prepare(
         \\SELECT id,hq,year,month,available,ord,
         \\       typeof(cid)='integer' AND typeof(ord)='integer'
@@ -186,11 +181,10 @@ pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
         if (flag > 1) return error.CorruptSave;
         try gs.artillery_offers.append(gs.allocator(), .{ .id = try positiveId(types.ArtilleryOfferId, os.int(0)), .hq = try positiveId(types.HqId, os.int(1)), .year = try os.intAs(u16, 2), .month = try os.intAs(u8, 3), .available = flag == 1 });
     }
-    if (version >= 60 and gs.artillery_offers.items.len != try requiredMetaUint(db, cid, "artillery_offer_count")) return error.CorruptSave;
-    if (version < 60 and (gs.artillery_formations.count() != 0 or gs.artillery_offers.items.len != 0)) return error.CorruptSave;
+    if (gs.artillery_offers.items.len != try requiredMetaUint(db, cid, "artillery_offer_count")) return error.CorruptSave;
 }
 
-fn loadOperationalRows(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
+fn loadOperationalRows(db: sqlite.Db, gs: *GameState, cid: i64) !void {
     const seen = try gs.scratch().alloc(struct { crew: u8 = 0, slots: u16 = 0 }, gs.artillery_formations.count());
     defer gs.scratch().free(seen);
     @memset(seen, .{});
@@ -208,7 +202,6 @@ fn loadOperationalRows(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !v
         if (seen[index].crew & mask != 0) return error.CorruptSave;
         seen[index].crew |= mask;
         const occupant = (try optionalId(types.PersonId, cs, 2)) orelse .none;
-        if (version < 62 and occupant != .none) return error.CorruptSave;
         gs.artillery_formations.values()[index].crew[@intFromEnum(seat)] = occupant;
     }
     const ss = try db.prepare("SELECT formation,slot,condition,rounds,typeof(cid)='integer' AND typeof(formation)='integer' AND typeof(slot)='text' AND typeof(condition)='text' AND typeof(rounds) IN ('integer','null') FROM artillery_slot WHERE cid=?1");
@@ -230,7 +223,6 @@ fn loadOperationalRows(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !v
         const d = operations.descriptor(slot);
         if ((ss.optInt(3) != null) != (d.family != null)) return error.CorruptSave;
         const rounds = if (ss.optInt(3)) |raw| std.math.cast(u16, raw) orelse return error.CorruptSave else 0;
-        if (version < 62 and (condition != .ok or rounds != 0)) return error.CorruptSave;
         gs.artillery_formations.values()[index].slots[@intFromEnum(slot)] = .{ .condition = condition, .rounds = rounds };
     }
     for (seen, gs.artillery_formations.values()) |row, f| {
@@ -239,18 +231,15 @@ fn loadOperationalRows(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !v
     }
 }
 
-fn loadCheckpoint(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
+fn loadCheckpoint(db: sqlite.Db, gs: *GameState, cid: i64) !void {
     const st = try db.prepare("SELECT value,typeof(cid)='integer' AND typeof(value)='integer' FROM meta WHERE cid=?1 AND key='last_artillery_service_day'");
     defer st.finalize();
     try st.bindAll(.{cid});
-    if (!try st.next()) {
-        if (version >= 62) return error.CorruptSave;
-        return;
-    }
+    if (!try st.next()) return error.CorruptSave;
     if (st.int(1) != 1) return error.CorruptSave;
     const raw = st.int(0);
     const day: ?u32 = if (raw == -1) null else std.math.cast(u32, raw) orelse return error.CorruptSave;
-    if (try st.next() or (version < 62 and day != null)) return error.CorruptSave;
+    if (try st.next()) return error.CorruptSave;
     gs.last_artillery_service_day = day;
 }
 
@@ -318,6 +307,7 @@ fn resetCodecFixture(db: sqlite.Db, placement: std.meta.Tag(dom.Placement)) !voi
         \\INSERT INTO meta VALUES(1,'next_artillery_formation_id',2);
         \\INSERT INTO meta VALUES(1,'next_artillery_offer_id',2);
         \\INSERT INTO meta VALUES(1,'artillery_offer_count',1);
+        \\INSERT INTO meta VALUES(1,'last_artillery_service_day',-1);
     );
     inline for (operations.seats) |seat| try db.exec("INSERT INTO artillery_crew VALUES(1,1,'" ++ @tagName(seat) ++ "',NULL)");
     inline for (operations.descriptors) |d| try db.exec("INSERT INTO artillery_slot VALUES(1,1,'" ++ @tagName(d.slot) ++ "','ok'," ++ (if (d.family != null) "0" else "NULL") ++ ")");
@@ -349,7 +339,7 @@ fn expectMalformedCodecValue(db: sqlite.Db, table: []const u8, field: []const u8
     try db.exec(try std.fmt.bufPrintZ(&sql, "UPDATE {s} SET {s}={s}", .{ table, field, value }));
     var rows = GameState.init(std.testing.allocator, .{});
     defer rows.deinit();
-    try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 60));
+    try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 62));
 }
 
 test "artillery codec rejects noninteger required fields and nontext placement tags" {
@@ -391,7 +381,7 @@ test "artillery codec preserves integer and null placements and rejects coerced 
         try resetCodecFixture(db, placement);
         var rows = GameState.init(std.testing.allocator, .{});
         defer rows.deinit();
-        try load(db, &rows, 1, 60);
+        try load(db, &rows, 1, 62);
         const formation = rows.artillery_formations.values()[0];
         try std.testing.expectEqual(placement, std.meta.activeTag(formation.placement));
         switch (formation.placement) {
@@ -430,7 +420,7 @@ test "artillery codec requires integer counter and row count metadata" {
             try db.exec(try std.fmt.bufPrintZ(&sql, "UPDATE meta SET value={s} WHERE key='{s}'", .{ value, key }));
             var rows = GameState.init(std.testing.allocator, .{});
             defer rows.deinit();
-            try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 60));
+            try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 62));
         }
     }
 }
@@ -632,15 +622,15 @@ test "placement tag scratch propagates allocation failure and releases bytes on 
                 var rows = GameState.init(failing.allocator(), .{});
                 defer rows.deinit();
                 if (fail_index == 0 or (fail_index == 1 and std.mem.eql(u8, value, "hq_pool"))) {
-                    try std.testing.expectError(error.OutOfMemory, load(db, &rows, 1, 60));
+                    try std.testing.expectError(error.OutOfMemory, load(db, &rows, 1, 62));
                     try std.testing.expect(failing.has_induced_failure);
                 } else if (std.mem.eql(u8, value, "hq_pool")) {
-                    try load(db, &rows, 1, 60);
+                    try load(db, &rows, 1, 62);
                     // Operational enums and row masks are scratch allocations;
                     // their bytes must be reclaimed alongside the campaign below.
                     try std.testing.expect(failing.deallocations > 0);
                 } else {
-                    try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 60));
+                    try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 62));
                     try std.testing.expectEqual(@as(usize, value.len), failing.freed_bytes);
                 }
             }

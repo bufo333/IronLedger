@@ -120,7 +120,10 @@ ammo bins use existing `SlotClass` and `PartCondition` meanings.
   and technician-skill multipliers, `Person.weekly_hours`, existing astech
   throughput, `qualityDrift`, target/field/uncovered modifiers, 2d6 and existing
   accident/medical rules through parameterized helpers in the existing
-  maintenance owner. Existing constants retain their current owner.
+  maintenance owner. Its pure `maintenanceTarget(quality, afield, covered)`
+  owns the quality, field and uncovered target for both ordinary units and
+  artillery; callers retain skill, RNG and mutation responsibilities. Existing
+  constants retain their current owner.
 - `techWeeklyLoadHours` includes ordinary hulls and serviceable-location
   artillery. Shared maintenance and field-repair passes each use one HourBook
   across both populations; no second artillery budget. Ordinary maintenance
@@ -166,7 +169,11 @@ ammo bins use existing `SlotClass` and `PartCondition` meanings.
   redo rule. Prepare/stage RNG, accident, stock, maintenance-history and logs
   together. A queued job requires a local assigned mechanic; start/completion
   waits without rolling while that mechanic is unavailable or absent. A job
-  occupies its existing shared bay while started and waiting. Bay time is the
+  occupies its existing shared bay while started and waiting. Durable job
+  validation checks the live home HQ of its pool or attached company separately
+  from actual work capability. Normal departure, deployed or idle-afield posture,
+  and return travel preserve the job; unavailable physical service suspends start
+  and completion without rolls, charges or condition changes. Bay time is the
   existing separate depot capacity, not a second weekly field-work budget.
 - P2g provides and validates chassis/equipment/armor damage state and repair
   paths. It adds no player damage command or battle damage generation. Existing
@@ -310,8 +317,8 @@ retry semantics and tests. No unrelated tick retry redesign is authorized.
 Save support is governed by
 [contract rule 51](engineering-contract.md#51-save-format-support-is-explicit).
 The approved P2g boundary supports schema **62** for both store and campaign;
-version numbering is retained. This is the target for the separately approved
-Phase B correction: the governance amendment does not change runtime behavior.
+version numbering is retained. Store adoption, campaign loading and overwriting
+enforce this boundary before decoding or replacing gameplay rows.
 Older formats are preserved but refused, with typed `StoreOlderThanGame` or
 `SaveOlderThanGame` errors; future versions retain distinct
 `StoreNewerThanGame`/`SaveNewerThanGame` refusals. A missing campaign remains

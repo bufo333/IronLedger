@@ -615,6 +615,7 @@ pub const hull_fraud_text = game.commands.hull_fraud_text;
 pub fn errorText(err: anyerror) []const u8 {
     return switch (err) {
         error.NoSuchCampaign => "no saved campaign has that id — `campaigns` lists them",
+        error.SaveOlderThanGame, error.StoreOlderThanGame => "that save uses an older unsupported development format; start a new campaign in a new save file",
         error.SaveNewerThanGame, error.StoreNewerThanGame => "that save was written by a newer version of the game",
         error.UnknownForce => "no force has that id",
         error.UnknownChassis => "no design by that key in the catalogue",
@@ -1185,4 +1186,10 @@ test "parseEntityFilter: valid treasury accepted, unknown refused, trailing toke
     try t.expectError(error.BadArguments, parse("outfit extra"));
     try t.expect(std.meta.activeTag(try parse("outfit")) == .all);
     try t.expectEqual(@as(u32, 1), @intFromEnum((try parse("hq:1")).hq));
+}
+
+test "unsupported old formats share a truthful refusal distinct from corruption and future saves" {
+    const sentence = "that save uses an older unsupported development format; start a new campaign in a new save file";
+    for ([_]anyerror{ error.SaveOlderThanGame, error.StoreOlderThanGame }) |err| try std.testing.expectEqualStrings(sentence, errorText(err));
+    for ([_]anyerror{ error.CorruptSave, error.CorruptStore, error.StoreNewerThanGame, error.SaveNewerThanGame, error.StoreReadOnly }) |err| try std.testing.expect(!std.mem.eql(u8, sentence, errorText(err)));
 }

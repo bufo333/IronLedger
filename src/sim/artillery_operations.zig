@@ -35,6 +35,17 @@ pub fn hasJob(gs: *const GameState, formation: types.ArtilleryFormationId) bool 
     return false;
 }
 
+/// Durable depot relationship, independent of present company posture or staff
+/// availability. Source: operations design, Condition, maintenance, repairs and shared hours.
+pub fn depotHome(gs: *GameState, f: *const dom.Formation) ?types.HqId {
+    const home = switch (f.placement) {
+        .hq_pool => |hq| hq,
+        .company => |company| if (gs.force(company) != null) gs.homeHqFor(company) else return null,
+        .freight, .sold => return null,
+    };
+    return if (gs.hqs.contains(home)) home else null;
+}
+
 /// Local qualified available mechanic and physical active carrier; does not
 /// require combat crew, intact chassis, loaded ammo or fresh maintenance.
 pub fn serviceCapability(gs: *GameState, f: *const dom.Formation) ?types.Site {
@@ -142,8 +153,8 @@ pub fn validate(gs: *GameState) error{CorruptSave}!void {
         if (job.started_day) |day| if (day < job.queued_day or day > gs.clock.day_index or job.done_day.? < day) return error.CorruptSave;
         if (job.artillery == .none) continue;
         const f = gs.artillery_formations.getPtr(job.artillery) orelse return error.CorruptSave;
-        const site = operationSite(gs, f) orelse return error.CorruptSave;
-        if (site != .hq or site.hq != job.hq) return error.CorruptSave;
+        const home = depotHome(gs, f) orelse return error.CorruptSave;
+        if (home != job.hq) return error.CorruptSave;
         for (gs.bay_jobs.items[0..index]) |other| if (other.artillery == job.artillery) return error.CorruptSave;
     }
 }
@@ -264,4 +275,49 @@ test "whole-bin reload preserves partial rounds and refuses aggregate shortage u
     _ = try reload(&gs, .{ .formation = id, .family = .machine_gun });
     try std.testing.expectEqual(rules.mg_rounds_per_bin, f.slots[@intFromEnum(rules.Slot.machine_gun_bin)].rounds);
     try std.testing.expectEqual(@as(u32, 1), gs.stockCount(site, rules.packageKey(.machine_gun)));
+}
+
+test "pending depot identity stays valid while its attached company travels" {
+    const control = @import("contract_control.zig");
+    const service = @import("artillery_service.zig");
+    const part = @import("../domain/part.zig");
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try fixtureForTest(&gs, true);
+    const f = gs.artillery_formations.getPtr(id).?;
+    const company = f.placement.company;
+    const home = gs.seat();
+    const hq = gs.hqs.getPtr(home).?;
+    for (hq.facilities.items) |*facility| if (facility.kind == .mek_bay) {
+        facility.level = part.find(rules.descriptor(.chassis).spare_key).?.fab_min_bay;
+    };
+    hq.staff_assigned = hq.staffRequired().total();
+    f.slots[@intFromEnum(rules.Slot.chassis)].condition = .destroyed;
+    try gs.addStock(.{ .hq = home }, rules.descriptor(.chassis).spare_key, 1);
+    _ = try service.queueRepair(&gs, id);
+    try gs.contract_offers.append(gs.allocator(), .{
+        .id = @enumFromInt(gs.next_contract_id),
+        .kind = .recon_raid,
+        .employer_key = "FS",
+        .enemy_key = "CC",
+        .planet_key = "caph",
+        .offer_hq = home,
+        .terms = .{ .length_months = 3, .base_pay_month = 400_000 },
+    });
+    gs.next_contract_id += 1;
+    try control.acceptContract(&gs, gs.contract_offers.items[gs.contract_offers.items.len - 1].id, company);
+    try std.testing.expect(posture.companyPosture(&gs, company) == .en_route);
+    try validate(&gs);
+    const before = digest.stateHash(&gs);
+    try std.testing.expect(!service.jobCanWork(&gs, &gs.bay_jobs.items[0]));
+    try std.testing.expect(!try service.completeJob(&gs, 0));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    _ = try control.recall(&gs, company);
+    try std.testing.expect(posture.companyPosture(&gs, company) == .returning);
+    try validate(&gs);
+    gs.clock.day_index = gs.force(company).?.return_eta_day.?;
+    try control.runReturns(&gs);
+    try validate(&gs);
+    try std.testing.expect(service.jobCanWork(&gs, &gs.bay_jobs.items[0]));
 }

@@ -967,16 +967,14 @@ identical hash, and identical evolution after load and executable restart;
 a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
-**Approved P2g format boundary, pending implementation.** New empty stores
+**Current P2g format boundary.** New empty stores
 initialize schema 62 transactionally. Existing store and campaign versions
 must both be 62; older formats are refused intact and newer formats retain
 their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
 missing tables or rows. No automatic reset, deletion, rewrite, backfill or
-reseeding is allowed. This governance amendment records the approved target;
-Phase B must bring runtime store adoption, loading, overwriting and RNG handling
-into agreement through a separately approved complete correction plan. It does
-not claim these runtime changes are already delivered.
+reseeding is allowed. Store adoption, campaign loading and overwriting enforce
+the format boundary before decoding or replacing gameplay rows.
 
 **Loading fails closed.** The schema declares enforceable foreign keys
 (containment references); the historical v37 table-rebuild declaration does not
@@ -999,7 +997,8 @@ state, duplicate rows and unknown streams are `CorruptSave`; current rows never
 default to fresh streams. Unsupported old stream blobs are not loaded. Adding
 an unused stream preserves existing stream identity and state; deterministic
 initialization in an older save would require an explicitly supported migration
-under rule 51. Strict current-format enforcement remains pending Phase B.
+under rule 51. Current-format loading enforces these requirements without
+legacy-blob or fresh-stream fallbacks.
 
 **Licensing note:** MekHQ/MegaMek code is GPLv2+ and their data files carry
 their own terms; BattleTech IP belongs to Topps/CGL, with Microsoft rights over

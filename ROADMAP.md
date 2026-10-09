@@ -1385,7 +1385,9 @@ history after an emptied HQ is sold. The explicit game abstractions and typed co
 
 P2g delivers four individual operating crew, a shared local mechanic, complete
 readiness, exact magazines and whole-bin reloads, local field/depot repairs,
-shared technician hours and bay queues, supply reserves and schema-62 migration.
+shared technician hours and bay queues, supply reserves and current schema-62
+persistence. Store and campaign formats outside schema 62 are preserved and
+refused; older formats require a new campaign in a new save file.
 `docs/p2-artillery-operations-design.md` owns the project operational adaptations.
 Existing personnel, assignment and shared bay views expose truthful references.
 P2h retains battle effects; P2i retains dedicated artillery panels, parser verbs

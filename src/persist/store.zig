@@ -381,105 +381,88 @@ pub const Store = struct {
         return try fromDb(db);
     }
 
-    /// Read the store's current schema version without mutating the database.
-    /// Returns null for a brand-new store (no `setting` table yet).
-    /// Returns 1 for a legacy store that has the table but no `schema_version` row.
-    /// Returns `error.CorruptStore` for a value < 1 or that does not fit u32.
+    /// Classify before DDL: only a database with no application objects is new.
+    /// Missing, duplicate or noninteger version metadata is CorruptStore.
+    /// Source: engineering-contract.md rule 51 and ARCHITECTURE.md Persistence.
     fn readStoreVersion(db: sqlite.Db) !?u32 {
-        const sm = try db.prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='setting'");
-        defer sm.finalize();
-        _ = try sm.next();
-        if (sm.int(0) == 0) return null; // brand-new store, no tables yet
-        const st = try db.prepare("SELECT value FROM setting WHERE key = 'schema_version'");
+        const objects = try db.prepare("SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'");
+        defer objects.finalize();
+        if (!try objects.next()) return error.CorruptStore;
+        if (objects.int(0) == 0) return null;
+        if (!try hasColumnRt(db, "setting", "key") or !try hasColumnRt(db, "setting", "value")) return error.CorruptStore;
+        const st = try db.prepare("SELECT value, typeof(value)='integer' FROM setting WHERE key = 'schema_version'");
         defer st.finalize();
-        if (!try st.next()) return 1; // legacy store: table exists but no version row
-        const v = st.int(0);
-        if (v < 1) return error.CorruptStore;
-        return std.math.cast(u32, v) orelse error.CorruptStore;
+        if (!try st.next() or st.int(1) != 1) return error.CorruptStore;
+        const version = std.math.cast(u32, st.int(0)) orelse return error.CorruptStore;
+        if (version == 0 or try st.next()) return error.CorruptStore;
+        return version;
     }
 
-    /// Adopt an open database: create what's missing, migrate what's old.
-    /// `db` is owned by the caller until this returns successfully; on any
-    /// error the caller must close it (A24).  Version is read before any
-    /// DDL so a future-version store is refused without mutation (rule 49).
-    /// DDL, indexes, column migrations, and table rebuild run in one
-    /// transaction (rule 62). Rule 50: PRAGMA foreign_keys is a no-op inside
-    /// a transaction, so it is set outside the BEGIN/COMMIT boundary.
+    /// Adopt only current schema 62 or initialize a genuinely empty database.
+    /// Unsupported formats and incomplete current schemas remain untouched.
+    /// Caller owns db until success; initialization is one guarded transaction.
+    /// Source: engineering-contract.md rules 50–51.
     pub fn fromDb(db: sqlite.Db) !Store {
-        const stored_opt = try readStoreVersion(db);
-        if (stored_opt) |s| if (s > schema_version) return error.StoreNewerThanGame;
-        var stored: u32 = stored_opt orelse 0;
-        const store: Store = .{ .db = db };
-        // Disable FK enforcement before the transaction: DDL and the rebuild
-        // require it off; it is re-enabled after COMMIT (rule 50).
-        try db.exec("PRAGMA foreign_keys = OFF");
-        try db.exec("BEGIN");
-        // best-effort: rolling back a failed transaction; the original error propagates.
-        errdefer db.exec("ROLLBACK") catch {};
-        try db.exec(ddl);
-        // A fresh store (stored == 0) is fully created by the current DDL and needs
-        // no historical migrations. Mark it as already at schema_version so the loop
-        // below skips every migration (all have m.to <= schema_version).
-        if (stored == 0) stored = schema_version;
-        try db.exec(index_ddl);
-        for (migrations) |m| {
-            if (m.to <= stored) continue;
-            if (!try hasColumnRt(db, m.table, m.column)) try db.exec(m.sql);
+        const version = try readStoreVersion(db);
+        if (version) |stored| {
+            if (stored < schema_version) return error.StoreOlderThanGame;
+            if (stored > schema_version) return error.StoreNewerThanGame;
+            try validateCurrentSchema(db);
         }
-        if (stored < 60 and !try hasColumnRt(db, "hull_instance", "catalogue"))
-            try db.exec("ALTER TABLE hull_instance ADD COLUMN catalogue TEXT NOT NULL DEFAULT 'chassis' CHECK (catalogue IN ('chassis','artillery'))");
-        // Rebuild per-cid tables with the declared constraint set (rules 50, 51).
-        // Skipped for brand-new stores (stored == 0): ddl already creates constrained tables.
-        if (stored >= 1 and stored < 37) try rebuildToV37(db);
-        // v59: rebuild battle_report so existing stores acquire the declared
-        // UNIQUE (cid, id) constraint. A duplicate historical ID rejects the
-        // transaction rather than leaving an ambiguous permanent report.
-        if (stored >= 1 and stored < 59) try rebuildBattleReportToV59(db);
-        if (stored >= 1 and stored < 60) try rebuildOwnershipToV60(db);
-        // v60 -> v61 adds retired_hq through the transactional DDL above.
-        // Campaigns retain their saved version until their first successful
-        // save; the versioned decoder requires an empty legacy archive.
-        if (stored < 62) try upgradeArtillerySchemaToV62(db);
-        try store.setSetting("schema_version", schema_version);
-        try db.exec("COMMIT");
-        // Re-enable FK enforcement for all subsequent operations (rule 50).
         try db.exec("PRAGMA foreign_keys = ON");
+        const store: Store = .{ .db = db };
+        if (version == null) {
+            try db.exec("BEGIN");
+            // best-effort: preserve the initialization error while undoing DDL.
+            errdefer db.exec("ROLLBACK") catch {};
+            try db.exec(ddl);
+            try db.exec(index_ddl);
+            try store.setSetting("schema_version", schema_version);
+            try db.exec("COMMIT");
+        }
         return store;
     }
 
-    /// Schema 61 -> 62 fills the explicit intact/empty operational defaults and
-    /// rebuilds the shared job target constraints, in the enclosing transaction.
-    fn upgradeArtillerySchemaToV62(db: sqlite.Db) !void {
-        const columns = [_]struct { []const u8, [*:0]const u8 }{
-            .{ "quality", "ALTER TABLE artillery_formation ADD COLUMN quality TEXT NOT NULL DEFAULT 'c' CHECK(typeof(quality)='text' AND quality IN ('a','b','c','d','e','f'))" },
-            .{ "armor", "ALTER TABLE artillery_formation ADD COLUMN armor INTEGER NOT NULL DEFAULT 100 CHECK(typeof(armor)='integer' AND armor BETWEEN 0 AND 100)" },
-            .{ "last_maintenance", "ALTER TABLE artillery_formation ADD COLUMN last_maintenance INTEGER CHECK(last_maintenance IS NULL OR (typeof(last_maintenance)='integer' AND last_maintenance BETWEEN 0 AND 4294967295))" },
-            .{ "tech", "ALTER TABLE artillery_formation ADD COLUMN tech INTEGER CHECK(tech IS NULL OR (typeof(tech)='integer' AND tech BETWEEN 1 AND 4294967295))" },
-        };
-        for (columns) |column| if (!try hasColumnRt(db, "artillery_formation", column[0])) try db.exec(column[1]);
-        // Rebuild supplies the compound campaign/person FK that ADD COLUMN cannot.
-        try rebuildTableToCurrent(db, "artillery_formation", "cid,ord,id,hull,acquisition_day,paid_price,placement,pool_hq,company,from_hq,to_hq,dispatch_day,eta_day,paid_cost,quality,armor,last_maintenance,tech", "cid,ord,id,hull,acquisition_day,paid_price,placement,pool_hq,company,from_hq,to_hq,dispatch_day,eta_day,paid_cost,quality,armor,last_maintenance,tech");
-        if (!try hasColumnRt(db, "bay_job", "artillery")) try db.exec("ALTER TABLE bay_job ADD COLUMN artillery INTEGER");
-        try rebuildTableToCurrent(db, "bay_job", "cid,ord,hq,kind,unit,item_key,duration,queued,started,done,cost,artillery", "cid,ord,hq,kind,NULLIF(unit,0),COALESCE(item_key,''),duration,queued,started,done,cost,artillery");
-        inline for (@import("../domain/artillery_operations.zig").seats) |seat| {
-            try db.exec("INSERT OR IGNORE INTO artillery_crew SELECT cid,id,'" ++ @tagName(seat) ++ "',NULL FROM artillery_formation");
-        }
-        inline for (@import("../domain/artillery_operations.zig").descriptors) |slot| {
-            try db.exec("INSERT OR IGNORE INTO artillery_slot SELECT cid,id,'" ++ @tagName(slot.slot) ++ "','ok'," ++ (if (slot.family != null) "0" else "NULL") ++ " FROM artillery_formation");
+    /// Required table/column names come directly from the executable DDL.
+    /// This probes the read boundary without creating or healing any object.
+    fn validateCurrentSchema(db: sqlite.Db) !void {
+        var definitions = std.mem.splitScalar(u8, ddl, '\n');
+        const marker = "CREATE TABLE IF NOT EXISTS ";
+        while (definitions.next()) |line| {
+            if (!std.mem.startsWith(u8, line, marker)) return error.CorruptStore;
+            const rest = line[marker.len..];
+            const name_end = std.mem.indexOfScalar(u8, rest, ' ') orelse return error.CorruptStore;
+            const table = rest[0..name_end];
+            const present = try db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1");
+            defer present.finalize();
+            try present.bind(1, table);
+            if (!try present.next()) return error.CorruptStore;
+            const members = rest[name_end + 2 .. rest.len - 2];
+            var start: usize = 0;
+            var depth: usize = 0;
+            var quoted = false;
+            for (members, 0..) |byte, index| {
+                if (byte == '\'') quoted = !quoted;
+                if (quoted) continue;
+                if (byte == '(') depth += 1;
+                if (byte == ')') depth -= 1;
+                if (byte == ',' and depth == 0) {
+                    try validateSchemaMember(db, table, members[start..index]);
+                    start = index + 1;
+                }
+            }
+            try validateSchemaMember(db, table, members[start..]);
         }
     }
 
-    fn rebuildTableToCurrent(db: sqlite.Db, table: []const u8, columns: []const u8, expressions: []const u8) !void {
-        var buffer: [8192]u8 = undefined;
-        const marker = try std.fmt.bufPrint(&buffer, "CREATE TABLE IF NOT EXISTS {s} (", .{table});
-        const start = std.mem.indexOf(u8, ddl, marker) orelse return error.SqliteError;
-        const end = std.mem.indexOfScalarPos(u8, ddl, start, '\n') orelse ddl.len;
-        const suffix = ddl[start + marker.len - 1 .. end];
-        var sql: [16384]u8 = undefined;
-        try db.exec(try std.fmt.bufPrintZ(&sql, "CREATE TABLE {s}__new {s}", .{ table, suffix }));
-        try db.exec(try std.fmt.bufPrintZ(&sql, "INSERT INTO {s}__new ({s}) SELECT {s} FROM {s}", .{ table, columns, expressions, table }));
-        try db.exec(try std.fmt.bufPrintZ(&sql, "DROP TABLE {s}", .{table}));
-        try db.exec(try std.fmt.bufPrintZ(&sql, "ALTER TABLE {s}__new RENAME TO {s}", .{ table, table }));
+    fn validateSchemaMember(db: sqlite.Db, table: []const u8, member: []const u8) !void {
+        const trimmed = std.mem.trim(u8, member, " ");
+        const end = std.mem.indexOfAny(u8, trimmed, " (") orelse return error.CorruptStore;
+        const name = trimmed[0..end];
+        for ([_][]const u8{ "PRIMARY", "FOREIGN", "UNIQUE", "CHECK" }) |constraint| {
+            if (std.mem.eql(u8, name, constraint)) return;
+        }
+        if (!try hasColumnRt(db, table, name)) return error.CorruptStore;
     }
 
     /// Rebuild every per-cid table to acquire the constraint set declared in
@@ -489,7 +472,8 @@ pub const Store = struct {
     /// drop t, rename t__new to t. Runs with foreign_keys OFF (set by the
     /// caller); CHECK constraints still apply on INSERT but are restricted to
     /// writer-guaranteed values. Does not run foreign_key_check: soft
-    /// references remain the loader's job. Called from fromDb for stored < 37.
+    /// references remain the loader's job. Current-format adoption never invokes
+    /// schema rebuilds.
     fn rebuildToV37(db: sqlite.Db) !void {
         const marker = "CREATE TABLE IF NOT EXISTS ";
         for (tables) |t| {
@@ -814,6 +798,7 @@ pub const Store = struct {
         try self.db.exec("BEGIN");
         // best-effort: rolling back a failed transaction; the original error propagates.
         errdefer self.db.exec("ROLLBACK") catch {};
+        if (gs.campaign_id != 0) try requireCampaignVersion(try self.loadVersion(gs.campaign_id));
 
         const cid = try self.saveCampaignRow(gs);
         try self.clearRows(cid);
@@ -1290,7 +1275,7 @@ pub const Store = struct {
             };
             try c.operations.append(alloc, op);
         }
-        // Bump next_operation_id past the maximum stored id.
+        // The stored counter must be beyond every owned operation identity.
         {
             var max: u32 = 0;
             var cit = gs.contracts.iterator();
@@ -1300,7 +1285,7 @@ pub const Store = struct {
                 }
             }
             if (max == std.math.maxInt(u32)) return error.CorruptSave;
-            gs.next_operation_id = @max(gs.next_operation_id, max + 1);
+            if (gs.next_operation_id <= max) return error.CorruptSave;
         }
         // FK-orphan: operation_task rows must reference loaded operation ids (P4e).
         {
@@ -1444,13 +1429,13 @@ pub const Store = struct {
                 try c.actor_ids.append(alloc, a.id);
             }
         }
-        // Bump next_actor_id past the maximum stored id.
+        // The stored counter must be beyond every owned actor identity.
         {
             var max: u32 = 0;
             var it = gs.actors.iterator();
             while (it.next()) |entry| max = @max(max, @intFromEnum(entry.key_ptr.*));
             if (max == std.math.maxInt(u32)) return error.CorruptSave;
-            gs.next_actor_id = @max(gs.next_actor_id, max + 1);
+            if (gs.next_actor_id <= max) return error.CorruptSave;
         }
     }
 
@@ -1600,13 +1585,13 @@ pub const Store = struct {
                 try c.rival_ids.append(alloc, rv.id);
             }
         }
-        // Bump next_rival_id past the maximum stored id.
+        // The stored counter must be beyond every owned rival identity.
         {
             var max: u32 = 0;
             var it2 = gs.rivals.iterator();
             while (it2.next()) |entry| max = @max(max, @intFromEnum(entry.key_ptr.*));
             if (max == std.math.maxInt(u32)) return error.CorruptSave;
-            gs.next_rival_id = @max(gs.next_rival_id, max + 1);
+            if (gs.next_rival_id <= max) return error.CorruptSave;
         }
     }
 
@@ -1747,13 +1732,13 @@ pub const Store = struct {
                 try c.officer_arc_ids.append(alloc, oa.id);
             }
         }
-        // Bump next_officer_arc_id past the maximum stored id.
+        // The stored counter must be beyond every owned officer identity.
         {
             var max: u32 = 0;
             var it2 = gs.officer_arcs.iterator();
             while (it2.next()) |entry| max = @max(max, @intFromEnum(entry.key_ptr.*));
             if (max == std.math.maxInt(u32)) return error.CorruptSave;
-            gs.next_officer_arc_id = @max(gs.next_officer_arc_id, max + 1);
+            if (gs.next_officer_arc_id <= max) return error.CorruptSave;
         }
     }
 
@@ -2140,45 +2125,27 @@ pub const Store = struct {
 
     // ------------------------------------------------------------------ load
 
-    /// Restore every RNG stream. A row names its stream; a stream with no
-    /// row starts fresh from the campaign seed. A malformed row, an unknown
-    /// stream, or stream rows without a seed are `error.CorruptSave`.
-    ///
-    /// Saves before schema v32 hold one `rng` blob of native-endian
-    /// generator states in `legacy_rng_order` and no seed. Their seed, used
-    /// only for streams added since, is a hash of that blob, so it differs
-    /// per campaign. A save with no RNG state at all is corrupt.
+    /// Restore exactly one valid named row for every stream and the saved seed.
+    /// Missing, duplicate or malformed current state is corruption; no reseeding.
+    /// Source: engineering-contract.md rule 52.
     fn loadRng(self: Store, gs: *GameState, cid: i64, has_seed: bool) !void {
-        const alloc = gs.allocator();
+        if (!has_seed) return error.CorruptSave;
         var loaded = std.EnumSet(rng_mod.Stream).initEmpty();
-        {
-            const st = try self.db.prepare("SELECT stream, format, state FROM rng_stream WHERE cid = ?1");
-            defer st.finalize();
-            try st.bindAll(.{cid});
-            while (try st.next()) {
-                const stream = st.enumValue(rng_mod.Stream, 0) orelse return error.CorruptSave;
-                if (!gs.rng.decode(stream, st.int(1), try st.blob(2, alloc, rng_mod.Rng.state_len))) return error.CorruptSave;
-                loaded.insert(stream);
-            }
+        const st = try self.db.prepare("SELECT stream, format, state, typeof(stream)='text' AND typeof(format)='integer' AND typeof(state)='blob' FROM rng_stream WHERE cid = ?1");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            if (st.int(3) != 1) return error.CorruptSave;
+            const name = try st.text(0, gs.scratch());
+            defer gs.scratch().free(name);
+            const stream = std.meta.stringToEnum(rng_mod.Stream, name) orelse return error.CorruptSave;
+            if (loaded.contains(stream)) return error.CorruptSave;
+            const bytes = try st.blob(2, gs.scratch(), rng_mod.Rng.state_len);
+            defer gs.scratch().free(bytes);
+            if (!gs.rng.decode(stream, st.int(1), bytes)) return error.CorruptSave;
+            loaded.insert(stream);
         }
-        if (loaded.count() > 0 and !has_seed) return error.CorruptSave;
-        if (loaded.count() == 0) {
-            const st = try self.db.prepare("SELECT state FROM rng WHERE cid = ?1");
-            defer st.finalize();
-            try st.bindAll(.{cid});
-            if (!try st.next()) return error.CorruptSave;
-            const bytes = try st.blob(0, alloc, legacy_rng_order.len * @sizeOf(std.Random.DefaultPrng));
-            const size = @sizeOf(std.Random.DefaultPrng);
-            if (bytes.len != legacy_rng_order.len * size) return error.CorruptSave;
-            for (legacy_rng_order, 0..) |stream, i| {
-                gs.rng.prngs[@intFromEnum(stream)] = std.mem.bytesToValue(std.Random.DefaultPrng, bytes[i * size ..][0..size]);
-                loaded.insert(stream);
-            }
-            if (!has_seed) gs.rng.seed = std.hash.Wyhash.hash(0, bytes);
-        }
-        for (std.enums.values(rng_mod.Stream)) |stream| {
-            if (!loaded.contains(stream)) gs.rng.prngs[@intFromEnum(stream)] = rng_mod.Rng.fresh(gs.rng.seed, stream);
-        }
+        if (loaded.count() != std.enums.values(rng_mod.Stream).len) return error.CorruptSave;
     }
 
     /// Rebuild a campaign from the store. `gpa` backs the new GameState.
@@ -2187,9 +2154,16 @@ pub const Store = struct {
         errdefer gs.deinit();
         gs.campaign_id = cid;
         const saved_version = try self.loadVersion(cid);
-        if (saved_version > schema_version) return error.SaveNewerThanGame;
+        try requireCampaignVersion(saved_version);
 
         const has_seed = try self.loadMeta(&gs, cid);
+        inline for (.{ "next_person_id", "next_unit_id", "next_force_id", "next_hq_id", "next_contract_id", "next_battle_id", "next_listing_id", "next_candidate_id", "next_loan_id", "next_operation_id", "next_actor_id", "next_rival_id", "next_officer_arc_id", "next_hull_instance_id", "next_merc_company_id" }) |key| {
+            const counter = (try self.hqMetaUint(cid, key, true)).?;
+            if (counter == 0) return error.CorruptSave;
+            @field(gs, key) = counter;
+        }
+        gs.event_queue.next_id = (try self.hqMetaUint(cid, "next_event_id", true)).?;
+        if (gs.event_queue.next_id == 0) return error.CorruptSave;
         try self.loadRng(&gs, cid, has_seed);
         try self.loadCommander(&gs, cid);
         try self.loadPerson(&gs, cid);
@@ -2236,21 +2210,12 @@ pub const Store = struct {
         try artillery_store.load(self.db, &gs, cid, saved_version);
 
         hq_ops.refreshHqStaffing(&gs);
-        try upgradeCampaign(&gs, saved_version);
-        // Saves before schema v18 have no stats counters: if the book is
-        // empty but the log has battles, count them up. Gated on version so
-        // a legitimately stats-empty current save is not re-derived from log
-        // text (rule 51, C7c).
-        if (saved_version < 18 and gs.stats.isEmpty()) recoverStatsFromLog(&gs);
-        // Saves without a `next_battle_id` row still hold reports, held hulls
-        // and decisions that name battles; numbering resumes past all of them.
-        gs.resumeBattleIds();
-        // Validate all cross-entity references and reconcile counters before
+        // Validate all cross-entity references and durable counters before
         // string validation (rules 47, 48).
         try validateReferences(&gs);
         try hq_ops.validateHqHistory(&gs);
         try artillery.validate(&gs);
-        try reconcileCounters(&gs);
+        try validateCounters(&gs);
         try validateStoredStrings(&gs);
         return gs;
     }
@@ -2260,13 +2225,18 @@ pub const Store = struct {
     /// The schema version a campaign was saved at; `NoSuchCampaign` when the id is unknown.
     /// A campaign schema_version below 1 is corruption (rule 49).
     fn loadVersion(self: Store, cid: i64) !u32 {
-        const st = try self.db.prepare("SELECT schema_version FROM campaign WHERE id = ?1");
+        const st = try self.db.prepare("SELECT schema_version, typeof(schema_version)='integer' FROM campaign WHERE id = ?1");
         defer st.finalize();
         try st.bindAll(.{cid});
         if (!try st.next()) return error.NoSuchCampaign;
         const v = st.int(0);
-        if (v < 1) return error.CorruptSave;
+        if (st.int(1) != 1 or v < 1 or try st.next()) return error.CorruptSave;
         return std.math.cast(u32, v) orelse error.CorruptSave;
+    }
+
+    fn requireCampaignVersion(version: u32) !void {
+        if (version < schema_version) return error.SaveOlderThanGame;
+        if (version > schema_version) return error.SaveNewerThanGame;
     }
 
     /// The campaign scalars; true when the save holds its RNG seed.
@@ -2284,12 +2254,13 @@ pub const Store = struct {
         var saw_funds = false;
         var saw_reputation = false;
         var saw_difficulty = false;
-        const st = try self.db.prepare("SELECT key, value FROM meta WHERE cid = ?1");
+        const st = try self.db.prepare("SELECT key, value, typeof(value)='integer' FROM meta WHERE cid = ?1");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
             const key = try st.text(0, alloc);
             const v = st.int(1);
+            if (st.int(2) != 1) return error.CorruptSave;
             if (std.mem.eql(u8, key, "day_index")) {
                 gs.clock.day_index = try fit(@TypeOf(gs.clock.day_index), v);
                 saw_day_index = true;
@@ -2345,6 +2316,7 @@ pub const Store = struct {
             if (std.mem.eql(u8, key, "next_hull_instance_id")) gs.next_hull_instance_id = try fit(@TypeOf(gs.next_hull_instance_id), v);
             if (std.mem.eql(u8, key, "next_merc_company_id")) gs.next_merc_company_id = try fit(@TypeOf(gs.next_merc_company_id), v);
             if (std.mem.eql(u8, key, "rng_seed")) {
+                if (has_seed) return error.CorruptSave;
                 gs.rng.seed = @bitCast(v);
                 has_seed = true;
             }
@@ -2949,20 +2921,13 @@ pub const Store = struct {
 
     fn loadLoan(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        // v35 added an `id` column to loan; pre-v35 rows carry 0 and are
-        // backfilled deterministically in ord order (rule 51).
         const st = try self.db.prepare("SELECT principal, balance, rate_bp, term, next_pay, payment, id FROM loan WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
             const raw_id = st.int(6);
-            const id: types.LoanId = if (raw_id != 0)
-                try toId(types.LoanId, raw_id)
-            else blk: {
-                const bid: types.LoanId = @enumFromInt(gs.next_loan_id);
-                gs.next_loan_id += 1;
-                break :blk bid;
-            };
+            const id = try toId(types.LoanId, raw_id);
+            if (id == .none) return error.CorruptSave;
             try gs.loans.append(alloc, .{
                 .id = id,
                 .principal = st.int(0),
@@ -2972,8 +2937,6 @@ pub const Store = struct {
                 .next_pay_day = try st.intAs(u32, 4),
                 .payment = st.int(5),
             });
-            if (raw_id != 0 and try fit(u32, raw_id) >= gs.next_loan_id)
-                gs.next_loan_id = try fit(u32, raw_id) + 1;
         }
     }
 
@@ -3047,22 +3010,13 @@ pub const Store = struct {
 
     fn loadCandidate(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        // v35 added an `id` column to candidate; this query reads it when present
-        // (DEFAULT 0 after migration). Pre-v35 rows carry 0 and are backfilled
-        // deterministically in ord order from next_candidate_id (rule 51).
         const st = try self.db.prepare("SELECT hq, first, last, callsign, role, experience, primary_skill, secondary_skill, bonus, listed, expires, age, id FROM candidate WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
-            const raw_id = st.int(12); // 0 on pre-v35 rows (DEFAULT 0 from migration)
-            const id: types.CandidateId = if (raw_id != 0)
-                try toId(types.CandidateId, raw_id)
-            else blk: {
-                // Backfill: assign the next counter value in ord order.
-                const bid: types.CandidateId = @enumFromInt(gs.next_candidate_id);
-                gs.next_candidate_id += 1;
-                break :blk bid;
-            };
+            const raw_id = st.int(12);
+            const id = try toId(types.CandidateId, raw_id);
+            if (id == .none) return error.CorruptSave;
             try gs.candidates.append(alloc, .{
                 .id = id,
                 .hq = try toId(types.HqId, st.int(0)),
@@ -3080,9 +3034,6 @@ pub const Store = struct {
                 .listed_day = try st.intAs(u32, 9),
                 .expires_day = try st.intAs(u32, 10),
             });
-            // Raise the counter above any persisted id that exceeds it.
-            if (raw_id != 0 and try fit(u32, raw_id) >= gs.next_candidate_id)
-                gs.next_candidate_id = try fit(u32, raw_id) + 1;
         }
     }
 
@@ -3157,22 +3108,13 @@ pub const Store = struct {
 
     fn loadListing(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        // v35 added an `id` column to listing; pre-v35 rows carry 0 and are
-        // backfilled deterministically in ord order (rule 51).
-        // v56 added hull_instance_id; pre-v56 rows carry 0 → .none (abstraction-path listings).
-        // v57 added planet_key, available_after; pre-v57 rows carry defaults ('', 0).
         const st = try self.db.prepare("SELECT kind, item_key, rarity, price, qty, staple, listed, expires, hq, c_armor, c_quality, c_damaged, c_destroyed, c_missing, black, company, id, hull_instance_id, planet_key, available_after FROM listing WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
             const raw_id = st.int(16);
-            const id: types.ListingId = if (raw_id != 0)
-                try toId(types.ListingId, raw_id)
-            else blk: {
-                const bid: types.ListingId = @enumFromInt(gs.next_listing_id);
-                gs.next_listing_id += 1;
-                break :blk bid;
-            };
+            const id = try toId(types.ListingId, raw_id);
+            if (id == .none) return error.CorruptSave;
             const raw_hid = st.int(17);
             const hull_instance_id: types.HullInstanceId = if (raw_hid != 0)
                 try toId(types.HullInstanceId, raw_hid)
@@ -3206,8 +3148,6 @@ pub const Store = struct {
                 };
             }
             try gs.market_listings.append(alloc, l);
-            if (raw_id != 0 and try fit(u32, raw_id) >= gs.next_listing_id)
-                gs.next_listing_id = try fit(u32, raw_id) + 1;
         }
     }
 
@@ -3275,16 +3215,10 @@ pub const Store = struct {
                 .battle = try toId(types.BattleId, st.int(9)),
             });
         }
-        // Saves before schema v26 have every id defaulted to 0; stamp them
-        // in load order so the inbox is addressable. Current-version saves
-        // already hold real ids; this gate ensures no RNG or state growth
-        // occurs on a current-version load (rule 51, C7c).
-        if (saved_version < 26) {
-            for (gs.event_queue.pending.items, 0..) |*ev, i| {
-                if (ev.id == .none) ev.id = @enumFromInt(i + 1);
-            }
+        _ = saved_version;
+        for (gs.event_queue.pending.items) |event| {
+            if (event.id == .none or @intFromEnum(event.id) >= gs.event_queue.next_id) return error.CorruptSave;
         }
-        gs.event_queue.resumeIds();
     }
 
     fn loadBattleReport(self: Store, gs: *GameState, cid: i64) !void {
@@ -3968,16 +3902,15 @@ fn validateReferences(gs: *GameState) error{CorruptSave}!void {
 
 /// Ensure every entity counter exceeds the maximum owned id; detect
 /// impossible-maxima that would overflow on the next allocation (rule 48).
-fn reconcileCounters(gs: *GameState) error{CorruptSave}!void {
+fn validateCounters(gs: *GameState) error{CorruptSave}!void {
     const max_u32 = std.math.maxInt(u32);
-    // Helper: find max id in a map and ensure counter > max.
-    // next_*_id stays at least 1, so the first allocation is always fresh.
+    // Current counters are immutable on load and strictly exceed owned IDs.
     {
         var max: u32 = 0;
         var it = gs.people.iterator();
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         if (max == max_u32) return error.CorruptSave;
-        gs.next_person_id = @max(gs.next_person_id, max + 1);
+        if (gs.next_person_id <= max) return error.CorruptSave;
     }
     {
         var max: u32 = 0;
@@ -3985,19 +3918,19 @@ fn reconcileCounters(gs: *GameState) error{CorruptSave}!void {
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         for (gs.held_hulls.items) |h| max = @max(max, @intFromEnum(h.unit.id));
         if (max == max_u32) return error.CorruptSave;
-        gs.next_unit_id = @max(gs.next_unit_id, max + 1);
+        if (gs.next_unit_id <= max) return error.CorruptSave;
     }
     {
         var max: u32 = 0;
         var it = gs.forces.iterator();
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         if (max == max_u32) return error.CorruptSave;
-        gs.next_force_id = @max(gs.next_force_id, max + 1);
+        if (gs.next_force_id <= max) return error.CorruptSave;
     }
     {
         const max = hq_ops.maxHqIdentity(gs);
         if (max == max_u32) return error.CorruptSave;
-        gs.next_hq_id = @max(gs.next_hq_id, max + 1);
+        if (gs.next_hq_id <= max) return error.CorruptSave;
     }
     {
         var max: u32 = 0;
@@ -4005,65 +3938,66 @@ fn reconcileCounters(gs: *GameState) error{CorruptSave}!void {
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         for (gs.contract_offers.items) |c| max = @max(max, @intFromEnum(c.id));
         if (max == max_u32) return error.CorruptSave;
-        gs.next_contract_id = @max(gs.next_contract_id, max + 1);
+        if (gs.next_contract_id <= max) return error.CorruptSave;
     }
     {
         var max: u32 = 0;
         var it = gs.actors.iterator();
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         if (max == max_u32) return error.CorruptSave;
-        gs.next_actor_id = @max(gs.next_actor_id, max + 1);
+        if (gs.next_actor_id <= max) return error.CorruptSave;
     }
     {
         var max: u32 = 0;
         var it = gs.rivals.iterator();
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         if (max == max_u32) return error.CorruptSave;
-        gs.next_rival_id = @max(gs.next_rival_id, max + 1);
+        if (gs.next_rival_id <= max) return error.CorruptSave;
     }
     {
         var max: u32 = 0;
         var it = gs.merc_companies.iterator();
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         if (max == max_u32) return error.CorruptSave;
-        gs.next_merc_company_id = @max(gs.next_merc_company_id, max + 1);
+        if (gs.next_merc_company_id <= max) return error.CorruptSave;
     }
     {
         var max: u32 = 0;
         var it = gs.officer_arcs.iterator();
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         if (max == max_u32) return error.CorruptSave;
-        gs.next_officer_arc_id = @max(gs.next_officer_arc_id, max + 1);
+        if (gs.next_officer_arc_id <= max) return error.CorruptSave;
     }
     {
         var max: u32 = 0;
         var it = gs.hull_instances.iterator();
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         if (max == max_u32) return error.CorruptSave;
-        gs.next_hull_instance_id = @max(gs.next_hull_instance_id, max + 1);
+        if (gs.next_hull_instance_id <= max) return error.CorruptSave;
     }
-    // Battle and event counters: resumeBattleIds/resumeIds saturate at maxInt
-    // when an entity holds the maximum id — detect that here (rule 48).
+    // Battle/event references also reserve their identity below the counter.
     if (gs.next_battle_id == max_u32) return error.CorruptSave;
     if (gs.event_queue.next_id == max_u32) return error.CorruptSave;
-    // Listing, candidate and loan: backfilled in their loaders; check max.
+    for (gs.battle_reports.kept.items) |report| if (@intFromEnum(report.id) >= gs.next_battle_id) return error.CorruptSave;
+    for (gs.held_hulls.items) |held| if (@intFromEnum(held.battle) >= gs.next_battle_id) return error.CorruptSave;
+    for (gs.event_queue.pending.items) |event| if (@intFromEnum(event.battle) >= gs.next_battle_id) return error.CorruptSave;
     {
         var max: u32 = 0;
         for (gs.market_listings.items) |l| max = @max(max, @intFromEnum(l.id));
         if (max == max_u32) return error.CorruptSave;
-        gs.next_listing_id = @max(gs.next_listing_id, max + 1);
+        if (gs.next_listing_id <= max) return error.CorruptSave;
     }
     {
         var max: u32 = 0;
         for (gs.candidates.items) |c| max = @max(max, @intFromEnum(c.id));
         if (max == max_u32) return error.CorruptSave;
-        gs.next_candidate_id = @max(gs.next_candidate_id, max + 1);
+        if (gs.next_candidate_id <= max) return error.CorruptSave;
     }
     {
         var max: u32 = 0;
         for (gs.loans.items) |l| max = @max(max, @intFromEnum(l.id));
         if (max == max_u32) return error.CorruptSave;
-        gs.next_loan_id = @max(gs.next_loan_id, max + 1);
+        if (gs.next_loan_id <= max) return error.CorruptSave;
     }
 }
 
@@ -4339,6 +4273,82 @@ test "a brand-new empty :memory: store opens (new-vs-corrupt distinction)" {
     try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
 }
 
+test "nonempty unversioned databases are refused without creating a schema" {
+    const db = try sqlite.Db.open(":memory:");
+    defer db.close();
+    try db.exec("CREATE TABLE unrelated(value); INSERT INTO unrelated VALUES ('retained')");
+    try std.testing.expectError(error.CorruptStore, Store.fromDb(db));
+    const st = try db.prepare("SELECT count(*) FROM sqlite_master WHERE type='table'");
+    defer st.finalize();
+    try std.testing.expect(try st.next());
+    try std.testing.expectEqual(@as(i64, 1), st.int(0));
+}
+
+fn databaseFingerprintForTest(db: sqlite.Db) !u64 {
+    var hash = std.hash.Wyhash.init(0);
+    var scratch = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer scratch.deinit();
+    const schema = try db.prepare("SELECT type,name,sql FROM sqlite_master ORDER BY type,name");
+    defer schema.finalize();
+    while (try schema.next()) {
+        for (0..3) |column| {
+            _ = scratch.reset(.retain_capacity);
+            const bytes = try schema.text(@intCast(column), scratch.allocator());
+            hash.update(std.mem.asBytes(&bytes.len));
+            hash.update(bytes);
+        }
+    }
+    const tables_query = try db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name");
+    defer tables_query.finalize();
+    while (try tables_query.next()) {
+        const table = try tables_query.text(0, std.testing.allocator);
+        defer std.testing.allocator.free(table);
+        var sql: [16384]u8 = undefined;
+        var writer = std.Io.Writer.fixed(&sql);
+        try writer.writeAll("SELECT ");
+        var pragma: [256]u8 = undefined;
+        const columns = try db.prepare(try std.fmt.bufPrint(&pragma, "PRAGMA table_info(\"{s}\")", .{table}));
+        defer columns.finalize();
+        var count: c_int = 0;
+        while (try columns.next()) {
+            _ = scratch.reset(.retain_capacity);
+            const name = try columns.text(1, scratch.allocator());
+            if (count > 0) try writer.writeAll(",");
+            try writer.print("typeof(\"{s}\")||':'||hex(\"{s}\")", .{ name, name });
+            count += 1;
+        }
+        try writer.print(" FROM \"{s}\" ORDER BY rowid", .{table});
+        const rows = try db.prepare(writer.buffered());
+        defer rows.finalize();
+        while (try rows.next()) {
+            var column: c_int = 0;
+            while (column < count) : (column += 1) {
+                _ = scratch.reset(.retain_capacity);
+                const value = try rows.text(column, scratch.allocator());
+                hash.update(std.mem.asBytes(&value.len));
+                hash.update(value);
+            }
+        }
+    }
+    return hash.final();
+}
+
+fn expectStoreRefusedUnchanged(db: sqlite.Db, expected: anyerror) !void {
+    const before = try databaseFingerprintForTest(db);
+    for (0..2) |_| {
+        try std.testing.expectError(expected, Store.fromDb(db));
+        try std.testing.expectEqual(before, try databaseFingerprintForTest(db));
+    }
+}
+
+fn expectCurrentRoundTripForTest(store: Store, gs: *GameState) !void {
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var difference: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(gs, &loaded, &difference) orelse "");
+    try std.testing.expectEqual(digest.stateHash(gs), digest.stateHash(&loaded));
+}
+
 test "a fresh store has no owner_rival_id column in hull_instance (P3e entity split)" {
     // Regression: historical migrations must not run against a fresh store.
     // The v52 migration adds owner_rival_id; the v54 rebuild removes it.
@@ -4427,10 +4437,8 @@ test "one store, many playthroughs: list, overwrite, delete" {
     try std.testing.expectEqual(digest.stateHash(&b), digest.stateHash(&still));
 }
 
-test "a v5 store upgrades in place — columns added, version stamped, wounds left to triage" {
-    // A store as the game wrote it at schema 5: no berth_hq on unit, no
-    // injury table, no schema_version setting. Only the tables the fixture
-    // touches are created by hand; `fromDb` creates the rest.
+test "a v5 fixture is refused without changing schema or rows" {
+    // Preserve the historical table shapes and rows; adoption must not repair them.
     const raw = try sqlite.Db.open(":memory:");
     try raw.exec(
         \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
@@ -4454,34 +4462,12 @@ test "a v5 store upgrades in place — columns added, version stamped, wounds le
         \\INSERT INTO person VALUES (1, 0, 1, 'Lori', 'Kalmar', NULL, 'mekwarrior', 0, 'wounded', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, 30, NULL, NULL, 1);
     );
 
-    const store = try Store.fromDb(raw);
-    defer store.close();
-    try std.testing.expect(try Store.hasColumnRt(store.db, "unit", "berth_hq"));
-    try std.testing.expect(try Store.hasColumnRt(store.db, "injury", "location"));
-    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
-
-    var gs = try store.load(std.testing.allocator, 1);
-    defer gs.deinit();
-    try std.testing.expectEqual(@as(u32, 12), gs.clock.day_index);
-    const lori = gs.person(@enumFromInt(1)).?;
-    try std.testing.expectEqual(person_mod.Status.wounded, lori.status);
-    // The store does not invent a wound record; triage does, the first
-    // day the medbay looks at her (the sim's rule, not the loader's).
-    try std.testing.expectEqual(@as(usize, 0), lori.injuries.items.len);
-    try std.testing.expectEqual(@as(?u32, 30), lori.wound_heal_day);
-    try std.testing.expectEqual(types.HqId.none, gs.unit(@enumFromInt(1)).?.berth_hq);
-
-    // A save from a newer game is refused rather than misread.
-    try store.db.exec("UPDATE campaign SET schema_version = 99 WHERE id = 1");
-    try std.testing.expectError(error.SaveNewerThanGame, store.load(std.testing.allocator, 1));
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.CorruptStore);
 }
 
-test "a v34 store backfills listing, candidate and loan ids in ord order" {
-    // A store as the game wrote it at schema 34: listing, candidate and loan
-    // tables lack the `id` column that v35 adds. Rows carry 0 (the DEFAULT
-    // added by migration) and are backfilled deterministically in ord order
-    // from next_*_id (rule 51). The three meta counters are absent; the
-    // counters start at their GameState default of 1.
+test "a v34 fixture is refused without changing schema or rows" {
+    // Preserve the historical table shapes and rows; adoption must not repair them.
     const raw = try sqlite.Db.open(":memory:");
     try raw.exec(
         \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
@@ -4510,36 +4496,8 @@ test "a v34 store backfills listing, candidate and loan ids in ord order" {
         \\INSERT INTO loan VALUES (1, 1, 2000000, 2000000, 1200, 24, 30, 92000);
     );
 
-    const store = try Store.fromDb(raw);
-    defer store.close();
-    // v35 migrations added the id columns to all three tables.
-    try std.testing.expect(try Store.hasColumnRt(store.db, "listing", "id"));
-    try std.testing.expect(try Store.hasColumnRt(store.db, "candidate", "id"));
-    try std.testing.expect(try Store.hasColumnRt(store.db, "loan", "id"));
-
-    var gs = try store.load(std.testing.allocator, 1);
-    defer gs.deinit();
-
-    // Listing backfill: ord 0 → id 1, ord 1 → id 2; counter past the max.
-    try std.testing.expectEqual(@as(usize, 2), gs.market_listings.items.len);
-    try std.testing.expect(@intFromEnum(gs.market_listings.items[0].id) != 0);
-    try std.testing.expectEqual(@as(types.ListingId, @enumFromInt(1)), gs.market_listings.items[0].id);
-    try std.testing.expectEqual(@as(types.ListingId, @enumFromInt(2)), gs.market_listings.items[1].id);
-    try std.testing.expect(gs.next_listing_id > @intFromEnum(gs.market_listings.items[1].id));
-
-    // Candidate backfill: ord 0 → id 1, ord 1 → id 2; counter past the max.
-    try std.testing.expectEqual(@as(usize, 2), gs.candidates.items.len);
-    try std.testing.expect(@intFromEnum(gs.candidates.items[0].id) != 0);
-    try std.testing.expectEqual(@as(types.CandidateId, @enumFromInt(1)), gs.candidates.items[0].id);
-    try std.testing.expectEqual(@as(types.CandidateId, @enumFromInt(2)), gs.candidates.items[1].id);
-    try std.testing.expect(gs.next_candidate_id > @intFromEnum(gs.candidates.items[1].id));
-
-    // Loan backfill: ord 0 → id 1, ord 1 → id 2; counter past the max.
-    try std.testing.expectEqual(@as(usize, 2), gs.loans.items.len);
-    try std.testing.expect(@intFromEnum(gs.loans.items[0].id) != 0);
-    try std.testing.expectEqual(@as(types.LoanId, @enumFromInt(1)), gs.loans.items[0].id);
-    try std.testing.expectEqual(@as(types.LoanId, @enumFromInt(2)), gs.loans.items[1].id);
-    try std.testing.expect(gs.next_loan_id > @intFromEnum(gs.loans.items[1].id));
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.CorruptStore);
 }
 
 test "a battle report round-trips as fields, not as a row count" {
@@ -4560,6 +4518,7 @@ test "a battle report round-trips as fields, not as a row count" {
         .assigned_company = co,
         .monthly_net = 300_000,
     });
+    gs.next_contract_id = 2;
     const c = gs.contracts.getPtr(@enumFromInt(1)).?;
     const site: types.Site = .{ .company = co };
     try gs.addStock(site, "armor", 60);
@@ -4761,6 +4720,7 @@ test "permanent report identities and battle backlinks reject corruption" {
         .weather = "clear",
         .outcome = .victory,
     });
+    gs.next_battle_id = 3;
     try gs.hull_combat_records.append(gs.allocator(), .{ .hull_instance_id = hid, .battle_id = @enumFromInt(1) });
     try gs.maintenance_entries.append(gs.allocator(), .{
         .hull_instance_id = hid,
@@ -4799,6 +4759,7 @@ test "a hull the enemy holds round-trips, slots and all — off the books, not s
         .status = .active,
         .assigned_company = co,
     });
+    gs.next_contract_id = 2;
     const c = gs.contracts.getPtr(@enumFromInt(1)).?;
     const site: types.Site = .{ .company = co };
     try gs.addStock(site, "armor", 60);
@@ -4955,6 +4916,7 @@ test "confirmed battle orders survive a save" {
     const f = try contract_events.damagedCompanyForTest(&gs, 0);
     f.c.next_battle_day = gs.clock.day_index + 2;
     f.c.orders_day = f.c.next_battle_day;
+    gs.next_contract_id = @intFromEnum(f.c.id) + 1;
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
@@ -5072,40 +5034,16 @@ test "a NULL in a required enum column rejects the load" {
 }
 
 test "a duplicate primary person id is rejected by the schema" {
-    // The provoked constraint failure is expected; keep its warning out of stderr.
     const saved_log_level = std.testing.log_level;
     std.testing.log_level = .err;
     defer std.testing.log_level = saved_log_level;
-    // The rebuild in fromDb copies rows into person__new (PRIMARY KEY (cid, id));
-    // duplicate (cid, id) fails at the schema level before the loader runs.
-    // Uniqueness of (cid, id) is schema-enforced; the loader's getOrPut guard
-    // remains for any non-SQL path. RNG: legacy 256-byte blob (pre-v32).
-    const raw = try sqlite.Db.open(":memory:");
-    defer raw.close(); // fromDb fails, so caller closes raw
-    try raw.exec(
-        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
-        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
-        \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
-        \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
-        \\CREATE TABLE rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
-        \\CREATE TABLE person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, last_raise_day INTEGER, last_award_day INTEGER, departed_day INTEGER, secondary_role TEXT);
-        \\INSERT INTO setting VALUES ('schema_version', 36);
-        \\INSERT INTO campaign VALUES (1, 'Test', NULL, 0, '3025-01-01', 36, 1, 0);
-        \\INSERT INTO meta VALUES (1, 'day_index', 0);
-        \\INSERT INTO meta VALUES (1, 'year', 3025);
-        \\INSERT INTO meta VALUES (1, 'month', 1);
-        \\INSERT INTO meta VALUES (1, 'day', 1);
-        \\INSERT INTO meta VALUES (1, 'funds', 0);
-        \\INSERT INTO meta VALUES (1, 'reputation', 0);
-        \\INSERT INTO meta VALUES (1, 'difficulty', 1);
-        \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Test');
-        \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
-        \\INSERT INTO person VALUES (1, 0, 1, 'A', 'B', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
-        \\INSERT INTO person VALUES (1, 1, 1, 'C', 'D', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
-    );
-    // rebuildToV37 copies duplicate (cid=1, id=1) rows into person__new
-    // (PRIMARY KEY (cid, id)) → ConstraintViolation at the schema level.
-    try std.testing.expectError(error.ConstraintViolation, Store.fromDb(raw));
+    const store = try Store.open(":memory:");
+    defer store.close();
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8881 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    try store.save(&gs);
+    try std.testing.expectError(error.ConstraintViolation, store.db.exec("INSERT INTO person SELECT * FROM person"));
 }
 
 test "a save with month 13 rejects the load" {
@@ -5127,9 +5065,8 @@ test "a missing required meta row rejects the load" {
 
 // C7b: counter reconciliation and choice bounds.
 
-test "next_person_id is resumed past a higher owned id after load" {
-    // A save with next_person_id below a live person id is repaired by
-    // reconcileCounters: the counter advances above the max owned id (rule 48).
+test "next_person_id below its owned IDs is corrupt" {
+    // Current counters are durable state; an invalid value is refused (rule 48).
     var gs = GameState.init(std.testing.allocator, .{ .seed = 8881 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
@@ -5139,13 +5076,9 @@ test "next_person_id is resumed past a higher owned id after load" {
     try store.save(&gs);
     // Drive next_person_id below the max owned id.
     try store.db.exec("UPDATE meta SET value = 0 WHERE key = 'next_person_id'");
-    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    // Counter must exceed every person id.
-    var max_pid: u32 = 0;
-    var pit = loaded.people.iterator();
-    while (pit.next()) |e| max_pid = @max(max_pid, @intFromEnum(e.key_ptr.*));
-    try std.testing.expect(loaded.next_person_id > max_pid);
+    const before = try databaseFingerprintForTest(store.db);
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    try std.testing.expectEqual(before, try databaseFingerprintForTest(store.db));
 }
 
 test "a pending event with an out-of-range default_choice rejects the load" {
@@ -5174,34 +5107,7 @@ test "a pending event with an out-of-range default_choice rejects the load" {
 }
 
 test "a person id equal to maxInt(u32) rejects the load as corrupt" {
-    // reconcileCounters: max owned id == maxInt(u32) means next allocation would
-    // overflow — the save is corrupt (rule 48). Use a raw fixture to bypass the
-    // PRIMARY KEY constraint and store the impossible id. The person table here
-    // has no PRIMARY KEY so SQLite allows id = 4294967295 (maxInt u32).
-    const raw = try sqlite.Db.open(":memory:");
-    try raw.exec(
-        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
-        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
-        \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
-        \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
-        \\CREATE TABLE rng (cid INTEGER PRIMARY KEY, state BLOB NOT NULL);
-        \\CREATE TABLE person (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, first TEXT, last TEXT, callsign TEXT, role TEXT, xp INTEGER, status TEXT, fatigue INTEGER, morale INTEGER, recruited_day INTEGER, salary_override INTEGER, assigned_force INTEGER, posted_hq INTEGER, weekly_hours INTEGER, medbay_priority INTEGER, leave_until INTEGER, wound_heal_day INTEGER, training_skill TEXT, training_done INTEGER, admitted INTEGER NOT NULL DEFAULT 0, rank TEXT NOT NULL DEFAULT 'private', rank_pinned INTEGER NOT NULL DEFAULT 0, kills INTEGER NOT NULL DEFAULT 0, kill_bv INTEGER NOT NULL DEFAULT 0, battles INTEGER NOT NULL DEFAULT 0, tours INTEGER NOT NULL DEFAULT 0, outstanding_tours INTEGER NOT NULL DEFAULT 0, edge_spent INTEGER NOT NULL DEFAULT 0, faction TEXT NOT NULL DEFAULT '', shares INTEGER NOT NULL DEFAULT 0, born_day INTEGER, last_raise_day INTEGER, last_award_day INTEGER, departed_day INTEGER, secondary_role TEXT);
-        \\INSERT INTO setting VALUES ('schema_version', 36);
-        \\INSERT INTO campaign VALUES (1, 'Test', NULL, 0, '3025-01-01', 36, 1, 0);
-        \\INSERT INTO meta VALUES (1, 'day_index', 0);
-        \\INSERT INTO meta VALUES (1, 'year', 3025);
-        \\INSERT INTO meta VALUES (1, 'month', 1);
-        \\INSERT INTO meta VALUES (1, 'day', 1);
-        \\INSERT INTO meta VALUES (1, 'funds', 0);
-        \\INSERT INTO meta VALUES (1, 'reputation', 0);
-        \\INSERT INTO meta VALUES (1, 'difficulty', 1);
-        \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Test');
-        \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
-        \\INSERT INTO person VALUES (1, 0, 4294967295, 'A', 'B', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
-    );
-    const store = try Store.fromDb(raw);
-    defer store.close();
-    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, 1));
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("PRAGMA foreign_keys=OFF; UPDATE person SET id=4294967295 WHERE ord=0"));
 }
 
 // C9: schema integrity and migration tests.
@@ -5216,7 +5122,7 @@ test "the migrations array is strictly ascending by to and each from < to" {
     }
 }
 
-test "a v58 report with a nullable ID rejects the v59 migration" {
+test "a v58 report with a nullable ID is refused without mutation" {
     // The provoked constraint failure is expected; keep its warning out of stderr.
     const saved_log_level = std.testing.log_level;
     std.testing.log_level = .err;
@@ -5231,7 +5137,7 @@ test "a v58 report with a nullable ID rejects the v59 migration" {
         \\INSERT INTO campaign VALUES (1, 'Fixture', NULL, 0, '3025-01-01', 58, 1, 0);
         \\INSERT INTO battle_report VALUES (1, 0, NULL);
     );
-    try std.testing.expectError(error.ConstraintViolation, Store.fromDb(raw));
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 test "foreign keys are enforced on every connection" {
@@ -5258,10 +5164,7 @@ test "foreign keys are enforced on every connection" {
     try std.testing.expectError(error.ConstraintViolation, store.db.exec("COMMIT"));
 }
 
-test "a v36 store rebuilds to v37 with constraints and preserves every row" {
-    // Rule 51: fixture for the rebuild boundary. A v36-shaped store (no FK/UNIQUE
-    // constraints on per-cid tables) is reopened through fromDb; schema_version
-    // advances to 37 and the new constraints are present.
+test "v36 historical fixture is refused without mutation" {
     const raw = try sqlite.Db.open(":memory:");
     try raw.exec(
         \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
@@ -5284,129 +5187,44 @@ test "a v36 store rebuilds to v37 with constraints and preserves every row" {
         \\INSERT INTO person VALUES (1, 0, 1, 'A', 'B', NULL, 'mekwarrior', 0, 'active', 0, 50, 0, NULL, 0, 0, 40, 0, NULL, NULL, NULL, NULL, 0, 'private', 0, 0, 0, 0, 0, 0, 0, '', 0, NULL, NULL, NULL, NULL, NULL);
         \\INSERT INTO award VALUES (1, 1, 'valor');
     );
-    const store = try Store.fromDb(raw);
-    defer store.close();
-    // Schema advanced to 37.
-    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
-    // award now carries the containment FK to person.
-    var fk_found = false;
-    const fk = try store.db.prepare("PRAGMA foreign_key_list(award)");
-    defer fk.finalize();
-    while (try fk.next()) {
-        var buf: [32]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&buf);
-        const tbl = fk.text(2, fba.allocator()) catch continue;
-        if (std.mem.eql(u8, tbl, "person")) fk_found = true;
-    }
-    try std.testing.expect(fk_found);
-    // All rows survived the rebuild.
-    const cnt = try store.db.prepare("SELECT COUNT(*) FROM award WHERE cid = 1");
-    defer cnt.finalize();
-    try std.testing.expect(try cnt.next());
-    try std.testing.expectEqual(@as(i64, 1), cnt.int(0));
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
-test "a rebuilt store loads to the identical digest" {
-    // Rules 2, 51: the rebuild is data-preserving. Saving through a current
-    // store, forcing schema_version back to 36, reopening (triggers rebuild),
-    // and loading yields an identical state hash.
+test "a played current campaign round trips and its downgraded store is refused intact" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 20_260_924 });
     defer gs.deinit();
     try playedYearForTest(&gs);
     const hash_before = digest.stateHash(&gs);
 
     const raw = try sqlite.Db.open(":memory:");
-    // First fromDb: creates schema and sets version to 37.
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
-    // Force version back to 36 so the next fromDb rebuilds.
+    try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("UPDATE setting SET value = 36 WHERE key = 'schema_version'");
-    // Second fromDb: sees v36, runs rebuildToV37.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    // Digest is identical: the rebuild changed no data.
-    var diff_buf: [128]u8 = undefined;
-    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    defer raw.close();
     try std.testing.expectEqual(@as(u64, 4891880808279109320), hash_before);
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
-test "every next-ID counter resumes past a higher owned id after load" {
-    // Rule 70: representative table-driven coverage for all 10 counter meta
-    // rows. Each counter is driven below the maximum owned id; reconcileCounters
-    // (and resumeBattleIds/resumeIds for the battle/event counters) must bump it
-    // past the max on load.
+test "every current next-ID counter is required and never repaired" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 8881 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
-    _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     const store = try Store.open(":memory:");
     defer store.close();
-    try store.save(&gs);
-    // v61 rejects corrupt HQ counters; explicit v60 compatibility reconciles them.
-    try store.db.exec("UPDATE campaign SET schema_version=60; DELETE FROM meta WHERE key='retired_hq_count'");
-    for ([_][*:0]const u8{
-        "UPDATE meta SET value = 0 WHERE key = 'next_person_id'",
-        "UPDATE meta SET value = 0 WHERE key = 'next_unit_id'",
-        "UPDATE meta SET value = 0 WHERE key = 'next_force_id'",
-        "UPDATE meta SET value = 0 WHERE key = 'next_hq_id'",
-        "UPDATE meta SET value = 0 WHERE key = 'next_contract_id'",
-        "UPDATE meta SET value = 0 WHERE key = 'next_battle_id'",
-        "UPDATE meta SET value = 0 WHERE key = 'next_event_id'",
-        "UPDATE meta SET value = 0 WHERE key = 'next_listing_id'",
-        "UPDATE meta SET value = 0 WHERE key = 'next_candidate_id'",
-        "UPDATE meta SET value = 0 WHERE key = 'next_loan_id'",
-        "UPDATE meta SET value = 0 WHERE key = 'next_rival_id'",
-        "UPDATE meta SET value = 0 WHERE key = 'next_officer_arc_id'",
-    }) |sql| {
-        try store.db.exec(sql);
-        var loaded = try store.load(std.testing.allocator, gs.campaign_id);
-        defer loaded.deinit();
-        // Each counter must be at least 1 after load (resume invariant).
-        try std.testing.expect(loaded.next_person_id >= 1);
-        try std.testing.expect(loaded.next_unit_id >= 1);
-        try std.testing.expect(loaded.next_force_id >= 1);
-        try std.testing.expect(loaded.next_hq_id >= 1);
-        try std.testing.expect(loaded.next_contract_id >= 1);
-        try std.testing.expect(loaded.next_battle_id >= 1);
-        try std.testing.expect(loaded.event_queue.next_id >= 1);
-        try std.testing.expect(loaded.next_listing_id >= 1);
-        try std.testing.expect(loaded.next_candidate_id >= 1);
-        try std.testing.expect(loaded.next_loan_id >= 1);
-        try std.testing.expect(loaded.next_rival_id >= 1);
-        try std.testing.expect(loaded.next_officer_arc_id >= 1);
+    inline for (.{ "next_person_id", "next_unit_id", "next_force_id", "next_hq_id", "next_contract_id", "next_battle_id", "next_event_id", "next_listing_id", "next_candidate_id", "next_loan_id", "next_operation_id", "next_actor_id", "next_rival_id", "next_officer_arc_id", "next_hull_instance_id", "next_merc_company_id", "next_artillery_formation_id", "next_artillery_offer_id" }) |key| {
+        inline for (.{ "UPDATE meta SET value=0 WHERE key='" ++ key ++ "'", "DELETE FROM meta WHERE key='" ++ key ++ "'" }) |sql| {
+            try store.save(&gs);
+            try store.db.exec(sql);
+            const before = try databaseFingerprintForTest(store.db);
+            try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+            try std.testing.expectEqual(before, try databaseFingerprintForTest(store.db));
+        }
     }
 }
 
 test "a next_battle_id at maxInt rejects the load as corrupt" {
-    // Rule 70: overflow class distinct from person (resumeBattleIds saturates
-    // at maxInt when a battle id equals maxInt(u32); rule 48). Complements the
-    // next_person_id overflow test.
-    const raw = try sqlite.Db.open(":memory:");
-    defer raw.close();
-    try raw.exec(
-        \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
-        \\CREATE TABLE campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL, save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
-        \\CREATE TABLE meta (cid INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (cid, key));
-        \\CREATE TABLE meta_text (cid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (cid, key));
-        \\CREATE TABLE rng_stream (cid INTEGER NOT NULL, stream TEXT NOT NULL, format INTEGER NOT NULL, state BLOB NOT NULL, UNIQUE (cid, stream));
-        \\INSERT INTO setting VALUES ('schema_version', 36);
-        \\INSERT INTO campaign VALUES (1, 'Test', NULL, 0, '3025-01-01', 36, 1, 0);
-        \\INSERT INTO meta VALUES (1, 'day_index', 0);
-        \\INSERT INTO meta VALUES (1, 'year', 3025);
-        \\INSERT INTO meta VALUES (1, 'month', 1);
-        \\INSERT INTO meta VALUES (1, 'day', 1);
-        \\INSERT INTO meta VALUES (1, 'funds', 0);
-        \\INSERT INTO meta VALUES (1, 'reputation', 0);
-        \\INSERT INTO meta VALUES (1, 'difficulty', 1);
-        \\INSERT INTO meta VALUES (1, 'next_battle_id', 4294967295);
-        \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Test');
-    );
-    const store = try Store.fromDb(raw);
-    defer store.close();
-    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, 1));
+    try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE meta SET value=4294967295 WHERE key='next_battle_id'"));
 }
 
 // C7c: current-version no-RNG test and v17/v18 stats recovery.
@@ -5435,13 +5253,8 @@ test "a current-version save draws no RNG and rewrites no counter on load" {
     try std.testing.expectEqual(pid_before, loaded.next_person_id);
 }
 
-test "a v17 store recovers stats from its log; a v18 store does not" {
-    // recoverStatsFromLog runs only when saved_version < 18. A v17 save with
-    // battle log lines should recover battles_won; a v18 save with the same
-    // rows but no stats meta should leave stats empty (the loader trusts the
-    // version gate and makes no attempt to re-derive, rule 51).
-    // Pre-v32 stores use the legacy `rng` blob (256 bytes for 8 streams × 32 bytes each).
-    // v17: stats empty in meta → recoverStatsFromLog runs → battles_won set.
+test "v17 and v18 stores are refused without recovering statistics" {
+    // Historical formats remain intact, including their stored statistics.
     {
         const raw = try sqlite.Db.open(":memory:");
         try raw.exec(
@@ -5462,16 +5275,10 @@ test "a v17 store recovers stats from its log; a v18 store does not" {
             \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Old');
             \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
         );
-        const store = try Store.fromDb(raw);
-        defer store.close();
-        // Insert a battle-win log row using the current event_log schema so
-        // recoverStatsFromLog can parse it (requires [AAR] prefix and ' — power ').
-        try store.db.exec("INSERT INTO event_log (cid, ord, day, category, company, hq, contract, text) VALUES (1, 0, 5, 'battle', 0, 0, 0, '[AAR] recon_raid vs PER: victory \u{2014} power 3000 vs 2000')");
-        var loaded = try store.load(std.testing.allocator, 1);
-        defer loaded.deinit();
-        try std.testing.expect(loaded.stats.battles_won > 0);
+        defer raw.close();
+        try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
     }
-    // v18: same rows, version gate closed → stats stay empty (no re-derivation).
+    // The later historical format is independently refused.
     {
         const raw = try sqlite.Db.open(":memory:");
         try raw.exec(
@@ -5492,13 +5299,8 @@ test "a v17 store recovers stats from its log; a v18 store does not" {
             \\INSERT INTO meta_text VALUES (1, 'outfit_name', 'Old');
             \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
         );
-        const store = try Store.fromDb(raw);
-        defer store.close();
-        // Insert the same battle-win log row; the v18 gate must suppress recovery.
-        try store.db.exec("INSERT INTO event_log (cid, ord, day, category, company, hq, contract, text) VALUES (1, 0, 5, 'battle', 0, 0, 0, '[AAR] recon_raid vs PER: victory \u{2014} power 3000 vs 2000')");
-        var loaded = try store.load(std.testing.allocator, 1);
-        defer loaded.deinit();
-        try std.testing.expect(loaded.stats.isEmpty());
+        defer raw.close();
+        try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
     }
 }
 
@@ -5525,7 +5327,7 @@ test "every RNG stream and the seed survive a save and load" {
     }
 }
 
-test "a stream the save lacks starts fresh from the seed, and the others keep their state" {
+test "a missing current RNG stream is corrupt without a fresh-stream fallback" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 6007 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
@@ -5533,18 +5335,15 @@ test "a stream the save lacks starts fresh from the seed, and the others keep th
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
     // A stream added to the game after this campaign was saved has no row.
     try store.db.exec("DELETE FROM rng_stream WHERE stream = 'travel'");
-    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    var fresh = rng_mod.Rng.init(gs.rng.seed);
-    for (std.enums.values(rng_mod.Stream)) |stream| {
-        const want = if (stream == .travel) fresh.encode(stream) else gs.rng.encode(stream);
-        try std.testing.expectEqual(want, loaded.rng.encode(stream));
-    }
+    const before = try databaseFingerprintForTest(store.db);
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    try std.testing.expectEqual(before, try databaseFingerprintForTest(store.db));
 }
 
-test "a save from before per-stream rows loads every stream from its legacy blob" {
+test "current missing RNG rows and seed are corrupt even with a valid legacy blob" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 6008 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
@@ -5552,6 +5351,7 @@ test "a save from before per-stream rows loads every stream from its legacy blob
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
     // Rewrite the save the way schema v31 held it: one blob, no seed.
     try store.db.exec("DELETE FROM rng_stream; DELETE FROM meta WHERE key = 'rng_seed'");
     var blob: [legacy_rng_order.len * @sizeOf(std.Random.DefaultPrng)]u8 = undefined;
@@ -5563,19 +5363,9 @@ test "a save from before per-stream rows loads every stream from its legacy blob
     try ins.bind(1, gs.campaign_id);
     try ins.bindBlob(2, &blob);
     try ins.run();
-    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    // Streams in the legacy blob are restored exactly. Streams added after v31
-    // (not in legacy_rng_order) are absent from the blob and start fresh from seed.
-    var fresh_from_seed = rng_mod.Rng.init(std.hash.Wyhash.hash(0, &blob));
-    for (std.enums.values(rng_mod.Stream)) |stream| {
-        const in_legacy = for (legacy_rng_order) |ls| {
-            if (ls == stream) break true;
-        } else false;
-        const want = if (in_legacy) gs.rng.encode(stream) else fresh_from_seed.encode(stream);
-        try std.testing.expectEqual(want, loaded.rng.encode(stream));
-    }
-    try std.testing.expectEqual(std.hash.Wyhash.hash(0, &blob), loaded.rng.seed);
+    const before = try databaseFingerprintForTest(store.db);
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    try std.testing.expectEqual(before, try databaseFingerprintForTest(store.db));
 }
 
 /// A campaign that has fought `fights` engagements, every battle decision
@@ -5593,6 +5383,7 @@ fn foughtCampaignForTest(gs: *GameState, fights: u32) !void {
         .status = .active,
         .assigned_company = co,
     });
+    gs.next_contract_id = 2;
     const c = gs.contracts.getPtr(@enumFromInt(1)).?;
     for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(.{ .company = co }, key, 40);
     for (0..fights) |_| {
@@ -5616,23 +5407,19 @@ test "battle report IDs stay unique after a save and load" {
     for (loaded.battle_reports.kept.items) |r| try std.testing.expect(r.id != fresh);
 }
 
-test "a save without the battle counter resumes numbering past every battle it references" {
+test "a missing current battle counter is corrupt without renumbering battles" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 3004 });
     defer gs.deinit();
     try foughtCampaignForTest(&gs, 3);
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
     // Saves before the counter was stored carry no `next_battle_id` row.
     try store.db.exec("DELETE FROM meta WHERE key = 'next_battle_id'");
-    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    var max: u32 = 0;
-    for (loaded.battle_reports.kept.items) |r| max = @max(max, @intFromEnum(r.id));
-    for (loaded.held_hulls.items) |h| max = @max(max, @intFromEnum(h.battle));
-    for (loaded.event_queue.pending.items) |ev| max = @max(max, @intFromEnum(ev.battle));
-    try std.testing.expect(max > 0);
-    try std.testing.expect(loaded.next_battle_id > max);
+    const before = try databaseFingerprintForTest(store.db);
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    try std.testing.expectEqual(before, try databaseFingerprintForTest(store.db));
 }
 
 test "a battle decision round-trips answerable, and still holds the turn" {
@@ -5656,6 +5443,7 @@ test "a battle decision round-trips answerable, and still holds the turn" {
 
     const store = try Store.open(":memory:");
     defer store.close();
+    gs.next_contract_id = 2;
     try store.save(&gs);
     var loaded = try store.load(std.testing.allocator, gs.campaign_id);
     defer loaded.deinit();
@@ -5675,6 +5463,7 @@ test "a field repair decision comes back from a save with its three orders" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12069 });
     defer gs.deinit();
     const f = try contract_events.damagedCompanyForTest(&gs, 2);
+    gs.next_contract_id = @intFromEnum(f.c.id) + 1;
     try contract_events.queueFieldRepair(&gs, f.c, .none);
     try std.testing.expect(gs.event_queue.blocking() != null);
 
@@ -5737,6 +5526,8 @@ test "a recovery decision remembers its battle, and a held hull its lance" {
 
     const store = try Store.open(":memory:");
     defer store.close();
+    gs.next_contract_id = 2;
+    gs.next_battle_id = 5;
     try store.save(&gs);
     var loaded = try store.load(std.testing.allocator, gs.campaign_id);
     defer loaded.deinit();
@@ -5925,6 +5716,7 @@ test "pool-path salvage: hull_instance_id round-trips through save/load" {
     // Save and reload.
     const store = try Store.open(":memory:");
     defer store.close();
+    gs.next_contract_id = 2;
     try store.save(&gs);
     var loaded = try store.load(std.testing.allocator, gs.campaign_id);
     defer loaded.deinit();
@@ -5998,9 +5790,11 @@ fn loadArcAfterTampering(sql: [*:0]const u8) !void {
         .opened_day = 0,
     });
     gs.next_operation_id = 2;
+    gs.next_contract_id = 2;
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
     try store.db.exec("PRAGMA foreign_keys = OFF");
     try store.db.exec(sql);
     try store.db.exec("PRAGMA foreign_keys = ON");
@@ -6201,10 +5995,8 @@ test "operation.tempo and battle_report.operation_tempo round-trip through save/
     try std.testing.expectEqual(@as(?operation_mod.TempoPosture, .recon), loaded.battle_reports.kept.items[0].operation_tempo);
 }
 
-test "a v41 store migrates to v42 with operation.tempo and battle_report.operation_tempo defaults" {
-    // Rule 50: a store at v41 must migrate cleanly; the new columns must
-    // have their default values ('advance' and '' respectively) for existing rows.
-    const alloc = std.testing.allocator;
+test "v41-shaped TEXT version metadata is corrupt and remains unchanged" {
+    // Exact metadata storage classes are required even for recognizable old versions.
     var store_v41 = try sqlite.Db.open(":memory:");
     defer store_v41.close();
     // Build a v41-equivalent schema: the same tables minus the two new columns.
@@ -6215,12 +6007,7 @@ test "a v41 store migrates to v42 with operation.tempo and battle_report.operati
         \\CREATE TABLE operation (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, template_key TEXT NOT NULL, state TEXT NOT NULL, outcome TEXT NOT NULL, opened_day INTEGER NOT NULL, resolved_day INTEGER, committed_day INTEGER, intent TEXT NOT NULL DEFAULT 'secure_objective', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
         \\CREATE TABLE battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1, salvage_unclaimed INTEGER NOT NULL DEFAULT 0, operation TEXT NOT NULL DEFAULT '', operation_intent TEXT NOT NULL DEFAULT '', UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     );
-    // Adopt (migrate) must succeed.
-    const store = try Store.fromDb(store_v41);
-    defer store.close();
-    // After migration the schema_version must be 42.
-    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
-    _ = alloc;
+    try expectStoreRefusedUnchanged(store_v41, error.CorruptStore);
 }
 
 test "a contract arc_key not in arcs.zon rejects the load as corrupt" {
@@ -6241,12 +6028,8 @@ test "an operation template_key not in operations.zon rejects the load as corrup
     ));
 }
 
-test "a v38 store migrates to v39 with arc_finale_key, committed_day, and operation defaults" {
-    // Rule 51: forward migration. A v38-shaped store (arc columns present on
-    // contract, operation table exists, battle_report exists — all missing
-    // the three v39 columns) opens cleanly; the new columns take their defaults:
-    // contract.arc_finale_key = '', operation.committed_day = null,
-    // battle_report.operation = ''.
+test "a v38 fixture is refused without changing schema or rows" {
+    // Preserve the historical table shapes and rows; adoption must not repair them.
     const raw = try sqlite.Db.open(":memory:");
     try raw.exec(
         \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
@@ -6275,27 +6058,12 @@ test "a v38 store migrates to v39 with arc_finale_key, committed_day, and operat
         \\INSERT INTO operation (cid, contract_id, ord, id, template_key, state, outcome, opened_day) VALUES (1, 1, 0, 1, 'negotiate_terms', 'committed', 'none', 0);
         \\INSERT INTO battle_report (cid, ord, id, day, contract, company, outcome, roe) VALUES (1, 0, 1, 0, 1, 0, 'defeat', 'standard');
     );
-    const store = try Store.fromDb(raw);
-    defer store.close();
-    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
-    var loaded = try store.load(std.testing.allocator, 1);
-    defer loaded.deinit();
-    // contract.arc_finale_key must default to "".
-    try std.testing.expectEqual(@as(usize, 1), loaded.contracts.count());
-    const c = loaded.contracts.values()[0];
-    try std.testing.expectEqualStrings("", c.arc_finale_key);
-    // operation.committed_day must default to null.
-    try std.testing.expectEqual(@as(usize, 1), c.operations.items.len);
-    try std.testing.expectEqual(@as(?u32, null), c.operations.items[0].committed_day);
-    // battle_report.operation must default to "".
-    try std.testing.expectEqual(@as(usize, 1), loaded.battle_reports.kept.items.len);
-    try std.testing.expectEqualStrings("", loaded.battle_reports.kept.items[0].operation);
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
-test "a v37 store migrates to v38 with empty arc fields and no operations" {
-    // Rule 51: additive forward-only migration. A v37-shaped store (no arc
-    // columns on contract, no operation table) opens and loads cleanly.
-    // arc_key defaults to '', escalation_clock to 0, operations list is empty.
+test "a v37 fixture is refused without changing schema or rows" {
+    // Preserve the historical table shapes and rows; adoption must not repair them.
     const raw = try sqlite.Db.open(":memory:");
     try raw.exec(
         \\CREATE TABLE setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
@@ -6320,19 +6088,9 @@ test "a v37 store migrates to v38 with empty arc fields and no operations" {
         \\INSERT INTO contract VALUES (1, 0, 0, 1, 'garrison_duty', 'LC', 'PER', 'caph', 'active', 0, 0, 0, 30, 0, 14, 14, 360, 80000, 30, 0, 0, 'duration', 0, 100000, 100000, 0, NULL, NULL, 12, 80000, 25, 0, 0, 0, 0, 0, 0, 'independent', 0, 0, 'regular', 0, 0, 0, NULL);
         \\INSERT INTO rng VALUES (1, x'000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff');
     );
-    // fromDb runs migrations and creates the operation table via DDL.
-    const store = try Store.fromDb(raw);
-    defer store.close();
-    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
-    // Loading must succeed with empty arc state and no operations.
-    var loaded = try store.load(std.testing.allocator, 1);
-    defer loaded.deinit();
-    try std.testing.expectEqual(@as(usize, 1), loaded.contracts.count());
-    const c = loaded.contracts.values()[0];
-    try std.testing.expectEqualStrings("", c.arc_key);
-    try std.testing.expectEqual(@as(u8, 0), c.arc_beat);
-    try std.testing.expectEqual(@as(u16, 0), c.escalation_clock);
-    try std.testing.expectEqual(@as(usize, 0), c.operations.items.len);
+    // Unsupported adoption must not create the absent operation table.
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 test "non-default op.intent and non-null operation_intent round-trip through save/load" {
@@ -6504,10 +6262,7 @@ test "operation_task and battle_report_task round-trip with ≥2 rows (P4e)" {
     try std.testing.expectEqualStrings("held in reserve", lr.tasks[1].note);
 }
 
-test "a v40 store with no task tables loads cleanly with empty task lists" {
-    // Rule 51 / P4e: operation_task and battle_report_task are created by DDL when
-    // a v40 store is opened; the existing operation and battle_report rows load with
-    // empty task lists (correct migration default, like the operation table for v38).
+test "v40 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 55007 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
@@ -6552,32 +6307,17 @@ test "a v40 store with no task tables loads cleanly with empty task lists" {
     gs.next_battle_id = 2;
 
     const raw = try sqlite.Db.open(":memory:");
-    // First pass: save at the current schema.
     const s1 = try Store.fromDb(raw);
     try s1.save(&gs);
+    try expectCurrentRoundTripForTest(s1, &gs);
     try removeArtilleryFromLegacyFixture(raw);
-    // Simulate a v40 store: drop the P4e task tables and roll back the version.
-    // fromDb will recreate them via DDL (CREATE TABLE IF NOT EXISTS) on reopen.
     try raw.exec("DROP TABLE IF EXISTS operation_task");
     try raw.exec("DROP TABLE IF EXISTS battle_report_task");
     try raw.exec("UPDATE setting SET value = 40 WHERE key = 'schema_version'");
     try raw.exec("UPDATE campaign SET schema_version = 40");
 
-    // Second pass: fromDb recreates the missing tables; schema advances to current.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-
-    // Load must succeed; operation and battle report must have empty task lists.
-    try std.testing.expectEqual(@as(usize, 1), loaded.contracts.count());
-    const lc = loaded.contracts.getPtr(cid).?;
-    try std.testing.expectEqual(@as(usize, 1), lc.operations.items.len);
-    try std.testing.expectEqual(@as(usize, 0), lc.operations.items[0].tasks.items.len);
-    try std.testing.expectEqual(@as(usize, 1), loaded.battle_reports.kept.items.len);
-    try std.testing.expectEqual(@as(usize, 0), loaded.battle_reports.kept.items[0].tasks.len);
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 test "invalid and orphaned operation_task rows reject the load as corrupt (P4e)" {
@@ -6703,14 +6443,9 @@ test "command_capacity and applied intervention round-trip through save/load (P4
     try std.testing.expectEqual(operation_mod.Intervention.reinforce, lc.operations.items[0].interventions.items[0]);
 }
 
-test "a v42 store migrates to v43 with command_capacity and operation_interventions defaults" {
-    // Rule 50: a store at v42 must migrate cleanly; the new v43 columns must
-    // have their default values (0 and '' respectively) for existing rows.
+test "v42 historical fixture is refused without mutation" {
     var store_v42 = try sqlite.Db.open(":memory:");
     defer store_v42.close();
-    // Build a v42-equivalent schema: the same tables minus the v43 additions
-    // (no command_capacity on contract, no operation_interventions on battle_report,
-    // no operation_intervention table).
     try store_v42.exec(
         \\CREATE TABLE setting (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL);
         \\INSERT INTO setting VALUES ('schema_version', 42);
@@ -6719,10 +6454,7 @@ test "a v42 store migrates to v43 with command_capacity and operation_interventi
         \\CREATE TABLE operation (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, template_key TEXT NOT NULL, state TEXT NOT NULL, outcome TEXT NOT NULL, opened_day INTEGER NOT NULL, resolved_day INTEGER, committed_day INTEGER, intent TEXT NOT NULL DEFAULT 'secure_objective', tempo TEXT NOT NULL DEFAULT 'advance', FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
         \\CREATE TABLE battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER, day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)), salvage_unclaimed INTEGER NOT NULL DEFAULT 0, operation TEXT NOT NULL DEFAULT '', operation_intent TEXT NOT NULL DEFAULT '', operation_tempo TEXT NOT NULL DEFAULT '', UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     );
-    // fromDb must migrate v42 → v43 successfully.
-    const store = try Store.fromDb(store_v42);
-    defer store.close();
-    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
+    try expectStoreRefusedUnchanged(store_v42, error.CorruptStore);
 }
 
 test "invalid and orphaned operation_intervention rows reject the load as corrupt (P4g)" {
@@ -6919,11 +6651,7 @@ test "actors with nonzero relationships and a recurring actor survive a save/loa
     try std.testing.expectEqual(@as(i16, 45), loaded.actors.getPtr(aid2).?.trust);
 }
 
-test "a v43 store migrates to v44 with the actor table created and next_actor_id defaults to 1 (P4i)" {
-    // Rule 50 / P4i: a store at schema v43 (no actor table, no next_actor_id meta row)
-    // must migrate cleanly to v44 — applySchema creates the actor table — and loading
-    // a campaign from the migrated store yields next_actor_id = 1 (safe default for a
-    // campaign that had no actors before P4i).
+test "v43 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 20002 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
@@ -6931,25 +6659,12 @@ test "a v43 store migrates to v44 with the actor table created and next_actor_id
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
-    // Simulate a v43 store: drop the actor table and the next_actor_id meta row,
-    // then downgrade schema_version to 43.
+    try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("DROP TABLE actor");
     try raw.exec("DELETE FROM meta WHERE key = 'next_actor_id'");
     try raw.exec("UPDATE setting SET value = 43 WHERE key = 'schema_version'");
-    // fromDb sees v43, runs applySchema (CREATE TABLE IF NOT EXISTS actor), sets v44.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    // Schema advanced to 44.
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-    // actor table exists and is empty.
-    const cnt = try s2.db.prepare("SELECT COUNT(*) FROM actor");
-    defer cnt.finalize();
-    try std.testing.expect(try cnt.next());
-    try std.testing.expectEqual(@as(i64, 0), cnt.int(0));
-    // Loading the campaign yields next_actor_id = 1 (no meta row → safe default).
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    try std.testing.expectEqual(@as(u32, 1), loaded.next_actor_id);
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 test "an unknown archetype_key in an actor row rejects the load as corrupt (P4i)" {
@@ -7082,9 +6797,7 @@ test "world states on two worlds survive a save/load round-trip (P4h.4)" {
     try std.testing.expectEqualStrings("big_win", gal.last_cause);
 }
 
-test "a v44 store migrates to v45 with the world_state table created (P4h.4)" {
-    // Rule 50 / P4h.4: a store at schema v44 (no world_state table) must migrate
-    // cleanly to v45 — applySchema creates the table — and loading yields zero world states.
+test "v44 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 30002 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
@@ -7092,23 +6805,11 @@ test "a v44 store migrates to v45 with the world_state table created (P4h.4)" {
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
-    // Simulate a v44 store: drop the world_state table and downgrade schema_version.
+    try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("DROP TABLE world_state");
     try raw.exec("UPDATE setting SET value = 44 WHERE key = 'schema_version'");
-    // fromDb sees v44, runs applySchema (CREATE TABLE IF NOT EXISTS world_state), sets v45.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    // Schema advanced to current.
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-    // world_state table exists and is empty.
-    const cnt = try s2.db.prepare("SELECT COUNT(*) FROM world_state");
-    defer cnt.finalize();
-    try std.testing.expect(try cnt.next());
-    try std.testing.expectEqual(@as(i64, 0), cnt.int(0));
-    // Loading yields zero world states (safe default).
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    try std.testing.expectEqual(@as(usize, 0), loaded.world_states.count());
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 test "a world_state row with an unknown planet_key rejects the load as corrupt (P4h.4)" {
@@ -7260,10 +6961,7 @@ test "rivals with nonzero standing and a recurring rival survive a save/load rou
     try std.testing.expectEqual(rid2, lc2.rival_ids.items[0]);
 }
 
-test "a v45 store migrates to v46 with the rival table created and next_rival_id defaults to 1 (P4i)" {
-    // Rule 50 / P4i: a store at schema v45 (no rival table, no next_rival_id meta row)
-    // must migrate cleanly to v46 — applySchema creates the rival table — and loading
-    // a campaign from the migrated store yields next_rival_id = 1 (safe default).
+test "v45 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 40002 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
@@ -7271,26 +6969,12 @@ test "a v45 store migrates to v46 with the rival table created and next_rival_id
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
-    // Simulate a v45 store: drop the rival table and the next_rival_id meta row,
-    // then downgrade schema_version to 45.
+    try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("DROP TABLE rival");
     try raw.exec("DELETE FROM meta WHERE key = 'next_rival_id'");
     try raw.exec("UPDATE setting SET value = 45 WHERE key = 'schema_version'");
-    // fromDb sees v45, runs applySchema (CREATE TABLE IF NOT EXISTS rival), sets v46.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    // Schema advanced to current.
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-    // rival table exists and is empty.
-    const cnt = try s2.db.prepare("SELECT COUNT(*) FROM rival");
-    defer cnt.finalize();
-    try std.testing.expect(try cnt.next());
-    try std.testing.expectEqual(@as(i64, 0), cnt.int(0));
-    // Loading the campaign yields next_rival_id = 1 (no meta row → safe default).
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    try std.testing.expectEqual(@as(u32, 1), loaded.next_rival_id);
-    try std.testing.expectEqual(@as(usize, 0), loaded.rivals.count());
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 test "an unknown archetype_key in a rival row rejects the load as corrupt (P4i)" {
@@ -7444,10 +7128,7 @@ test "officer arcs with nonzero performance and a recurring arc survive a save/l
     try std.testing.expectEqual(oa2_id, lc2.officer_arc_ids.items[0]);
 }
 
-test "a v46 store migrates to v47 with the officer_arc table created and next_officer_arc_id defaults to 1 (P4i)" {
-    // Rule 50 / P4i: a store at schema v46 (no officer_arc table, no next_officer_arc_id meta row)
-    // must migrate cleanly to v47 — applySchema creates the officer_arc table — and loading
-    // a campaign from the migrated store yields next_officer_arc_id = 1 (safe default).
+test "v46 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50002 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
@@ -7455,26 +7136,12 @@ test "a v46 store migrates to v47 with the officer_arc table created and next_of
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
-    // Simulate a v46 store: drop the officer_arc table and the next_officer_arc_id meta row,
-    // then downgrade schema_version to 46.
+    try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("DROP TABLE officer_arc");
     try raw.exec("DELETE FROM meta WHERE key = 'next_officer_arc_id'");
     try raw.exec("UPDATE setting SET value = 46 WHERE key = 'schema_version'");
-    // fromDb sees v46, runs applySchema (CREATE TABLE IF NOT EXISTS officer_arc), sets v47.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    // Schema advanced to current.
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-    // officer_arc table exists and is empty.
-    const cnt = try s2.db.prepare("SELECT COUNT(*) FROM officer_arc");
-    defer cnt.finalize();
-    try std.testing.expect(try cnt.next());
-    try std.testing.expectEqual(@as(i64, 0), cnt.int(0));
-    // Loading the campaign yields next_officer_arc_id = 1 (no meta row → safe default).
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    try std.testing.expectEqual(@as(u32, 1), loaded.next_officer_arc_id);
-    try std.testing.expectEqual(@as(usize, 0), loaded.officer_arcs.count());
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 test "an unknown seat tag in an officer_arc row rejects the load as corrupt (P4i)" {
@@ -7513,7 +7180,7 @@ test "an officer_arc row with a non-markup-safe last_cause rejects the load as c
     ));
 }
 
-test "next_officer_arc_id resumes past owned ids after load (P4i counter-resume)" {
+test "next_officer_arc_id below its owned IDs is corrupt" {
     // Rule 70 / P4i: next_officer_arc_id must be >= 1 and above every owned id after load.
     var gs = try buildOfficerGs(std.testing.allocator);
     defer gs.deinit();
@@ -7521,16 +7188,11 @@ test "next_officer_arc_id resumes past owned ids after load (P4i counter-resume)
     defer store.close();
     try store.save(&gs);
 
-    // Drive counter below the max owned id; reconcileCounters bumps it past the max on load.
+    // Drive the durable counter below the maximum owned ID; no repair is permitted.
     try store.db.exec("UPDATE meta SET value = 0 WHERE key = 'next_officer_arc_id'");
-    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    try std.testing.expect(loaded.next_officer_arc_id >= 1);
-    // Must be above all owned ids (max owned id = 2).
-    var it = loaded.officer_arcs.iterator();
-    while (it.next()) |e| {
-        try std.testing.expect(loaded.next_officer_arc_id > @intFromEnum(e.key_ptr.*));
-    }
+    const before = try databaseFingerprintForTest(store.db);
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    try std.testing.expectEqual(before, try databaseFingerprintForTest(store.db));
 }
 
 // P3c.1 hull instance tests ------------------------------------------------
@@ -7639,13 +7301,7 @@ test "hull instances and linked units survive a save/load round-trip with identi
     try std.testing.expect(linked >= 1);
 }
 
-test "v47→v48 migration synthesizes one HullInstance per owned unit (P3c.1)" {
-    // Rules 50, 51 / P3c.1: a store at schema v47 must migrate to v48 with exactly one
-    // HullInstance per owned unit, each having base_key == chassis_key, pre_campaign = true,
-    // status = active, loadout length == slot count.
-    // Note: SQLite cannot drop a column; hull_instance_id already exists in the unit table
-    // after fromDb adds it via the ALTER migration. Setting it to 0 faithfully reproduces
-    // the DEFAULT 0 state the real migration produces (same technique as actor tests).
+test "v47 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 30002 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
@@ -7653,24 +7309,12 @@ test "v47→v48 migration synthesizes one HullInstance per owned unit (P3c.1)" {
     const owned_count = gs.units.count();
     try std.testing.expect(owned_count > 0);
 
-    // Record each owned unit's slot count before simulating a v47 store.
-    const alloc = std.testing.allocator;
-    var slot_counts = std.AutoArrayHashMapUnmanaged(types.UnitId, usize){};
-    defer slot_counts.deinit(alloc);
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| {
-        try slot_counts.put(alloc, e.key_ptr.*, e.value_ptr.slots.items.len);
-    }
-
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
+    try expectCurrentRoundTripForTest(s1, &gs);
     try removeArtilleryFromLegacyFixture(raw);
 
-    // Simulate a v47 store: remove the hull tables, reset hull_instance_id to 0,
-    // remove the next_hull_instance_id meta row, and downgrade schema_version.
-    // Also clear P3c.2–P3c.4 child tables whose rows now exist (P3c.5 seeded
-    // them) and would orphan against migration-recreated instances on load.
     try raw.exec("PRAGMA foreign_keys = OFF");
     try raw.exec("DROP TABLE hull_loadout");
     try raw.exec("DROP TABLE hull_instance");
@@ -7683,32 +7327,8 @@ test "v47→v48 migration synthesizes one HullInstance per owned unit (P3c.1)" {
     try raw.exec("UPDATE campaign SET schema_version = 47");
     try raw.exec("PRAGMA foreign_keys = ON");
 
-    // Re-open: fromDb sees v47, ddl creates hull_instance + hull_loadout, schema advances to 48.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-
-    // One HullInstance per owned unit.
-    try std.testing.expectEqual(owned_count, loaded.hull_instances.count());
-
-    // Each owned unit has a non-.none hull_instance_id resolving to a valid instance.
-    var luit = loaded.units.iterator();
-    while (luit.next()) |e| {
-        const u = e.value_ptr;
-        try std.testing.expect(u.hull_instance_id != .none);
-        const inst = loaded.hull_instances.getPtr(u.hull_instance_id) orelse return error.TestFailed;
-        try std.testing.expectEqualStrings(u.chassis_key, inst.base_key);
-        try std.testing.expect(inst.pre_campaign);
-        try std.testing.expectEqual(@import("../domain/hull_instance.zig").HullStatus.active, inst.status);
-        const expected_slots = slot_counts.get(u.id) orelse 0;
-        try std.testing.expectEqual(expected_slots, inst.loadout.items.len);
-    }
-
-    // next_hull_instance_id is past all owned ids.
-    try std.testing.expectEqual(owned_count + 1, loaded.next_hull_instance_id);
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 test "a bad base_key in a hull_instance row rejects the load as corrupt (P3c.1)" {
@@ -8253,12 +7873,7 @@ test "a merc_company-owned hull with an absent merc_company_id rejects the load 
     }
 }
 
-test "v51→v52 migration backfills all hull instances to owner='player' (P3e.2)" {
-    // Rules 50, 51 / P3e.2: a store at schema v51 must migrate through v52 with every
-    // hull_instance row backfilled to owner_type='player' / owner_faction_key='' / owner_merc_company_id=0,
-    // and every loaded hull has owner == .player. SQLite ADD COLUMN NOT NULL DEFAULT
-    // handles the backfill deterministically.
-    const hull_mod = @import("../domain/hull_instance.zig");
+test "v51 historical fixture is refused without mutation" {
     var gs = try buildHullGs(std.testing.allocator);
     defer gs.deinit();
     const hull_count = gs.hull_instances.count();
@@ -8267,10 +7882,9 @@ test "v51→v52 migration backfills all hull instances to owner='player' (P3e.2)
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
+    try expectCurrentRoundTripForTest(s1, &gs);
     try removeArtilleryFromLegacyFixture(raw);
 
-    // Simulate a v51 store: recreate hull_instance without the three owner columns
-    // and downgrade schema_version.
     try raw.exec("PRAGMA foreign_keys = OFF");
     try raw.exec("ALTER TABLE hull_instance RENAME TO hull_instance_v52;" ++
         "CREATE TABLE hull_instance (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, base_key TEXT, name TEXT, nickname TEXT, status TEXT NOT NULL DEFAULT 'active', intro_year INTEGER NOT NULL DEFAULT 0, pre_campaign INTEGER NOT NULL DEFAULT 0 CHECK (pre_campaign IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);" ++
@@ -8280,21 +7894,8 @@ test "v51→v52 migration backfills all hull instances to owner='player' (P3e.2)
     try raw.exec("UPDATE campaign SET schema_version = 51");
     try raw.exec("PRAGMA foreign_keys = ON");
 
-    // Re-open: fromDb sees v51, runs the three ALTER TABLE ADD COLUMN migrations → v52.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-
-    // Every hull loaded as owner == .player.
-    try std.testing.expectEqual(hull_count, loaded.hull_instances.count());
-    var lit = loaded.hull_instances.iterator();
-    while (lit.next()) |e| {
-        try std.testing.expectEqual(hull_mod.OwnerType.player, std.meta.activeTag(e.value_ptr.owner));
-        try std.testing.expect(e.value_ptr.owner == .player);
-    }
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 // P3e.3: faction_roster + rival_roster persistence (rules 47, 67, 69).
@@ -8416,10 +8017,7 @@ test "faction and merc-company rosters survive a save/load round-trip with ident
     try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
 }
 
-test "a v52 store migrates to v54 with the roster tables created (P3e.3/entity-split)" {
-    // Rules 50, 51 / P3e.3 + entity split: a store at schema v52 (no roster tables) must
-    // migrate to v54 — ddl creates faction_roster/merc_company_roster/merc_company — and
-    // loading a campaign yields empty rosters. rival_roster is never created (v53→v54 drops it).
+test "v52 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50002 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
@@ -8427,9 +8025,9 @@ test "a v52 store migrates to v54 with the roster tables created (P3e.3/entity-s
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
+    try expectCurrentRoundTripForTest(s1, &gs);
     try removeArtilleryFromLegacyFixture(raw);
 
-    // Simulate a v52 store: drop roster/merc tables and downgrade schema_version.
     try raw.exec("PRAGMA foreign_keys = OFF");
     try raw.exec("DROP TABLE IF EXISTS faction_roster");
     try raw.exec("DROP TABLE IF EXISTS merc_company_roster");
@@ -8438,26 +8036,8 @@ test "a v52 store migrates to v54 with the roster tables created (P3e.3/entity-s
     try raw.exec("UPDATE campaign SET schema_version = 52");
     try raw.exec("PRAGMA foreign_keys = ON");
 
-    // Re-open: fromDb sees v52, ddl creates tables, migrations run, schema advances to 54.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-
-    // faction_roster and merc_company_roster exist and are empty; rival_roster is gone.
-    const fc = try s2.db.prepare("SELECT COUNT(*) FROM faction_roster");
-    defer fc.finalize();
-    try std.testing.expect(try fc.next());
-    try std.testing.expectEqual(@as(i64, 0), fc.int(0));
-    const mrc = try s2.db.prepare("SELECT COUNT(*) FROM merc_company_roster");
-    defer mrc.finalize();
-    try std.testing.expect(try mrc.next());
-    try std.testing.expectEqual(@as(i64, 0), mrc.int(0));
-
-    // Loading yields empty rosters.
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    try std.testing.expectEqual(@as(usize, 0), loaded.faction_rosters.count());
-    try std.testing.expectEqual(@as(usize, 0), loaded.merc_company_rosters.count());
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 test "a faction_roster row naming no hull instance rejects the load as corrupt (P3e.3)" {
@@ -8555,18 +8135,12 @@ test "a rival row with a dangling merc_company_id rejects the load as corrupt (P
     }
 }
 
-test "a v53 store migrates to v54 with merc_company/merc_company_roster created and rival relabelled (P3e entity split)" {
-    // Rules 50, 51 / P3e entity split: a store at schema v53 (rival_roster, owner_rival_id) must
-    // migrate to v54: owner_merc_company_id added, owner_type='rival'→'merc_company' relabelled,
-    // rival_roster dropped, merc_company/merc_company_roster created.
-    // Asserted at the SQL level (not through store.load) because the relabelled hull has
-    // no merc_company parent row — provably unreachable in a real save; P3e.5 adds producers.
+test "v53 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50030 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const a = gs.allocator();
 
-    // One player-owned hull instance (baseline for migration).
     const hid1: types.HullInstanceId = @enumFromInt(1);
     try gs.hull_instances.put(a, hid1, .{ .id = hid1, .base_key = "LCT-1V", .status = .active });
     gs.next_hull_instance_id = 2;
@@ -8575,23 +8149,16 @@ test "a v53 store migrates to v54 with merc_company/merc_company_roster created 
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
 
-    // Simulate a v53 store: recreate hull_instance without owner_merc_company_id but with
-    // owner_rival_id; recreate rival without merc_company_id; recreate rival_roster; drop
-    // merc_company/merc_company_roster; set schema version 53.
     try raw.exec("PRAGMA foreign_keys = OFF");
-    // Recreate hull_instance with owner_rival_id instead of owner_merc_company_id.
     try raw.exec("ALTER TABLE hull_instance RENAME TO hull_instance_v54;" ++
         "CREATE TABLE hull_instance (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, base_key TEXT, name TEXT, nickname TEXT, status TEXT NOT NULL DEFAULT 'active', intro_year INTEGER NOT NULL DEFAULT 0, pre_campaign INTEGER NOT NULL DEFAULT 0 CHECK (pre_campaign IN (0,1)), owner_type TEXT NOT NULL DEFAULT 'player', owner_faction_key TEXT NOT NULL DEFAULT '', owner_rival_id INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);" ++
         "INSERT INTO hull_instance SELECT cid, ord, id, base_key, name, nickname, status, intro_year, pre_campaign, owner_type, owner_faction_key, owner_merc_company_id FROM hull_instance_v54;" ++
         "DROP TABLE hull_instance_v54");
-    // Insert a raw hull row with owner_type='rival' and owner_rival_id=7 to test relabelling.
     try raw.exec("INSERT INTO hull_instance VALUES (1, 99, 777, 'LCT-1V', NULL, NULL, 'active', 2750, 0, 'rival', '', 7)");
-    // Recreate rival table without merc_company_id.
     try raw.exec("ALTER TABLE rival RENAME TO rival_v54;" ++
         "CREATE TABLE rival (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, standing INTEGER NOT NULL DEFAULT 0, encounters INTEGER NOT NULL DEFAULT 1, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);" ++
         "INSERT INTO rival SELECT cid, ord, id, archetype_key, commander_first, commander_last, unit_name, faction_key, side, doctrine, contract, standing, encounters, last_cause, last_cause_day, recurring FROM rival_v54;" ++
         "DROP TABLE rival_v54");
-    // Create rival_roster (was dropped by current ddl); drop merc_company/merc_company_roster.
     try raw.exec("CREATE TABLE rival_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, rival_id INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED)");
     try raw.exec("DROP TABLE IF EXISTS merc_company");
     try raw.exec("DROP TABLE IF EXISTS merc_company_roster");
@@ -8599,37 +8166,8 @@ test "a v53 store migrates to v54 with merc_company/merc_company_roster created 
     try raw.exec("UPDATE campaign SET schema_version = 53");
     try raw.exec("PRAGMA foreign_keys = ON");
 
-    // Re-open: fromDb sees v53, runs v54 migrations, schema advances to 54.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-
-    // merc_company and merc_company_roster exist and are empty.
-    const mc_count = try s2.db.prepare("SELECT COUNT(*) FROM merc_company");
-    defer mc_count.finalize();
-    try std.testing.expect(try mc_count.next());
-    try std.testing.expectEqual(@as(i64, 0), mc_count.int(0));
-    const mrc_count = try s2.db.prepare("SELECT COUNT(*) FROM merc_company_roster");
-    defer mrc_count.finalize();
-    try std.testing.expect(try mrc_count.next());
-    try std.testing.expectEqual(@as(i64, 0), mrc_count.int(0));
-
-    // rival_roster is gone.
-    const rr_check = try s2.db.prepare("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='rival_roster'");
-    defer rr_check.finalize();
-    try std.testing.expect(try rr_check.next());
-    try std.testing.expectEqual(@as(i64, 0), rr_check.int(0));
-
-    // The relabelled hull (id=777) has owner_type='merc_company' and owner_merc_company_id=7;
-    // owner_rival_id is gone — the rebuild-table migration removed it.
-    const relabel_q = try s2.db.prepare("SELECT owner_type, owner_merc_company_id FROM hull_instance WHERE id = 777");
-    defer relabel_q.finalize();
-    try std.testing.expect(try relabel_q.next());
-    var buf: [32]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const ot = try relabel_q.text(0, fba.allocator());
-    try std.testing.expectEqualStrings("merc_company", ot);
-    try std.testing.expectEqual(@as(i64, 7), relabel_q.int(1));
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 // P3f.4: merc company lifecycle — save/load and migration tests.
@@ -8679,9 +8217,7 @@ test "MercCompany save/load round-trip with all four new fields non-default (P3f
     try std.testing.expectEqualStrings("ashfall_lancers", lmc.logo_key);
 }
 
-test "a v57 store migrates to v58 with four new merc_company columns and legacy defaults (P3f.4)" {
-    // Rules 50, 51 / P3f.4: a store at schema v57 (no cbills/founded_day/dissolved_day/logo_key)
-    // migrates to v58: four new columns exist with fail-closed legacy defaults.
+test "v57 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 58002 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
@@ -8703,8 +8239,8 @@ test "a v57 store migrates to v58 with four new merc_company columns and legacy 
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
+    try expectCurrentRoundTripForTest(s1, &gs);
 
-    // Simulate a v57 store: drop the four new columns and set schema_version = 57.
     try raw.exec("PRAGMA foreign_keys = OFF");
     try raw.exec("ALTER TABLE merc_company RENAME TO merc_company__bak");
     try raw.exec("CREATE TABLE merc_company (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED)");
@@ -8713,76 +8249,32 @@ test "a v57 store migrates to v58 with four new merc_company columns and legacy 
     try raw.exec("UPDATE setting SET value = 57 WHERE key = 'schema_version'");
     try raw.exec("PRAGMA foreign_keys = ON");
 
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-
-    // Four new columns must now exist.
-    try std.testing.expect(try Store.hasColumnRt(raw, "merc_company", "cbills"));
-    try std.testing.expect(try Store.hasColumnRt(raw, "merc_company", "founded_day"));
-    try std.testing.expect(try Store.hasColumnRt(raw, "merc_company", "dissolved_day"));
-    try std.testing.expect(try Store.hasColumnRt(raw, "merc_company", "logo_key"));
-
-    // Load the legacy row — fail-closed defaults.
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    const lmc = loaded.merc_companies.getPtr(@enumFromInt(1)) orelse return error.TestFailed;
-    try std.testing.expectEqual(@as(types.CBills, 0), lmc.cbills);
-    try std.testing.expectEqual(@as(u32, 0), lmc.founded_day);
-    try std.testing.expectEqual(@as(u32, 0), lmc.dissolved_day);
-    try std.testing.expectEqualStrings("", lmc.logo_key);
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
-test "v50→v51 migration seeds one .initial ownership interval per owned hull (P3c.4)" {
-    // Rules 50, 51 / P3c.4: a store at schema v50 must migrate to v51 with exactly one
-    // .initial ownership interval per owned unit, with from_day == acquired_day,
-    // to_day == null, and prior_owner_key == "unknown".
-    const hull_inst_mod = @import("../domain/hull_instance.zig");
+test "v50 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 30003 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Delta");
-    // generateInto now links every unit with a pre_campaign HullInstance (P3c.5).
     const owned_count = gs.units.count();
     try std.testing.expect(owned_count > 0);
-
-    // Record acquired_day values before simulating.
-    var acquired_days = std.AutoArrayHashMapUnmanaged(types.HullInstanceId, u32){};
-    defer acquired_days.deinit(std.testing.allocator);
-    var uit2 = gs.units.iterator();
-    while (uit2.next()) |e| {
-        try acquired_days.put(std.testing.allocator, e.value_ptr.hull_instance_id, e.value_ptr.acquired_day);
-    }
 
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
+    try expectCurrentRoundTripForTest(s1, &gs);
     try removeArtilleryFromLegacyFixture(raw);
 
-    // Simulate a v50 store: drop hull_ownership_history and downgrade schema_version.
     try raw.exec("PRAGMA foreign_keys = OFF");
     try raw.exec("DROP TABLE hull_ownership_history");
     try raw.exec("UPDATE setting SET value = 50 WHERE key = 'schema_version'");
     try raw.exec("UPDATE campaign SET schema_version = 50");
     try raw.exec("PRAGMA foreign_keys = ON");
 
-    // Re-open: fromDb sees v50, ddl creates hull_ownership_history, schema advances to 51.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-
-    // Exactly one .initial row per owned hull.
-    try std.testing.expectEqual(owned_count, loaded.hull_ownership_history.items.len);
-    for (loaded.hull_ownership_history.items) |row| {
-        try std.testing.expectEqual(hull_inst_mod.AcquisitionType.initial, row.acquisition_type);
-        try std.testing.expectEqual(@as(?u32, null), row.to_day);
-        try std.testing.expectEqualStrings("unknown", row.prior_owner_key);
-        const expected_day = acquired_days.get(row.hull_instance_id) orelse return error.TestFailed;
-        try std.testing.expectEqual(expected_day, row.from_day);
-    }
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 test "seeded faction hull pool survives a save/load round-trip with identical stateHash (P3e.4)" {
@@ -8915,15 +8407,11 @@ test "P3e.6: surplus listing hull_instance_id round-trips through save/load" {
     try std.testing.expectEqual(before, digest.stateHash(&loaded));
 }
 
-test "P3e.6: v55 store upgrades to v56, existing listings load with hull_instance_id = .none" {
-    // Rules 50, 51: a v55 store (listing table without hull_instance_id) migrates
-    // to v56 — the column is added with DEFAULT 0 — and existing abstraction-path
-    // listings load with hull_instance_id == .none.
+test "P3e.6: v55 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 56002 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
 
-    // Add an abstraction-path listing (no hull_instance_id).
     const lid: types.ListingId = @enumFromInt(gs.next_listing_id);
     gs.next_listing_id += 1;
     try gs.market_listings.append(gs.allocator(), .{
@@ -8940,9 +8428,9 @@ test "P3e.6: v55 store upgrades to v56, existing listings load with hull_instanc
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
+    try expectCurrentRoundTripForTest(s1, &gs);
     try removeArtilleryFromLegacyFixture(raw);
 
-    // Downgrade to v55: drop hull_instance_id from listing by recreating the table.
     try raw.exec("PRAGMA foreign_keys = OFF");
     try raw.exec(
         \\ALTER TABLE listing RENAME TO listing__bak;
@@ -8954,23 +8442,8 @@ test "P3e.6: v55 store upgrades to v56, existing listings load with hull_instanc
     );
     try raw.exec("PRAGMA foreign_keys = ON");
 
-    // Re-open: sees v55, runs migration to add hull_instance_id.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-    try std.testing.expect(try Store.hasColumnRt(raw, "listing", "hull_instance_id"));
-
-    // Load and verify existing listing has hull_instance_id == .none.
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    var found = false;
-    for (loaded.market_listings.items) |l| {
-        if (l.id == lid) {
-            try std.testing.expectEqual(types.HullInstanceId.none, l.hull_instance_id);
-            found = true;
-        }
-    }
-    try std.testing.expect(found);
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 test "P3e.6: a listing with hull_instance_id naming no hull is rejected as corrupt" {
@@ -9090,15 +8563,11 @@ test "P3f.1: dispersed listing planet_key and available_after round-trip through
     try std.testing.expectEqual(before, digest.stateHash(&loaded));
 }
 
-test "P3f.1: v56 store upgrades to v57, existing listings load with planet_key='' and available_after=0" {
-    // Rules 50, 51: a v56 store (listing table without planet_key/available_after)
-    // migrates to v57 — columns are added with defaults — and existing listings
-    // load with planet_key == "" and available_after == 0 (fail-closed, rule 49).
+test "P3f.1: v56 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 57002 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
 
-    // Add an abstraction-path listing (no planet_key/available_after).
     const lid: types.ListingId = @enumFromInt(gs.next_listing_id);
     gs.next_listing_id += 1;
     try gs.market_listings.append(gs.allocator(), .{
@@ -9115,9 +8584,9 @@ test "P3f.1: v56 store upgrades to v57, existing listings load with planet_key='
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
     try s1.save(&gs);
+    try expectCurrentRoundTripForTest(s1, &gs);
     try removeArtilleryFromLegacyFixture(raw);
 
-    // Downgrade to v56: drop planet_key and available_after from listing by recreating the table.
     try raw.exec("PRAGMA foreign_keys = OFF");
     try raw.exec(
         \\ALTER TABLE listing RENAME TO listing__bak;
@@ -9129,25 +8598,8 @@ test "P3f.1: v56 store upgrades to v57, existing listings load with planet_key='
     );
     try raw.exec("PRAGMA foreign_keys = ON");
 
-    // Re-open: sees v56, runs migration to add planet_key and available_after.
-    const s2 = try Store.fromDb(raw);
-    defer s2.close();
-    try std.testing.expectEqual(@as(i64, schema_version), s2.getSetting("schema_version", 0));
-    try std.testing.expect(try Store.hasColumnRt(raw, "listing", "planet_key"));
-    try std.testing.expect(try Store.hasColumnRt(raw, "listing", "available_after"));
-
-    // Load and verify existing listing has planet_key == "" and available_after == 0.
-    var loaded = try s2.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    var found = false;
-    for (loaded.market_listings.items) |l| {
-        if (l.id == lid) {
-            try std.testing.expectEqualStrings("", l.planet_key);
-            try std.testing.expectEqual(@as(u32, 0), l.available_after);
-            found = true;
-        }
-    }
-    try std.testing.expect(found);
+    defer raw.close();
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
 fn removeArtilleryFromLegacyFixture(db: sqlite.Db) !void {
@@ -9488,7 +8940,7 @@ fn downgradeToV59ForTest(db: sqlite.Db) !void {
     );
 }
 
-test "real v59 schema migration disambiguates open ordinary and repeated day-zero intervals" {
+test "real v59 fixture refuses open ordinary and repeated day-zero intervals" {
     for ([_][]const u32{ &.{0}, &.{ 0, 5 }, &.{ 0, 0 }, &.{ 0, 0, 0 } }) |starts| {
         var gs = GameState.init(std.testing.allocator, .{ .seed = 625 });
         defer gs.deinit();
@@ -9509,24 +8961,13 @@ test "real v59 schema migration disambiguates open ordinary and repeated day-zer
         defer raw.close();
         const store = try Store.fromDb(raw);
         try store.save(&gs);
+        try expectCurrentRoundTripForTest(store, &gs);
         try downgradeToV59ForTest(raw);
-        const migrated = try Store.fromDb(raw);
-        var loaded = try migrated.load(std.testing.allocator, gs.campaign_id);
-        defer loaded.deinit();
-        try std.testing.expectEqualDeep(gs.hull_ownership_history.items, loaded.hull_ownership_history.items);
-        try std.testing.expectEqual(gs.rng, loaded.rng);
-        try std.testing.expectEqual(gs.next_hull_instance_id, loaded.next_hull_instance_id);
-        try std.testing.expectEqual(@as(usize, 0), loaded.artillery_formations.count());
-        try std.testing.expectEqual(@as(usize, 1), loaded.artillery_offers.items.len);
-        try std.testing.expectEqual(loaded.clock.date.month, loaded.artillery_offers.items[0].month);
-        try std.testing.expectEqual(@import("../domain/hull_instance.zig").HullCatalogue.chassis, loaded.hull_instances.get(hid).?.catalogue);
-        const unchanged = digest.stateHash(&loaded);
-        try artillery.syncMarkets(&loaded);
-        try std.testing.expectEqual(unchanged, digest.stateHash(&loaded));
+        try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
     }
 }
 
-test "malformed v59 ownership migration rejects and leaves schema and rows unchanged" {
+test "malformed v59 ownership fixture refuses and leaves schema and rows unchanged" {
     for ([_][*:0]const u8{
         "UPDATE hull_ownership_history SET to_day=0.5",
         "UPDATE hull_ownership_history SET to_day='invalid'",
@@ -9556,7 +8997,7 @@ test "malformed v59 ownership migration rejects and leaves schema and rows uncha
         try store.save(&gs);
         try downgradeToV59ForTest(raw);
         try raw.exec(tamper);
-        try std.testing.expectError(error.CorruptSave, Store.fromDb(raw));
+        try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
         try std.testing.expectEqual(@as(i64, 59), store.getSetting("schema_version", 0));
         try std.testing.expect(!try Store.hasColumnRt(raw, "hull_instance", "catalogue"));
     }
@@ -9826,7 +9267,6 @@ test "retired HQ archive and history reject incomplete malformed and operational
         "UPDATE force SET supplying_hq=2",
         "UPDATE person SET posted_hq=2",
         "UPDATE artillery_offer SET hq=2",
-        "UPDATE campaign SET schema_version=60",
     }) |tamper| {
         try store.save(&gs);
         try store.db.exec("PRAGMA foreign_keys=OFF; PRAGMA ignore_check_constraints=ON");
@@ -9933,35 +9373,17 @@ test "archive save first-write update overwrite and delete are one transaction p
     try std.testing.expectEqual(@as(i64, 0), rows.int(0));
 }
 
-test "real v60 archive migration is empty deterministic repeatable and rejects lost legacy identity" {
+test "real v60 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
     _ = try artilleryCampaignForTest(&gs);
     const db = try sqlite.Db.open(":memory:");
     var initial = try Store.fromDb(db);
     try initial.save(&gs);
+    try expectCurrentRoundTripForTest(initial, &gs);
     try db.exec("DROP TABLE retired_hq; DELETE FROM meta WHERE key='retired_hq_count'; UPDATE setting SET value=60 WHERE key='schema_version'; UPDATE campaign SET schema_version=60; UPDATE meta SET value=0 WHERE key='next_hq_id'");
-    const migrated = try Store.fromDb(db);
-    defer migrated.close();
-    try std.testing.expectEqual(@as(i64, schema_version), migrated.getSetting("schema_version", 0));
-    var loaded = try migrated.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    try std.testing.expectEqual(@as(usize, 0), loaded.retired_hqs.count());
-    try std.testing.expectEqual(gs.next_hq_id, loaded.next_hq_id);
-    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
-    const repeated = try Store.fromDb(db);
-    var again = try repeated.load(std.testing.allocator, gs.campaign_id);
-    defer again.deinit();
-    try std.testing.expectEqual(digest.stateHash(&loaded), digest.stateHash(&again));
-    // A partly upgraded campaign must not have an invented archive payload.
-    try db.exec("INSERT INTO retired_hq VALUES (1,0,2,'Lost','skye','regional',0)");
-    try std.testing.expectError(error.CorruptSave, migrated.load(std.testing.allocator, gs.campaign_id));
-    try db.exec("DELETE FROM retired_hq");
-    // Schema-v60 historical-only tags must resolve despite the empty archive.
-    try db.exec("UPDATE event_log SET hq=99");
-    try std.testing.expectError(error.CorruptSave, migrated.load(std.testing.allocator, gs.campaign_id));
-    try db.exec("UPDATE event_log SET hq=1; UPDATE txn SET hq=99 WHERE hq=1");
-    try std.testing.expectError(error.CorruptSave, migrated.load(std.testing.allocator, gs.campaign_id));
+    defer db.close();
+    try expectStoreRefusedUnchanged(db, error.StoreOlderThanGame);
 }
 
 // Schema-61 fixture definitions are independently copied from the pre-P2g documented schema.
@@ -10036,8 +9458,7 @@ fn downgradeArtilleryToV61ForTest(db: sqlite.Db) !void {
     try db.exec("PRAGMA foreign_keys=ON");
 }
 
-test "real schema 61 upgrades every artillery placement with empty deterministic defaults and existing jobs" {
-    const rules = @import("../domain/artillery_operations.zig");
+test "real schema 61 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
     const home = try founding.createCommander(&gs, "T", .LC, .quartermaster);
@@ -10064,39 +9485,12 @@ test "real schema 61 upgrades every artillery placement with empty deterministic
     defer raw.close();
     const initial = try Store.fromDb(raw);
     try initial.save(&gs);
+    try expectCurrentRoundTripForTest(initial, &gs);
     try downgradeArtilleryToV61ForTest(raw);
-    const migrated = try Store.fromDb(raw);
-    var loaded = try migrated.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    try std.testing.expectEqual(@as(i64, 62), migrated.getSetting("schema_version", 0));
-    try std.testing.expectEqual(@as(?u32, null), loaded.last_artillery_service_day);
-    for (ids) |id| {
-        const old = gs.artillery_formations.get(id).?;
-        const actual = loaded.artillery_formations.get(id).?;
-        try std.testing.expectEqualDeep(old, actual);
-        try std.testing.expectEqual(@as(u8, 100), actual.armor_pct);
-        for (actual.crew) |p| try std.testing.expectEqual(types.PersonId.none, p);
-        for (rules.descriptors, actual.slots) |d, slot| {
-            _ = d;
-            try std.testing.expectEqual(@as(u16, 0), slot.rounds);
-        }
-    }
-    try std.testing.expectEqualDeep(gs.bay_jobs.items, loaded.bay_jobs.items);
-    try std.testing.expectEqual(gs.rng, loaded.rng);
-    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
-    const repeated = try Store.fromDb(raw);
-    var retry = try repeated.load(std.testing.allocator, gs.campaign_id);
-    defer retry.deinit();
-    try std.testing.expectEqual(digest.stateHash(&loaded), digest.stateHash(&retry));
-    try migrated.save(&loaded);
-    try migrated.deleteCampaign(gs.campaign_id);
-    const orphan = try raw.prepare("SELECT (SELECT count(*) FROM artillery_crew)+(SELECT count(*) FROM artillery_slot)");
-    defer orphan.finalize();
-    try std.testing.expect(try orphan.next());
-    try std.testing.expectEqual(@as(i64, 0), orphan.int(0));
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
-test "schema 62 operational corruption and partially upgraded legacy data are never repaired on load" {
+test "schema 62 operational corruption is never repaired on load" {
     const operations = @import("../sim/artillery_operations.zig");
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
@@ -10133,7 +9527,6 @@ test "schema 62 operational corruption and partially upgraded legacy data are ne
         "UPDATE meta SET value=-2 WHERE key='last_artillery_service_day'",
         "UPDATE meta SET value=0.5 WHERE key='last_artillery_service_day'",
         "DELETE FROM meta WHERE key='last_artillery_service_day'",
-        "UPDATE campaign SET schema_version=61",
     }) |tamper| {
         try store.save(&gs);
         try store.db.exec("PRAGMA foreign_keys=OFF; PRAGMA ignore_check_constraints=ON");
@@ -10354,4 +9747,234 @@ test "operational row write failures preserve first-save and overwrite identity 
         defer retried.deinit();
         try std.testing.expectEqual(changed, digest.stateHash(&retried));
     }
+}
+
+test "queued and started artillery depot work survives normal departure station return and deterministic resumption" {
+    const operations = @import("../sim/artillery_operations.zig");
+    const service = @import("../sim/artillery_service.zig");
+    const control = @import("../sim/contract_control.zig");
+    const rules = @import("../domain/artillery_operations.zig");
+    const part = @import("../domain/part.zig");
+    const tick = @import("../sim/tick.zig");
+    for ([_]bool{ false, true }) |started| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 625 });
+        defer gs.deinit();
+        const id = try operations.fixtureForTest(&gs, true);
+        const f = gs.artillery_formations.getPtr(id).?;
+        const company = f.placement.company;
+        const home = gs.seat();
+        const hq = gs.hqs.getPtr(home).?;
+        for (hq.facilities.items) |*facility| if (facility.kind == .mek_bay) {
+            facility.level = part.find(rules.descriptor(.chassis).spare_key).?.fab_min_bay;
+        };
+        _ = try hq_ops.staffHqToRequirement(&gs, home);
+        f.slots[@intFromEnum(rules.Slot.chassis)].condition = .destroyed;
+        try gs.addStock(.{ .hq = home }, rules.descriptor(.chassis).spare_key, 1);
+        _ = try service.queueRepair(&gs, id);
+        if (started) try hq_ops.runDaily(&gs);
+        try std.testing.expectEqual(started, gs.bay_jobs.items[0].started_day != null);
+        const store = try Store.open(":memory:");
+        defer store.close();
+        try store.save(&gs);
+        try expectCurrentRoundTripForTest(store, &gs);
+        const offer: types.ContractId = @enumFromInt(gs.next_contract_id);
+        gs.next_contract_id += 1;
+        try gs.contract_offers.append(gs.allocator(), .{
+            .id = offer,
+            .kind = .recon_raid,
+            .employer_key = "FS",
+            .enemy_key = "CC",
+            .planet_key = "caph",
+            .offer_hq = home,
+            .terms = .{ .length_months = 3, .base_pay_month = 400_000 },
+        });
+        try control.acceptContract(&gs, offer, company);
+        try std.testing.expect(posture.companyPosture(&gs, company) == .en_route);
+        try expectSuspendedDepotRoundTripForTest(store, &gs, home, started);
+        gs.clock.day_index = gs.contracts.get(offer).?.arrive_day.? - 1;
+        try tick.advanceDay(&gs);
+        try std.testing.expect(posture.companyPosture(&gs, company) == .deployed);
+        try expectSuspendedDepotRoundTripForTest(store, &gs, home, started);
+        try control.fail(&gs, gs.contracts.getPtr(offer).?, "fixture term ended");
+        try std.testing.expect(posture.companyPosture(&gs, company) == .idle_afield);
+        try expectSuspendedDepotRoundTripForTest(store, &gs, home, started);
+        _ = try control.recall(&gs, company);
+        try std.testing.expect(posture.companyPosture(&gs, company) == .returning);
+        try expectSuspendedDepotRoundTripForTest(store, &gs, home, started);
+        gs.clock.day_index = gs.force(company).?.return_eta_day.?;
+        try control.runReturns(&gs);
+        try std.testing.expect(posture.companyPosture(&gs, company) == .home);
+        try std.testing.expect(service.jobCanWork(&gs, &gs.bay_jobs.items[0]));
+        try store.save(&gs);
+        var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+        defer loaded.deinit();
+        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+        for ([_]*GameState{ &gs, &loaded }) |g| {
+            try hq_ops.runDaily(g);
+            if (g.bay_jobs.items.len > 0) {
+                g.clock.day_index = g.bay_jobs.items[0].done_day.?;
+                try hq_ops.runDaily(g);
+            }
+        }
+        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+        try std.testing.expectEqual(gs.rng, loaded.rng);
+        try std.testing.expectEqualDeep(gs.bay_jobs.items, loaded.bay_jobs.items);
+        try store.save(&loaded);
+        try expectCurrentRoundTripForTest(store, &loaded);
+        // Durable identity still rejects another HQ despite valid travel posture.
+        if (loaded.bay_jobs.items.len == 0) {
+            try loaded.bay_jobs.append(loaded.allocator(), .{ .hq = home, .kind = .artillery_depot_repair, .artillery = id, .duration_days = 2, .queued_day = loaded.clock.day_index });
+        }
+        try store.save(&loaded);
+        try store.db.exec("PRAGMA foreign_keys=OFF; UPDATE bay_job SET hq=99999");
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, loaded.campaign_id));
+    }
+}
+
+fn expectSuspendedDepotRoundTripForTest(store: Store, gs: *GameState, home: types.HqId, started: bool) !void {
+    const service = @import("../sim/artillery_service.zig");
+    try store.save(gs);
+    try expectCurrentRoundTripForTest(store, gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    const before = digest.stateHash(&loaded);
+    try std.testing.expect(!service.jobCanWork(&loaded, &loaded.bay_jobs.items[0]));
+    try std.testing.expect(!try service.completeJob(&loaded, 0));
+    try hq_ops.runDaily(&loaded);
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    try std.testing.expectEqual(@as(u32, if (started) 1 else 0), hq_ops.bayLoad(&loaded, home).busy);
+    try std.testing.expectEqual(@as(u32, if (started) 0 else 1), hq_ops.bayLoad(&loaded, home).queued);
+    try std.testing.expectEqual(gs.rng, loaded.rng);
+    try std.testing.expectEqualDeep(gs.bay_jobs.items, loaded.bay_jobs.items);
+}
+
+test "store versions require one exact positive integer and current structures are never healed" {
+    for ([_][]const u8{ "0", "-1", "4294967296", "NULL", "62.5", "'62'", "X'3632'" }) |value| {
+        const raw = try sqlite.Db.open(":memory:");
+        defer raw.close();
+        try raw.exec("CREATE TABLE setting(key,value)");
+        var sql: [256:0]u8 = undefined;
+        try raw.exec(try std.fmt.bufPrintZ(&sql, "INSERT INTO setting VALUES('schema_version',{s})", .{value}));
+        try expectStoreRefusedUnchanged(raw, error.CorruptStore);
+    }
+    for ([_][*:0]const u8{
+        "CREATE TABLE setting(key,value)",
+        "CREATE TABLE setting(key,value); INSERT INTO setting VALUES('schema_version',62),('schema_version',62)",
+        "CREATE TABLE setting(key,value); INSERT INTO setting VALUES('schema_version',62)",
+    }) |sql| {
+        const raw = try sqlite.Db.open(":memory:");
+        defer raw.close();
+        try raw.exec(sql);
+        try expectStoreRefusedUnchanged(raw, error.CorruptStore);
+    }
+    for ([_][*:0]const u8{ "DROP TABLE artillery_slot", "PRAGMA foreign_keys=OFF; ALTER TABLE bay_job RENAME TO old_bay; CREATE TABLE bay_job(cid,ord,hq,kind); DROP TABLE old_bay" }) |sql| {
+        const raw = try sqlite.Db.open(":memory:");
+        defer raw.close();
+        _ = try Store.fromDb(raw);
+        try raw.exec(sql);
+        try expectStoreRefusedUnchanged(raw, error.CorruptStore);
+    }
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    const first = try Store.fromDb(raw);
+    const before = try databaseFingerprintForTest(raw);
+    _ = try Store.fromDb(raw);
+    _ = try Store.fromDb(raw);
+    try std.testing.expectEqual(before, try databaseFingerprintForTest(raw));
+    try std.testing.expectEqual(@as(i64, 62), first.getSetting("schema_version", 0));
+}
+
+test "empty schema initialization rolls back all DDL and version on storage failure" {
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    try raw.exec("PRAGMA max_page_count=1");
+    const before = try databaseFingerprintForTest(raw);
+    try std.testing.expectError(error.StoreFull, Store.fromDb(raw));
+    try std.testing.expectEqual(before, try databaseFingerprintForTest(raw));
+    try raw.exec("PRAGMA max_page_count=10000");
+    _ = try Store.fromDb(raw);
+    _ = try Store.fromDb(raw);
+}
+
+test "old and future campaign load and overwrite refuse before gameplay decoding or replacement" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 625 });
+    defer gs.deinit();
+    _ = try artilleryCampaignForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    for ([_]struct { version: u32, expected: anyerror }{
+        .{ .version = 1, .expected = error.SaveOlderThanGame },
+        .{ .version = 36, .expected = error.SaveOlderThanGame },
+        .{ .version = 59, .expected = error.SaveOlderThanGame },
+        .{ .version = 60, .expected = error.SaveOlderThanGame },
+        .{ .version = 61, .expected = error.SaveOlderThanGame },
+        .{ .version = 63, .expected = error.SaveNewerThanGame },
+    }) |case| {
+        try store.db.exec("UPDATE campaign SET schema_version=62");
+        try store.save(&gs);
+        var sql: [128:0]u8 = undefined;
+        try store.db.exec(try std.fmt.bufPrintZ(&sql, "UPDATE campaign SET schema_version={d}; DELETE FROM rng_stream", .{case.version}));
+        const storage_before = try databaseFingerprintForTest(store.db);
+        const memory_before = digest.stateHash(&gs);
+        for (0..2) |_| {
+            try std.testing.expectError(case.expected, store.load(std.testing.allocator, gs.campaign_id));
+            try std.testing.expectError(case.expected, store.save(&gs));
+            try std.testing.expectEqual(storage_before, try databaseFingerprintForTest(store.db));
+            try std.testing.expectEqual(memory_before, digest.stateHash(&gs));
+        }
+    }
+}
+
+test "current RNG requires a valid seed and exactly one fully typed row per stream" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6008 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    stirRng(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+    try store.db.exec("PRAGMA foreign_keys=OFF; ALTER TABLE rng_stream RENAME TO rng_original; CREATE TABLE rng_stream(cid,stream,format,state); DROP TABLE rng_original; ALTER TABLE meta RENAME TO meta_original; CREATE TABLE meta(cid,key,value); INSERT INTO meta SELECT * FROM meta_original; DROP TABLE meta_original");
+    for ([_][*:0]const u8{
+        "DELETE FROM meta WHERE key='rng_seed'",
+        "UPDATE meta SET value=0.5 WHERE key='rng_seed'",
+        "UPDATE meta SET value=CAST(value AS TEXT) WHERE key='rng_seed'",
+        "UPDATE meta SET value=X'30' WHERE key='rng_seed'",
+        "UPDATE meta SET value=NULL WHERE key='rng_seed'",
+        "INSERT INTO meta SELECT * FROM meta WHERE key='rng_seed'",
+        "DELETE FROM rng_stream WHERE stream='travel'",
+        "INSERT INTO rng_stream SELECT * FROM rng_stream WHERE stream='travel'",
+        "UPDATE rng_stream SET stream=stream||char(0) WHERE stream='travel'",
+        "UPDATE rng_stream SET stream=CAST(stream AS BLOB) WHERE stream='travel'",
+        "UPDATE rng_stream SET stream='unknown' WHERE stream='travel'",
+        "UPDATE rng_stream SET format=0.5 WHERE stream='travel'",
+        "UPDATE rng_stream SET format=CAST(format AS TEXT) WHERE stream='travel'",
+        "UPDATE rng_stream SET format=NULL WHERE stream='travel'",
+        "UPDATE rng_stream SET state=CAST(state AS TEXT) WHERE stream='travel'",
+        "UPDATE rng_stream SET state=NULL WHERE stream='travel'",
+        "UPDATE rng_stream SET state=X'00' WHERE stream='travel'",
+    }) |sql| {
+        try store.save(&gs);
+        try store.db.exec(sql);
+        const before = try databaseFingerprintForTest(store.db);
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+        try std.testing.expectEqual(before, try databaseFingerprintForTest(store.db));
+    }
+}
+
+test "pre-v37 bay jobs without artillery columns are refused intact before any rebuild" {
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    try raw.exec(
+        \\CREATE TABLE setting(key TEXT PRIMARY KEY,value INTEGER NOT NULL);
+        \\INSERT INTO setting VALUES('schema_version',36);
+        \\CREATE TABLE campaign(id INTEGER PRIMARY KEY,schema_version INTEGER);
+        \\INSERT INTO campaign VALUES(1,36);
+        \\CREATE TABLE bay_job(cid INTEGER NOT NULL,ord INTEGER NOT NULL,hq INTEGER,kind TEXT,unit INTEGER,item_key TEXT,duration INTEGER,queued INTEGER,started INTEGER,done INTEGER,cost INTEGER);
+        \\INSERT INTO bay_job VALUES(1,0,1,'depot_repair',1,'',2,0,0,2,100);
+        \\INSERT INTO bay_job VALUES(1,1,1,'fabrication',0,'comp_chassis_h',2,0,NULL,NULL,100);
+    );
+    try std.testing.expect(!try Store.hasColumnRt(raw, "bay_job", "artillery"));
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
+    try std.testing.expect(!try Store.hasColumnRt(raw, "bay_job", "artillery"));
 }

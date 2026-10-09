@@ -99,6 +99,16 @@ fn activeTech(gs: *GameState, u: *const unit_mod.Unit) ?*person_mod.Person {
 
 pub const QualityDrift = enum { drop, hold, rise };
 
+/// Pure weekly check target from quality, field conditions and actual coverage.
+/// Source: ARCHITECTURE.md §9.9 and artillery operations design,
+/// Condition, maintenance, repairs and shared hours. Skill and RNG remain separate inputs.
+pub fn maintenanceTarget(quality: types.Quality, afield: bool, covered: bool) i32 {
+    var target = tuning.maintenance.target_base + quality.maintenanceModifier();
+    if (afield) target += tuning.maintenance.target_deployed;
+    if (!covered) target += tuning.maintenance.target_uncovered;
+    return target;
+}
+
 /// Classifies a maintenance result against its target under the weekly tech-time
 /// rule (ARCHITECTURE.md §9.9), using margins in `data/tables/tuning.zon`.
 pub fn qualityDrift(total: i32, target: i32) QualityDrift {
@@ -250,9 +260,7 @@ fn runWeeklyMaintenanceWithBook(gs: *GameState, book: *HourBook) !void {
         }
 
         const afield = !posture.isCompanyHome(gs, gs.companyOf(u.force));
-        var tn: i32 = tuning.maintenance.target_base + u.quality.maintenanceModifier();
-        if (afield) tn += tuning.maintenance.target_deployed; // field conditions
-        if (!covered) tn += tuning.maintenance.target_uncovered; // nobody turning wrenches
+        const tn = maintenanceTarget(u.quality, afield, covered);
 
         const raw = gs.rng.roll2d6(.maintenance);
         const total: i32 = @as(i32, raw) + person_mod.skillRollBonus(skill);
@@ -1194,4 +1202,62 @@ test "idle_afield hull rolls the harder field-conditions target; home hull does 
     }
     // Afield hulls should have more quality drops over many weeks (harder target).
     try std.testing.expect(drops_afield > drops_home);
+}
+
+test "ordinary and artillery maintenance share every quality location and coverage target without extra draws" {
+    const modifiers = [_]i32{ 3, 2, 1, 0, -1, -2 };
+    for (std.enums.values(types.Quality), modifiers) |quality, modifier| {
+        for ([_]bool{ false, true }) |afield| {
+            for ([_]bool{ false, true }) |covered| {
+                const target = 4 + modifier + @as(i32, if (afield) 1 else 0) + @as(i32, if (covered) 0 else 3);
+                try std.testing.expectEqual(target, maintenanceTarget(quality, afield, covered));
+                for (3..13) |roll| {
+                    const seed = rng_mod.seedForFirstRoll(.maintenance, @intCast(roll)) orelse unreachable;
+                    var ordinary = GameState.init(std.testing.allocator, .{ .seed = seed });
+                    defer ordinary.deinit();
+                    _ = try founding.createCommander(&ordinary, "T", .LC, .quartermaster);
+                    const company = try ordinary.createForce("Alpha", .company, .none);
+                    const uid = try ordinary.addUnit("SCP-1N");
+                    try toe.assignUnit(&ordinary, uid, company, .none);
+                    const tech = try ordinary.hirePerson("Local", "Mechanic", .tech_mechanic);
+                    ordinary.person(tech).?.assigned_force = company;
+                    try ordinary.person(tech).?.skills.put(ordinary.allocator(), .tech_mechanic, 4);
+                    try crew.assignSlot(&ordinary, uid, .tech, tech);
+                    ordinary.person(tech).?.weekly_hours = if (covered) 10000 else 0;
+                    ordinary.unit(uid).?.quality = quality;
+                    if (afield) ordinary.force(company).?.location_planet = "galatea";
+
+                    var carrier = GameState.init(std.testing.allocator, .{ .seed = seed });
+                    defer carrier.deinit();
+                    const id = try artillery_operations.fixtureForTest(&carrier, true);
+                    const f = carrier.artillery_formations.getPtr(id).?;
+                    f.quality = quality;
+                    carrier.person(f.tech).?.weekly_hours = if (covered) 10000 else 0;
+                    if (afield) carrier.force(f.placement.company).?.location_planet = "galatea";
+                    var expected_rng = ordinary.rng;
+                    const raw = expected_rng.roll2d6(.maintenance);
+                    try std.testing.expectEqual(@as(u8, @intCast(roll)), raw);
+                    const total = @as(i32, raw) + person_mod.skillRollBonus(if (covered) 4 else 7);
+                    const q = @intFromEnum(quality);
+                    const expected: types.Quality = switch (qualityDrift(total, target)) {
+                        .drop => @enumFromInt(q -| 1),
+                        .hold => quality,
+                        .rise => @enumFromInt(@min(@intFromEnum(types.Quality.f), q + 1)),
+                    };
+                    try runWeeklyMaintenance(&ordinary);
+                    var service_book: HourBook = .{ .alloc = carrier.scratch() };
+                    defer service_book.map.deinit(service_book.alloc);
+                    var repair_book: HourBook = .{ .alloc = carrier.scratch() };
+                    defer repair_book.map.deinit(repair_book.alloc);
+                    try artillery_service.runWeekly(&carrier, &service_book, &repair_book);
+                    try std.testing.expectEqual(expected, ordinary.unit(uid).?.quality);
+                    try std.testing.expectEqual(expected, f.quality);
+                    for (std.enums.values(rng_mod.Stream)) |stream| {
+                        try std.testing.expectEqual(expected_rng.encode(stream), ordinary.rng.encode(stream));
+                        try std.testing.expectEqual(expected_rng.encode(stream), carrier.rng.encode(stream));
+                    }
+                }
+            }
+        }
+    }
 }
