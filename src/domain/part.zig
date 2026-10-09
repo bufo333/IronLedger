@@ -137,6 +137,14 @@ pub fn munitionFor(weapon_key: []const u8) ?[]const u8 {
     return null;
 }
 
+/// Ammunition stock classification includes sealed non-mountable carrier
+/// packages without granting conventional mounts-per-battle semantics.
+/// Source: artillery operations design, Ammunition and supply policy.
+pub fn isAmmunition(key: []const u8) bool {
+    if (std.mem.eql(u8, key, "ammo_long_tom") or std.mem.eql(u8, key, "ammo_artillery_mg")) return true;
+    return if (find(key)) |p| p.mount == .ammo else false;
+}
+
 pub const munition_keys = [_][]const u8{ "ammo_ac2", "ammo_ac5", "ammo_ac10", "ammo_ac20", "ammo_lrm", "ammo_srm", "ammo_mg" };
 
 /// Short label for a munition family ("AC/5", "LRM").

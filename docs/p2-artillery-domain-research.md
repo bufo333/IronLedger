@@ -39,3 +39,7 @@ persisted representation.
 The BLK supports calculation of this carrier but does not define this game's
 availability, market policy, asset topology, crew, technician responsibility,
 formation size, transport, lifecycle, destruction, salvage, recovery, supply,
+
+[Artillery operations](p2-artillery-operations-design.md) owns the project crew,
+maintenance, magazine, readiness and supply adaptations beyond this physical
+catalogue boundary. Combat and artillery interfaces remain separately deferred.

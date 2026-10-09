@@ -45,7 +45,7 @@ const artillery_store = @import("artillery_store.zig");
 const artillery = @import("../sim/artillery.zig");
 const artillery_catalogue = @import("../domain/artillery_catalogue.zig");
 
-pub const schema_version = 61;
+pub const schema_version = 62;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -79,7 +79,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, entity_kind TEXT, entity_id INTEGER, floor INTEGER, cap INTEGER, sent INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS supply_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, company INTEGER, min_days INTEGER, tons INTEGER, ammo_battles INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS stock_policy (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, part_key TEXT, min_qty INTEGER, target INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS bay_job (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, kind TEXT, unit INTEGER, item_key TEXT, duration INTEGER, queued INTEGER, started INTEGER, done INTEGER, cost INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS bay_job (cid INTEGER NOT NULL CHECK (typeof(cid)='integer'), ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), hq INTEGER NOT NULL CHECK (typeof(hq)='integer' AND hq BETWEEN 1 AND 4294967295), kind TEXT NOT NULL CHECK (typeof(kind)='text' AND kind IN ('depot_repair','reactivation','fabrication','refit','artillery_depot_repair')), unit INTEGER, item_key TEXT NOT NULL CHECK (typeof(item_key)='text'), duration INTEGER NOT NULL CHECK (typeof(duration)='integer' AND duration > 0 AND duration <= 4294967295), queued INTEGER NOT NULL CHECK (typeof(queued)='integer' AND queued BETWEEN 0 AND 4294967295), started INTEGER, done INTEGER, cost INTEGER NOT NULL CHECK (typeof(cost)='integer' AND cost >= 0), artillery INTEGER, PRIMARY KEY(cid,ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,unit) REFERENCES unit(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,artillery) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK ((unit IS NOT NULL) = (kind IN ('depot_repair','reactivation','refit'))), CHECK ((artillery IS NOT NULL) = (kind='artillery_depot_repair')), CHECK (unit IS NULL OR (typeof(unit)='integer' AND unit BETWEEN 1 AND 4294967295)), CHECK (artillery IS NULL OR (typeof(artillery)='integer' AND artillery BETWEEN 1 AND 4294967295)), CHECK ((started IS NULL) = (done IS NULL)), CHECK (started IS NULL OR (typeof(started)='integer' AND started BETWEEN queued AND 4294967295 AND typeof(done)='integer' AND done BETWEEN started AND 4294967295)), CHECK ((item_key != '') = (kind='fabrication')));
     \\CREATE TABLE IF NOT EXISTS candidate (cid INTEGER NOT NULL, ord INTEGER NOT NULL, hq INTEGER, first TEXT, last TEXT, callsign TEXT, role TEXT, experience TEXT, primary_skill INTEGER, secondary_skill INTEGER, bonus INTEGER, listed INTEGER, expires INTEGER, age INTEGER NOT NULL DEFAULT 30, id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hq_link (cid INTEGER NOT NULL, ord INTEGER NOT NULL, a INTEGER, b INTEGER, level INTEGER, tons INTEGER, established INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS unit_transfer (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, to_company INTEGER, eta INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
@@ -112,18 +112,21 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS faction_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction_key TEXT NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS merc_company (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, cbills INTEGER NOT NULL DEFAULT 0, founded_day INTEGER NOT NULL DEFAULT 0, dissolved_day INTEGER NOT NULL DEFAULT 0, logo_key TEXT NOT NULL DEFAULT '', PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS merc_company_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, merc_company_id INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, merc_company_id) REFERENCES merc_company(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS artillery_formation (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0), id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295), hull INTEGER NOT NULL CHECK (hull BETWEEN 1 AND 4294967295), acquisition_day INTEGER NOT NULL CHECK (acquisition_day BETWEEN 0 AND 4294967295), paid_price INTEGER NOT NULL CHECK (paid_price > 0), placement TEXT NOT NULL CHECK (placement IN ('hq_pool','company','freight','sold')), pool_hq INTEGER, company INTEGER, from_hq INTEGER, to_hq INTEGER, dispatch_day INTEGER, eta_day INTEGER, paid_cost INTEGER, PRIMARY KEY (cid,id), UNIQUE (cid,ord), UNIQUE (cid,hull), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,hull) REFERENCES hull_instance(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,pool_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,company) REFERENCES force(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,from_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,to_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK ((pool_hq IS NOT NULL) = (placement='hq_pool')), CHECK ((company IS NOT NULL) = (placement='company')), CHECK ((from_hq IS NOT NULL) = (placement='freight')), CHECK ((to_hq IS NOT NULL) = (placement='freight')), CHECK ((dispatch_day IS NOT NULL) = (placement='freight')), CHECK ((eta_day IS NOT NULL) = (placement='freight')), CHECK ((paid_cost IS NOT NULL) = (placement='freight')), CHECK (pool_hq IS NULL OR pool_hq BETWEEN 1 AND 4294967295), CHECK (company IS NULL OR company BETWEEN 1 AND 4294967295), CHECK (from_hq IS NULL OR from_hq BETWEEN 1 AND 4294967295), CHECK (to_hq IS NULL OR to_hq BETWEEN 1 AND 4294967295), CHECK (placement!='freight' OR (from_hq!=to_hq AND dispatch_day BETWEEN 0 AND 4294967295 AND eta_day > dispatch_day AND eta_day <= 4294967295 AND paid_cost >= 0)));
+    \\CREATE TABLE IF NOT EXISTS artillery_formation (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0), id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295), hull INTEGER NOT NULL CHECK (hull BETWEEN 1 AND 4294967295), acquisition_day INTEGER NOT NULL CHECK (acquisition_day BETWEEN 0 AND 4294967295), paid_price INTEGER NOT NULL CHECK (paid_price > 0), placement TEXT NOT NULL CHECK (placement IN ('hq_pool','company','freight','sold')), pool_hq INTEGER, company INTEGER, from_hq INTEGER, to_hq INTEGER, dispatch_day INTEGER, eta_day INTEGER, paid_cost INTEGER, quality TEXT NOT NULL DEFAULT 'c' CHECK(typeof(quality)='text' AND quality IN ('a','b','c','d','e','f')), armor INTEGER NOT NULL DEFAULT 100 CHECK(typeof(armor)='integer' AND armor BETWEEN 0 AND 100), last_maintenance INTEGER CHECK(last_maintenance IS NULL OR (typeof(last_maintenance)='integer' AND last_maintenance BETWEEN 0 AND 4294967295)), tech INTEGER CHECK(tech IS NULL OR (typeof(tech)='integer' AND tech BETWEEN 1 AND 4294967295)), FOREIGN KEY(cid,tech) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED, PRIMARY KEY (cid,id), UNIQUE (cid,ord), UNIQUE (cid,hull), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,hull) REFERENCES hull_instance(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,pool_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,company) REFERENCES force(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,from_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,to_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK ((pool_hq IS NOT NULL) = (placement='hq_pool')), CHECK ((company IS NOT NULL) = (placement='company')), CHECK ((from_hq IS NOT NULL) = (placement='freight')), CHECK ((to_hq IS NOT NULL) = (placement='freight')), CHECK ((dispatch_day IS NOT NULL) = (placement='freight')), CHECK ((eta_day IS NOT NULL) = (placement='freight')), CHECK ((paid_cost IS NOT NULL) = (placement='freight')), CHECK (pool_hq IS NULL OR pool_hq BETWEEN 1 AND 4294967295), CHECK (company IS NULL OR company BETWEEN 1 AND 4294967295), CHECK (from_hq IS NULL OR from_hq BETWEEN 1 AND 4294967295), CHECK (to_hq IS NULL OR to_hq BETWEEN 1 AND 4294967295), CHECK (placement!='freight' OR (from_hq!=to_hq AND dispatch_day BETWEEN 0 AND 4294967295 AND eta_day > dispatch_day AND eta_day <= 4294967295 AND paid_cost >= 0)));
+    \\CREATE TABLE IF NOT EXISTS artillery_crew (cid INTEGER NOT NULL CHECK(typeof(cid)='integer'), formation INTEGER NOT NULL CHECK(typeof(formation)='integer' AND formation BETWEEN 1 AND 4294967295), seat TEXT NOT NULL CHECK(typeof(seat)='text' AND seat IN ('commander','gunner','driver','loader')), person INTEGER CHECK(person IS NULL OR (typeof(person)='integer' AND person BETWEEN 1 AND 4294967295)), PRIMARY KEY(cid,formation,seat), UNIQUE(cid,person), FOREIGN KEY(cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,formation) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,person) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS artillery_slot (cid INTEGER NOT NULL CHECK(typeof(cid)='integer'), formation INTEGER NOT NULL CHECK(typeof(formation)='integer' AND formation BETWEEN 1 AND 4294967295), slot TEXT NOT NULL CHECK(typeof(slot)='text' AND slot IN ('chassis','main_gun','machine_gun_right_1','machine_gun_right_2','machine_gun_left_1','machine_gun_left_2','long_tom_bin_1','long_tom_bin_2','long_tom_bin_3','long_tom_bin_4','machine_gun_bin','communications','hitch')), condition TEXT NOT NULL CHECK(typeof(condition)='text' AND condition IN ('ok','damaged','destroyed','missing')), rounds INTEGER, PRIMARY KEY(cid,formation,slot), FOREIGN KEY(cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,formation) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK((rounds IS NOT NULL)=(slot IN ('long_tom_bin_1','long_tom_bin_2','long_tom_bin_3','long_tom_bin_4','machine_gun_bin'))), CHECK(rounds IS NULL OR (typeof(rounds)='integer' AND rounds >= 0 AND rounds <= CASE WHEN slot='machine_gun_bin' THEN 100 ELSE 5 END)), CHECK(condition NOT IN ('destroyed','missing') OR rounds IS NULL OR rounds=0));
     \\CREATE TABLE IF NOT EXISTS artillery_offer (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0), id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295), hq INTEGER NOT NULL CHECK (hq BETWEEN 1 AND 4294967295), year INTEGER NOT NULL CHECK (year BETWEEN 1 AND 65535), month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12), available INTEGER NOT NULL CHECK (available IN (0,1)), PRIMARY KEY (cid,id), UNIQUE (cid,ord), UNIQUE (cid,hq), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED);
 ;
 
 const tables = [_][]const u8{
-    "meta",                "meta_text",              "rng",                "commander",         "person",                 "person_skill",       "injury",                "award",               "ability",
-    "unit",                "unit_slot",              "force",              "force_unit",        "force_child",            "stock",              "hq",                    "hq_facility",         "hq_project",
-    "contract",            "txn",                    "loan",               "courier",           "policy",                 "bay_job",            "candidate",             "hq_link",             "unit_transfer",
-    "supply_policy",       "stock_policy",           "faction_cooling",    "faction_standing",  "event_memory",           "listing",            "part_order",            "event_log",           "pending_event",
-    "refit_plan",          "refit_op",               "rating_snapshot",    "battle_report",     "battle_report_hit",      "battle_report_ammo", "battle_report_salvage", "rng_stream",          "operation",
-    "operation_task",      "operation_intervention", "battle_report_task", "actor",             "world_state",            "rival",              "officer_arc",           "hull_instance",       "hull_loadout",
-    "artillery_formation", "artillery_offer",        "hull_combat_record", "maintenance_entry", "hull_ownership_history", "faction_roster",     "merc_company",          "merc_company_roster", "retired_hq",
+    "meta",                "meta_text",              "rng",                "commander",        "person",             "person_skill",       "injury",                 "award",          "ability",
+    "unit",                "unit_slot",              "force",              "force_unit",       "force_child",        "stock",              "hq",                     "hq_facility",    "hq_project",
+    "contract",            "txn",                    "loan",               "courier",          "policy",             "bay_job",            "candidate",              "hq_link",        "unit_transfer",
+    "supply_policy",       "stock_policy",           "faction_cooling",    "faction_standing", "event_memory",       "listing",            "part_order",             "event_log",      "pending_event",
+    "refit_plan",          "refit_op",               "rating_snapshot",    "battle_report",    "battle_report_hit",  "battle_report_ammo", "battle_report_salvage",  "rng_stream",     "operation",
+    "operation_task",      "operation_intervention", "battle_report_task", "actor",            "world_state",        "rival",              "officer_arc",            "hull_instance",  "hull_loadout",
+    "artillery_formation", "artillery_crew",         "artillery_slot",     "artillery_offer",  "hull_combat_record", "maintenance_entry",  "hull_ownership_history", "faction_roster", "merc_company",
+    "merc_company_roster", "retired_hq",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -436,11 +439,47 @@ pub const Store = struct {
         // v60 -> v61 adds retired_hq through the transactional DDL above.
         // Campaigns retain their saved version until their first successful
         // save; the versioned decoder requires an empty legacy archive.
+        if (stored < 62) try upgradeArtillerySchemaToV62(db);
         try store.setSetting("schema_version", schema_version);
         try db.exec("COMMIT");
         // Re-enable FK enforcement for all subsequent operations (rule 50).
         try db.exec("PRAGMA foreign_keys = ON");
         return store;
+    }
+
+    /// Schema 61 -> 62 fills the explicit intact/empty operational defaults and
+    /// rebuilds the shared job target constraints, in the enclosing transaction.
+    fn upgradeArtillerySchemaToV62(db: sqlite.Db) !void {
+        const columns = [_]struct { []const u8, [*:0]const u8 }{
+            .{ "quality", "ALTER TABLE artillery_formation ADD COLUMN quality TEXT NOT NULL DEFAULT 'c' CHECK(typeof(quality)='text' AND quality IN ('a','b','c','d','e','f'))" },
+            .{ "armor", "ALTER TABLE artillery_formation ADD COLUMN armor INTEGER NOT NULL DEFAULT 100 CHECK(typeof(armor)='integer' AND armor BETWEEN 0 AND 100)" },
+            .{ "last_maintenance", "ALTER TABLE artillery_formation ADD COLUMN last_maintenance INTEGER CHECK(last_maintenance IS NULL OR (typeof(last_maintenance)='integer' AND last_maintenance BETWEEN 0 AND 4294967295))" },
+            .{ "tech", "ALTER TABLE artillery_formation ADD COLUMN tech INTEGER CHECK(tech IS NULL OR (typeof(tech)='integer' AND tech BETWEEN 1 AND 4294967295))" },
+        };
+        for (columns) |column| if (!try hasColumnRt(db, "artillery_formation", column[0])) try db.exec(column[1]);
+        // Rebuild supplies the compound campaign/person FK that ADD COLUMN cannot.
+        try rebuildTableToCurrent(db, "artillery_formation", "cid,ord,id,hull,acquisition_day,paid_price,placement,pool_hq,company,from_hq,to_hq,dispatch_day,eta_day,paid_cost,quality,armor,last_maintenance,tech", "cid,ord,id,hull,acquisition_day,paid_price,placement,pool_hq,company,from_hq,to_hq,dispatch_day,eta_day,paid_cost,quality,armor,last_maintenance,tech");
+        if (!try hasColumnRt(db, "bay_job", "artillery")) try db.exec("ALTER TABLE bay_job ADD COLUMN artillery INTEGER");
+        try rebuildTableToCurrent(db, "bay_job", "cid,ord,hq,kind,unit,item_key,duration,queued,started,done,cost,artillery", "cid,ord,hq,kind,NULLIF(unit,0),COALESCE(item_key,''),duration,queued,started,done,cost,artillery");
+        inline for (@import("../domain/artillery_operations.zig").seats) |seat| {
+            try db.exec("INSERT OR IGNORE INTO artillery_crew SELECT cid,id,'" ++ @tagName(seat) ++ "',NULL FROM artillery_formation");
+        }
+        inline for (@import("../domain/artillery_operations.zig").descriptors) |slot| {
+            try db.exec("INSERT OR IGNORE INTO artillery_slot SELECT cid,id,'" ++ @tagName(slot.slot) ++ "','ok'," ++ (if (slot.family != null) "0" else "NULL") ++ " FROM artillery_formation");
+        }
+    }
+
+    fn rebuildTableToCurrent(db: sqlite.Db, table: []const u8, columns: []const u8, expressions: []const u8) !void {
+        var buffer: [8192]u8 = undefined;
+        const marker = try std.fmt.bufPrint(&buffer, "CREATE TABLE IF NOT EXISTS {s} (", .{table});
+        const start = std.mem.indexOf(u8, ddl, marker) orelse return error.SqliteError;
+        const end = std.mem.indexOfScalarPos(u8, ddl, start, '\n') orelse ddl.len;
+        const suffix = ddl[start + marker.len - 1 .. end];
+        var sql: [16384]u8 = undefined;
+        try db.exec(try std.fmt.bufPrintZ(&sql, "CREATE TABLE {s}__new {s}", .{ table, suffix }));
+        try db.exec(try std.fmt.bufPrintZ(&sql, "INSERT INTO {s}__new ({s}) SELECT {s} FROM {s}", .{ table, columns, expressions, table }));
+        try db.exec(try std.fmt.bufPrintZ(&sql, "DROP TABLE {s}", .{table}));
+        try db.exec(try std.fmt.bufPrintZ(&sql, "ALTER TABLE {s}__new RENAME TO {s}", .{ table, table }));
     }
 
     /// Rebuild every per-cid table to acquire the constraint set declared in
@@ -464,7 +503,7 @@ pub const Store = struct {
             // --- create t__new with the constrained schema ---
             // Substitute the table name with t__new in the CREATE TABLE statement.
             const suffix = table_ddl[marker.len + t.len ..]; // " (...);"
-            var create_buf: [2048:0]u8 = undefined;
+            var create_buf: [8192:0]u8 = undefined;
             _ = std.fmt.bufPrintZ(&create_buf, "{s}{s}__new{s}", .{ marker, t, suffix }) catch return error.SqliteError;
             try db.exec(&create_buf);
 
@@ -520,7 +559,7 @@ pub const Store = struct {
         const marker = "CREATE TABLE IF NOT EXISTS hull_ownership_history";
         const begin = std.mem.indexOf(u8, ddl, marker) orelse return error.SqliteError;
         const end = std.mem.indexOfScalarPos(u8, ddl, begin, '\n') orelse return error.SqliteError;
-        var create_buf: [2048:0]u8 = undefined;
+        var create_buf: [8192:0]u8 = undefined;
         _ = std.fmt.bufPrintZ(&create_buf, "CREATE TABLE hull_ownership_history__new{s}", .{ddl[begin + marker.len .. end]}) catch return error.SqliteError;
         try db.exec(&create_buf);
         const rows = try db.prepare(
@@ -573,7 +612,7 @@ pub const Store = struct {
         const ddl_end = std.mem.indexOfScalarPos(u8, ddl, ddl_pos, '\n') orelse return error.SqliteError;
         const table_ddl = ddl[ddl_pos..ddl_end];
         const suffix = table_ddl["CREATE TABLE IF NOT EXISTS battle_report".len..];
-        var create_buf: [2048:0]u8 = undefined;
+        var create_buf: [8192:0]u8 = undefined;
         _ = std.fmt.bufPrintZ(&create_buf, "CREATE TABLE battle_report__new{s}", .{suffix}) catch return error.SqliteError;
         try db.exec(&create_buf);
 
@@ -1847,10 +1886,10 @@ pub const Store = struct {
     }
 
     fn saveBayJob(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO bay_job VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
+        const st = try self.db.prepare("INSERT INTO bay_job VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)");
         defer st.finalize();
         for (gs.bay_jobs.items, 0..) |j, i| {
-            try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(j.hq), j.kind, @intFromEnum(j.unit), j.item_key, @as(i64, j.duration_days), @as(i64, j.queued_day), j.started_day, j.done_day, j.cost });
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), @intFromEnum(j.hq), j.kind, if (j.unit != .none) @as(?types.UnitId, j.unit) else null, j.item_key, @as(i64, j.duration_days), @as(i64, j.queued_day), j.started_day, j.done_day, j.cost, if (j.artillery != .none) @as(?types.ArtilleryFormationId, j.artillery) else null });
             try st.run();
         }
     }
@@ -2980,14 +3019,18 @@ pub const Store = struct {
 
     fn loadBayJob(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT hq, kind, unit, item_key, duration, queued, started, done, cost FROM bay_job WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT hq,kind,unit,item_key,duration,queued,started,done,cost,artillery,typeof(cid)='integer' AND typeof(ord)='integer' AND typeof(hq)='integer' AND typeof(kind)='text' AND typeof(unit) IN ('integer','null') AND typeof(item_key)='text' AND typeof(duration)='integer' AND typeof(queued)='integer' AND typeof(started) IN ('integer','null') AND typeof(done) IN ('integer','null') AND typeof(cost)='integer' AND typeof(artillery) IN ('integer','null') FROM bay_job WHERE cid=?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
+            if (st.int(10) != 1) return error.CorruptSave;
+            const kind_bytes = try st.text(1, gs.scratch());
+            defer gs.scratch().free(kind_bytes);
             try gs.bay_jobs.append(alloc, .{
                 .hq = try toId(types.HqId, st.int(0)),
-                .kind = st.enumValue(state_mod.BayJobKind, 1) orelse return error.CorruptSave,
-                .unit = try toId(types.UnitId, st.int(2)),
+                .kind = std.meta.stringToEnum(state_mod.BayJobKind, kind_bytes) orelse return error.CorruptSave,
+                .unit = if (st.optInt(2)) |raw| try toId(types.UnitId, raw) else .none,
+                .artillery = if (st.optInt(9)) |raw| try toId(types.ArtilleryFormationId, raw) else .none,
                 .item_key = try st.text(3, alloc),
                 .duration_days = try st.intAs(u32, 4),
                 .queued_day = try st.intAs(u32, 5),

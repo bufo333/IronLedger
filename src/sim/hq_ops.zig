@@ -9,6 +9,8 @@
 
 const artillery = @import("artillery.zig");
 const std = @import("std");
+const artillery_service = @import("artillery_service.zig");
+const rng_mod = @import("rng.zig");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const hq_mod = @import("../domain/hq.zig");
@@ -657,15 +659,22 @@ pub fn repairOddsText(alloc: std.mem.Allocator, gs: *GameState, hq_id: types.HqI
     return std.fmt.allocPrint(alloc, "tech skill {d} vs target {d} · {d}% clean / {d}% fault / {d}% redo", .{ o.skill, o.target, o.clean_pct, o.fault_pct, o.redo_pct });
 }
 
-const RepairResult = enum { clean, fault, redo, botch };
+pub const RepairResult = enum { clean, fault, redo, botch };
 
 /// The roll itself, at the end of the bay time (MekHQ: the repair check).
 fn rollRepair(gs: *GameState, hq_id: types.HqId, unit_id: types.UnitId) RepairResult {
-    const t = tuning.hq_ops;
     const o = repairOdds(gs, hq_id, unit_id);
-    const raw = gs.rng.roll2d6(.maintenance);
+    const u = gs.unit(unit_id) orelse return .redo;
+    return rollRepairFor(&gs.rng, o.skill, u.quality);
+}
+
+/// Shared 2d6 depot outcome table for a qualified skill and actual hull quality.
+/// The caller chooses/stages the maintenance stream; no entity lookup occurs.
+pub fn rollRepairFor(rng: *rng_mod.Rng, skill: u8, quality: types.Quality) RepairResult {
+    const t = tuning.hq_ops;
+    const raw = rng.roll2d6(.maintenance);
     if (raw == 2) return .botch;
-    const margin = @as(i32, raw) + person_mod.skillRollBonus(o.skill) - o.target;
+    const margin = @as(i32, raw) + person_mod.skillRollBonus(skill) - (t.repair_target_base + quality.maintenanceModifier());
     if (margin >= t.repair_fault_margin) return .clean;
     if (margin >= 0) return .fault;
     return .redo;
@@ -717,7 +726,8 @@ pub fn runDaily(gs: *GameState) !void {
             i += 1;
             continue;
         }
-        if (!try completeJob(gs, job)) {
+        const completed = if (job.kind == .artillery_depot_repair) try artillery_service.completeJob(gs, i) else try completeJob(gs, job);
+        if (!completed) {
             i += 1;
             continue;
         }
@@ -732,6 +742,7 @@ pub fn runDaily(gs: *GameState) !void {
         for (gs.bay_jobs.items) |*job| {
             if (free == 0) break;
             if (job.hq != hq_id or job.started_day != null) continue;
+            if (job.kind == .artillery_depot_repair and !artillery_service.jobCanWork(gs, job)) continue;
             job.started_day = today;
             job.done_day = today + job.duration_days;
             free -= 1;
@@ -798,6 +809,7 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
     //   fabrication:  complete(1)                                          → 1
     const award_table = @import("../domain/award.zig").table;
     const n_logs: usize = switch (job.kind) {
+        .artillery_depot_repair => unreachable,
         .depot_repair => 4 + award_table.len,
         .refit => 2,
         .reactivation, .fabrication => 1,
@@ -899,6 +911,7 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
         }
     }
     switch (job.kind) {
+        .artillery_depot_repair => unreachable,
         .depot_repair => if (gs.unit(job.unit)) |u| {
             for (u.slots.items) |*s| {
                 if (s.class == .structure) s.condition = .ok;

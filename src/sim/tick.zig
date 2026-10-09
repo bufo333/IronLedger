@@ -70,8 +70,7 @@ pub fn advanceDay(gs: *GameState) !void {
     try medical.runDailyHealing(gs); // medical phase
     try runMarkets(gs); // acquisition_and_markets
     if (gs.clock.day_index % types.days_per_week == 0 and gs.clock.day_index > 0) {
-        try maintenance.runWeeklyMaintenance(gs); // maintenance phase
-        try maintenance.runWeeklyRepairs(gs);
+        try maintenance.runWeeklyService(gs);
     }
     try medical.runDailyTraining(gs); // training phase
     try runContracts(gs); // contract lifecycle

@@ -22,6 +22,8 @@ const toe = @import("toe.zig");
 const posture = @import("posture.zig");
 const sites = @import("sites.zig");
 const commands = @import("commands.zig");
+const artillery_crew = @import("artillery_crew.zig");
+const artillery = @import("artillery.zig");
 
 /// Recruit a randomly generated person (AtB-style: experience on 2d6,
 /// skills from the band, names from the tables). No signing bonus: that
@@ -34,6 +36,12 @@ pub fn recruitGenerated(gs: *GameState, role: person_mod.Role, hq_id: types.HqId
 /// Put a generated person on the books (recruiting, or hiring a hall
 /// candidate).
 pub fn hireFromSpec(gs: *GameState, spec: person_gen.GeneratedPerson) !types.PersonId {
+    return gs.commitPerson(try prepareHireFromSpec(gs, spec));
+}
+
+/// Allocate a generated personnel record without consuming an ID or RNG.
+/// The caller reserves the people map before an allocation-free insertion.
+pub fn prepareHireFromSpec(gs: *GameState, spec: person_gen.GeneratedPerson) !person_mod.Person {
     const role = spec.role;
     const alloc = gs.allocator();
     var p: person_mod.Person = .{
@@ -50,17 +58,35 @@ pub fn hireFromSpec(gs: *GameState, spec: person_gen.GeneratedPerson) !types.Per
     const s = role.skillSlots();
     if (s.primary) |k| try p.skills.put(alloc, k, spec.primary_skill);
     if (s.secondary) |k| try p.skills.put(alloc, k, spec.secondary_skill);
-    return gs.commitPerson(p);
+    return p;
+}
+
+/// Personnel duty availability includes training as well as status, leave and
+/// fitness. Source: artillery operations design, Crew and personnel policy.
+pub fn availableForDuty(p: *const person_mod.Person, today: u32) bool {
+    return p.isAvailable(today) and !p.isUnfit() and p.training == null;
+}
+
+/// Attached artillery occupants cannot leave their physical company by posting
+/// or transfer while it is away, including return travel and idle afield.
+pub fn artilleryDepartureBlocked(gs: *GameState, id: types.PersonId) bool {
+    for (gs.artillery_formations.values()) |f| {
+        if (f.placement != .company or posture.isCompanyHome(gs, f.placement.company)) continue;
+        if (f.tech == id) return true;
+        for (f.crew) |occupant| if (occupant == id) return true;
+    }
+    return false;
 }
 
 /// Why posting a person to an HQ is blocked (rule 21: one named predicate for
 /// "may this person be posted here"; `postToHq` and any view eligibility call
 /// it before acting).
-pub const PostBlock = enum { unknown_person, unknown_hq };
+pub const PostBlock = enum { unknown_person, unknown_hq, deployed };
 
 pub fn canPostToHq(gs: *GameState, person_id: types.PersonId, hq_id: types.HqId) ?PostBlock {
     if (gs.person(person_id) == null) return .unknown_person;
     if (gs.hqs.getPtr(hq_id) == null) return .unknown_hq;
+    if (artilleryDepartureBlocked(gs, person_id)) return .deployed;
     return null;
 }
 
@@ -70,7 +96,9 @@ pub fn postToHq(gs: *GameState, person_id: types.PersonId, hq_id: types.HqId) !v
     if (canPostToHq(gs, person_id, hq_id)) |why| return switch (why) {
         .unknown_person => error.UnknownPerson,
         .unknown_hq => error.UnknownHq,
+        .deployed => error.PersonDeployed,
     };
+    if (artilleryDepartureBlocked(gs, person_id)) return error.PersonDeployed;
     const p = gs.person(person_id).?;
     if (p.posted_hq == hq_id) return error.AlreadyPosted;
     vacateSeats(gs, person_id);
@@ -209,6 +237,12 @@ pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.F
 /// Clear every pilot/tech slot that points at this person (rule 20: one owner
 /// for seat-vacating; called by `depart`, `transferPerson` and `postToHq`).
 fn vacateSeats(gs: *GameState, person_id: types.PersonId) void {
+    for (gs.artillery_formations.values()) |*f| {
+        for (&f.crew) |*id| if (id.* == person_id) {
+            id.* = .none;
+        };
+        if (f.tech == person_id) f.tech = .none;
+    }
     var uit = gs.units.iterator();
     while (uit.next()) |ue| {
         if (ue.value_ptr.pilot == person_id) ue.value_ptr.pilot = .none;
@@ -222,15 +256,13 @@ fn vacateSeats(gs: *GameState, person_id: types.PersonId) void {
 /// retirement all of it). Returns what was paid.
 pub fn depart(gs: *GameState, person_id: types.PersonId, status: person_mod.Status, share_bp: types.Bp, note: []const u8) !types.CBills {
     const p = gs.person(person_id) orelse return 0;
+    const owed = severanceOwed(gs, person_id, share_bp);
+    const posting = try gs.prepareTreasuryPosting(.outfit, .{ .day = gs.clock.day_index, .amount = -owed, .category = .payroll, .company = gs.companyOf(p.assigned_force), .note = note });
     p.status = status;
     p.departed_day = gs.clock.day_index;
     vacateSeats(gs, person_id);
-    // The posting stays on the record (who walked from which desk); the
-    // staffing count is derived from active people, refreshed here so no
-    // caller has to remember.
     hq_ops.refreshHqStaffing(gs);
-    const owed = severanceOwed(gs, person_id, share_bp);
-    if (owed > 0) try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -owed, .category = .payroll, .company = gs.companyOf(p.assigned_force), .note = note });
+    if (owed > 0) gs.commitTreasuryPosting(posting);
     return owed;
 }
 
@@ -294,7 +326,7 @@ pub fn manningNeeds(gs: *GameState, company: types.ForceId) [14]Need {
         }
     }
     var out: [14]Need = undefined;
-    for (company_gen.staffNeeds(.{ .meks = meks, .vehicles = vehicles, .platoons = platoons, .fighters = fighters, .mash = mash }), 0..) |n, i| {
+    for (company_gen.staffNeeds(.{ .meks = meks, .vehicles = vehicles, .platoons = platoons, .fighters = fighters, .mash = mash, .artillery = artillery.attachedCount(gs, company) }), 0..) |n, i| {
         out[i] = .{ .role = n.role, .need = n.need, .why = n.why };
     }
     return out;
@@ -623,8 +655,10 @@ pub fn recruit(gs: *GameState, role: person_mod.Role) !types.PersonId {
 
 pub fn fire(gs: *GameState, id: types.PersonId) !void {
     const p = gs.person(id) orelse return error.UnknownPerson;
-    const paid = try depart(gs, id, .resigned, tuning.person.fire_severance_bp, "severance (fired)");
-    if (paid > 0) try gs.log(.rotation, .{ .company = gs.companyOf(p.assigned_force) }, "[personnel] {s} fired — {s} c-bills severance", .{ try p.fullName(gs.allocator()), try types.moneyText(gs.allocator(), paid) });
+    const owed = severanceOwed(gs, id, tuning.person.fire_severance_bp);
+    const log = if (owed > 0) try gs.prepareLog(.rotation, .{ .company = gs.companyOf(p.assigned_force) }, "[personnel] {s} fired — {s} c-bills severance", .{ try p.fullName(gs.allocator()), try types.moneyText(gs.allocator(), owed) }) else null;
+    _ = try depart(gs, id, .resigned, tuning.person.fire_severance_bp, "severance (fired)");
+    if (log) |entry| gs.commitLog(entry);
 }
 
 pub fn setOfficeStaff(gs: *GameState, hq: types.HqId, role: person_mod.Role, delta: i8) !types.PersonId {
@@ -649,7 +683,7 @@ pub fn transferPerson(gs: *GameState, person_id: types.PersonId, to_force: types
     const p = gs.person(person_id) orelse return error.UnknownPerson;
     const dest = gs.force(to_force) orelse return error.UnknownForce;
     if (gs.companyOf(p.assigned_force) == gs.companyOf(dest.id) and p.assigned_force == dest.id) return error.SameForce;
-    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force))) return error.PersonDeployed;
+    if (posture.isCompanyDeployed(gs, gs.companyOf(p.assigned_force)) or artilleryDepartureBlocked(gs, person_id)) return error.PersonDeployed;
     // Vacate any seat/tech slot they hold in the old company.
     vacateSeats(gs, person_id);
     const days = sites.travelDays(gs, gs.companyOf(p.assigned_force), gs.companyOf(dest.id));

@@ -36,7 +36,15 @@ including transit. The existing outfit-wide monthly posting and contract operati
 cost owner consume that total. Intact baseline-C resale uses the shared hull resale
 owner, and contributes once to liquidation-backed credit. Sale is only from an HQ
 pool, credits that HQ, closes player provenance and opens market provenance.
-There is no crew, maintenance work, cold storage, ammunition or supply charge here.
+The acquisition boundary grants no crew or ammunition and adds no operating
+charge. [Artillery operations](p2-artillery-operations-design.md) owns individual
+crew, local service, magazines and repairs; cold storage remains unavailable.
+Queued or active depot jobs block attachment, detachment, freight and sale.
+Attachment clears the pool mechanic, detachment clears crew and mechanic, and
+freight clears the mechanic; people remain on their existing books. Condition
+and magazines travel with the carrier and remain in sold history. Sale uses
+actual quality and armor, capped at the named chassis-damage valuation limit
+when structure is non-intact, without extracting ammunition or creating stock.
 
 Ownership intervals use nullable closing days: null means open; zero is a real
 closed day. Schema 59 to 60 preserves nonzero closing days, closes legacy zero rows

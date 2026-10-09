@@ -247,7 +247,7 @@ pub fn moveUnitToForce(gs: *GameState, unit_id: types.UnitId, force_id: types.Fo
     if (gs.person(u.pilot)) |p| p.assigned_force = force_id;
 }
 
-pub const AssignError = error{ UnknownUnit, UnknownPerson, UnknownForce } || std.mem.Allocator.Error;
+pub const AssignError = error{ UnknownUnit, UnknownPerson, UnknownForce, ArtilleryPersonSeated } || std.mem.Allocator.Error;
 
 /// Put a unit in a lance and a pilot in the unit, keeping all three
 /// views (unit.force, force.units, person.assigned_force) consistent.
@@ -255,6 +255,8 @@ pub fn assignUnit(gs: *GameState, unit_id: types.UnitId, force_id: types.ForceId
     const u = gs.unit(unit_id) orelse return error.UnknownUnit;
     const f = gs.force(force_id) orelse return error.UnknownForce;
     const pilot = if (pilot_id != .none) gs.person(pilot_id) orelse return error.UnknownPerson else null;
+
+    if (pilot_id != .none and @import("artillery_crew.zig").operatingSeat(gs, pilot_id) != null) return error.ArtilleryPersonSeated;
 
     // -- prepare --
     try f.units.ensureUnusedCapacity(gs.allocator(), 1);

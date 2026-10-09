@@ -15,6 +15,8 @@ const GameState = state.GameState;
 const commands = @import("commands.zig");
 const posture = @import("posture.zig");
 const sites = @import("sites.zig");
+const operations = @import("artillery_operations.zig");
+const operation_rules = @import("../domain/artillery_operations.zig");
 
 /// The sole approved carrier construction entry; static data validates this catalogue.
 pub fn carrier() *const catalogue.Entry {
@@ -97,6 +99,7 @@ pub fn buy(gs: *GameState, request: @FieldType(commands.Command, "buy_artillery"
     if (!marketEligible(gs, hq) or !offer.available or offer.year != gs.clock.date.year or offer.month != gs.clock.date.month) return error.ArtilleryUnavailable;
     const price = purchasePrice();
     if (hq.funds < price) return error.InsufficientTreasury;
+    try operations.validate(gs);
     if (gs.next_artillery_formation_id == 0 or gs.next_artillery_formation_id == std.math.maxInt(u32)) return error.ArtilleryIdExhausted;
     if (gs.next_hull_instance_id == 0 or gs.next_hull_instance_id == std.math.maxInt(u32)) return error.HullInstanceIdExhausted;
     const fid: types.ArtilleryFormationId = @enumFromInt(gs.next_artillery_formation_id);
@@ -139,10 +142,12 @@ fn companyHome(gs: *GameState, co: types.ForceId) commands.Error!types.HqId {
 /// Attach only at the company's actual home pool; the carrier follows parent posture.
 pub fn attach(gs: *GameState, request: @FieldType(commands.Command, "attach_artillery")) commands.Error!commands.Result {
     const f = try owned(gs, request.formation);
+    if (operations.hasJob(gs, f.id)) return error.ArtilleryBayJob;
     const home = try companyHome(gs, request.company);
     if (f.placement != .hq_pool or f.placement.hq_pool != home) return error.ArtilleryWrongLocation;
     if (attachedCount(gs, request.company) >= dom.company_formation_cap) return error.ArtilleryAttachmentFull;
     const log = try gs.prepareLog(.rotation, .{ .hq = home, .company = request.company }, "[artillery] formation {d} attached to company {d}", .{ @intFromEnum(f.id), @intFromEnum(request.company) });
+    f.tech = .none;
     f.placement = .{ .company = request.company };
     gs.commitLog(log);
     return .{};
@@ -151,10 +156,13 @@ pub fn attach(gs: *GameState, request: @FieldType(commands.Command, "attach_arti
 /// Detach at actual home only, preserving both persistent identities.
 pub fn detach(gs: *GameState, id: types.ArtilleryFormationId) commands.Error!commands.Result {
     const f = try owned(gs, id);
+    if (operations.hasJob(gs, f.id)) return error.ArtilleryBayJob;
     if (f.placement != .company) return error.ArtilleryWrongLocation;
     const co = f.placement.company;
     const home = try companyHome(gs, co);
     const log = try gs.prepareLog(.rotation, .{ .hq = home, .company = co }, "[artillery] formation {d} detached at HQ {d}", .{ @intFromEnum(id), @intFromEnum(home) });
+    f.tech = .none;
+    f.crew = @splat(.none);
     f.placement = .{ .hq_pool = home };
     gs.commitLog(log);
     return .{};
@@ -164,6 +172,7 @@ pub fn detach(gs: *GameState, id: types.ArtilleryFormationId) commands.Error!com
 /// freightQuote's compatibility fallback; date/funds exhaustion refuses unchanged.
 pub fn transfer(gs: *GameState, request: @FieldType(commands.Command, "transfer_artillery")) commands.Error!commands.Result {
     const f = try owned(gs, request.formation);
+    if (operations.hasJob(gs, f.id)) return error.ArtilleryBayJob;
     if (f.placement != .hq_pool) return error.ArtilleryWrongLocation;
     const from = f.placement.hq_pool;
     if (from == request.to_hq) return error.ArtilleryWrongLocation;
@@ -179,6 +188,7 @@ pub fn transfer(gs: *GameState, request: @FieldType(commands.Command, "transfer_
     const log = try gs.prepareLog(.delivery, .{ .hq = from }, "[artillery] formation {d} freight to HQ {d}, ETA d{d}, cost {d}", .{ @intFromEnum(f.id), @intFromEnum(request.to_hq), eta, quote.cost });
     gs.commitTreasuryPosting(posting);
     sites.commitFreight(gs, quote);
+    f.tech = .none;
     f.placement = .{ .freight = .{ .from_hq = from, .to_hq = request.to_hq, .dispatch_day = gs.clock.day_index, .eta_day = eta, .paid_cost = quote.cost } };
     gs.commitLog(log);
     return .{ .artillery_formation = request.formation, .hq = request.to_hq, .artillery_freight_cost = quote.cost, .artillery_eta_day = eta, .in_transit = true };
@@ -204,6 +214,7 @@ pub fn hqHasCarriers(gs: *const GameState, hq: types.HqId) bool {
         .freight => |t| if (t.from_hq == hq or t.to_hq == hq) return true,
         else => {},
     };
+    for (gs.bay_jobs.items) |job| if (job.hq == hq and job.artillery != .none) return true;
     return false;
 }
 
@@ -215,9 +226,10 @@ pub fn removeHqOffers(gs: *GameState, hq: types.HqId) void {
     }
 }
 
-/// Shared intact baseline-quality resale arithmetic; accounting inputs are not readiness.
+/// Shared hull resale with actual quality, armor and the named chassis cap.
 pub fn saleValue(f: *const dom.Formation) types.CBills {
-    return if (f.placement == .sold) 0 else market.intactHullSaleValue(f.paid_price, dom.intact_condition_pct, .c);
+    const condition = if (f.slots[@intFromEnum(operation_rules.Slot.chassis)].condition == .ok) f.armor_pct else @min(f.armor_pct, operation_rules.damaged_chassis_sale_cap_pct);
+    return if (f.placement == .sold) 0 else market.intactHullSaleValue(f.paid_price, condition, f.quality);
 }
 
 /// Each player carrier pays the vehicle carry owner once, including freight.
@@ -233,6 +245,7 @@ pub fn monthlyCarry(gs: *const GameState) types.CBills {
 /// appends explicit market ownership. All fallible work precedes the commit.
 pub fn sell(gs: *GameState, id: types.ArtilleryFormationId) commands.Error!commands.Result {
     const f = try owned(gs, id);
+    if (operations.hasJob(gs, f.id)) return error.ArtilleryBayJob;
     if (f.placement != .hq_pool) return error.ArtilleryWrongLocation;
     const hq = f.placement.hq_pool;
     const h = gs.hqs.getPtr(hq) orelse return error.UnknownHq;
@@ -243,6 +256,8 @@ pub fn sell(gs: *GameState, id: types.ArtilleryFormationId) commands.Error!comma
     const log = try gs.prepareLog(.market, .{ .hq = hq }, "[artillery] formation {d} sold for {d}", .{ @intFromEnum(id), value });
     gs.commitHullTransfer(ownership);
     gs.commitTreasuryPosting(posting);
+    f.tech = .none;
+    f.crew = @splat(.none);
     f.placement = .sold;
     gs.commitLog(log);
     return .{};

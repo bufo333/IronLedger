@@ -37,6 +37,8 @@ added, its owning P2 design or tracker record must externally verify and pin:
 - Battle mechanics: contribution condition, abstraction, objective behavior,
   stacking limits, force or attachment eligibility, and every numeric modifier.
 
+For the bounded operational adaptation, see [P2g project operational policy](#p2g-project-operational-policy).
+
 The repository's existing `.ba_trooper`, `.tech_ba`, `has_artillery`, and
 `artillery_bp` names or values do not verify any of these domain facts. In
 particular, the unused `artillery_bp = 1_000` is not an approved artillery
@@ -44,10 +46,25 @@ rule. Each later fact table must cite its authority as required by the coding
 contract. Unknown page references remain unknown; no candidate, value, role,
 capacity, or formula may be invented.
 
+For the bounded operational adaptation, see [P2g project operational policy](#p2g-project-operational-policy).
+
 Any future battle-armor return requires a later era-expansion plan to source
 and pin MegaMek GitHub records for each proposed candidate and verify its
 actual introduction date is later than 3025. Current research gaps,
 source-directory labels, and project placeholders are not availability rules.
+
+## P2g project operational policy
+
+P2g operational gameplay is project-designed under
+docs/p2-artillery-operations-design.md. Its approved crew complement,
+seat roles and qualifications, ammunition loading units and capacities,
+supply prices and availability, maintenance, repair, readiness and
+migration defaults are IRON LEDGER adaptations, not external source
+facts. For these P2g policies only, that durable project design replaces
+this document's external-verification and no-invention requirements.
+P2e physical catalogue facts, identity, provenance, era, calculated BV
+and construction cost remain pinned. This exception does not approve
+P2h battle effects, P2i interfaces, battle armor or an era expansion.
 
 ## Ownership and acquisition
 
@@ -83,6 +100,8 @@ cannot grant an implicit benefit.
 Before P2b or P2e begins, the model must define its source-backed crew and
 technician complement, including seats, roles, required skills, combat inputs,
 and how hiring, auto-assignment, and manpower reporting account for it.
+
+For the bounded operational adaptation, see [P2g project operational policy](#p2g-project-operational-policy).
 
 Each capability used by battle, objectives, maintenance, reloads, repair,
 transport, and supply must have one complete operational predicate. It must

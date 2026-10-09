@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 61. The executable DDL and its column migrations
+-- Matches schema_version 62. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -321,20 +321,7 @@ CREATE TABLE part_order (
 
 -- Mek bay work: jobs hold a bay slot for a span of days and queue when the
 -- bays are full.
-CREATE TABLE bay_job (
-    cid             INTEGER NOT NULL,
-    ord             INTEGER NOT NULL,
-    hq              INTEGER,                         -- -> hq.id
-    kind            TEXT,                            -- depot_repair | reactivation | fabrication | refit
-    unit            INTEGER,                         -- -> unit.id; 0 for fabrication
-    item_key        TEXT,                            -- component being fabricated
-    duration        INTEGER,                         -- days
-    queued          INTEGER,                         -- day
-    started         INTEGER,                         -- day; null while waiting for a slot
-    done            INTEGER,                         -- day
-    cost            INTEGER,                         -- labor posted to the HQ at completion
-    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
-);
+CREATE TABLE bay_job (cid INTEGER NOT NULL CHECK (typeof(cid)='integer'), ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), hq INTEGER NOT NULL CHECK (typeof(hq)='integer' AND hq BETWEEN 1 AND 4294967295), kind TEXT NOT NULL CHECK (typeof(kind)='text' AND kind IN ('depot_repair','reactivation','fabrication','refit','artillery_depot_repair')), unit INTEGER, item_key TEXT NOT NULL CHECK (typeof(item_key)='text'), duration INTEGER NOT NULL CHECK (typeof(duration)='integer' AND duration > 0 AND duration <= 4294967295), queued INTEGER NOT NULL CHECK (typeof(queued)='integer' AND queued BETWEEN 0 AND 4294967295), started INTEGER, done INTEGER, cost INTEGER NOT NULL CHECK (typeof(cost)='integer' AND cost >= 0), artillery INTEGER, PRIMARY KEY(cid,ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,unit) REFERENCES unit(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,artillery) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK ((unit IS NOT NULL) = (kind IN ('depot_repair','reactivation','refit'))), CHECK ((artillery IS NOT NULL) = (kind='artillery_depot_repair')), CHECK (unit IS NULL OR (typeof(unit)='integer' AND unit BETWEEN 1 AND 4294967295)), CHECK (artillery IS NULL OR (typeof(artillery)='integer' AND artillery BETWEEN 1 AND 4294967295)), CHECK ((started IS NULL) = (done IS NULL)), CHECK (started IS NULL OR (typeof(started)='integer' AND started BETWEEN queued AND 4294967295 AND typeof(done)='integer' AND done BETWEEN started AND 4294967295)), CHECK ((item_key != '') = (kind='fabrication')));
 
 -- MekLab refit plans: edits staged against a hull, committed into a bay job.
 CREATE TABLE refit_plan (
@@ -1215,43 +1202,11 @@ CREATE INDEX IF NOT EXISTS ix_merc_company_roster_cid ON merc_company_roster(cid
 -- Artillery formation and HQ offer fields are persisted (schema v60).
 -- Catalogue facts and attached location are derived; quotes are scratch.
 -- Placement payload columns are nullable and disjoint. Sold records retain identity.
-CREATE TABLE artillery_formation (
-    cid INTEGER NOT NULL,
-    ord INTEGER NOT NULL CHECK (ord >= 0),
-    id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295),
-    hull INTEGER NOT NULL CHECK (hull BETWEEN 1 AND 4294967295),
-    acquisition_day INTEGER NOT NULL CHECK (acquisition_day BETWEEN 0 AND 4294967295),
-    paid_price INTEGER NOT NULL CHECK (paid_price > 0),
-    placement TEXT NOT NULL CHECK (placement IN ('hq_pool','company','freight','sold')),
-    pool_hq INTEGER,
-    company INTEGER,
-    from_hq INTEGER,
-    to_hq INTEGER,
-    dispatch_day INTEGER,
-    eta_day INTEGER,
-    paid_cost INTEGER,
-    PRIMARY KEY (cid,id),
-    UNIQUE (cid,ord),
-    UNIQUE (cid,hull),
-    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (cid,hull) REFERENCES hull_instance(cid,id) DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (cid,pool_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (cid,company) REFERENCES force(cid,id) DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (cid,from_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (cid,to_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED,
-    CHECK ((pool_hq IS NOT NULL) = (placement='hq_pool')),
-    CHECK ((company IS NOT NULL) = (placement='company')),
-    CHECK ((from_hq IS NOT NULL) = (placement='freight')),
-    CHECK ((to_hq IS NOT NULL) = (placement='freight')),
-    CHECK ((dispatch_day IS NOT NULL) = (placement='freight')),
-    CHECK ((eta_day IS NOT NULL) = (placement='freight')),
-    CHECK ((paid_cost IS NOT NULL) = (placement='freight')),
-    CHECK (pool_hq IS NULL OR pool_hq BETWEEN 1 AND 4294967295),
-    CHECK (company IS NULL OR company BETWEEN 1 AND 4294967295),
-    CHECK (from_hq IS NULL OR from_hq BETWEEN 1 AND 4294967295),
-    CHECK (to_hq IS NULL OR to_hq BETWEEN 1 AND 4294967295),
-    CHECK (placement!='freight' OR (from_hq!=to_hq AND dispatch_day BETWEEN 0 AND 4294967295 AND eta_day > dispatch_day AND eta_day <= 4294967295 AND paid_cost >= 0))
-);
+CREATE TABLE artillery_formation (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0), id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295), hull INTEGER NOT NULL CHECK (hull BETWEEN 1 AND 4294967295), acquisition_day INTEGER NOT NULL CHECK (acquisition_day BETWEEN 0 AND 4294967295), paid_price INTEGER NOT NULL CHECK (paid_price > 0), placement TEXT NOT NULL CHECK (placement IN ('hq_pool','company','freight','sold')), pool_hq INTEGER, company INTEGER, from_hq INTEGER, to_hq INTEGER, dispatch_day INTEGER, eta_day INTEGER, paid_cost INTEGER, quality TEXT NOT NULL DEFAULT 'c' CHECK(typeof(quality)='text' AND quality IN ('a','b','c','d','e','f')), armor INTEGER NOT NULL DEFAULT 100 CHECK(typeof(armor)='integer' AND armor BETWEEN 0 AND 100), last_maintenance INTEGER CHECK(last_maintenance IS NULL OR (typeof(last_maintenance)='integer' AND last_maintenance BETWEEN 0 AND 4294967295)), tech INTEGER CHECK(tech IS NULL OR (typeof(tech)='integer' AND tech BETWEEN 1 AND 4294967295)), FOREIGN KEY(cid,tech) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED, PRIMARY KEY (cid,id), UNIQUE (cid,ord), UNIQUE (cid,hull), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,hull) REFERENCES hull_instance(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,pool_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,company) REFERENCES force(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,from_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,to_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK ((pool_hq IS NOT NULL) = (placement='hq_pool')), CHECK ((company IS NOT NULL) = (placement='company')), CHECK ((from_hq IS NOT NULL) = (placement='freight')), CHECK ((to_hq IS NOT NULL) = (placement='freight')), CHECK ((dispatch_day IS NOT NULL) = (placement='freight')), CHECK ((eta_day IS NOT NULL) = (placement='freight')), CHECK ((paid_cost IS NOT NULL) = (placement='freight')), CHECK (pool_hq IS NULL OR pool_hq BETWEEN 1 AND 4294967295), CHECK (company IS NULL OR company BETWEEN 1 AND 4294967295), CHECK (from_hq IS NULL OR from_hq BETWEEN 1 AND 4294967295), CHECK (to_hq IS NULL OR to_hq BETWEEN 1 AND 4294967295), CHECK (placement!='freight' OR (from_hq!=to_hq AND dispatch_day BETWEEN 0 AND 4294967295 AND eta_day > dispatch_day AND eta_day <= 4294967295 AND paid_cost >= 0)));
+
+CREATE TABLE artillery_crew (cid INTEGER NOT NULL CHECK(typeof(cid)='integer'), formation INTEGER NOT NULL CHECK(typeof(formation)='integer' AND formation BETWEEN 1 AND 4294967295), seat TEXT NOT NULL CHECK(typeof(seat)='text' AND seat IN ('commander','gunner','driver','loader')), person INTEGER CHECK(person IS NULL OR (typeof(person)='integer' AND person BETWEEN 1 AND 4294967295)), PRIMARY KEY(cid,formation,seat), UNIQUE(cid,person), FOREIGN KEY(cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,formation) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,person) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED);
+
+CREATE TABLE artillery_slot (cid INTEGER NOT NULL CHECK(typeof(cid)='integer'), formation INTEGER NOT NULL CHECK(typeof(formation)='integer' AND formation BETWEEN 1 AND 4294967295), slot TEXT NOT NULL CHECK(typeof(slot)='text' AND slot IN ('chassis','main_gun','machine_gun_right_1','machine_gun_right_2','machine_gun_left_1','machine_gun_left_2','long_tom_bin_1','long_tom_bin_2','long_tom_bin_3','long_tom_bin_4','machine_gun_bin','communications','hitch')), condition TEXT NOT NULL CHECK(typeof(condition)='text' AND condition IN ('ok','damaged','destroyed','missing')), rounds INTEGER, PRIMARY KEY(cid,formation,slot), FOREIGN KEY(cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,formation) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK((rounds IS NOT NULL)=(slot IN ('long_tom_bin_1','long_tom_bin_2','long_tom_bin_3','long_tom_bin_4','machine_gun_bin'))), CHECK(rounds IS NULL OR (typeof(rounds)='integer' AND rounds >= 0 AND rounds <= CASE WHEN slot='machine_gun_bin' THEN 100 ELSE 5 END)), CHECK(condition NOT IN ('destroyed','missing') OR rounds IS NULL OR rounds=0));
 CREATE INDEX IF NOT EXISTS ix_artillery_formation_cid ON artillery_formation(cid);
 CREATE TABLE artillery_offer (
     cid INTEGER NOT NULL,

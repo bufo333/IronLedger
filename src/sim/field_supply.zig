@@ -23,6 +23,8 @@ const toe = @import("toe.zig");
 const GameState = @import("state.zig").GameState;
 const treasury = @import("treasury.zig");
 const commands = @import("commands.zig");
+const artillery = @import("artillery.zig");
+const artillery_rules = @import("../domain/artillery_operations.zig");
 
 /// Truck budget per category, in percent of field capacity: ammo, armor
 /// and medical are capped so provisions — the one line that burns every
@@ -118,31 +120,65 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
         const floor_battles: u32 = tuning.field_supply.ammo_floor_battles_base + (std.math.divCeil(u32, transit_days, days_per_battle) catch unreachable);
         const target_battles: u32 = if (ammo_battles > 0) @max(@as(u32, ammo_battles), floor_battles) else floor_battles + tuning.field_supply.ammo_target_battles_extra;
         const budget = cap * ammo_share_pct / 100;
-        var sum: u32 = 0;
         const first_ammo = lines.items.len;
         for (part_mod.munition_keys) |key| {
             const mounts = family_mounts.get(key) orelse continue;
             if (mounts == 0) continue;
             const per_battle = tonsPerBattle(mounts);
             const target = per_battle * target_battles;
-            sum += target;
             try lines.append(alloc, .{ .key = key, .floor = per_battle * floor_battles, .target = target, .note = try std.fmt.allocPrint(alloc, "{d} mounts · {d}t per battle · {d} battles floor, {d} target", .{ mounts, per_battle, floor_battles, target_battles }) });
         }
-        if (sum > budget and budget > 0) {
-            for (lines.items[first_ammo..]) |*l| {
-                const mounts = family_mounts.get(l.key) orelse 1;
-                const per_battle = tonsPerBattle(mounts);
-                l.target = @max(per_battle, l.target * budget / sum);
-                l.floor = @min(l.floor, l.target);
-                l.trimmed = true;
-                l.note = try std.fmt.allocPrint(alloc, "{s} · {d}% ammo share", .{ l.note, ammo_share_pct });
-            }
+        const carriers = artillery.attachedCount(gs, company);
+        for (artillery_rules.families) |family| {
+            if (carriers == 0) break;
+            const packages = carriers * artillery_rules.packagesPerLoad(family);
+            try lines.append(alloc, .{ .key = artillery_rules.packageKey(family), .floor = packages * artillery_rules.reserve_floor_loads, .target = packages * artillery_rules.reserve_target_loads, .note = try std.fmt.allocPrint(alloc, "{d} carriers · {d} packages per complete reload · {d}/{d} reloads floor/target", .{ carriers, packages, artillery_rules.reserve_floor_loads, artillery_rules.reserve_target_loads }) });
         }
+        try allocateAmmunition(alloc, lines.items[first_ammo..], budget);
     }
 
     var total: u32 = 0;
     for (lines.items) |l| total += l.target * part_mod.tons(l.key);
     return .{ .lines = try lines.toOwnedSlice(alloc), .transit_days = transit_days, .provisions_per_day = per_day, .capacity = cap, .total_target = total };
+}
+
+/// Allocate one shared ammo-ton budget proportionally, then remaining whole
+/// packages in stable key order. Floors never exceed targets or physical hold.
+/// Source: artillery operations design, Ammunition and supply policy.
+pub fn allocateAmmunition(alloc: std.mem.Allocator, lines: []Line, budget_tons: u32) !void {
+    var requested: u64 = 0;
+    for (lines) |line| requested += @as(u64, line.target) * part_mod.tons(line.key);
+    if (requested <= budget_tons) return;
+    const wanted = try alloc.alloc(u32, lines.len);
+    defer alloc.free(wanted);
+    const order = try alloc.alloc(usize, lines.len);
+    defer alloc.free(order);
+    var spent: u64 = 0;
+    for (lines, wanted, order, 0..) |*line, *original, *index, i| {
+        original.* = line.target;
+        index.* = i;
+        line.target = @intCast(@as(u64, line.target) * budget_tons / requested);
+        spent += @as(u64, line.target) * part_mod.tons(line.key);
+        line.trimmed = true;
+    }
+    std.mem.sort(usize, order, lines, struct {
+        fn less(ls: []Line, a: usize, b: usize) bool {
+            return std.mem.lessThan(u8, ls[a].key, ls[b].key);
+        }
+    }.less);
+    var available = @as(u64, budget_tons) - spent;
+    while (true) {
+        var progressed = false;
+        for (order) |i| {
+            const tons = part_mod.tons(lines[i].key);
+            if (lines[i].target >= wanted[i] or tons > available) continue;
+            lines[i].target += 1;
+            available -= tons;
+            progressed = true;
+        }
+        if (!progressed) break;
+    }
+    for (lines) |*line| line.floor = @min(line.floor, line.target);
 }
 
 /// One stock item the load-out will move (rule 12: prepared before any

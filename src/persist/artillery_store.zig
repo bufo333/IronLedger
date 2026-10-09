@@ -4,6 +4,7 @@
 const std = @import("std");
 const sqlite = @import("sqlite.zig");
 const types = @import("../domain/types.zig");
+const operations = @import("../domain/artillery_operations.zig");
 const dom = @import("../domain/artillery_formation.zig");
 const GameState = @import("../sim/state.zig").GameState;
 
@@ -61,15 +62,34 @@ fn optionalDay(st: sqlite.Stmt, column: c_int) !?u32 {
 
 /// Encode ordered formations/offers; the caller owns BEGIN/COMMIT and table clearing.
 pub fn save(db: sqlite.Db, gs: *const GameState, cid: i64) !void {
-    const fs = try db.prepare("INSERT INTO artillery_formation VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)");
+    const fs = try db.prepare("INSERT INTO artillery_formation VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)");
     defer fs.finalize();
     for (gs.artillery_formations.values(), 0..) |f, ord| {
         const pool: ?types.HqId = if (f.placement == .hq_pool) f.placement.hq_pool else null;
         const co: ?types.ForceId = if (f.placement == .company) f.placement.company else null;
         const t: ?dom.Freight = if (f.placement == .freight) f.placement.freight else null;
-        try fs.bindAll(.{ cid, ord, f.id, f.hull, f.acquisition_day, f.paid_price, @tagName(f.placement), pool, co, if (t) |v| @as(?types.HqId, v.from_hq) else null, if (t) |v| @as(?types.HqId, v.to_hq) else null, if (t) |v| @as(?u32, v.dispatch_day) else null, if (t) |v| @as(?u32, v.eta_day) else null, if (t) |v| @as(?types.CBills, v.paid_cost) else null });
+        try fs.bindAll(.{ cid, ord, f.id, f.hull, f.acquisition_day, f.paid_price, @tagName(f.placement), pool, co, if (t) |v| @as(?types.HqId, v.from_hq) else null, if (t) |v| @as(?types.HqId, v.to_hq) else null, if (t) |v| @as(?u32, v.dispatch_day) else null, if (t) |v| @as(?u32, v.eta_day) else null, if (t) |v| @as(?types.CBills, v.paid_cost) else null, f.quality, f.armor_pct, f.last_maintenance_day, if (f.tech != .none) @as(?types.PersonId, f.tech) else null });
         try fs.run();
     }
+    const cs = try db.prepare("INSERT INTO artillery_crew VALUES (?1,?2,?3,?4)");
+    defer cs.finalize();
+    const ss = try db.prepare("INSERT INTO artillery_slot VALUES (?1,?2,?3,?4,?5)");
+    defer ss.finalize();
+    for (gs.artillery_formations.values()) |f| {
+        for (operations.seats, f.crew) |seat, occupant| {
+            try cs.bindAll(.{ cid, f.id, seat, if (occupant != .none) @as(?types.PersonId, occupant) else null });
+            try cs.run();
+        }
+        for (operations.descriptors, f.slots) |d, state| {
+            try ss.bindAll(.{ cid, f.id, d.slot, state.condition, if (d.family != null) @as(?u16, state.rounds) else null });
+            try ss.run();
+        }
+    }
+    const checkpoint = try db.prepare("INSERT INTO meta VALUES (?1,'last_artillery_service_day',?2)");
+    defer checkpoint.finalize();
+    // SQL meta integers encode the nullable day with -1; zero is a real day.
+    try checkpoint.bindAll(.{ cid, if (gs.last_artillery_service_day) |day| @as(i64, day) else -1 });
+    try checkpoint.run();
     const os = try db.prepare("INSERT INTO artillery_offer VALUES (?1,?2,?3,?4,?5,?6,?7)");
     defer os.finalize();
     for (gs.artillery_offers.items, 0..) |o, ord| {
@@ -94,6 +114,7 @@ pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
     const fs = try db.prepare(
         \\SELECT id,hull,acquisition_day,paid_price,placement,pool_hq,company,
         \\       from_hq,to_hq,dispatch_day,eta_day,paid_cost,ord,
+        \\       quality,armor,last_maintenance,tech,
         \\       typeof(cid)='integer' AND typeof(ord)='integer'
         \\       AND typeof(id)='integer' AND typeof(hull)='integer'
         \\       AND typeof(acquisition_day)='integer' AND typeof(paid_price)='integer'
@@ -102,6 +123,8 @@ pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
         \\       AND typeof(from_hq) IN ('integer','null') AND typeof(to_hq) IN ('integer','null')
         \\       AND typeof(dispatch_day) IN ('integer','null') AND typeof(eta_day) IN ('integer','null')
         \\       AND typeof(paid_cost) IN ('integer','null')
+        \\       AND typeof(quality)='text' AND typeof(armor)='integer'
+        \\       AND typeof(last_maintenance) IN ('integer','null') AND typeof(tech) IN ('integer','null')
         \\FROM artillery_formation WHERE cid=?1 ORDER BY ord
     );
     defer fs.finalize();
@@ -109,7 +132,7 @@ pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
     while (try fs.next()) {
         // SQLite integer reads coerce REAL/TEXT/BLOB and NULL. Check original
         // storage classes before any payload conversion (contract rule 47).
-        if (fs.int(13) != 1) return error.CorruptSave;
+        if (fs.int(17) != 1) return error.CorruptSave;
         _ = try fs.intAs(usize, 12);
         const tag_bytes = try fs.text(4, gs.scratch());
         defer gs.scratch().free(tag_bytes);
@@ -129,11 +152,24 @@ pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
             .sold => .sold,
             .freight => .{ .freight = .{ .from_hq = from.?, .to_hq = to.?, .dispatch_day = sent.?, .eta_day = eta.?, .paid_cost = cost.? } },
         };
-        const f: dom.Formation = .{ .id = try positiveId(types.ArtilleryFormationId, fs.int(0)), .hull = try positiveId(types.HullInstanceId, fs.int(1)), .acquisition_day = try fs.intAs(u32, 2), .paid_price = fs.int(3), .placement = placement };
+        const quality_bytes = try fs.text(13, gs.scratch());
+        defer gs.scratch().free(quality_bytes);
+        const quality = std.meta.stringToEnum(types.Quality, quality_bytes) orelse return error.CorruptSave;
+        const armor = try fs.intAs(u8, 14);
+        if (armor > dom.intact_condition_pct) return error.CorruptSave;
+        const last = try optionalDay(fs, 15);
+        const tech = (try optionalId(types.PersonId, fs, 16)) orelse .none;
+        if (version < 62 and (quality != .c or armor != dom.intact_condition_pct or last != null or tech != .none)) return error.CorruptSave;
+        const f: dom.Formation = .{ .id = try positiveId(types.ArtilleryFormationId, fs.int(0)), .hull = try positiveId(types.HullInstanceId, fs.int(1)), .acquisition_day = try fs.intAs(u32, 2), .paid_price = fs.int(3), .placement = placement, .quality = quality, .armor_pct = armor, .last_maintenance_day = last, .tech = tech };
         const gop = try gs.artillery_formations.getOrPut(gs.allocator(), f.id);
         if (gop.found_existing) return error.CorruptSave;
         gop.value_ptr.* = f;
     }
+    try loadOperationalRows(db, gs, cid, version);
+    try loadCheckpoint(db, gs, cid, version);
+    if (version < 62) for (gs.bay_jobs.items) |job| {
+        if (job.artillery != .none or job.kind == .artillery_depot_repair) return error.CorruptSave;
+    };
     const os = try db.prepare(
         \\SELECT id,hq,year,month,available,ord,
         \\       typeof(cid)='integer' AND typeof(ord)='integer'
@@ -152,6 +188,70 @@ pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
     }
     if (version >= 60 and gs.artillery_offers.items.len != try requiredMetaUint(db, cid, "artillery_offer_count")) return error.CorruptSave;
     if (version < 60 and (gs.artillery_formations.count() != 0 or gs.artillery_offers.items.len != 0)) return error.CorruptSave;
+}
+
+fn loadOperationalRows(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
+    const seen = try gs.scratch().alloc(struct { crew: u8 = 0, slots: u16 = 0 }, gs.artillery_formations.count());
+    defer gs.scratch().free(seen);
+    @memset(seen, .{});
+    const cs = try db.prepare("SELECT formation,seat,person,typeof(cid)='integer' AND typeof(formation)='integer' AND typeof(seat)='text' AND typeof(person) IN ('integer','null') FROM artillery_crew WHERE cid=?1");
+    defer cs.finalize();
+    try cs.bindAll(.{cid});
+    while (try cs.next()) {
+        if (cs.int(3) != 1) return error.CorruptSave;
+        const id = try positiveId(types.ArtilleryFormationId, cs.int(0));
+        const index = gs.artillery_formations.getIndex(id) orelse return error.CorruptSave;
+        const bytes = try cs.text(1, gs.scratch());
+        defer gs.scratch().free(bytes);
+        const seat = std.meta.stringToEnum(operations.Seat, bytes) orelse return error.CorruptSave;
+        const mask = @as(u8, 1) << @as(u3, @intCast(@intFromEnum(seat)));
+        if (seen[index].crew & mask != 0) return error.CorruptSave;
+        seen[index].crew |= mask;
+        const occupant = (try optionalId(types.PersonId, cs, 2)) orelse .none;
+        if (version < 62 and occupant != .none) return error.CorruptSave;
+        gs.artillery_formations.values()[index].crew[@intFromEnum(seat)] = occupant;
+    }
+    const ss = try db.prepare("SELECT formation,slot,condition,rounds,typeof(cid)='integer' AND typeof(formation)='integer' AND typeof(slot)='text' AND typeof(condition)='text' AND typeof(rounds) IN ('integer','null') FROM artillery_slot WHERE cid=?1");
+    defer ss.finalize();
+    try ss.bindAll(.{cid});
+    while (try ss.next()) {
+        if (ss.int(4) != 1) return error.CorruptSave;
+        const id = try positiveId(types.ArtilleryFormationId, ss.int(0));
+        const index = gs.artillery_formations.getIndex(id) orelse return error.CorruptSave;
+        const bytes = try ss.text(1, gs.scratch());
+        defer gs.scratch().free(bytes);
+        const slot = std.meta.stringToEnum(operations.Slot, bytes) orelse return error.CorruptSave;
+        const condition_bytes = try ss.text(2, gs.scratch());
+        defer gs.scratch().free(condition_bytes);
+        const condition = std.meta.stringToEnum(@import("../domain/unit.zig").PartCondition, condition_bytes) orelse return error.CorruptSave;
+        const mask = @as(u16, 1) << @as(u4, @intCast(@intFromEnum(slot)));
+        if (seen[index].slots & mask != 0) return error.CorruptSave;
+        seen[index].slots |= mask;
+        const d = operations.descriptor(slot);
+        if ((ss.optInt(3) != null) != (d.family != null)) return error.CorruptSave;
+        const rounds = if (ss.optInt(3)) |raw| std.math.cast(u16, raw) orelse return error.CorruptSave else 0;
+        if (version < 62 and (condition != .ok or rounds != 0)) return error.CorruptSave;
+        gs.artillery_formations.values()[index].slots[@intFromEnum(slot)] = .{ .condition = condition, .rounds = rounds };
+    }
+    for (seen, gs.artillery_formations.values()) |row, f| {
+        if (row.crew != (@as(u8, 1) << operations.seats.len) - 1 or row.slots != (@as(u16, 1) << operations.descriptors.len) - 1) return error.CorruptSave;
+        try operations.validateSlots(&f.slots);
+    }
+}
+
+fn loadCheckpoint(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
+    const st = try db.prepare("SELECT value,typeof(cid)='integer' AND typeof(value)='integer' FROM meta WHERE cid=?1 AND key='last_artillery_service_day'");
+    defer st.finalize();
+    try st.bindAll(.{cid});
+    if (!try st.next()) {
+        if (version >= 62) return error.CorruptSave;
+        return;
+    }
+    if (st.int(1) != 1) return error.CorruptSave;
+    const raw = st.int(0);
+    const day: ?u32 = if (raw == -1) null else std.math.cast(u32, raw) orelse return error.CorruptSave;
+    if (try st.next() or (version < 62 and day != null)) return error.CorruptSave;
+    gs.last_artillery_service_day = day;
 }
 
 fn requiredCounter(db: sqlite.Db, cid: i64, key: []const u8) !u32 {
@@ -207,15 +307,19 @@ test "artillery campaign load rejects fractional identity price and market year"
 
 fn resetCodecFixture(db: sqlite.Db, placement: std.meta.Tag(dom.Placement)) !void {
     try db.exec(
+        \\DELETE FROM artillery_crew;
+        \\DELETE FROM artillery_slot;
         \\DELETE FROM artillery_formation;
         \\DELETE FROM artillery_offer;
         \\DELETE FROM meta;
-        \\INSERT INTO artillery_formation VALUES(1,0,1,3,0,1779313,'hq_pool',1,NULL,NULL,NULL,NULL,NULL,NULL);
+        \\INSERT INTO artillery_formation VALUES(1,0,1,3,0,1779313,'hq_pool',1,NULL,NULL,NULL,NULL,NULL,NULL,'c',100,NULL,NULL);
         \\INSERT INTO artillery_offer VALUES(1,0,1,1,3025,1,0);
         \\INSERT INTO meta VALUES(1,'next_artillery_formation_id',2);
         \\INSERT INTO meta VALUES(1,'next_artillery_offer_id',2);
         \\INSERT INTO meta VALUES(1,'artillery_offer_count',1);
     );
+    inline for (operations.seats) |seat| try db.exec("INSERT INTO artillery_crew VALUES(1,1,'" ++ @tagName(seat) ++ "',NULL)");
+    inline for (operations.descriptors) |d| try db.exec("INSERT INTO artillery_slot VALUES(1,1,'" ++ @tagName(d.slot) ++ "','ok'," ++ (if (d.family != null) "0" else "NULL") ++ ")");
     switch (placement) {
         .hq_pool => {},
         .company => try db.exec("UPDATE artillery_formation SET placement='company',pool_hq=NULL,company=1"),
@@ -230,7 +334,9 @@ fn openCodecFixture() !sqlite.Db {
     // No affinities or constraints: malformed storage classes reach the decoder,
     // including required NULLs normally blocked by executable DDL's NOT NULL.
     try db.exec(
-        \\CREATE TABLE artillery_formation(cid,ord,id,hull,acquisition_day,paid_price,placement,pool_hq,company,from_hq,to_hq,dispatch_day,eta_day,paid_cost);
+        \\CREATE TABLE artillery_formation(cid,ord,id,hull,acquisition_day,paid_price,placement,pool_hq,company,from_hq,to_hq,dispatch_day,eta_day,paid_cost,quality,armor,last_maintenance,tech);
+        \\CREATE TABLE artillery_crew(cid,formation,seat,person);
+        \\CREATE TABLE artillery_slot(cid,formation,slot,condition,rounds);
         \\CREATE TABLE artillery_offer(cid,ord,id,hq,year,month,available);
         \\CREATE TABLE meta(cid,key,value);
     );

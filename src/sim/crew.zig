@@ -17,6 +17,7 @@ const personnel = @import("personnel.zig");
 const contract_market = @import("contract_market.zig");
 const person_gen = @import("../gen/person_gen.zig");
 const commands = @import("commands.zig");
+const artillery_crew = @import("artillery_crew.zig");
 
 /// `any`: whichever seat the person's role fits — pilot roles
 /// take the crew seat, tech roles the tech slot.
@@ -26,7 +27,8 @@ pub const Slot = enum { pilot, tech, any };
 /// company's books: what the assignment column calls "unassigned".
 pub fn isUnassigned(gs: *GameState, p: *const person_mod.Person) bool {
     if (p.posted_hq != .none or p.assigned_force != .none) return false;
-    if (gs.pilotSeat(p.id) != .none) return false;
+    if (artillery_crew.isSeated(gs, p.id)) return false;
+    for (gs.artillery_formations.values()) |f| if (f.tech == p.id) return false;
     var uit = gs.units.iterator();
     while (uit.next()) |e| if (e.value_ptr.tech == p.id) return false;
     return true;
@@ -66,7 +68,7 @@ pub fn canReachPool(gs: *GameState, p: *const person_mod.Person) bool {
     return gs.homeHqFor(company) == seat;
 }
 
-pub const AssignSlotError = error{ UnknownUnit, UnknownPerson, WrongRole, Unavailable, NoTechSlot, PersonAway };
+pub const AssignSlotError = error{ UnknownUnit, UnknownPerson, WrongRole, Unavailable, NoTechSlot, PersonAway, ArtilleryPersonSeated };
 
 /// Put a person in a hull's pilot or tech slot. A pilot leaves any
 /// previous hull; a tech may cover several hulls (hours permitting —
@@ -83,6 +85,7 @@ pub fn assignSlot(gs: *GameState, unit_id: types.UnitId, slot: Slot, person_id: 
         .any => unreachable,
         .pilot => {
             if (p.role != unit_mod.crewRoleFor(u.kind)) return error.WrongRole;
+            if (artillery_crew.operatingSeat(gs, person_id) != null) return error.ArtilleryPersonSeated;
             // One seat per pilot.
             var it = gs.units.iterator();
             while (it.next()) |entry| {
@@ -92,6 +95,7 @@ pub fn assignSlot(gs: *GameState, unit_id: types.UnitId, slot: Slot, person_id: 
             p.assigned_force = u.force;
         },
         .tech => {
+            if (artillery_crew.operatingSeat(gs, person_id) != null) return error.ArtilleryPersonSeated;
             const need = unit_mod.techRoleFor(u.kind) orelse return error.NoTechSlot;
             if (p.role != need) return error.WrongRole;
             u.tech = person_id;
@@ -114,7 +118,7 @@ pub fn unassignSlot(gs: *GameState, unit_id: types.UnitId, slot: Slot) error{Unk
 
 /// Fill every open pilot/tech slot in a company from its own people
 /// (and the unassigned pool). Returns how many slots remain open.
-pub fn autoAssign(gs: *GameState, company: types.ForceId) !u32 {
+fn autoAssignOrdinary(gs: *GameState, company: types.ForceId) !u32 {
     var open: u32 = 0;
     var uit = gs.units.iterator();
     while (uit.next()) |entry| {
@@ -134,10 +138,10 @@ pub fn autoAssign(gs: *GameState, company: types.ForceId) !u32 {
                 const p = pe.value_ptr;
                 if (p.role != role or !p.isAvailable(gs.clock.day_index) or p.posted_hq != .none) continue;
                 if (gs.companyOf(p.assigned_force) != company and p.assigned_force != .none) continue;
-                if (gs.pilotSeat(p.id) != .none) continue;
+                if (artillery_crew.isSeated(gs, p.id)) continue;
                 if (pilot_spent and p.isUnfit()) continue; // no better off
                 assignSlot(gs, u.id, .pilot, p.id) catch |err| switch (err) {
-                    error.UnknownUnit, error.UnknownPerson, error.WrongRole, error.Unavailable, error.NoTechSlot, error.PersonAway => continue,
+                    error.UnknownUnit, error.UnknownPerson, error.WrongRole, error.Unavailable, error.NoTechSlot, error.PersonAway, error.ArtilleryPersonSeated => continue,
                 };
                 found = true;
                 break;
@@ -169,33 +173,113 @@ pub fn autoAssignCompany(gs: *GameState, company: types.ForceId) !void {
     _ = try autoAssign(gs, company);
 }
 
+/// Scratch roster copies prepare a complete assignment/hiring command. Only
+/// seat, book, candidate, ID and stream fields are committed; no shared nested
+/// personnel or Unit storage is mutated during preparation.
+const PreparedRoster = struct {
+    view: GameState,
+    alloc: std.mem.Allocator,
+
+    fn init(gs: *GameState) !PreparedRoster {
+        const alloc = gs.scratch();
+        var view = gs.*;
+        view.people = try gs.people.clone(alloc);
+        errdefer view.people.deinit(alloc);
+        view.units = try gs.units.clone(alloc);
+        errdefer view.units.deinit(alloc);
+        view.artillery_formations = try gs.artillery_formations.clone(alloc);
+        errdefer view.artillery_formations.deinit(alloc);
+        view.candidates = .empty;
+        try view.candidates.appendSlice(alloc, gs.candidates.items);
+        return .{ .view = view, .alloc = alloc };
+    }
+
+    fn deinit(self: *PreparedRoster) void {
+        self.view.people.deinit(self.alloc);
+        self.view.units.deinit(self.alloc);
+        self.view.artillery_formations.deinit(self.alloc);
+        self.view.candidates.deinit(self.alloc);
+    }
+
+    fn commit(self: *const PreparedRoster, gs: *GameState) void {
+        for (self.view.units.values()) |u| {
+            const target = gs.unit(u.id).?;
+            target.pilot = u.pilot;
+            target.tech = u.tech;
+        }
+        for (self.view.artillery_formations.values()) |f| {
+            const target = gs.artillery_formations.getPtr(f.id).?;
+            target.crew = f.crew;
+            target.tech = f.tech;
+        }
+        for (self.view.people.values()) |p| {
+            if (gs.person(p.id)) |target| target.assigned_force = p.assigned_force else gs.people.putAssumeCapacity(p.id, p);
+        }
+        gs.next_person_id = self.view.next_person_id;
+        gs.rng = self.view.rng;
+        gs.candidates.clearRetainingCapacity();
+        gs.candidates.appendSliceAssumeCapacity(self.view.candidates.items);
+    }
+};
+
+/// Prepare both ordinary and artillery assignments before changing live seats.
+/// Source: artillery operations design, Commands, orchestration and atomicity.
+pub fn autoAssign(gs: *GameState, company: types.ForceId) !u32 {
+    var prepared = try PreparedRoster.init(gs);
+    defer prepared.deinit();
+    const open = try autoAssignOrdinary(&prepared.view, company) + try artillery_crew.autoAssignPrepared(&prepared.view, company);
+    prepared.commit(gs);
+    return open;
+}
+
+/// Fill staffing targets from the actual home hall and pooled-role generation.
+/// The entire requested hire/assignment command is prepared before any debit,
+/// candidate removal, person insertion, ID or RNG commit.
 pub fn crewCompany(gs: *GameState, company: types.ForceId) !CrewCompanyResult {
     const f = gs.force(company) orelse return error.UnknownForce;
     if (f.echelon != .company) return error.NotACompany;
-    if (posture.isCompanyDeployed(gs, company)) return error.CompanyDeployed;
-    var hired: u32 = 0;
-    var still_open: u32 = 0;
+    if (!posture.isCompanyHome(gs, company)) return error.CompanyDeployed;
+    var prepared = try PreparedRoster.init(gs);
+    defer prepared.deinit();
+    var result: CrewCompanyResult = .{};
+    var bonus: types.CBills = 0;
+    const home = gs.homeHqFor(company);
+    const recruit_bonus = personnel.recruitBonus(gs, home);
     for (personnel.manningNeeds(gs, company)) |n| {
-        var have = personnel.manningHave(gs, company, n.role);
+        var have = personnel.manningHave(&prepared.view, company, n.role);
         while (have < n.need) : (have += 1) {
+            var spec: person_gen.GeneratedPerson = undefined;
             if (personnel.isPooledRole(n.role)) {
-                // MekHQ hires astechs and medics to complement on
-                // demand: no market, no signing bonus, salary only.
-                const spec = person_gen.generateWithBonus(&gs.rng, .market, n.role, personnel.recruitBonus(gs, gs.homeHqFor(company)));
-                const id = try personnel.hireFromSpec(gs, spec);
-                gs.person(id).?.assigned_force = company;
-                hired += 1;
-            } else if (try contract_market.hireRoleFromHall(gs, n.role, company)) {
-                hired += 1;
+                spec = person_gen.generateWithBonus(&prepared.view.rng, .market, n.role, recruit_bonus);
             } else {
-                still_open += n.need - have;
-                break;
+                const index = contract_market.hallCandidateFor(&prepared.view, n.role, home) orelse {
+                    result.still_open += n.need - have;
+                    break;
+                };
+                const candidate = prepared.view.candidates.items[index];
+                bonus = try std.math.add(types.CBills, bonus, candidate.asking_bonus);
+                if (gs.treasuryBalance(.outfit) < bonus) return error.InsufficientTreasury;
+                spec = candidate.spec;
+                _ = prepared.view.candidates.orderedRemove(index);
             }
+            if (prepared.view.next_person_id == 0 or prepared.view.next_person_id == std.math.maxInt(u32)) return error.ArtilleryIdExhausted;
+            var p = try personnel.prepareHireFromSpec(gs, spec);
+            p.id = @enumFromInt(prepared.view.next_person_id);
+            p.assigned_force = company;
+            try prepared.view.people.put(prepared.alloc, p.id, p);
+            prepared.view.next_person_id += 1;
+            result.hired_count += 1;
         }
     }
-    _ = try autoAssign(gs, company);
-    try gs.log(.decision, .{ .company = company }, "[raise] {s}: {d} hired to fill the manning table ({d} still open — the halls had nobody)", .{ f.name, hired, still_open });
-    return .{ .hired_count = hired, .still_open = still_open };
+    _ = try autoAssignOrdinary(&prepared.view, company);
+    _ = try artillery_crew.autoAssignPrepared(&prepared.view, company);
+    try gs.people.ensureUnusedCapacity(gs.allocator(), result.hired_count);
+    const posting = try gs.prepareTreasuryPosting(.outfit, .{ .day = gs.clock.day_index, .amount = -bonus, .category = .payroll, .note = "signing bonuses" });
+    const log = try gs.prepareLog(.decision, .{ .company = company }, "[raise] {s}: {d} hired to fill the manning table ({d} still open — the hall had nobody)", .{ f.name, result.hired_count, result.still_open });
+    prepared.commit(gs);
+    if (bonus > 0) gs.commitTreasuryPosting(posting);
+    gs.commitLog(log);
+    return result;
 }
 
 // ---- C4b exec wrappers ----

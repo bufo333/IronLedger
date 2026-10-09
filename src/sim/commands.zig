@@ -45,6 +45,10 @@ const crew = @import("crew.zig");
 const toe = @import("toe.zig");
 const personnel = @import("personnel.zig");
 const artillery = @import("artillery.zig");
+const artillery_crew = @import("artillery_crew.zig");
+const artillery_service = @import("artillery_service.zig");
+const artillery_operations = @import("artillery_operations.zig");
+const artillery_rules = @import("../domain/artillery_operations.zig");
 const held_hulls = @import("held_hulls.zig");
 
 pub const Command = union(enum) {
@@ -53,6 +57,12 @@ pub const Command = union(enum) {
     detach_artillery: types.ArtilleryFormationId,
     transfer_artillery: struct { formation: types.ArtilleryFormationId, to_hq: types.HqId },
     sell_artillery: types.ArtilleryFormationId,
+    assign_artillery_crew: struct { formation: types.ArtilleryFormationId, seat: artillery_rules.Seat, person: types.PersonId },
+    unassign_artillery_crew: struct { formation: types.ArtilleryFormationId, seat: artillery_rules.Seat },
+    assign_artillery_tech: struct { formation: types.ArtilleryFormationId, person: types.PersonId },
+    unassign_artillery_tech: types.ArtilleryFormationId,
+    repair_artillery: types.ArtilleryFormationId,
+    reload_artillery: struct { formation: types.ArtilleryFormationId, family: artillery_rules.Family },
     /// End the turn: advance one day. Turn-based — time only moves here,
     /// and nothing blocks it; decisions wait in the inbox with deadlines.
     advance_day,
@@ -320,6 +330,13 @@ pub const Error = error{
     ArtilleryIdExhausted,
     ArtilleryDateExhausted,
     ArtilleryFundsExhausted,
+    ArtilleryNoServiceSite,
+    ArtilleryPersonAbsent,
+    ArtilleryPersonSeated,
+    ArtilleryUnqualified,
+    ArtilleryNoMechanic,
+    ArtilleryBayJob,
+    ArtilleryNothingToReload,
     UnknownPerson,
     UnknownForce,
     UnknownUnit,
@@ -498,6 +515,9 @@ pub const Error = error{
 pub const Result = struct {
     artillery_formation: types.ArtilleryFormationId = .none,
     hull_instance: types.HullInstanceId = .none,
+    artillery_person: types.PersonId = .none,
+    artillery_site: ?types.Site = null,
+    artillery_packages: u32 = 0,
     artillery_freight_cost: types.CBills = 0,
     artillery_eta_day: u32 = 0,
     days_advanced: u32 = 0,
@@ -658,6 +678,12 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .detach_artillery => |id| return artillery.detach(gs, id),
         .transfer_artillery => |p| return artillery.transfer(gs, p),
         .sell_artillery => |id| return artillery.sell(gs, id),
+        .assign_artillery_crew => |p| return artillery_crew.assign(gs, p),
+        .unassign_artillery_crew => |p| return artillery_crew.unassign(gs, p),
+        .assign_artillery_tech => |p| return artillery_crew.assignTech(gs, p),
+        .unassign_artillery_tech => |id| return artillery_crew.unassignTech(gs, id),
+        .repair_artillery => |id| return artillery_service.queueRepair(gs, id),
+        .reload_artillery => |p| return artillery_operations.reload(gs, p),
         .disband_company => |co| return toe.execDisbandCompany(gs, co),
         .reactivate => |unit_id| return hq_ops.execReactivate(gs, unit_id),
         .fabricate => |f0| return hq_ops.execFabricate(gs, f0),

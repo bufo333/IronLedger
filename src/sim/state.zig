@@ -179,12 +179,13 @@ pub const LogFilter = union(enum) {
 
 /// Mek bay work: jobs hold a bay slot for a span of days; they
 /// wait in queue when the bays are full.
-pub const BayJobKind = enum { depot_repair, reactivation, fabrication, refit };
+pub const BayJobKind = enum { depot_repair, reactivation, fabrication, refit, artillery_depot_repair };
 
 pub const BayJob = struct {
     hq: types.HqId,
     kind: BayJobKind,
     unit: types.UnitId = .none,
+    artillery: types.ArtilleryFormationId = .none,
     item_key: []const u8 = "", // component being fabricated
     duration_days: u32,
     queued_day: u32,
@@ -377,6 +378,8 @@ pub const GameState = struct {
 
     artillery_formations: std.AutoArrayHashMapUnmanaged(types.ArtilleryFormationId, artillery_dom.Formation) = .empty,
     artillery_offers: std.ArrayListUnmanaged(artillery_dom.Offer) = .empty,
+    /// Persisted successful population-service checkpoint; null before first pass.
+    last_artillery_service_day: ?u32 = null,
     next_artillery_formation_id: u32 = 1,
     next_artillery_offer_id: u32 = 1,
 
@@ -1379,6 +1382,7 @@ pub const GameState = struct {
         .{ "hull_combat_records", .persisted },
         .{ "maintenance_entries", .persisted },
         .{ "hull_ownership_history", .persisted },
+        .{ "last_artillery_service_day", .persisted },
         .{ "artillery_formations", .persisted },
         .{ "artillery_offers", .persisted },
         .{ "next_artillery_formation_id", .persisted },

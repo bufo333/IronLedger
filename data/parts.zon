@@ -88,4 +88,8 @@
     // ---- supplies: one unit = one ton ----
     .{ .key = "provisions", .name = "Provisions (ton, 200 person-days)", .cost = 2_000, .rarity = .common, .availability = .a, .pallet_tons = 1 },
     .{ .key = "medical_supplies", .name = "Medical supplies (ton)", .cost = 15_000, .rarity = .common, .pallet_tons = 1 },
+    // Project reload/repair stock: docs/p2-artillery-operations-design.md, Ammunition and supply policy.
+    .{ .key = "ammo_long_tom", .name = "Long Tom sealed reload", .cost = 20_000, .rarity = .rare, .pallet_tons = 1, .tech_base = .inner_sphere, .availability = .e, .intro_year = 2602, .mount = .none },
+    .{ .key = "ammo_artillery_mg", .name = "Carrier MG sealed reload", .cost = 500, .rarity = .common, .pallet_tons = 1, .tech_base = .inner_sphere, .availability = .b, .intro_year = 2602, .mount = .none },
+    .{ .key = "artillery_spares", .name = "Artillery rebuilding kit", .cost = 25_000, .rarity = .uncommon, .pallet_tons = 1, .tech_base = .inner_sphere, .availability = .d, .intro_year = 2602, .mount = .none },
 }

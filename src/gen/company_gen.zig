@@ -41,7 +41,7 @@ pub const SupportStaff = struct {
 };
 
 /// What a company fields, counted for the manning table.
-pub const HullTally = struct { meks: u32 = 0, vehicles: u32 = 0, platoons: u32 = 0, fighters: u32 = 0, mash: u32 = 0 };
+pub const HullTally = struct { meks: u32 = 0, vehicles: u32 = 0, platoons: u32 = 0, fighters: u32 = 0, mash: u32 = 0, artillery: u32 = 0 };
 
 pub const StaffNeed = struct { role: person.Role, need: u32, why: []const u8 };
 
@@ -49,17 +49,18 @@ pub const StaffNeed = struct { role: person.Role, need: u32, why: []const u8 };
 /// and why. The starter generator hires to it and `personnel.manningNeeds`
 /// reads it back for a raised company, so the two never drift.
 pub fn staffNeeds(t: HullTally) [14]StaffNeed {
-    const combat = t.meks + t.vehicles + t.platoons;
+    const artillery_heads = t.artillery * @import("../domain/artillery_operations.zig").crew_count;
+    const combat = t.meks + t.vehicles + t.platoons + artillery_heads;
     const staff = supportStaffFor(t.meks, combat);
     return .{
         .{ .role = .mekwarrior, .need = t.meks, .why = "one per mek" },
-        .{ .role = .vehicle_crew, .need = t.vehicles, .why = "one per truck, rig or ambulance" },
+        .{ .role = .vehicle_crew, .need = t.vehicles + artillery_heads, .why = "one per conventional vehicle; four per artillery carrier" },
         .{ .role = .infantry, .need = t.platoons, .why = "one per security platoon" },
         .{ .role = .aero_pilot, .need = t.fighters, .why = "one per fighter" },
         .{ .role = .tech_aero, .need = t.fighters, .why = "one per fighter" },
         .{ .role = .tech_mek, .need = staff.techs, .why = "one per mek" },
-        .{ .role = .astech, .need = staff.astechs, .why = "six per mek tech (hours)" },
-        .{ .role = .tech_mechanic, .need = t.vehicles / 2, .why = "one per two vehicles" },
+        .{ .role = .astech, .need = staff.astechs + t.artillery * tuning.generation.astechs_per_tech, .why = "full teams for mek techs and artillery mechanics" },
+        .{ .role = .tech_mechanic, .need = t.vehicles / 2 + t.artillery, .why = "one per two conventional vehicles; one per artillery carrier" },
         .{ .role = .doctor, .need = staff.doctors, .why = "one per 25 combat crew" },
         .{ .role = .medic, .need = staff.medics + (if (t.mash > 0) @as(u32, 4) else 0), .why = "each covers 5 patients and staffs a MASH bed; four per doctor, four more with the MASH lance" },
         .{ .role = .admin_command, .need = 1, .why = "company office" },

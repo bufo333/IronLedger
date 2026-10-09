@@ -2,6 +2,7 @@
 //! No MekHQ counterpart: project acquisition and topology policy (docs/mekhq-map.md).
 
 const types = @import("types.zig");
+const operations = @import("artillery_operations.zig");
 
 /// Project limits in docs/p2-artillery-acquisition-design.md, not source battery size.
 pub const company_formation_cap: u32 = 1;
@@ -24,13 +25,19 @@ pub const Placement = union(enum) {
     sold,
 };
 
-/// Organizational identity and its unique physical carrier, with no operational fields.
+/// Organizational identity, physical carrier and persisted operational history.
 pub const Formation = struct {
     id: types.ArtilleryFormationId,
     hull: types.HullInstanceId,
     acquisition_day: u32,
     paid_price: types.CBills,
     placement: Placement,
+    quality: types.Quality = .c,
+    armor_pct: u8 = intact_condition_pct,
+    last_maintenance_day: ?u32 = null,
+    tech: types.PersonId = .none,
+    crew: operations.Crew = @splat(.none),
+    slots: operations.Slots = @splat(.{}),
 };
 
 /// One HQ's current calendar-period board. Consumption survives save and same-month sync.

@@ -1568,14 +1568,19 @@ pub fn hireCandidate(gs: *GameState, index: usize) !types.PersonId {
     return id;
 }
 
-/// Hire the first hall candidate with `role` (any HQ's hall) into `company`.
+/// First matching candidate at one actual HQ, in stable hall order.
+/// Source: artillery operations design, Crew and personnel policy.
+pub fn hallCandidateFor(gs: *const GameState, role: person_mod.Role, hq: types.HqId) ?usize {
+    for (gs.candidates.items, 0..) |c, i| if (c.hq == hq and c.spec.role == role) return i;
+    return null;
+}
+
+/// Hire only from the company's actual home HQ hall; no remote candidate grant.
 pub fn hireRoleFromHall(gs: *GameState, role: person_mod.Role, company: types.ForceId) !bool {
-    for (gs.candidates.items, 0..) |c, i| if (c.spec.role == role) {
-        const id = try hireCandidate(gs, i);
-        if (gs.person(id)) |p| p.assigned_force = company;
-        return true;
-    };
-    return false;
+    const index = hallCandidateFor(gs, role, gs.homeHqFor(company)) orelse return false;
+    const id = try hireCandidate(gs, index);
+    gs.person(id).?.assigned_force = company;
+    return true;
 }
 
 test "hireCandidate leaves funds, people and the hall unchanged when the hire allocation fails" {

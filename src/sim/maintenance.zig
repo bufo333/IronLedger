@@ -22,6 +22,10 @@ const founding = @import("founding.zig");
 const posture = @import("posture.zig");
 const readiness_m = @import("readiness.zig");
 const rng_mod = @import("rng.zig");
+const artillery_operations = @import("artillery_operations.zig");
+const artillery_crew = @import("artillery_crew.zig");
+const artillery_service = @import("artillery_service.zig");
+const personnel = @import("personnel.zig");
 
 /// Hours a field repair costs the hull's tech (tuning.maintenance).
 const hours_damaged_slot = tuning.maintenance.hours_damaged_slot;
@@ -30,11 +34,11 @@ const hours_armor_patch = tuning.maintenance.hours_armor_patch;
 
 /// Hours and labour for one field job on a slot (tuning.maintenance):
 /// one rule for the weekly pass and the field repair push.
-fn slotHours(wrecked: bool) u32 {
+pub fn slotHours(wrecked: bool) u32 {
     return if (wrecked) hours_destroyed_slot else hours_damaged_slot;
 }
 
-fn slotLabour(part_key: []const u8, wrecked: bool) types.CBills {
+pub fn slotLabour(part_key: []const u8, wrecked: bool) types.CBills {
     return @divTrunc(part_mod.cost(part_key), if (wrecked) tuning.maintenance.labour_destroyed_divisor else tuning.maintenance.labour_damaged_divisor);
 }
 
@@ -50,11 +54,11 @@ fn postRepairLabour(gs: *GameState, labour: types.CBills) !void {
 }
 
 /// Remaining weekly hours per tech, built lazily as hulls come up.
-const HourBook = struct {
+pub const HourBook = struct {
     map: std.AutoHashMapUnmanaged(types.PersonId, u32) = .empty,
     alloc: std.mem.Allocator,
 
-    fn spend(self: *HourBook, gs: *GameState, tech: *const person_mod.Person, hours: u32, base_load: u32) !bool {
+    pub fn spend(self: *HourBook, gs: *GameState, tech: *const person_mod.Person, hours: u32, base_load: u32) !bool {
         const entry = try self.map.getOrPut(self.alloc, tech.id);
         if (!entry.found_existing) entry.value_ptr.* = techWeeklyHoursAvailable(gs, tech) -| base_load;
         if (entry.value_ptr.* < hours) return false;
@@ -83,13 +87,14 @@ pub fn monthlyConsumablesEstimate(gs: *GameState) types.CBills {
         if (u.status == .mothballed or u.kind == .infantry) continue;
         total += weeklyConsumables(u);
     }
+    total += artillery_service.weeklyConsumablesTotal(gs);
     return @divTrunc(total * 52, 12);
 }
 
 /// The hull's tech if assigned and fit for duty today.
 fn activeTech(gs: *GameState, u: *const unit_mod.Unit) ?*person_mod.Person {
     const t = gs.person(u.tech) orelse return null;
-    return if (t.isAvailable(gs.clock.day_index)) t else null;
+    return if (personnel.availableForDuty(t, gs.clock.day_index) and artillery_crew.personPresent(gs, t, sites.siteForForce(gs, u.force))) t else null;
 }
 
 pub const QualityDrift = enum { drop, hold, rise };
@@ -109,11 +114,16 @@ pub fn qualityDrift(total: i32, target: i32) QualityDrift {
 /// exotic design (rare on the market, rare in the manuals).
 pub fn hullHours(gs: *GameState, u: *const unit_mod.Unit) u32 {
     _ = gs;
-    const t = tuning.maintenance;
     const design = chassis_mod.find(u.chassis_key);
-    const tonnage: u8 = if (design) |d| d.tonnage else 50;
-    const base = unit_mod.maintenanceHours(u.kind, tonnage);
-    const q_bp: types.Bp = switch (u.quality) {
+    return maintenanceHoursFor(u.kind, if (design) |d| d.tonnage else 50, u.quality, if (design) |d| d.rarity == .very_rare else false);
+}
+
+/// Quality and rarity scale the shared Unit-kind maintenance-hours table.
+/// Source: campaign maintenance policy, ARCHITECTURE.md §9.9.
+pub fn maintenanceHoursFor(kind: unit_mod.UnitKind, tons: u8, quality: types.Quality, exotic: bool) u32 {
+    const t = tuning.maintenance;
+    const base = unit_mod.maintenanceHours(kind, tons);
+    const q_bp: types.Bp = switch (quality) {
         .a => t.hours_quality_bp.a,
         .b => t.hours_quality_bp.b,
         .c => t.hours_quality_bp.c,
@@ -122,28 +132,22 @@ pub fn hullHours(gs: *GameState, u: *const unit_mod.Unit) u32 {
         .f => t.hours_quality_bp.f,
     };
     var hours = types.applyBp(@as(i64, base), q_bp);
-    if (design) |d| if (d.rarity == .very_rare) {
-        hours = types.applyBp(hours, t.hours_exotic_bp);
-    };
+    if (exotic) hours = types.applyBp(hours, t.hours_exotic_bp);
     return @intCast(@max(1, hours));
 }
 
 /// The same hull in this tech's hands: skill sets the pace.
 pub fn techWeeklyHoursFor(gs: *GameState, tech: *const person_mod.Person, u: *const unit_mod.Unit) u32 {
-    const t = tuning.maintenance;
     const role = unit_mod.techRoleFor(u.kind) orelse tech.role;
-    const skill = tech.skill(role.primarySkill()) orelse 7;
-    const bp: types.Bp = if (skill <= 2)
-        t.hours_skill_bp.elite
-    else if (skill == 3)
-        t.hours_skill_bp.veteran
-    else if (skill == 4)
-        t.hours_skill_bp.regular
-    else if (skill == 5)
-        t.hours_skill_bp.green
-    else
-        t.hours_skill_bp.untrained;
-    return @intCast(@max(1, types.applyBp(@as(i64, hullHours(gs, u)), bp)));
+    return hoursForSkill(hullHours(gs, u), tech.skill(role.primarySkill()) orelse 7);
+}
+
+/// Technician skill scales an already quality-adjusted base-hour demand.
+/// Source: campaign maintenance policy, ARCHITECTURE.md §9.9.
+pub fn hoursForSkill(base_hours: u32, skill: u8) u32 {
+    const t = tuning.maintenance;
+    const bp: types.Bp = if (skill <= 2) t.hours_skill_bp.elite else if (skill == 3) t.hours_skill_bp.veteran else if (skill == 4) t.hours_skill_bp.regular else if (skill == 5) t.hours_skill_bp.green else t.hours_skill_bp.untrained;
+    return @intCast(@max(1, types.applyBp(@as(i64, base_hours), bp)));
 }
 
 /// Weekly hours a tech already carries across assigned hulls.
@@ -156,6 +160,10 @@ pub fn techWeeklyLoadHours(gs: *GameState, tech_id: types.PersonId) u32 {
         if (u.tech != tech_id or u.isParked()) continue;
         hours += if (tech) |t| techWeeklyHoursFor(gs, t, u) else hullHours(gs, u);
     }
+    for (gs.artillery_formations.values()) |*f| {
+        if (f.tech != tech_id or artillery_operations.operationSite(gs, f) == null or artillery_operations.hasJob(gs, f.id)) continue;
+        hours += artillery_service.techHours(gs, f);
+    }
     return hours;
 }
 
@@ -164,12 +172,14 @@ pub fn techWeeklyLoadHours(gs: *GameState, tech_id: types.PersonId) u32 {
 /// per tech = full rate, none = `tech_no_team_bp`).
 pub fn techWeeklyHoursAvailable(gs: *GameState, tech: *const person_mod.Person) u32 {
     const company = gs.companyOf(tech.assigned_force);
+    const pool_site = if (tech.posted_hq != .none) types.Site{ .hq = tech.posted_hq } else gs.defaultSite();
     var techs: u32 = 0;
     var astechs: u32 = 0;
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
-        if (!p.isAvailable(gs.clock.day_index) or gs.companyOf(p.assigned_force) != company) continue;
+        if (!personnel.availableForDuty(p, gs.clock.day_index) or gs.companyOf(p.assigned_force) != company) continue;
+        if (company == .none and !artillery_crew.personPresent(gs, p, pool_site)) continue;
         if (p.role == .astech) astechs += 1;
         if (p.role.isTech()) techs += 1;
     }
@@ -213,6 +223,10 @@ pub fn findFreeTech(gs: *GameState, role: person_mod.Role, company: types.ForceI
 pub fn runWeeklyMaintenance(gs: *GameState) !void {
     var book: HourBook = .{ .alloc = gs.scratch() };
     defer book.map.deinit(book.alloc);
+    try runWeeklyMaintenanceWithBook(gs, &book);
+}
+
+fn runWeeklyMaintenanceWithBook(gs: *GameState, book: *HourBook) !void {
     var upkeep_cost: types.CBills = 0;
 
     var it = gs.units.iterator();
@@ -307,6 +321,19 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
     }
 }
 
+/// One weekly orchestration owner carries ordinary spending and the combined
+/// service reservation into artillery preparation. Artillery commits only after
+/// its entire population and automatic repairs have prepared successfully.
+pub fn runWeeklyService(gs: *GameState) !void {
+    var service_book: HourBook = .{ .alloc = gs.scratch() };
+    defer service_book.map.deinit(service_book.alloc);
+    var repair_book: HourBook = .{ .alloc = gs.scratch() };
+    defer repair_book.map.deinit(repair_book.alloc);
+    try runWeeklyMaintenanceWithBook(gs, &service_book);
+    try runWeeklyRepairsWithBook(gs, &repair_book);
+    try artillery_service.runWeekly(gs, &service_book, &repair_book);
+}
+
 /// A tech goes down: wounded for `days`, and every hull they covered gets a
 /// free tech swapped in if one exists — logged either way, surfaced in the
 /// end-turn checklist as an open slot otherwise.
@@ -344,6 +371,12 @@ pub fn injureTech(gs: *GameState, tech_id: types.PersonId, days: u32, cause: []c
 /// hours; depot work becomes a bay job. Destroyed parts consume
 /// spares from the hull's site.
 pub fn runWeeklyRepairs(gs: *GameState) !void {
+    var book: HourBook = .{ .alloc = gs.scratch() };
+    defer book.map.deinit(book.alloc);
+    try runWeeklyRepairsWithBook(gs, &book);
+}
+
+fn runWeeklyRepairsWithBook(gs: *GameState, book: *HourBook) !void {
     var depot_ok = false;
     var hqit = gs.hqs.iterator();
     while (hqit.next()) |entry| {
@@ -352,8 +385,6 @@ pub fn runWeeklyRepairs(gs: *GameState) !void {
     // Reserve the labour ledger entry before the repair loop mutates any
     // slot or armor (rule 17): postRepairLabour can then never fail.
     try gs.reserveLedger(1);
-    var book: HourBook = .{ .alloc = gs.scratch() };
-    defer book.map.deinit(book.alloc);
 
     var labor_cost: types.CBills = 0;
     var it = gs.units.iterator();
