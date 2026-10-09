@@ -46,7 +46,9 @@
       "Bash(git branch --show-current)",
       "Bash(git add *)",
       "Bash(git checkout main)",
-      "Bash(git switch main)"
+      "Bash(git switch main)",
+      "Edit(/AGENTS.md)",
+      "Edit(/.ai/plans/**)"
     ]
   }
 }

@@ -673,8 +673,18 @@ live in:
   HQ network, supply lines, economy
 - `GAMEPLAY.md` — player-facing loops, what the screens do, progression
 - `ROADMAP.md` — stage plan and completion status
-- `docs/coding-contract.md` — the normative rule set for all contributors
+- `AGENTS.md` — shared project instructions and authority
+- `docs/engineering-contract.md` — the normative rule set for all contributors
+- `docs/agent-workflow.md` — approval, role boundaries, review and local integration
+- `docs/governance-bootstrap.md` — baseline procedure when the contract is absent
 - `docs/tui.md` — terminal client architecture, keyboard model, screen reference
+
+Codex role configurations live in `.codex/agents/`; Claude role adapters live in
+`.claude/agents/`, with `CLAUDE.md` directing Claude to the shared guide. Plans
+are local and ignored under `.ai/plans/`. These are static configuration locations;
+effective role selection and permissions require verification in the active tool.
+The seven-role workflow activates for subsequent tasks after this migration is
+accepted and integrated; its own handoff retains the legacy integration authority.
 
 <br clear="all">
 

@@ -58,7 +58,7 @@ pub const VehicleCalculation = struct {
 
 /// Converts a non-negative, MegaMek-cent-rounded cost to project integer
 /// C-bills by ceiling division. Project money has no cent representation
-/// (docs/p2-artillery-domain-research.md; coding-contract rule 54).
+/// (docs/p2-artillery-domain-research.md; engineering-contract rule 54).
 pub fn ceilMegaMekCostCentsToCBills(cents: i64) error{ NegativeCost, Overflow }!types.CBills {
     if (cents < 0) return error.NegativeCost;
     const adjusted = std.math.add(i64, cents, 99) catch return error.Overflow;

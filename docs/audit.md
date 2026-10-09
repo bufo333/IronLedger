@@ -5,7 +5,7 @@ Date: 2026-09-24
 ## Scope and method
 
 This audit reviewed the repository's structure, architecture, and engineering
-practices against `ARCHITECTURE.md`, `docs/coding-contract.md`, and the behavior
+practices against `ARCHITECTURE.md`, `docs/engineering-contract.md`, and the behavior
 described in `ROADMAP.md`. The review covered:
 
 - `src/domain`, `src/econ`, `src/gen`, and the simulation modules under

@@ -1,6 +1,6 @@
 # Contract exceptions
 
-Every place the code does not yet meet `docs/coding-contract.md`, as rule 87
+Every place the code does not yet meet `docs/engineering-contract.md`, as rule 87
 requires: the rule, why it is not fixed yet, the scope, the deliverable in
 `TODO.md` that removes it, and what stops it growing. The contract governs
 all new code in full; nothing here licenses a new violation. The deliverable

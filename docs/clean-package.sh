@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The clean package build (docs/coding-contract.md rule 66): copy only the
+# The clean package build (docs/engineering-contract.md rule 66): copy only the
 # paths build.zig.zon declares into a fresh tree and build a release there,
 # so an input the package leaves out fails here instead of for the first
 # person who fetches it.

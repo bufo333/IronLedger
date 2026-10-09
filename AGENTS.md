@@ -1,22 +1,17 @@
 # Shared project guide
 
-## Draft bootstrap status and authority
+## Authority and migration transition
 
-This is a proposed governance baseline, not an accepted or committed baseline.
-The scaffold migration remains pending. Follow the current binding
-`docs/agent-workflow.md`, including its five roles, `.claude/plans/` artifacts,
-and implementer in integration mode. This draft does not activate the proposed
-seven-role workflow or relocate plans to `.ai/plans/`.
+`ARCHITECTURE.md` is the architectural authority. The sole normative contract is
+`docs/engineering-contract.md`; `docs/agent-workflow.md` owns role boundaries and
+local delivery. `CLAUDE.md` is the Claude entry point to this shared guide.
 
-`ARCHITECTURE.md` remains the architectural authority.
-`docs/coding-contract.md` remains the current owning contract;
-`docs/engineering-contract.md` is a temporary byte-identical copy for bootstrap
-review, not a separate set of rules. Do not edit the two independently. The
-approved migration must establish one owning path and update references.
-
-`CLAUDE.md` remains unchanged during this draft. This shared guide preserves its
-project instructions, with tool-neutral fresh-reading and remote-ownership
-wording and links to the owning contract rules rather than duplicate summaries.
+The seven-role workflow and `.ai/plans/` apply to subsequent tasks after the
+scaffold-alignment migration is accepted and integrated into local `main`.
+This migration itself retains its dual immutable snapshots and the previous
+five-role integration authority until integration completes. Its integrator is
+the current workflow's implementer in integration mode, or John if no authorized
+worker is available; the new integrator must not activate early.
 
 ## Project
 
@@ -93,7 +88,7 @@ explicit approval.
   status 0, and time out (`SMOKE_TIMEOUT_S`)
 - `docs/data-fixtures.py` — builds a broken mod overlay of each data family
   and requires every one to fail; prints `DATA FIXTURES OK` (CI runs it)
-- `docs/verify-contract.sh` — the coding contract's mechanical checks;
+- `docs/verify-contract.sh` — the engineering contract's mechanical checks;
   prints `CONTRACT CHECKS OK` or the violations (CI runs it)
 - `docs/clean-package.sh` — builds a ReleaseFast release from a tree
   holding only the `build.zig.zon` paths; prints `CLEAN PACKAGE OK`
@@ -122,7 +117,7 @@ git branch -d <branch>
   himself after closing the agent session.
 - Branch creation belongs to the `branch-bootstrap` agent, commits belong to
   the implementer, and fast-forward merge plus branch deletion belong to the
-  implementer in integration mode. Each requires John's approval through the
+  integrator. Each requires John's approval through the
   permission prompt showing the exact command.
 - The reviewer must be a fresh invocation that did not plan or implement the
   branch.
@@ -138,37 +133,36 @@ increments that each reach local `main` before the next begins.
 
 ## Hard rules
 
-The contract is `docs/coding-contract.md`; read it before touching the
+The contract is `docs/engineering-contract.md`; read it before touching the
 sim, the queries, the store or a screen. Where the code falls short, the
 code is wrong, not the rule. Known violations are listed, one entry each,
 in `docs/contract-exceptions.md` (rule 87): new code never adds to one,
 and the deliverable that fixes an entry deletes it. The key owning rule references are:
 
-1. [No partial truth — rule 1](docs/coding-contract.md#1-no-partial-truth).
-2. Determinism and core purity — rules 2 and 6, in sections 0 and 1.
-3. Import direction — rule 5, in section 1.
-4. Mutation boundary and failure atomicity — rules 7 and 11–13, in sections 1 and 2.
-5. Frontend/query/parser boundaries and view eligibility — rules 8–10 and 34,
-   in sections 1 and 4.
-6. Rule ownership and location context — rules 3 and 20–22, in sections 0 and 3.
-7. Named numbers and citations, money, time, IDs, and skills — rules 24, 54–56,
-   59, and 60, in sections 3 and 7.
-8. Persistence classification, loading, saves, and migrations — rules 45–51,
-   in section 6.
-9. Focused tests, regressions, and failure injection — rules 67–69, in section 9.
-10. [The exact gate and smoke triggers — rule 72](docs/coding-contract.md#72-the-gate-is-complete).
+1. [No partial truth — rule 1](docs/engineering-contract.md#1-no-partial-truth).
+2. [Determinism — rule 2](docs/engineering-contract.md#2-determinism-is-a-compatibility-promise)
+   and [core purity — rule 6](docs/engineering-contract.md#6-the-simulation-core-is-pure).
+3. [Import direction — rule 5](docs/engineering-contract.md#5-imports-point-down-only).
+4. [Mutation boundary — rule 7](docs/engineering-contract.md#7-commands-are-the-only-mutation-boundary)
+   and [failure atomicity — rules 11–13](docs/engineering-contract.md#11-commands-are-failure-atomic).
+5. [Frontend/query/parser boundaries — rules 8–10](docs/engineering-contract.md#8-queries-are-the-only-read-boundary-for-frontends)
+   and [view eligibility — rule 34](docs/engineering-contract.md#34-view-eligibility-is-informative-not-authoritative).
+6. [Rule ownership — rule 3](docs/engineering-contract.md#3-one-rule-one-owner-one-result)
+   and [location context — rules 20–22](docs/engineering-contract.md#20-a-game-rule-is-one-named-function).
+7. [Named numbers — rule 24](docs/engineering-contract.md#24-a-number-appears-once),
+   [money, time and IDs — rules 54–56](docs/engineering-contract.md#54-money-and-multipliers-are-integer-quantities),
+   [citations — rule 59](docs/engineering-contract.md#59-rule-data-cites-its-source)
+   and [skills — rule 60](docs/engineering-contract.md#60-skills-follow-mekhq-semantics).
+8. [Persistence, loading, saves and migrations — rules 45–51](docs/engineering-contract.md#45-every-state-field-has-a-persistence-classification).
+9. [Focused tests, regressions and failure injection — rules 67–69](docs/engineering-contract.md#67-every-rule-module-carries-focused-tests).
+10. [The exact gate and smoke triggers — rule 72](docs/engineering-contract.md#72-the-gate-is-complete).
 
-## Unresolved bootstrap matters
+## Unresolved project policy
 
-No new project policy is chosen by this draft. Questionnaire matters not settled
-by the existing project documents remain unresolved, including any additional
-privacy, secret-handling, security, or performance requirements. Existing
-contract requirements continue to apply; absence of an additional policy is not
-an exemption. John resolves open product or architectural-policy choices through
-the current workflow.
-
-The scaffold bootstrap baseline-commit procedure conflicts with the current
-prohibition on committing directly to `main`. That conflict remains unresolved;
-this draft supplies no permission to stage, commit, create a branch, or begin
-implementation. Exact path/hash approval and a separately authorized resolution
-of the commit procedure are still required.
+No additional project policy is chosen by this migration. Questionnaire matters
+not settled by existing project documents remain unresolved, including any
+additional privacy, secret-handling, security, or performance requirements.
+Existing contract requirements continue to apply; absence of an additional
+policy is not an exemption. John resolves open product or architectural-policy
+choices through the workflow. The approved baseline is already integrated; do
+not repeat bootstrap or infer authority to commit directly to `main`.

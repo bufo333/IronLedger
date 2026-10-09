@@ -1,4 +1,4 @@
-# Coding contract
+# Engineering contract
 
 The rules every change to IRON LEDGER must follow. This document is
 normative: it says what the code must do, not what it does today. Where the
@@ -943,7 +943,7 @@ TODO; it marks a placeholder value and names the data that would settle it.
 
 ### 84. Citations name durable authorities
 
-Comments cite durable authorities: `ARCHITECTURE.md` headings, coding-contract
+Comments cite durable authorities: `ARCHITECTURE.md` headings, engineering-contract
 rules, sourcebook edition with page or chapter, protocol and technical
 specifications (SQLite, POSIX, PNG), the MekHQ counterpart (rule 61), or a
 durable decision record. A named rule or heading is preferred over a line

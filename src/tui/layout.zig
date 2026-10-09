@@ -1,4 +1,4 @@
-//! Layout constants for the terminal client (docs/coding-contract.md rule
+//! Layout constants for the terminal client (docs/engineering-contract.md rule
 //! 38): the width tiers that decide how many panes a screen shows, the
 //! split ratios every screen shares, and the size of each modal. Nothing
 //! else in `src/tui` carries a column threshold or a ratio literal.

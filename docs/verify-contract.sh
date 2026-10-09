@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The mechanical checks of the coding contract (docs/coding-contract.md),
+# The mechanical checks of the engineering contract (docs/engineering-contract.md),
 # run as one gate: every check prints nothing on a clean tree, and any
 # output fails. Known violations are recorded in docs/contract-exceptions.md
 # (the C4 layering record) and docs/verify-contract.baseline (broad catches).
@@ -44,7 +44,7 @@ check "frontends calling GameState methods" \
 check "frontends reaching sim, store or domain modules" \
     "$(grep -nE 'game\.(store|state|hq_ops|contract_market|contract_control|battle|maintenance|medical|tick|planet|faction|chassis|part|force|hq|person|unit|difficulty|dataProvenance)\b' $tui | grep -vE 'pub const (GameState|Treasury) = game\.state\.(GameState|Treasury);')"
 # One rule 5 check (imports point down only): the layer map matches the
-# contract table (coding-contract.md §1), "game" resolves to src/root.zig
+# contract table (engineering-contract.md §1), "game" resolves to src/root.zig
 # (build.zig:7), and every non-std/builtin import is resolved to a source
 # path and compared against the layer of its importer. An upward edge to
 # src/sim/queries.zig is allowed only from test code, citing rule 5's test
@@ -68,7 +68,7 @@ def layer_of(p):
     if p == "src/sim/queries.zig":
         return 3  # views
     if p == "src/sim/rng.zig":
-        return 7  # random, below rules despite its path (coding-contract.md §1)
+        return 7  # random, below rules despite its path (engineering-contract.md §1)
     if p == "src/sim/state.zig":
         return 5  # state
     if p.startswith("src/sim/"):

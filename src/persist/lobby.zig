@@ -1,4 +1,4 @@
-//! The lobby facade (Stage 12, docs/coding-contract.md §1): everything a
+//! The lobby facade (Stage 12, docs/engineering-contract.md §1): everything a
 //! frontend needs from persistence — players, campaigns, settings, save
 //! and load — behind one type, so no screen reaches `store` directly.
 //! A `GameState` is handed out as an opaque session handle: the frontend

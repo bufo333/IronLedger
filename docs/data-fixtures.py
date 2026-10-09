@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Invalid-overlay fixtures (docs/coding-contract.md rule 58): each case
+"""Invalid-overlay fixtures (docs/engineering-contract.md rule 58): each case
 builds `zig build validate-data -Ddata=<dir>` against a mod made from the
 stock table with one deliberate defect, and must fail. A control overlay
 (an unchanged stock table) must pass, so a failure is the data's, not the

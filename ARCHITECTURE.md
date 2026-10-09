@@ -104,7 +104,7 @@ config, GUI scenario editing, multiplayer.
 Layered, with a strict rule: **the simulation core is pure and deterministic**
 — no I/O, no wall clock, no global state. UI and persistence sit outside.
 The layer rules, the command/query boundary and the reviewer's greps are
-normative in [`docs/coding-contract.md`](docs/coding-contract.md); this
+normative in [`docs/engineering-contract.md`](docs/engineering-contract.md); this
 section explains the shape, the contract states the rules.
 
 ```
@@ -994,14 +994,14 @@ bulk-copy MegaMek data files into the repo without deciding on licensing.
   rejects any target outside the supported set {macOS, Linux, Windows}
   (rule 65); CI also compiles for each supported target to verify the
   target-gated terminal and process code compiles on all three.
-- Style and every other coding rule: [`docs/coding-contract.md`](docs/coding-contract.md).
+- Style and every other coding rule: [`docs/engineering-contract.md`](docs/engineering-contract.md).
 
 ## 14. Directory layout
 
 ```
 build.zig, build.zig.zon
 ARCHITECTURE.md, GAMEPLAY.md, ROADMAP.md, TODO.md
-docs/            schema.sql, coding-contract.md, contract-exceptions.md,
+docs/            schema.sql, engineering-contract.md, contract-exceptions.md,
                  tui.md, modding.md, verify-contract.sh, smoke scripts
 data/            static game data (.zon): chassis, parts, planets, factions,
                  tuning; data/tables/ for rule tables

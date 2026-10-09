@@ -102,7 +102,7 @@ pub fn bar(buf: []u8, num: i64, den: i64) []const u8 {
     return buf;
 }
 
-/// The inline markup tags (docs/coding-contract.md rule 33): amber, good,
+/// The inline markup tags (docs/engineering-contract.md rule 33): amber, good,
 /// critical, selected, dim, tab, purple, and the close. Declared here
 /// once; `screen.Style.fromMarkup` maps them to styles.
 pub const marks = "agcsdtp/";

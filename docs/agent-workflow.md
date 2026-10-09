@@ -1,21 +1,49 @@
 # Agent workflow
 
-IRON LEDGER uses one thin long-lived dispatcher and four short-lived workers.
-John approves plans and local git writes. Claude never uses GitHub or a remote.
+IRON LEDGER uses one thin long-lived dispatcher and six short-lived worker roles.
+Tools share this process, `AGENTS.md`, and immutable artifacts, not session state.
+John approves plans and local Git writes. Agents never use GitHub or a remote.
+
+## Migration transition
+
+The seven roles and `.ai/plans/` activate for subsequent tasks only after this
+migration is accepted and integrated into local `main`. The scaffold-alignment
+migration itself uses both byte-identical immutable snapshots named in its
+approved artifact and the previous five-role workflow. Its integration belongs
+to a fresh implementer with current integration-mode authority, or to John if
+that worker is unavailable. Do not activate the new integrator early. Preserve
+the legacy transition snapshot at its original ignored path through review and
+integration; it may remain as a historical compatibility copy afterward.
 
 ## Roles
 
 | Agent | Lifetime | Authority |
 | --- | --- | --- |
 | `coordinator` | one interactive session | Dispatches and verifies handoffs; never plans or writes |
+| `bootstrapper` | one governance draft, freeze, or commit operation | Creates only the initial project-specific baseline under the bootstrap guide |
 | `planner` | one draft or freeze operation | Inspects and writes only ignored plan artifacts |
 | `branch-bootstrap` | one approved branch | Creates the branch from local `main`; never edits or commits |
-| `implementer` | one approved task | Edits, verifies, commits, corrects, or locally integrates |
+| `implementer` | one approved task | Edits, verifies, commits, or corrects one approved plan |
 | `reviewer` | one committed revision | Independently reviews; never writes |
+| `integrator` | one accepted exact revision | Read-only checks and prompted local fast-forward/delete; never edits |
 
-The five user-level agents are portable across repositories. IRON LEDGER's
-`CLAUDE.md`, contract, and `.claude/settings.json` supply project-specific rules
-and permissions.
+`AGENTS.md`, `docs/engineering-contract.md`, and this workflow supply shared
+project authority. Claude's project-local adapters are in `.claude/agents/`;
+Codex role configurations are in `.codex/agents/`. Claude's tracked settings
+supply permissions, and local overrides and hooks can affect enforcement.
+Verify effective role selection and permissions before dispatch. Do not edit
+user-level profiles, memory, local overrides or external hooks in this migration.
+
+## Governance bootstrap
+
+When `docs/engineering-contract.md` is absent, run only the questionnaire and
+bounded baseline procedure in `docs/governance-bootstrap.md`. Dispatch a fresh
+bootstrapper with recorded answers in draft, freeze, or commit mode. Exact path
+and SHA-256 approval is required for every deliverable. Do not dispatch ordinary
+implementation until the approved baseline is locally committed. Existing game
+history and contract protections must not be reset; unresolved commit authority
+requires an explicitly approved procedure. The baseline for this migration is
+already integrated and must not be repeated.
 
 ## Start
 
@@ -31,11 +59,11 @@ planning context itself.
 
 ## Plan artifacts
 
-Planning state is local and ignored by Git under `.claude/plans/`:
+Planning state is local and ignored by Git under `.ai/plans/`:
 
-- `.claude/plans/draft.md` is mutable. Each fresh draft planner may overwrite
+- `.ai/plans/draft.md` is mutable. Each fresh draft planner may overwrite
   it after independently inspecting the current repository.
-- `.claude/plans/approved/<branch-slug>-<base-short-sha>.md` is the immutable
+- `.ai/plans/approved/<branch-slug>-<base-short-sha>-<plan-short-sha>.md` is the immutable
   snapshot of exactly what John approved. An approved path is never overwritten
   or reused.
 
@@ -62,16 +90,31 @@ plan or inspect application code for this verification. If the evidence, tracker
 state, or approved scope does not agree, it requests a revised draft rather
 than dispatching implementation.
 
+Historical plans moved from `.claude/plans/` retain their filenames, bytes and
+old citations. The 152 approved and 17 named root drafts map to matching relative
+paths under `.ai/plans/`; the former root `draft.md` is `legacy-draft.md` to preserve
+both drafts. A per-file SHA-256 manifest and independent ignored backup record
+the migration mapping. Historical approved filenames are grandfathered; new
+freezes include the short plan hash. Relocation confers no new task approval or
+review acceptance. Both ignore rules remain for transition safety.
+
 ## Delivery
 
 1. A fresh planner inspects the repository and writes one complete draft. The
    coordinator presents that plan and its SHA-256; John approves or revises it.
 2. After approval, a fresh planner verifies the approved draft hash and freezes
-   a byte-identical snapshot under `.claude/plans/approved/`.
-3. A fresh `branch-bootstrap` creates the snapshot's branch from its exact local
-   `main` base through a permission prompt.
-4. A fresh `implementer` verifies the snapshot path, hash, metadata and branch,
-   then edits, runs the gate, and commits through a permission prompt. For an
+   a byte-identical snapshot under `.ai/plans/approved/`.
+3. The coordinator and a fresh `branch-bootstrap` verify a clean worktree,
+   current local `main`, exact approved base, and no other local implementation
+   branch. A branch/name collision stops delivery. Branch-bootstrap creates only
+   the snapshot's approved branch through the exact-command permission prompt.
+4. Dispatch names implementation, correction, or continuation mode and provides
+   the immutable artifact path, full SHA-256, branch and exact base revision.
+   A fresh `implementer` verifies the snapshot path, hash, metadata and branch,
+   then confirms a clean worktree and exact expected branch/base before editing,
+   runs the applicable full gate, inspects the full diff, stages only intended
+   files, and commits through a permission prompt. A failed gate stops delivery;
+   never weaken a rule or borrow a file from another branch to pass. For an
    approved tracker-reconciliation artifact, it also re-verifies the approved
    base, cited commits, and current TODO wording; changes only approved
    tracker/governance files; removes only the verified completed item or group;
@@ -104,11 +147,19 @@ than dispatching implementation.
 6. Confirmed findings inside approved scope go to an implementer in correction
    mode with the same snapshot. A material behavior, architecture, contract,
    governance, or scope change requires a new draft, hash, approval and frozen
-   snapshot. Every correction gets a fresh review.
-7. After acceptance, the coordinator invokes an implementer in integration
-   mode. It verifies the artifact and reviewed commit, fast-forwards local
-   `main`, and deletes the local branch through permission prompts.
-8. Claude stops. John pushes local `main` after closing Claude Code.
+   snapshot. Allow at most three in-scope correction rounds with a fresh
+   implementer and a fresh exact-commit reviewer each round. Every changed commit
+   must pass the applicable gate and receive fresh review; previous acceptance
+   does not transfer. After three rounds, stop and escalate to John rather than
+   continue corrections. Material expansion always requires a new approved plan.
+7. After acceptance, the coordinator invokes a fresh integrator. It verifies the
+   artifact, accepted exact commit, expected branch, clean worktree, unchanged base and fast-forward ancestry.
+   It makes no edits, stages nothing and runs only prompted `git checkout main`,
+   `git merge --ff-only <branch>` and `git branch -d <branch>` mutations. A stale
+   review/base or branch collision stops the handoff. Answer the contract's
+   delivery checklist before integration; integrate only the exact gated and
+   reviewed commit.
+8. Agents stop. John pushes local `main` after closing the agent session.
 
 At handoff, the coordinator records and relays the reviewer's findings and
 stated dispositions verbatim. It may verify that every finding has a
@@ -116,6 +167,12 @@ disposition, but cannot reinterpret, collapse, omit, downgrade, or report a
 finding as no findings. It cannot independently report no findings. Acceptance
 requires a reviewer report with no blocking findings and an explicit disposition
 for every finding.
+
+For this migration only, acceptance requires a fresh report with no findings,
+satisfying the configured Codex reviewer's stricter acceptance wording. An
+approved follow-up remains a finding and must never be downgraded to no findings.
+A future conflict between adapter acceptance policies requires a new approved
+plan; it does not silently alter the preserved disposition policy above.
 
 A partial implementer is resumed by task ID. If its session no longer exists,
 continuation mode verifies the same approved artifact and inspects the existing
@@ -139,3 +196,12 @@ Permissions reduce accidental authority but are not a sandbox against arbitrary
 programs launched through Bash. Durable controls are the hashed approved
 artifact, executable gates, fresh exact-commit review, fast-forward-only local
 integration, and John retaining all remote authority.
+
+Branch creation belongs only to branch-bootstrap; commits only to implementer;
+local integration and branch deletion only to integrator after the transition.
+Never commit directly to `main`. Every Git mutation above needs John's explicit
+permission prompt showing the exact command. Integrator has no implementation,
+correction, bootstrap or remote authority. Governance mode is bounded by the
+explicitly approved named-file scope; ordinary implementation cannot change
+contracts, gates, registries, CI, agent configuration, project instructions or
+memory. No role may fetch, pull, push, change remotes, or use GitHub.
