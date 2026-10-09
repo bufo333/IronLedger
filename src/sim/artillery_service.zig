@@ -142,7 +142,7 @@ const ServiceBatch = struct {
         }
         try gs.reserveLog(self.logs.items.len);
         try gs.reserveLedger(self.view.ledger.transactions.items.len);
-        try gs.bay_jobs.ensureUnusedCapacity(alloc, self.view.bay_jobs.items.len - gs.bay_jobs.items.len);
+        try gs.bay_jobs.ensureUnusedCapacity(alloc, self.view.bay_jobs.items.len -| gs.bay_jobs.items.len);
         try gs.maintenance_entries.ensureUnusedCapacity(alloc, self.view.maintenance_entries.items.len);
     }
 
@@ -223,7 +223,7 @@ fn prepareMaintenance(gs: *GameState, f: *dom.Formation, book: *maintenance.Hour
     if (covered) {
         f.last_maintenance_day = gs.clock.day_index;
         try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -types.applyBp(@divTrunc(artillery.purchasePrice(), tuning.maintenance.consumables_divisor), commander.costMultBp(gs.commander, .repair)), .category = .maintenance, .note = "artillery maintenance consumables" });
-        if (raw == 2 and gs.rng.roll2d6(.maintenance) <= tuning.maintenance.accident_target) try maintenance.injureTech(gs, tech.?.id, tuning.maintenance.accident_days_base + gs.rng.roll2d6(.medical), "artillery maintenance accident");
+        if (raw == 2 and gs.rng.roll2d6(.maintenance) <= tuning.maintenance.accident_target) try maintenance.injureTechPrepared(gs, tech.?.id, tuning.maintenance.accident_days_base + gs.rng.roll2d6(.medical), "artillery maintenance accident");
     }
 }
 
@@ -304,10 +304,261 @@ pub fn completeJob(gs: *GameState, index: usize) !bool {
         if (outcome == .fault or outcome == .botch) try damageGear(view, f, true);
         if (outcome == .botch) changeQuality(f, .drop);
         if (original.cost > 0) try view.postTreasury(.{ .hq = original.hq }, .{ .day = view.clock.day_index, .amount = -original.cost, .category = .maintenance, .hq = original.hq, .note = "artillery depot labor" });
-        if (view.rng.roll2d6(.medical) == 2) try maintenance.injureTech(view, p.id, tuning.maintenance.bay_accident_days_base + view.rng.roll2d6(.medical), "artillery bay accident");
+        if (view.rng.roll2d6(.medical) == 2) try maintenance.injureTechPrepared(view, p.id, tuning.maintenance.bay_accident_days_base + view.rng.roll2d6(.medical), "artillery bay accident");
         try view.log(.construction, .{ .hq = original.hq }, "[artillery] formation {d} chassis repair completed: {s}", .{ @intFromEnum(f.id), @tagName(outcome) });
     }
     try batch.prepareCommit(gs);
     batch.commit(gs);
     return outcome != .redo;
+}
+
+/// Accident preparation covers injury, awards and replacements across both
+/// asset populations before committing personnel, references, streams or logs.
+pub fn injureTechAtomic(gs: *GameState, id: types.PersonId, days: u32, cause: []const u8) !void {
+    var batch = try ServiceBatch.init(gs);
+    defer batch.deinit();
+    try maintenance.injureTechPrepared(&batch.view, id, days, cause);
+    try batch.prepareCommit(gs);
+    batch.commit(gs);
+}
+
+/// Aggregate physical-site repair stock in canonical carrier/slot order. Field
+/// demand is replacement gear plus the one weekly armor patch; structure is
+/// reported separately for the shared actual-HQ component ledger.
+pub fn addRepairDemand(alloc: std.mem.Allocator, gs: *GameState, site: types.Site, company: ?types.ForceId, structural: bool, need: *std.StringArrayHashMapUnmanaged(u32)) !void {
+    for (gs.artillery_formations.values()) |*f| {
+        if (operations.hasJob(gs, f.id)) continue;
+        const actual = operations.operationSite(gs, f) orelse continue;
+        if (!std.meta.eql(actual, site)) continue;
+        if (company) |co| if (f.placement != .company or f.placement.company != co) continue;
+        for (rules.descriptors, f.slots) |d, slot| {
+            const tier = unit.repairTier(d.class, slot.condition) orelse continue;
+            if ((tier == .depot) != structural) continue;
+            if (!structural and slot.condition != .destroyed and slot.condition != .missing) continue;
+            const entry = try need.getOrPut(alloc, d.spare_key);
+            if (!entry.found_existing) entry.value_ptr.* = 0;
+            entry.value_ptr.* += 1;
+        }
+        if (!structural and f.armor_pct < dom.intact_condition_pct) {
+            const entry = try need.getOrPut(alloc, "armor");
+            if (!entry.found_existing) entry.value_ptr.* = 0;
+            entry.value_ptr.* += 1;
+        }
+    }
+}
+
+test "one mechanic shares exact conventional artillery hours and actual HQ teams" {
+    const founding = @import("founding.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, false);
+    const f = gs.artillery_formations.getPtr(id).?;
+    const tech_id = f.tech;
+    var tech = gs.person(tech_id).?;
+    const ordinary = try gs.addUnit("SCP-1N");
+    gs.unit(ordinary).?.tech = tech.id;
+    const demand = maintenance.techWeeklyHoursFor(&gs, tech, gs.unit(ordinary).?) + techHours(&gs, f);
+    try std.testing.expectEqual(demand, maintenance.techWeeklyLoadHours(&gs, tech.id));
+    const far = try founding.foundHq(&gs, "Remote", .regional, "skye");
+    const without_team = maintenance.techWeeklyHoursAvailable(&gs, tech);
+    for (0..tuning.person.astechs_per_tech_full_rate) |_| {
+        const assistant = try gs.hirePerson("Remote", "Assistant", .astech);
+        gs.person(assistant).?.posted_hq = far;
+    }
+    tech = gs.person(tech_id).?;
+    try std.testing.expectEqual(without_team, maintenance.techWeeklyHoursAvailable(&gs, tech));
+    for (gs.people.values()) |*p| if (p.role == .astech) {
+        p.posted_hq = gs.seat();
+    };
+    try std.testing.expect(maintenance.techWeeklyHoursAvailable(&gs, tech) > without_team);
+    var book: maintenance.HourBook = .{ .alloc = std.testing.allocator };
+    defer book.map.deinit(std.testing.allocator);
+    try book.map.put(std.testing.allocator, tech.id, maintenance.techWeeklyHoursFor(&gs, tech, gs.unit(ordinary).?));
+    try std.testing.expect(try book.spend(&gs, tech, maintenance.techWeeklyHoursFor(&gs, tech, gs.unit(ordinary).?), 0));
+    try std.testing.expect(!try book.spend(&gs, tech, techHours(&gs, f), 0));
+    var repairs: maintenance.HourBook = .{ .alloc = std.testing.allocator };
+    defer repairs.map.deinit(std.testing.allocator);
+    try repairs.map.put(std.testing.allocator, tech.id, 0);
+    f.slots[@intFromEnum(rules.Slot.communications)].condition = .damaged;
+    try runWeekly(&gs, &book, &repairs);
+    try std.testing.expect(f.last_maintenance_day == null);
+    try std.testing.expectEqual(unit.PartCondition.damaged, f.slots[@intFromEnum(rules.Slot.communications)].condition);
+    const digest = @import("digest.zig");
+    const checkpoint = digest.stateHash(&gs);
+    try runWeekly(&gs, &book, &repairs);
+    try std.testing.expectEqual(checkpoint, digest.stateHash(&gs));
+}
+
+fn depotFixtureForTest(gs: *GameState) !types.ArtilleryFormationId {
+    const id = try operations.fixtureForTest(gs, false);
+    const hq = gs.hqs.getPtr(gs.seat()).?;
+    for (hq.facilities.items) |*facility| if (facility.kind == .mek_bay) {
+        facility.level = part.find(rules.descriptor(.chassis).spare_key).?.fab_min_bay;
+    };
+    hq.staff_assigned = hq.staffRequired().total();
+    gs.artillery_formations.getPtr(id).?.slots[@intFromEnum(rules.Slot.chassis)].condition = .destroyed;
+    try gs.addStock(.{ .hq = gs.seat() }, rules.descriptor(.chassis).spare_key, 1);
+    return id;
+}
+
+test "local field and structural demand feeds existing ledgers without minting ammunition" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try depotFixtureForTest(&gs);
+    const f = gs.artillery_formations.getPtr(id).?;
+    f.slots[@intFromEnum(rules.Slot.long_tom_bin_1)].condition = .missing;
+    f.armor_pct = 90;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const field = try hq_ops.spareDemand(arena.allocator(), &gs, .{ .hq = gs.seat() });
+    try std.testing.expectEqual(@as(usize, 2), field.len);
+    try std.testing.expectEqualStrings("artillery_spares", field[0].key);
+    try std.testing.expectEqual(@as(u32, 1), field[0].short);
+    const structural = try hq_ops.componentDemand(arena.allocator(), &gs, gs.seat(), null);
+    try std.testing.expectEqual(@as(usize, 1), structural.len);
+    try std.testing.expectEqual(@as(u32, 0), structural[0].short);
+    const quote = try repairQuote(&gs, f);
+    _ = try commands.execute(&gs, .{ .repair_artillery = id });
+    try std.testing.expectEqual(quote.duration_days, gs.bay_jobs.items[0].duration_days);
+    try std.testing.expectEqual(id, (try hq_ops.bayTarget(&gs, &gs.bay_jobs.items[0])).artillery);
+    try std.testing.expectEqual(@as(usize, 0), (try hq_ops.componentDemand(arena.allocator(), &gs, gs.seat(), null)).len);
+    try std.testing.expectError(error.ArtilleryBayJob, artillery.sell(&gs, id));
+    gs.person(f.tech).?.leave_until_day = 100;
+    const digest = @import("digest.zig");
+    const waiting = digest.stateHash(&gs);
+    try std.testing.expect(!jobCanWork(&gs, &gs.bay_jobs.items[0]));
+    try std.testing.expect(!try completeJob(&gs, 0));
+    try std.testing.expectEqual(waiting, digest.stateHash(&gs));
+    gs.person(f.tech).?.leave_until_day = null;
+    gs.clock.day_index = quote.duration_days;
+    gs.bay_jobs.items[0].started_day = 0;
+    gs.bay_jobs.items[0].done_day = quote.duration_days;
+    var tries: usize = 0;
+    while (!try completeJob(&gs, 0)) : (tries += 1) {
+        try std.testing.expect(tries < 100);
+        gs.clock.day_index = gs.bay_jobs.items[0].done_day.?;
+    }
+    try std.testing.expectEqual(unit.PartCondition.ok, f.slots[@intFromEnum(rules.Slot.chassis)].condition);
+    for (rules.descriptors, f.slots) |d, s| if (d.family != null) {
+        try std.testing.expectEqual(@as(u16, 0), s.rounds);
+    };
+}
+
+test "weekly preparation accident queue and completion refuse every allocation failure unchanged then retry" {
+    const digest = @import("digest.zig");
+    for ([_]enum { weekly, accident, queue, completion }{ .weekly, .accident, .queue, .completion }) |action| {
+        var failure_index: usize = 0;
+        var failed = false;
+        while (true) : (failure_index += 1) {
+            var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+            defer outer.deinit();
+            var gs = GameState.init(outer.allocator(), .{ .seed = 625 });
+            const id = try depotFixtureForTest(&gs);
+            if (action == .completion) {
+                _ = try queueRepair(&gs, id);
+                gs.bay_jobs.items[0].started_day = 0;
+                gs.clock.day_index = gs.bay_jobs.items[0].duration_days;
+                gs.bay_jobs.items[0].done_day = gs.clock.day_index;
+            }
+            const before = digest.stateHash(&gs);
+            gs.arena.state = .{};
+            var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = failure_index });
+            gs.arena.child_allocator = failing.allocator();
+            var service: maintenance.HourBook = .{ .alloc = outer.allocator() };
+            var repairs: maintenance.HourBook = .{ .alloc = outer.allocator() };
+            const result: anyerror!void = switch (action) {
+                .weekly => runWeekly(&gs, &service, &repairs),
+                .accident => injureTechAtomic(&gs, gs.artillery_formations.get(id).?.tech, 3, "test accident"),
+                .queue => blk: {
+                    _ = queueRepair(&gs, id) catch |err| break :blk err;
+                    break :blk {};
+                },
+                .completion => blk: {
+                    _ = completeJob(&gs, 0) catch |err| break :blk err;
+                    break :blk {};
+                },
+            };
+            if (result) |_| break else |err| {
+                try std.testing.expectEqual(error.OutOfMemory, err);
+                try std.testing.expectEqual(before, digest.stateHash(&gs));
+                failed = true;
+                gs.arena.child_allocator = outer.allocator();
+                gs.arena.state = .{};
+                switch (action) {
+                    .weekly => try runWeekly(&gs, &service, &repairs),
+                    .accident => try injureTechAtomic(&gs, gs.artillery_formations.get(id).?.tech, 3, "test accident"),
+                    .queue => _ = try queueRepair(&gs, id),
+                    .completion => _ = try completeJob(&gs, 0),
+                }
+                try std.testing.expect(before != digest.stateHash(&gs));
+            }
+        }
+        try std.testing.expect(failed);
+    }
+}
+
+test "maintenance bin loss and repair retain exact magazines and replacement stock" {
+    const rng_mod = @import("rng.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, false);
+    const f = gs.artillery_formations.getPtr(id).?;
+    f.quality = .a;
+    const bin = @intFromEnum(rules.Slot.long_tom_bin_1);
+    f.slots[bin] = .{ .condition = .damaged, .rounds = 3 };
+    var seed: u64 = 0;
+    while (true) : (seed += 1) {
+        var candidate = rng_mod.Rng.init(seed);
+        if (candidate.roll2d6(.maintenance) == 2 and candidate.random(.maintenance).uintLessThan(u32, rules.descriptors.len - 1) == bin - 1) break;
+    }
+    gs.rng = rng_mod.Rng.init(seed);
+    var service: maintenance.HourBook = .{ .alloc = std.testing.allocator };
+    defer service.map.deinit(std.testing.allocator);
+    var repairs: maintenance.HourBook = .{ .alloc = std.testing.allocator };
+    defer repairs.map.deinit(std.testing.allocator);
+    try repairs.map.put(std.testing.allocator, f.tech, 0);
+    try runWeekly(&gs, &service, &repairs);
+    try std.testing.expectEqual(unit.PartCondition.destroyed, f.slots[bin].condition);
+    try std.testing.expectEqual(@as(u16, 0), f.slots[bin].rounds);
+    try std.testing.expectEqual(@as(?u32, 0), f.last_maintenance_day);
+    var loss_log = false;
+    for (gs.event_log.items) |entry| if (std.mem.indexOf(u8, entry.text, "lost 3 rounds") != null) {
+        loss_log = true;
+    };
+    try std.testing.expect(loss_log);
+    // Directly exercise the weekly field adapter on a prepared view: a local
+    // replacement repairs condition only. Remote stock provides no substitute.
+    const far = try @import("founding.zig").foundHq(&gs, "Remote", .regional, "skye");
+    try gs.addStock(.{ .hq = far }, "artillery_spares", 1);
+    const tech = try gs.hirePerson("Replacement", "Mechanic", .tech_mechanic);
+    _ = try crew.assignTech(&gs, .{ .formation = id, .person = tech });
+    gs.person(tech).?.weekly_hours = 100;
+    var field_book: maintenance.HourBook = .{ .alloc = std.testing.allocator };
+    defer field_book.map.deinit(std.testing.allocator);
+    try prepareFieldRepairs(&gs, f, &field_book);
+    try std.testing.expectEqual(unit.PartCondition.destroyed, f.slots[bin].condition);
+    try gs.addStock(.{ .hq = gs.seat() }, "artillery_spares", 1);
+    try prepareFieldRepairs(&gs, f, &field_book);
+    try std.testing.expectEqual(unit.PartCondition.ok, f.slots[bin].condition);
+    try std.testing.expectEqual(@as(u16, 0), f.slots[bin].rounds);
+    try std.testing.expectEqual(@as(u32, 0), gs.stockCount(.{ .hq = gs.seat() }, "artillery_spares"));
+    try std.testing.expectEqual(@as(u32, 1), gs.stockCount(.{ .hq = far }, "artillery_spares"));
+}
+
+test "accidents replace shared conventional and artillery references with one local capacity owner" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, true);
+    const f = gs.artillery_formations.get(id).?;
+    const replacement = try gs.hirePerson("Spare", "Mechanic", .tech_mechanic);
+    gs.person(replacement).?.assigned_force = f.placement.company;
+    gs.person(replacement).?.weekly_hours = 100;
+    const vehicle = try gs.addUnit("SCP-1N");
+    try @import("toe.zig").placeUnitInCompanyPool(&gs, vehicle, f.placement.company);
+    gs.unit(vehicle).?.tech = f.tech;
+    try maintenance.injureTech(&gs, f.tech, 3, "shared accident");
+    try std.testing.expectEqual(person.Status.wounded, gs.person(f.tech).?.status);
+    try std.testing.expectEqual(replacement, gs.unit(vehicle).?.tech);
+    try std.testing.expectEqual(replacement, gs.artillery_formations.get(id).?.tech);
+    try std.testing.expectEqual(maintenance.techWeeklyHoursFor(&gs, gs.person(replacement).?, gs.unit(vehicle).?) + techHours(&gs, gs.artillery_formations.getPtr(id).?), maintenance.techWeeklyLoadHours(&gs, replacement));
 }

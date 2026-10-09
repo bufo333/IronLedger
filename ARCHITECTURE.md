@@ -214,7 +214,12 @@ cheap, copyable, and impossible to mix up.
   Mobile Long Tom `HullInstance`, with an explicit artillery catalogue and
   nullable ownership closing days. It is separate from `Unit`: acquisition,
   direct company attachment, HQ pools/freight and carrying/resale accounting
-  are live. Operational state and battle effects have separate later owners.
+  are live. P2g adds individual crew, condition/magazines, local service,
+  reloads and shared maintenance/depot repair in schema 62.
+  [Artillery operations policy](docs/p2-artillery-operations-design.md) owns
+  those project adaptations; combat effects remain P2h. Existing personnel,
+  assignment and shared bay views consume typed owners. Dedicated artillery
+  panels, parser verbs and TUI controls remain P2i.
   [Artillery acquisition policy](docs/p2-artillery-acquisition-design.md) defines
   the monthly local offers and declared transport/accounting abstractions.
 - **Part** — static part definition (catalog) plus fungible quantities in site

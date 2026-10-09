@@ -204,7 +204,8 @@ pub fn findFreeTech(gs: *GameState, role: person_mod.Role, company: types.ForceI
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
-        if (p.role != role or !p.isAvailable(gs.clock.day_index) or p.posted_hq != .none) continue;
+        if (p.role != role or !personnel.availableForDuty(p, gs.clock.day_index) or p.posted_hq != .none or artillery_crew.isSeated(gs, p.id)) continue;
+        if (!artillery_crew.personPresent(gs, p, sites.siteForForce(gs, company))) continue;
         if (company != .none and gs.companyOf(p.assigned_force) != company) continue;
         const avail = techWeeklyHoursAvailable(gs, p);
         const load = techWeeklyLoadHours(gs, p.id);
@@ -338,6 +339,11 @@ pub fn runWeeklyService(gs: *GameState) !void {
 /// free tech swapped in if one exists — logged either way, surfaced in the
 /// end-turn checklist as an open slot otherwise.
 pub fn injureTech(gs: *GameState, tech_id: types.PersonId, days: u32, cause: []const u8) !void {
+    try artillery_service.injureTechAtomic(gs, tech_id, days, cause);
+}
+
+/// Accident effects on an isolated prepared service view; caller owns commit.
+pub fn injureTechPrepared(gs: *GameState, tech_id: types.PersonId, days: u32, cause: []const u8) !void {
     const t = gs.person(tech_id) orelse return;
     if (t.status != .active) return;
     // The accident's size sets the wound: a short spell is a
@@ -346,6 +352,33 @@ pub fn injureTech(gs: *GameState, tech_id: types.PersonId, days: u32, cause: []c
     _ = try @import("medical.zig").inflict(gs, tech_id, .accident, severity, cause);
     const company = gs.companyOf(t.assigned_force);
 
+    const ids = try replacementOrder(gs.scratch(), gs, tech_id);
+    defer gs.scratch().free(ids);
+    const result = replaceTechReferences(gs, tech_id, ids);
+    if (result.swapped + result.open > 0) {
+        try gs.log(.medical, .{ .company = company }, "[roster] {d} hull(s) reassigned to free techs, {d} left without a tech", .{ result.swapped, result.open });
+    }
+}
+
+pub const ReplacementCount = struct { swapped: u32 = 0, open: u32 = 0 };
+
+/// Stable artillery identity order prepared before an accident's commit tail.
+/// Conventional assignments retain their existing iteration order.
+pub fn replacementOrder(alloc: std.mem.Allocator, gs: *GameState, tech_id: types.PersonId) ![]types.ArtilleryFormationId {
+    var ids: std.ArrayListUnmanaged(types.ArtilleryFormationId) = .empty;
+    errdefer ids.deinit(alloc);
+    for (gs.artillery_formations.values()) |f| if (f.tech == tech_id) try ids.append(alloc, f.id);
+    std.mem.sort(types.ArtilleryFormationId, ids.items, {}, struct {
+        fn less(_: void, a: types.ArtilleryFormationId, b: types.ArtilleryFormationId) bool {
+            return @intFromEnum(a) < @intFromEnum(b);
+        }
+    }.less);
+    return ids.toOwnedSlice(alloc);
+}
+
+/// Allocation-free replacement across both populations, using the same actual
+/// local qualification and combined spare-capacity owners as weekly service.
+pub fn replaceTechReferences(gs: *GameState, tech_id: types.PersonId, ids: []const types.ArtilleryFormationId) ReplacementCount {
     var swapped: u32 = 0;
     var open: u32 = 0;
     var it = gs.units.iterator();
@@ -362,9 +395,17 @@ pub fn injureTech(gs: *GameState, tech_id: types.PersonId, days: u32, cause: []c
             open += 1;
         }
     }
-    if (swapped + open > 0) {
-        try gs.log(.medical, .{ .company = company }, "[roster] {d} hull(s) reassigned to free techs, {d} left without a tech", .{ swapped, open });
+    for (ids) |id| {
+        const f = gs.artillery_formations.getPtr(id).?;
+        if (artillery_crew.bestMechanic(gs, f, true)) |replacement| {
+            f.tech = replacement;
+            swapped += 1;
+        } else {
+            f.tech = .none;
+            open += 1;
+        }
     }
+    return .{ .swapped = swapped, .open = open };
 }
 
 /// Weekly repair pass: field work by the hull's own tech from their spare

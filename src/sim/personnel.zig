@@ -1197,3 +1197,46 @@ test "severanceOwed wraps person.severance with a share; depart posts the same a
     try std.testing.expectEqual(expected, paid);
     try std.testing.expectEqual(funds_before - paid, gs.funds);
 }
+
+test "artillery departure advice and commands agree at home afield and return transit" {
+    const operations = @import("artillery_operations.zig");
+    const queries = @import("queries.zig");
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, true);
+    const f = gs.artillery_formations.get(id).?;
+    const far = try founding.foundHq(&gs, "Remote", .regional, "skye");
+    const other = try gs.createForce("Other", .company, .none);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expect(!artilleryDepartureBlocked(&gs, f.crew[0]));
+    try std.testing.expect(canPostToHq(&gs, f.crew[0], far) == null);
+    for ([_]bool{ false, true }) |returning| {
+        gs.force(f.placement.company).?.location_planet = "galatea";
+        gs.force(f.placement.company).?.return_eta_day = if (returning) 10 else null;
+        for ([_]types.PersonId{ f.crew[0], f.tech }) |person| {
+            const before = digest.stateHash(&gs);
+            try std.testing.expect(artilleryDepartureBlocked(&gs, person));
+            try std.testing.expectEqual(PostBlock.deployed, canPostToHq(&gs, person, far).?);
+            try std.testing.expectError(error.PersonDeployed, commands.execute(&gs, .{ .post_person = .{ .person = person, .hq = far } }));
+            try std.testing.expectError(error.PersonDeployed, commands.execute(&gs, .{ .transfer_person = .{ .person = person, .to_force = other } }));
+            for (try queries.hqChoices(a, &gs, person)) |row| try std.testing.expect(!row.eligible);
+            for (try queries.companyChoices(a, &gs, .person, @intFromEnum(person))) |row| {
+                try std.testing.expectEqual(other, row.sel.company);
+                try std.testing.expect(!row.eligible);
+            }
+            const actions = try queries.personActions(a, &gs, person);
+            try std.testing.expect(!actions.can_post and !actions.can_transfer);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+        }
+    }
+    gs.force(f.placement.company).?.location_planet = null;
+    gs.force(f.placement.company).?.return_eta_day = null;
+    _ = try commands.execute(&gs, .{ .post_person = .{ .person = f.crew[0], .hq = far } });
+    try std.testing.expectEqual(types.PersonId.none, gs.artillery_formations.get(id).?.crew[0]);
+    try std.testing.expectEqual(far, gs.person(f.crew[0]).?.posted_hq);
+    _ = try commands.execute(&gs, .{ .transfer_person = .{ .person = f.tech, .to_force = other } });
+    try std.testing.expectEqual(types.PersonId.none, gs.artillery_formations.get(id).?.tech);
+}

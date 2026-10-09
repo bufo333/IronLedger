@@ -7,8 +7,9 @@ owned by the pinned P2e catalogue. Campaign maintenance, medical, payroll,
 procurement and transport formulas retain their existing owners.
 
 Artillery combat effects, firing expenditure, battle damage and AAR participation
-belong to P2h. Artillery textual verbs, query panels and TUI controls belong to
-P2i. Battle armor remains deferred beyond the current 3025 era.
+belong to P2h. Dedicated artillery panels, parser verbs and TUI controls belong to
+P2i. Existing personnel, assignment and shared bay views expose artillery
+references through typed owners within P2g. Battle armor remains deferred beyond the current 3025 era.
 
 ## Crew and personnel policy
 
@@ -50,7 +51,7 @@ P2i. Battle armor remains deferred beyond the current 3025 era.
   Mechanics are chosen by most spare shared hours, then skill, then ID.
   Accident replacement may replace the injured mechanic, with a prepared log.
   Empty, recovering and unavailable seats remain distinguishable to the owner.
-- Extend existing `auto_assign` and `crew_company` behavior to attached
+- Existing `auto_assign` and `crew_company` behavior includes attached
   artillery. `crew_company` uses the same actual HQ hiring hall, existing
   candidate/signing-bonus and pooled-astech rules. No free generated vehicle
   crew or mechanic appears. The manning table adds four vehicle crew and one
@@ -72,10 +73,9 @@ Keep one formation plus one HullInstance, outside Unit and ordinary lance
 rosters. Never manufacture a temporary Unit surrogate. Placement remains the
 P2f tagged union; attached position derives from company posture.
 
-Add named owners for `operationSite`, `crewEligibility`, `serviceCapability`,
-`reloadQuote`, `repairQuote` and `operationalReadiness`; queries/commands/ticks
-and validators consume them. Proposed names are implementation names, not
-claims that these functions already exist.
+`operationSite`, `crewEligibility`, `serviceCapability`, `reloadQuote`,
+`repairQuote` and `operationalReadiness` own their named capabilities;
+queries, commands, ticks and validators consume those answers.
 
 - Pool: actual pool HQ stock and facilities; mechanic-only maintenance,
   reload and repairs are permitted, but no operating seats or firing readiness.
@@ -107,9 +107,9 @@ claims that these functions already exist.
 
 ## Condition, maintenance, repairs and shared hours
 
-Persist quality using `types.Quality`, armor percentage, optional last-covered
+Formations persist quality using `types.Quality`, armor percentage, optional last-covered
 maintenance day, a fixed condition per canonical equipment slot, and magazines.
-Define a canonical ordered slot descriptor for the chassis plus each individual
+The domain owns a canonical ordered slot descriptor for the chassis plus each individual
 pinned catalogue mount, expanding count into stable slots: main gun, each of
 four MGs, each of four Long Tom bins, the MG bin, communications and hitch.
 All start intact. Slot order is persisted compatibility; loading rejects any
@@ -119,9 +119,8 @@ ammo bins use existing `SlotClass` and `PartCondition` meanings.
 - Reuse `unit.maintenanceHours(.vehicle, catalogue_tons)`, maintenance quality
   and technician-skill multipliers, `Person.weekly_hours`, existing astech
   throughput, `qualityDrift`, target/field/uncovered modifiers, 2d6 and existing
-  accident/medical rules. Extract parameterized pure helpers in the existing
-  maintenance owner where its Unit-specific signature prevents reuse; retain
-  existing constants in their current owner. Do not copy formulas.
+  accident/medical rules through parameterized helpers in the existing
+  maintenance owner. Existing constants retain their current owner.
 - `techWeeklyLoadHours` includes ordinary hulls and serviceable-location
   artillery. Shared maintenance and field-repair passes each use one HourBook
   across both populations; no second artillery budget. Ordinary maintenance
@@ -148,7 +147,7 @@ ammo bins use existing `SlotClass` and `PartCondition` meanings.
   existing damaged-slot hours/labor rule, no replacement stock; destroyed or
   missing equipment consumes one matching spare plus destroyed-slot hours/
   labor. MG replacement uses the existing `mg` stock key. The main gun,
-  communications, hitch and ammo-bin repairs consume a proposed common
+  communications, hitch and ammo-bin repairs consume a common
   `artillery_spares` service kit. This kit is an abstract rebuilding material
   unit, not an externally specified replacement weapon or equipment mass.
   Repairing a bin never refills it. Process canonical slot order, then one
@@ -157,7 +156,7 @@ ammo bins use existing `SlotClass` and `PartCondition` meanings.
 - Chassis damage is depot-only. Reuse the heavy vehicle chassis component
   selected through `part.componentForSlotClass` and the verified 75-ton class,
   existing depot duration/labor/repair-result rules, and the actual HQ's bay
-  queue. Extend BayJob with an artillery target and `artillery_depot_repair`
+  queue. BayJob carries an artillery target and `artillery_depot_repair`
   kind; existing kinds retain Unit semantics. Artillery jobs compete in the
   same queue/slot capacity. Never create parallel free bays.
 - Depot work restores the chassis through the existing clean/fault/redo/botch
@@ -177,10 +176,10 @@ ammo bins use existing `SlotClass` and `PartCondition` meanings.
 
 ## Ammunition and supply policy
 
-The following capacities and market units are proposed game abstractions;
+The following capacities and market units are project game abstractions;
 P2e proves mount count, not rounds per bin or these supply rules.
 
-| Proposed policy | Exact value |
+| Project policy | Exact value |
 |---|---|
 | Long Tom capacity | 5 rounds per bin, four bins, total 20 |
 | MG capacity | 100 rounds in its one bin |
@@ -188,7 +187,7 @@ P2e proves mount count, not rounds per bin or these supply rules.
 | `ammo_artillery_mg` stock unit | sealed 100-round reload; 1 shipping/storage ton; 500 C-bills; rarity common; availability B |
 | `artillery_spares` stock unit | one rebuilding kit; 1 shipping/storage ton; 25,000 C-bills; rarity uncommon; availability D |
 
-All three proposed parts are Inner Sphere, introduced in the catalogue's
+All three parts are Inner Sphere, introduced in the catalogue's
 verified 2602 year, and `mount=.none` (not MekLab equipment). Their metadata is
 project market policy, not a new physical catalogue fact. Their cost literals
 live only in their data rows; capacity, crew count, maintenance-age limit and
@@ -253,7 +252,7 @@ MG/armor/component costs via `part.cost`, never copy their values.
   proceeds occur. Use the existing shared hull resale owner with actual
   artillery quality and condition: armor percentage, capped at **50%** when
   chassis is non-intact, with the existing pricing semantics. This cap is a
-  proposed named project valuation constant; intact C-grade equals P2f price.
+  named project valuation constant; intact C-grade equals P2f price.
   Optional equipment/bin condition does not create another sale discount.
   Liquidation-backed credit calls that same sale-value owner once.
 - HQ sale is blocked by pooled/freight carriers and artillery bay jobs through
@@ -262,17 +261,17 @@ MG/armor/component costs via `part.cost`, never copy their values.
 
 ## Commands, orchestration and atomicity
 
-Add typed commands `assign_artillery_crew {formation,seat,person}`,
+Typed commands are `assign_artillery_crew {formation,seat,person}`,
 `unassign_artillery_crew {formation,seat}`,
 `assign_artillery_tech {formation,person}`,
 `unassign_artillery_tech {formation}`,
 `reload_artillery {formation,family}` and
 `repair_artillery {formation}` (request actual-HQ chassis depot work).
-Reuse existing typed auto-assignment/hiring and acquisition/placement commands.
-Return the exact formation/person/site identity and actual loaded-package
+Existing typed auto-assignment/hiring and acquisition/placement commands are reused.
+Results return the exact formation/person/site identity and actual loaded-package
 counts/job outcome as appropriate. Expected reasons have canonical
-`cli.errorText` sentences; this is error presentation only. No artillery parser
-verbs, query panels or TUI controls are added before P2i.
+`cli.errorText` sentences; this is error presentation only. Dedicated artillery parser verbs, panels and TUI controls remain P2i;
+existing personnel, assignment and shared bay views remain truthful within P2g.
 
 `artillery_crew` owns seat/location/exclusivity and assignment preparation;
 `artillery_operations` owns capabilities, reloads and condition queries;
@@ -293,7 +292,7 @@ in crew/personnel/hall hiring owners, not a generic transaction framework.
 
 Weekly artillery maintenance plus its automatic field repairs is prepared
 for the entire artillery population from the post-conventional state, in
-stable ID order, before committing any artillery item. Refactor the weekly entry point so it
+stable ID order, before committing any artillery item. The weekly entry point
 prepares shared ordinary/artillery maintenance and repair allocations in their
 stated order; commit the artillery portion only after its full preparation.
 The shared HourBooks carry actual ordinary-unit spending/reservations into
@@ -309,29 +308,30 @@ retry semantics and tests. No unrelated tick retry redesign is authorized.
 ## Persistence and migration
 
 Schema **61→62** is transactional. Retain existing acquisition fields and
-identities. Add required operational fields to artillery representation:
+identities. The artillery representation persists:
 quality, armor, nullable last-covered maintenance day, nullable technician;
 normalized crew rows keyed by formation+seat; normalized canonical slot rows
-with condition and an ammo count only for ammo slots. Add nullable artillery
-target to BayJob with the new kind, enforcing mutually exclusive targets for
-all job kinds. No artillery formation/person/slot ID allocator is needed;
+with condition and an ammo count only for ammo slots. BayJob carries a nullable artillery
+target with the new kind, enforcing mutually exclusive targets for
+all job kinds. No additional formation/person/slot ID allocator is needed;
 slots/seats have stable enum identity, people use the existing counter.
-Add the nullable global last-artillery-service-day checkpoint to GameState.
+GameState persists the nullable global last-artillery-service-day checkpoint.
 
 Every formation, including sold history, has exactly the canonical crew and
 slot row set; unfilled Person references are SQL NULL, not fabricated IDs.
 New tables have campaign/formation/Person FKs, primary/unique keys, enum,
 integer-type and range checks; the bay table is rebuilt with appropriate
-new target constraints, preserving all existing jobs. Register new tables in
-the store clear/delete/overwrite registry and DDL parity test. The store facade
+new target constraints, preserving all existing jobs. The store clear/delete/overwrite registry and DDL parity test include these
+tables. The store facade
 owns transactions; existing artillery_store encodes/decodes its subsystem.
 No second save path or new persistence-module gate exception.
 
 For every schema-61 formation, migrate to intact, armor 100%, quality C,
 empty crew/tech/magazines, no last maintenance and no artillery job, regardless
 of pooled/attached/freight/sold placement. Preserve P2f placement, money, hull,
-provenance, offers, RNG and every existing person/job. Initialize checkpoint
-to NULL. No retroactive costs, free supplies or random draws. Current stores
+provenance, offers, RNG and every existing person/job. The checkpoint begins absent. Its nullable GameState day is encoded in the
+integer meta table as -1 (day zero remains a real checkpoint). Migration applies
+no retroactive costs, free supplies or random draws. Current stores
 require exact row completeness even for empty crews/magazines; defaults are
 legal only at the version boundary. Partially upgraded legacy payloads must
 match the explicit deterministic defaults or be rejected; never overwrite
@@ -349,3 +349,27 @@ company subsequently departs remains a valid unavailable assignment, never
 remote service; saved physical absence alone is not corruption. Static descriptors/capacity,
 readiness/location/quotes are derived; preparation and HourBooks are scratch.
 
+
+## Existing-view compatibility
+
+`crew.operatingAssignment` distinguishes an ordinary Unit pilot from an
+artillery formation and named operating seat. `crew.technicianTargets` lists
+ordinary Unit targets followed by artillery formation targets in ascending
+identity order; equal numeric IDs across the two kinds remain distinct. Retained
+wounded, captive, training or absent assignments remain assignments. The whole
+outfit unassigned pool excludes every live asset reference; a company's combat
+pool excludes operating seats while retaining its own membership semantics.
+
+Existing People and person records format those answers. Ordinary crew pickers
+consume the same `crew.assignBlock` as the command, so artillery occupants are
+ineligible until explicitly unassigned. Personnel company/HQ pickers and person
+actions consume the departure owner for deployed, idle-afield and return-transit
+artillery occupants. These are advisory views; commands revalidate before mutation.
+
+`hq_ops.bayTarget` identifies Unit, formation or fabricated item by BayJob kind.
+HQ detail and bay listings share one formatter, displaying the actual target,
+queue timing and service-owner waiting reason at the job HQ. Facility rows keep
+their typed facility identities; all other rows retain null action entries.
+Dynamic names, catalogue and item labels pass through validated plain-text
+rendering. Queries propagate allocation/invariant failures and consume no RNG.
+These existing views add no artillery action, parser verb or dedicated panel.

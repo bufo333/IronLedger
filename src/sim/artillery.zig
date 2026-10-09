@@ -99,7 +99,6 @@ pub fn buy(gs: *GameState, request: @FieldType(commands.Command, "buy_artillery"
     if (!marketEligible(gs, hq) or !offer.available or offer.year != gs.clock.date.year or offer.month != gs.clock.date.month) return error.ArtilleryUnavailable;
     const price = purchasePrice();
     if (hq.funds < price) return error.InsufficientTreasury;
-    try operations.validate(gs);
     if (gs.next_artillery_formation_id == 0 or gs.next_artillery_formation_id == std.math.maxInt(u32)) return error.ArtilleryIdExhausted;
     if (gs.next_hull_instance_id == 0 or gs.next_hull_instance_id == std.math.maxInt(u32)) return error.HullInstanceIdExhausted;
     const fid: types.ArtilleryFormationId = @enumFromInt(gs.next_artillery_formation_id);
@@ -270,6 +269,7 @@ fn forbidConventionalReference(gs: *const GameState, hid: types.HullInstanceId) 
 /// Validate artillery's complete identity/placement/accounting invariants and
 /// separation from conventional payloads. No repair, mutation, allocation or RNG.
 pub fn validate(gs: *GameState) error{CorruptSave}!void {
+    try operations.validate(gs);
     if (gs.next_artillery_formation_id == 0 or gs.next_artillery_offer_id == 0) return error.CorruptSave;
     for (gs.artillery_offers.items, 0..) |o, i| {
         if (o.id == .none or @intFromEnum(o.id) >= gs.next_artillery_offer_id) return error.CorruptSave;
@@ -300,7 +300,11 @@ pub fn validate(gs: *GameState) error{CorruptSave}!void {
     for (gs.faction_rosters.values()) |roster| for (roster.items) |hid| try forbidConventionalReference(gs, hid);
     for (gs.merc_company_rosters.values()) |roster| for (roster.items) |hid| try forbidConventionalReference(gs, hid);
     for (gs.market_listings.items) |o| try forbidConventionalReference(gs, o.hull_instance_id);
-    for (gs.maintenance_entries.items) |e| try forbidConventionalReference(gs, e.hull_instance_id);
+    for (gs.maintenance_entries.items) |e| {
+        if (gs.hull_instances.get(e.hull_instance_id)) |h| {
+            if (h.catalogue == .artillery and e.action != .repair) return error.CorruptSave;
+        }
+    }
     for (gs.hull_combat_records.items) |e| try forbidConventionalReference(gs, e.hull_instance_id);
     for (gs.battle_reports.kept.items) |r| for (r.salvage.candidates) |c| try forbidConventionalReference(gs, c.hull_instance_id);
 }
@@ -729,19 +733,11 @@ test "fixed seed artillery acquisition attachment freight and disposal script ha
     try std.testing.expectEqual(@as(usize, 2), gs.hull_ownership_history.items.len);
     try std.testing.expectEqual(@as(?u32, transfer_result.artillery_eta_day), gs.hull_ownership_history.items[0].to_day);
     try std.testing.expect(gs.hull_ownership_history.items[1].isOpen());
-    // The sole representation change is the empty persisted HQ archive;
-    // the full production digest still includes it. Prove the prior script
-    // (all RNG, counters and carrier state) remains identical without it.
-    var prior = std.hash.Wyhash.init(0x42544d43);
-    inline for (@typeInfo(GameState).@"struct".fields) |field| {
-        if (comptime GameState.persistenceOf(field.name) == .persisted or GameState.persistenceOf(field.name) == .derived) {
-            if (comptime std.mem.eql(u8, field.name, "retired_hqs")) continue;
-            digest.update(&prior, field.name);
-            digest.update(&prior, @field(gs, field.name));
-        }
-    }
-    try std.testing.expectEqual(@as(u64, 3971801592459885178), prior.final());
-    try std.testing.expectEqual(@as(u64, 1663881336431027581), digest.stateHash(&gs));
+    // P2g persists quality, armor, four empty crew seats, mechanic, canonical
+    // condition/magazine rows and the service checkpoint. These deterministic
+    // defaults change the full digest while the P2f identity/history checks
+    // above continue to pin the same acquisition and transport semantics.
+    try std.testing.expectEqual(@as(u64, 4777170326037980488), digest.stateHash(&gs));
 }
 
 fn validatePlacement(gs: *GameState, f: dom.Formation) error{CorruptSave}!void {

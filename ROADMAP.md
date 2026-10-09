@@ -1381,9 +1381,15 @@ player-only monthly HQ acquisition, direct company attachment, HQ pool/freight
 placement, shared lift demand and ownership carrying/resale accounting in schema
 v61, including persisted retired-HQ identity for preserved acquisition and freight
 history after an emptied HQ is sold. The explicit game abstractions and typed command boundary are recorded in
-`docs/p2-artillery-acquisition-design.md`. P2g retains crewing, readiness,
-reloads, repairs, supply and their operational persistence; P2h retains battle
-effects; P2i retains artillery query, REPL and TUI actions.
+`docs/p2-artillery-acquisition-design.md`.
+
+P2g delivers four individual operating crew, a shared local mechanic, complete
+readiness, exact magazines and whole-bin reloads, local field/depot repairs,
+shared technician hours and bay queues, supply reserves and schema-62 migration.
+`docs/p2-artillery-operations-design.md` owns the project operational adaptations.
+Existing personnel, assignment and shared bay views expose truthful references.
+P2h retains battle effects; P2i retains dedicated artillery panels, parser verbs
+and TUI controls.
 
 This foundation lets player and NPC companies buy the same assets from the
 market. The later NPC merc-company economy work sets the four-active-lance

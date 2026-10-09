@@ -26,18 +26,59 @@ pub const Slot = enum { pilot, tech, any };
 /// Nobody's pilot, nobody's tech, not posted to an HQ, not on a
 /// company's books: what the assignment column calls "unassigned".
 pub fn isUnassigned(gs: *GameState, p: *const person_mod.Person) bool {
-    if (p.posted_hq != .none or p.assigned_force != .none) return false;
-    if (artillery_crew.isSeated(gs, p.id)) return false;
-    for (gs.artillery_formations.values()) |f| if (f.tech == p.id) return false;
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| if (e.value_ptr.tech == p.id) return false;
-    return true;
+    return p.posted_hq == .none and p.assigned_force == .none and !hasAssetAssignment(gs, p.id);
+}
+
+pub const OperatingAssignment = union(enum) {
+    unit: types.UnitId,
+    artillery: artillery_crew.Occupancy,
+};
+pub const TechnicianTarget = union(enum) { unit: types.UnitId, artillery: types.ArtilleryFormationId };
+
+/// Authoritative operating reference, retained independently of availability.
+/// Source: artillery operations design, Crew and personnel policy.
+pub fn operatingAssignment(gs: *GameState, id: types.PersonId) ?OperatingAssignment {
+    const unit = gs.pilotSeat(id);
+    if (unit != .none) return .{ .unit = unit };
+    if (artillery_crew.operatingSeat(gs, id)) |seat| return .{ .artillery = seat };
+    return null;
+}
+
+/// All technician references ordered by asset kind and typed identity. Equal
+/// numeric IDs across kinds remain distinct. Caller owns the returned slice.
+pub fn technicianTargets(alloc: std.mem.Allocator, gs: *const GameState, id: types.PersonId) ![]TechnicianTarget {
+    var targets: std.ArrayListUnmanaged(TechnicianTarget) = .empty;
+    errdefer targets.deinit(alloc);
+    if (id != .none) {
+        for (gs.units.values()) |u| if (u.tech == id) try targets.append(alloc, .{ .unit = u.id });
+        for (gs.artillery_formations.values()) |f| if (f.tech == id) try targets.append(alloc, .{ .artillery = f.id });
+    }
+    std.mem.sort(TechnicianTarget, targets.items, {}, struct {
+        fn less(_: void, a: TechnicianTarget, b: TechnicianTarget) bool {
+            if (std.meta.activeTag(a) != std.meta.activeTag(b)) return a == .unit;
+            return switch (a) {
+                .unit => |id_a| @intFromEnum(id_a) < @intFromEnum(b.unit),
+                .artillery => |id_a| @intFromEnum(id_a) < @intFromEnum(b.artillery),
+            };
+        }
+    }.less);
+    return targets.toOwnedSlice(alloc);
+}
+
+/// Asset assignment excludes operating seats and all shared technician targets
+/// from the whole-outfit free pool, without consulting personnel availability.
+pub fn hasAssetAssignment(gs: *GameState, id: types.PersonId) bool {
+    if (id == .none) return false;
+    if (operatingAssignment(gs, id) != null) return true;
+    for (gs.units.values()) |u| if (u.tech == id) return true;
+    for (gs.artillery_formations.values()) |f| if (f.tech == id) return true;
+    return false;
 }
 
 /// Typed reason why a person cannot take a seat or tech slot on a hull
 /// today (C11v owner). The one answer `assignSlot` refuses with and the
 /// picker dims with.
-pub const AssignBlock = enum { wounded, unavailable, away };
+pub const AssignBlock = enum { wounded, unavailable, away, artillery_seat };
 
 /// The display text for a block reason: the single site that owns the
 /// string so `crewChoices` and any future viewer call the same words.
@@ -46,12 +87,14 @@ pub fn assignBlockText(b: AssignBlock) []const u8 {
         .wounded => "wounded",
         .unavailable => "unavailable",
         .away => "away with their company",
+        .artillery_seat => "assigned to an artillery operating seat",
     };
 }
 
 /// Why a person cannot take a seat or tech slot on a hull today, or
 /// null: the one answer `assignSlot` refuses with and the picker dims with.
 pub fn assignBlock(gs: *GameState, u: *const unit_mod.Unit, p: *const person_mod.Person) ?AssignBlock {
+    if (artillery_crew.operatingSeat(gs, p.id) != null) return .artillery_seat;
     if (!p.isAvailable(gs.clock.day_index)) return if (p.status == .wounded) .wounded else .unavailable;
     if (u.force == .none and !canReachPool(gs, p)) return .away;
     return null;
@@ -78,6 +121,7 @@ pub fn assignSlot(gs: *GameState, unit_id: types.UnitId, slot: Slot, person_id: 
     const p = gs.person(person_id) orelse return error.UnknownPerson;
     if (assignBlock(gs, u, p)) |b| return switch (b) {
         .away => error.PersonAway,
+        .artillery_seat => error.ArtilleryPersonSeated,
         else => error.Unavailable,
     };
     const resolved: Slot = if (slot != .any) slot else if (p.role == unit_mod.crewRoleFor(u.kind)) .pilot else if (unit_mod.techRoleFor(u.kind) == p.role) .tech else return error.WrongRole;
@@ -85,7 +129,6 @@ pub fn assignSlot(gs: *GameState, unit_id: types.UnitId, slot: Slot, person_id: 
         .any => unreachable,
         .pilot => {
             if (p.role != unit_mod.crewRoleFor(u.kind)) return error.WrongRole;
-            if (artillery_crew.operatingSeat(gs, person_id) != null) return error.ArtilleryPersonSeated;
             // One seat per pilot.
             var it = gs.units.iterator();
             while (it.next()) |entry| {
@@ -95,7 +138,6 @@ pub fn assignSlot(gs: *GameState, unit_id: types.UnitId, slot: Slot, person_id: 
             p.assigned_force = u.force;
         },
         .tech => {
-            if (artillery_crew.operatingSeat(gs, person_id) != null) return error.ArtilleryPersonSeated;
             const need = unit_mod.techRoleFor(u.kind) orelse return error.NoTechSlot;
             if (p.role != need) return error.WrongRole;
             u.tech = person_id;
@@ -500,4 +542,69 @@ test "assignments — roles enforced, one seat per pilot, hall hiring" {
     const before_hash = digest.stateHash(&gs);
     try std.testing.expectError(Error.NoSuchCandidate, commands.execute(&gs, .{ .hire_candidate = @as(types.CandidateId, @enumFromInt(99999)) }));
     try std.testing.expectEqual(before_hash, digest.stateHash(&gs));
+}
+
+test "artillery occupancy agrees with ordinary command and seat pickers" {
+    const queries = @import("queries.zig");
+    const digest = @import("digest.zig");
+    const artillery = @import("artillery.zig");
+    const rules = @import("../domain/artillery_operations.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const home = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
+    const co = try gs.createForce("Alpha", .company, .none);
+    const bought = try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
+    _ = try artillery.attach(&gs, .{ .formation = bought.artillery_formation, .company = co });
+    const operator = try gs.hirePerson("Crew", "One", .vehicle_crew);
+    try gs.person(operator).?.skills.put(gs.allocator(), rules.seatSkill(.gunner), 4);
+    _ = try artillery_crew.assign(&gs, .{ .formation = bought.artillery_formation, .seat = .gunner, .person = operator });
+    const vehicle = try gs.addUnit("SCP-1N");
+    const before = digest.stateHash(&gs);
+    try std.testing.expect(assignBlock(&gs, gs.unit(vehicle).?, gs.person(operator).?) != null);
+    try std.testing.expectError(Error.ArtilleryPersonSeated, commands.execute(&gs, .{ .assign = .{ .unit = vehicle, .slot = .pilot, .person = operator } }));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    for (try queries.crewChoices(al, &gs, vehicle)) |row| if (row.sel.person == operator) {
+        try std.testing.expect(!row.eligible);
+        try std.testing.expectEqual(Slot.pilot, row.slot);
+    };
+    try std.testing.expectEqual(@as(usize, 0), (try queries.openSeats(al, &gs, operator)).len);
+    try std.testing.expect(!(try queries.personActions(al, &gs, operator)).can_seat);
+}
+
+test "artillery crew company hiring consumes actual hall shortfalls and ordinary payroll headcount once" {
+    const artillery = @import("artillery.zig");
+    const operations = @import("artillery_operations.zig");
+    const rules = @import("../domain/artillery_operations.zig");
+    const treasury = @import("treasury.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, false);
+    const co = try gs.createForce("Alpha", .company, .none);
+    _ = try artillery.attach(&gs, .{ .formation = id, .company = co });
+    gs.candidates.clearRetainingCapacity();
+    for (0..rules.crew_count) |_| {
+        try gs.candidates.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_candidate_id), .hq = gs.seat(), .spec = person_gen.generate(&gs.rng, .market, .vehicle_crew), .asking_bonus = 100, .listed_day = 0, .expires_day = 400 });
+        gs.next_candidate_id += 1;
+    }
+    const people_before = gs.people.count();
+    const funds_before = gs.funds;
+    const payroll_before = treasury.monthlyPayroll(&gs);
+    const result = try crewCompany(&gs, co);
+    try std.testing.expectEqual(people_before + result.hired_count, gs.people.count());
+    try std.testing.expectEqual(funds_before - rules.crew_count * 100, gs.funds);
+    try std.testing.expectEqual(@as(u32, rules.crew_count), personnel.manningHave(&gs, co, .vehicle_crew));
+    try std.testing.expect(result.still_open > 0); // no doctor/company admins in this hall
+    try std.testing.expectEqual(@as(usize, 0), gs.candidates.items.len);
+    const f = gs.artillery_formations.get(id).?;
+    for (f.crew) |p| try std.testing.expect(p != .none);
+    var newly_hired_pay: types.CBills = 0;
+    for (gs.people.values()) |p| if (@intFromEnum(p.id) >= people_before + 1) {
+        newly_hired_pay += p.monthlySalary();
+    };
+    try std.testing.expectEqual(payroll_before + newly_hired_pay, treasury.monthlyPayroll(&gs));
+    try std.testing.expectEqual(personnel.manningHave(&gs, co, .vehicle_crew), rules.crew_count);
 }

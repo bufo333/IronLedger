@@ -1017,10 +1017,11 @@ test "company operating estimate consumes the shared artillery carrying owner" {
     const home = try founding.createCommander(&gs, "T", .LC, .quartermaster);
     gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
     const estimate = perCompanyOpsCost(&gs);
+    const consumables = maintenanceEstimate(&gs);
     const liquidation = try treasury.liquidationValue(std.testing.allocator, &gs);
     const bought = try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
     try std.testing.expectEqual(unit.monthlyCarryCost(.vehicle), artillery.monthlyCarry(&gs));
-    try std.testing.expectEqual(estimate + artillery.monthlyCarry(&gs), perCompanyOpsCost(&gs));
+    try std.testing.expectEqual(estimate + artillery.monthlyCarry(&gs) + maintenanceEstimate(&gs) - consumables, perCompanyOpsCost(&gs));
     try std.testing.expectEqual(liquidation + artillery.saleValue(gs.artillery_formations.getPtr(bought.artillery_formation).?), try treasury.liquidationValue(std.testing.allocator, &gs));
     _ = try artillery.sell(&gs, bought.artillery_formation);
     try std.testing.expectEqual(estimate, perCompanyOpsCost(&gs));

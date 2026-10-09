@@ -55,7 +55,8 @@ behavior and record artillery disposal as transfer.
 All formation and offer records, acquisition facts, placement payloads and counters
 are persisted. Catalogue facts and attached physical position are derived; quotes
 and preparation records are operation-local scratch. P2g owns operational fields;
-P2h owns artillery battle effects; P2i owns artillery query and textual/UI actions.
+P2h owns artillery battle effects; P2i owns dedicated artillery panels, parser verbs and TUI controls. P2g
+maintains existing personnel, assignment and shared bay views.
 
 HQ sale preserves permanent historical identity in a separate `retired_hqs`
 archive: original typed HQ ID, exact name, planet, tier and sale day (including
@@ -94,4 +95,5 @@ checks HQ identity collision/exhaustion before allocation or gameplay mutation.
 
 Existing typed history queries safely render archived names and retain original
 HQ filters. Archived HQs never appear in treasury/action lists. This is shared
-history integrity; P2i still owns artillery views, parser verbs and UI actions.
+history integrity; P2i still owns dedicated artillery panels, parser verbs and TUI controls;
+P2g keeps existing personnel, assignment and shared bay views truthful.

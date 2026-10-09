@@ -38,8 +38,10 @@ persisted representation.
 
 The BLK supports calculation of this carrier but does not define this game's
 availability, market policy, asset topology, crew, technician responsibility,
-formation size, transport, lifecycle, destruction, salvage, recovery, supply,
+formation size, transport, lifecycle, destruction, salvage, recovery, supply or combat policy.
 
 [Artillery operations](p2-artillery-operations-design.md) owns the project crew,
 maintenance, magazine, readiness and supply adaptations beyond this physical
-catalogue boundary. Combat and artillery interfaces remain separately deferred.
+catalogue boundary. P2h combat and dedicated P2i panels, parser verbs and TUI controls remain
+separately deferred. P2g maintains truthful existing personnel, assignment
+and shared bay views.

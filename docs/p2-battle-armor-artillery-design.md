@@ -66,6 +66,11 @@ P2e physical catalogue facts, identity, provenance, era, calculated BV
 and construction cost remain pinned. This exception does not approve
 P2h battle effects, P2i interfaces, battle armor or an era expansion.
 
+P2i owns dedicated artillery panels, parser verbs and TUI controls. P2g keeps
+existing personnel, assignment and shared bay views truthful as ordinary
+people and bay jobs gain artillery references. This compatibility boundary
+does not activate P2h or P2i.
+
 ## Ownership and acquisition
 
 Before P2b or P2e begins, the selected source-backed model must decide whether

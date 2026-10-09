@@ -28,8 +28,8 @@ A package has one primary invariant or subsystem outcome.
   facts, provenance, calculated BV/cost, and static artillery category.
 - [x] P2f artillery acquisition and attachment: Mobile Long Tom ownership,
   market acquisition, placement, transport, and persisted formation identity.
-- [ ] P2g artillery operations: crewing, readiness, reloads, repairs, supply,
-  and operational persistence.
+- [x] P2g artillery operations: crewing, readiness, reloads, repairs, supply,
+  operational persistence, and truthful existing personnel/shared-bay views.
 - [ ] P2-battle-ui (P2h-P2i): artillery battle effects and REPL/TUI/query
   surfaces; battle-armor UI remains deferred with P2b-P2d.
 - [ ] NPC world-contract design: shared world conflicts and typed opposing forces

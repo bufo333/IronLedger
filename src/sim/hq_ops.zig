@@ -10,6 +10,7 @@
 const artillery = @import("artillery.zig");
 const std = @import("std");
 const artillery_service = @import("artillery_service.zig");
+const maintenance = @import("maintenance.zig");
 const rng_mod = @import("rng.zig");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
@@ -277,6 +278,7 @@ pub fn spareDemand(alloc: std.mem.Allocator, gs: *GameState, site: types.Site) !
             g.value_ptr.* += 1;
         }
     }
+    try artillery_service.addRepairDemand(alloc, gs, site, null, false, &need);
     var out: std.ArrayListUnmanaged(ComponentLine) = .empty;
     var it = need.iterator();
     while (it.next()) |e| {
@@ -333,6 +335,7 @@ pub fn componentDemand(alloc: std.mem.Allocator, gs: *GameState, hq_id: types.Hq
             g.value_ptr.* += 1;
         }
     }
+    try artillery_service.addRepairDemand(alloc, gs, .{ .hq = hq_id }, company, true, &need);
     var out: std.ArrayListUnmanaged(ComponentLine) = .empty;
     var it = need.iterator();
     while (it.next()) |e| {
@@ -853,6 +856,8 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
     // + injureTech need so the commit tail (which inlines those functions) is
     // allocation-free (rule 17, C5q).  All the log slots are already included
     // in n_logs above.
+    var replacement_ids: []types.ArtilleryFormationId = &.{};
+    defer gs.scratch().free(replacement_ids);
     var injure_tech_ptr: ?*person_mod.Person = null;
     var injure_full_name: []const u8 = "";
     var injure_ranked_name: []const u8 = "";
@@ -864,6 +869,7 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
         if (u.tech == .none) break :blk;
         const t = gs.person(u.tech) orelse break :blk;
         injure_tech_ptr = t;
+        replacement_ids = try maintenance.replacementOrder(gs.scratch(), gs, t.id);
         injure_full_name = try t.fullName(gs.allocator());
         injure_ranked_name = try t.rankedName(gs.allocator());
         injure_wound_buf = try gs.allocator().alloc(u8, 256);
@@ -978,22 +984,9 @@ fn completeJob(gs: *GameState, job: *state_mod.BayJob) !bool {
                     });
                     // injureTech roster reassignment.
                     const tech_company = gs.companyOf(it.assigned_force);
-                    var swapped: u32 = 0;
-                    var open: u32 = 0;
-                    var rit = gs.units.iterator();
-                    while (rit.next()) |uentry| {
-                        const ru = uentry.value_ptr;
-                        if (ru.tech != it.id) continue;
-                        const role = unit_mod.techRoleFor(ru.kind) orelse continue;
-                        const needed = @import("maintenance.zig").hullHours(gs, ru);
-                        if (@import("maintenance.zig").findFreeTech(gs, role, gs.companyOf(ru.force), needed)) |replacement| {
-                            ru.tech = replacement;
-                            swapped += 1;
-                        } else {
-                            ru.tech = .none;
-                            open += 1;
-                        }
-                    }
+                    const replacements = maintenance.replaceTechReferences(gs, it.id, replacement_ids);
+                    const swapped = replacements.swapped;
+                    const open = replacements.open;
                     if (swapped + open > 0) {
                         const roster_line = std.fmt.bufPrint(injure_roster_buf, "{s} [roster] {d} hull(s) reassigned to free techs, {d} left without a tech", .{
                             date_str, swapped, open,
@@ -2776,4 +2769,85 @@ test "operational HQ reference categories never resolve through a retired identi
     try std.testing.expectError(error.CorruptSave, validateHqHistory(&gs));
     gs.candidates.items[0].hq = home;
     try validateHqHistory(&gs);
+}
+
+pub const BayTarget = union(enum) {
+    unit: types.UnitId,
+    artillery: types.ArtilleryFormationId,
+    item: []const u8,
+};
+
+/// Typed target for the valid shared job kind. Malformed or absent targets
+/// propagate corruption instead of manufacturing an ordinary hull identity.
+pub fn bayTarget(gs: *GameState, job: *const state_mod.BayJob) error{CorruptSave}!BayTarget {
+    return switch (job.kind) {
+        .depot_repair, .reactivation, .refit => if (job.artillery == .none and job.item_key.len == 0 and gs.unit(job.unit) != null) .{ .unit = job.unit } else error.CorruptSave,
+        .artillery_depot_repair => if (job.unit == .none and job.item_key.len == 0 and gs.artillery_formations.contains(job.artillery)) .{ .artillery = job.artillery } else error.CorruptSave,
+        .fabrication => if (job.unit == .none and job.artillery == .none and part_mod.find(job.item_key) != null) .{ .item = job.item_key } else error.CorruptSave,
+    };
+}
+
+test "ordinary depot accident replaces a shared artillery mechanic before the nonfailing commit completes" {
+    const operations = @import("artillery_operations.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const formation = try operations.fixtureForTest(&gs, false);
+    const injured = gs.artillery_formations.get(formation).?.tech;
+    const replacement = try gs.hirePerson("Replacement", "Mechanic", .tech_mechanic);
+    gs.person(replacement).?.weekly_hours = 100;
+    const uid = try gs.addUnit("SCP-1N");
+    const u = gs.unit(uid).?;
+    u.tech = injured;
+    u.quality = .f;
+    u.status = .repairing;
+    for (u.slots.items) |*slot| if (slot.class == .structure) {
+        slot.condition = .destroyed;
+    };
+    var seed: u64 = 0;
+    while (true) : (seed += 1) {
+        var rng = rng_mod.Rng.init(seed);
+        if (rollRepairFor(&rng, gs.person(injured).?.skill(.tech_mechanic).?, u.quality) == .clean and rng.roll2d6(.medical) == 2) break;
+    }
+    gs.rng = rng_mod.Rng.init(seed);
+    try gs.bay_jobs.append(gs.allocator(), .{ .hq = gs.seat(), .kind = .depot_repair, .unit = uid, .duration_days = 1, .queued_day = 0, .started_day = 0, .done_day = 1 });
+    gs.clock.day_index = 1;
+    try runDaily(&gs);
+    try std.testing.expectEqual(person_mod.Status.wounded, gs.person(injured).?.status);
+    try std.testing.expectEqual(replacement, gs.unit(uid).?.tech);
+    try std.testing.expectEqual(replacement, gs.artillery_formations.get(formation).?.tech);
+    try std.testing.expectEqual(@as(usize, 0), gs.bay_jobs.items.len);
+}
+
+test "artillery waits for its local mechanic while sharing the ordinary HQ queue and bay capacity" {
+    const operations = @import("artillery_operations.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const formation = try operations.fixtureForTest(&gs, false);
+    const hq = gs.seat();
+    for (gs.hqs.getPtr(hq).?.facilities.items) |*facility| if (facility.kind == .mek_bay) {
+        facility.level = 1;
+    };
+    const f = gs.artillery_formations.get(formation).?;
+    gs.person(f.tech).?.leave_until_day = 100;
+    try gs.bay_jobs.appendSlice(gs.allocator(), &.{
+        .{ .hq = hq, .kind = .artillery_depot_repair, .artillery = formation, .duration_days = 2, .queued_day = 0 },
+        .{ .hq = hq, .kind = .fabrication, .item_key = "comp_chassis_h", .duration_days = 1, .queued_day = 0 },
+    });
+    try runDaily(&gs);
+    try std.testing.expect(gs.bay_jobs.items[0].started_day == null);
+    try std.testing.expectEqual(@as(?u32, 0), gs.bay_jobs.items[1].started_day);
+    try std.testing.expectEqual(BayLoad{ .busy = 1, .queued = 1 }, bayLoad(&gs, hq));
+    gs.person(f.tech).?.leave_until_day = null;
+    gs.clock.day_index = 1;
+    try runDaily(&gs);
+    try std.testing.expectEqual(@as(usize, 1), gs.bay_jobs.items.len);
+    try std.testing.expectEqual(@as(?u32, 1), gs.bay_jobs.items[0].started_day);
+    try std.testing.expectEqual(@as(?u32, 3), gs.bay_jobs.items[0].done_day);
+    gs.person(f.tech).?.leave_until_day = 100;
+    gs.clock.day_index = 3;
+    const digest = @import("digest.zig");
+    const before = digest.stateHash(&gs);
+    try runDaily(&gs);
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(BayLoad{ .busy = 1, .queued = 0 }, bayLoad(&gs, hq));
 }

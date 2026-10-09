@@ -25,6 +25,7 @@ const treasury = @import("treasury.zig");
 const commands = @import("commands.zig");
 const artillery = @import("artillery.zig");
 const artillery_rules = @import("../domain/artillery_operations.zig");
+const artillery_service = @import("artillery_service.zig");
 
 /// Truck budget per category, in percent of field capacity: ammo, armor
 /// and medical are capped so provisions — the one line that burns every
@@ -135,6 +136,21 @@ pub fn plan(alloc: std.mem.Allocator, gs: *GameState, company: types.ForceId, tr
             try lines.append(alloc, .{ .key = artillery_rules.packageKey(family), .floor = packages * artillery_rules.reserve_floor_loads, .target = packages * artillery_rules.reserve_target_loads, .note = try std.fmt.allocPrint(alloc, "{d} carriers · {d} packages per complete reload · {d}/{d} reloads floor/target", .{ carriers, packages, artillery_rules.reserve_floor_loads, artillery_rules.reserve_target_loads }) });
         }
         try allocateAmmunition(alloc, lines.items[first_ammo..], budget);
+    }
+
+    // Exact carrier repair demand shares the actual-site owner used by the
+    // spares ledger. On-hand and incoming stock remain the movement/policy
+    // owners' concern; these floors expose the amount needed for one pass.
+    var repair_need: std.StringArrayHashMapUnmanaged(u32) = .empty;
+    defer repair_need.deinit(alloc);
+    try artillery_service.addRepairDemand(alloc, gs, sites.siteForForce(gs, company), company, false, &repair_need);
+    for (repair_need.keys(), repair_need.values()) |key, qty| {
+        if (std.mem.eql(u8, key, "armor")) {
+            for (lines.items) |*line| if (std.mem.eql(u8, line.key, key)) {
+                line.floor = @max(line.floor, qty);
+                line.target = @max(line.target, qty);
+            };
+        } else try lines.append(alloc, .{ .key = key, .floor = qty, .target = qty, .note = "local artillery field replacement demand" });
     }
 
     var total: u32 = 0;
@@ -589,7 +605,7 @@ pub fn trimStock(gs: *GameState, company: types.ForceId) !u32 {
                 target = l.target;
             };
             const def = part_mod.find(key);
-            const consumable = part_mod.isComponent(key) or (def != null and (def.?.mount == .ammo or def.?.mount == .none));
+            const consumable = part_mod.isComponent(key) or part_mod.isAmmunition(key) or (def != null and def.?.mount == .none);
             const excess: u32 = if (target) |t| have -| t else if (consumable) have else 0;
             if (excess == 0) continue;
             var date_buf: [10]u8 = undefined;
@@ -1033,4 +1049,70 @@ test "rounding D1: partial beachhead band (1-30 LY) → ×2.5, not ×2.0" {
     try std.testing.expectEqual(@as(types.Bp, 25_000), logistics_mod.localPurchaseMultBp(30, 0));
     // One step past (31 LY) rounds up to band 2 → ×3.0.
     try std.testing.expectEqual(@as(types.Bp, 30_000), logistics_mod.localPurchaseMultBp(31, 0));
+}
+
+test "shared ammunition apportionment obeys zero tiny unequal and reordered budgets" {
+    const desired = [_]Line{
+        .{ .key = "ammo_long_tom", .floor = 4, .target = 8, .note = "reloads" },
+        .{ .key = "ammo_artillery_mg", .floor = 1, .target = 2, .note = "reloads" },
+        .{ .key = "ammo_mg", .floor = 2, .target = 4, .note = "battles" },
+    };
+    for ([_]u32{ 0, 1, 3, 7, 14 }) |budget| {
+        var lines = desired;
+        var reversed = [_]Line{ desired[2], desired[1], desired[0] };
+        try allocateAmmunition(std.testing.allocator, &lines, budget);
+        try allocateAmmunition(std.testing.allocator, &reversed, budget);
+        var tons: u32 = 0;
+        for (lines) |line| {
+            try std.testing.expect(line.floor <= line.target);
+            try std.testing.expect(part_mod.isAmmunition(line.key));
+            tons += line.target * part_mod.tons(line.key);
+            for (reversed) |other| if (std.mem.eql(u8, line.key, other.key)) try std.testing.expectEqual(line.target, other.target);
+        }
+        try std.testing.expectEqual(budget, tons);
+    }
+    var tiny = desired;
+    try allocateAmmunition(std.testing.allocator, &tiny, 1);
+    try std.testing.expectEqual(@as(u32, 1), tiny[1].target); // stable first key gets the residual ton
+    var refused = desired;
+    try std.testing.expectError(error.OutOfMemory, allocateAmmunition(std.testing.failing_allocator, &refused, 1));
+    try std.testing.expectEqualDeep(desired, refused);
+}
+
+test "artillery reserves and repair lines feed the existing load out without counting loaded rounds" {
+    const operations = @import("artillery_operations.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, true);
+    const f = gs.artillery_formations.getPtr(id).?;
+    const co = f.placement.company;
+    const truck = try gs.addUnit("CGT-3");
+    try toe.placeUnitInCompany(&gs, truck, co);
+    try toe.placeUnitInCompany(&gs, try gs.addUnit("CGT-3"), co);
+    f.slots[@intFromEnum(artillery_rules.Slot.communications)].condition = .destroyed;
+    f.slots[@intFromEnum(artillery_rules.Slot.long_tom_bin_1)].rounds = artillery_rules.long_tom_rounds_per_bin;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const p = try plan(a, &gs, co, 0, 14, 9);
+    for (artillery_rules.families) |family| {
+        const line = for (p.lines) |l| {
+            if (std.mem.eql(u8, l.key, artillery_rules.packageKey(family))) break l;
+        } else return error.TestUnexpectedResult;
+        try std.testing.expectEqual(artillery_rules.packagesPerLoad(family) * artillery_rules.reserve_floor_loads, line.floor);
+        try std.testing.expectEqual(artillery_rules.packagesPerLoad(family) * artillery_rules.reserve_target_loads, line.target);
+        try std.testing.expect(std.mem.indexOf(u8, line.note, "reload") != null);
+        try gs.addStock(gs.homeSiteFor(co), line.key, line.target);
+    }
+    const spare = for (p.lines) |line| {
+        if (std.mem.eql(u8, line.key, "artillery_spares")) break line;
+    } else return error.TestUnexpectedResult;
+    try std.testing.expectEqual(@as(u32, 1), spare.target);
+    try gs.addStock(gs.homeSiteFor(co), spare.key, spare.target);
+    const lo = try prepareLoadOut(a, &gs, co, 0);
+    applyLoadOut(&gs, lo);
+    try std.testing.expectEqual(lo.dest_tons_after, sites.siteTons(&gs, lo.dest));
+    try std.testing.expectEqual(@as(u32, 1), gs.stockCount(lo.dest, "artillery_spares"));
+    for (artillery_rules.families) |family| try std.testing.expectEqual(artillery_rules.packagesPerLoad(family) * artillery_rules.reserve_target_loads, gs.stockCount(lo.dest, artillery_rules.packageKey(family)));
+    try std.testing.expectEqual(@as(u16, artillery_rules.long_tom_rounds_per_bin), f.slots[@intFromEnum(artillery_rules.Slot.long_tom_bin_1)].rounds);
 }

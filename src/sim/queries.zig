@@ -38,6 +38,10 @@ const operation_mod = @import("../domain/operation.zig");
 const operations_m = @import("operations.zig");
 const medical = @import("medical.zig");
 const black_market = @import("black_market.zig");
+const artillery = @import("artillery.zig");
+const artillery_service = @import("artillery_service.zig");
+const hq_operations = @import("hq_ops.zig");
+const personnel_owner = @import("personnel.zig");
 
 const Alloc = std.mem.Allocator;
 
@@ -1807,13 +1811,7 @@ pub fn unassigned(alloc: Alloc, gs: *GameState) ![]const []const u8 {
         const p = e.value_ptr;
         if (p.status != .active or p.posted_hq != .none) continue;
         if (p.role != .mekwarrior and p.role != .tech_mek and p.role != .vehicle_crew and p.role != .tech_mechanic) continue;
-        if (gs.pilotSeat(p.id) != .none) continue;
-        var seated = false;
-        var uit = gs.units.iterator();
-        while (uit.next()) |ue| if (ue.value_ptr.tech == p.id) {
-            seated = true;
-        };
-        if (seated) continue;
+        if (crew.hasAssetAssignment(gs, p.id)) continue;
         try out.append(alloc, try std.fmt.allocPrint(alloc, "{d: <6} {s: <23} {s: <14} {s: <10} {s}", .{ @intFromEnum(p.id), try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, p)}), @tagName(p.role), @tagName(p.experience()), if (p.isAvailable(day)) "" else "{a}unavailable{/}" }));
     }
     return out.toOwnedSlice(alloc);
@@ -2185,8 +2183,7 @@ pub fn hqDetailView(alloc: Alloc, gs: *GameState, id: types.HqId) !HqDetail {
     for (gs.bay_jobs.items) |j| {
         if (j.hq != id) continue;
         any = true;
-        const odds = if (j.kind == .depot_repair or j.kind == .refit) try std.fmt.allocPrint(alloc, "  {{d}}{s}{{/}}", .{try @import("hq_ops.zig").repairOddsText(alloc, gs, id, j.unit)}) else "";
-        try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <13} {s}{s}  {s}{s}", .{ @tagName(j.kind), if (j.unit != .none) try std.fmt.allocPrint(alloc, "#{d} ", .{@intFromEnum(j.unit)}) else "", j.item_key, if (j.started_day != null) try std.fmt.allocPrint(alloc, "done day {d}", .{j.done_day orelse 0}) else "queued", odds }));
+        try out.append(alloc, try bayJobText(alloc, gs, &j));
     }
     if (!any) try out.append(alloc, "  idle");
     try out.append(alloc, "");
@@ -2810,17 +2807,26 @@ fn skillsText(alloc: Alloc, p: *const person_mod.Person) ![]const u8 {
 
 /// What a person is doing right now, in one short phrase.
 pub fn assignmentText(alloc: Alloc, gs: *GameState, p: *const person_mod.Person) ![]const u8 {
-    const seat = gs.pilotSeat(p.id);
-    if (seat != .none) {
-        const u = gs.unit(seat).?;
-        return std.fmt.allocPrint(alloc, "pilot #{d} {s}", .{ @intFromEnum(seat), u.chassis_key });
-    }
-    var techs: std.ArrayListUnmanaged(u8) = .empty;
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| if (e.value_ptr.tech == p.id) {
-        if (techs.items.len > 0) try techs.appendSlice(alloc, ",");
-        try techs.appendSlice(alloc, try std.fmt.allocPrint(alloc, "#{d}", .{@intFromEnum(e.value_ptr.id)}));
+    if (crew.operatingAssignment(gs, p.id)) |assignment| switch (assignment) {
+        .unit => |id| {
+            const u = gs.unit(id) orelse return error.CorruptSave;
+            return std.fmt.allocPrint(alloc, "pilot #{d} {s}", .{ @intFromEnum(id), try table.plain(alloc, u.chassis_key) });
+        },
+        .artillery => |seat| return std.fmt.allocPrint(alloc, "artillery #{d} {s}", .{ @intFromEnum(seat.formation), @tagName(seat.seat) }),
     };
+    const targets = try crew.technicianTargets(alloc, gs, p.id);
+    defer alloc.free(targets);
+    var techs: std.ArrayListUnmanaged(u8) = .empty;
+    defer techs.deinit(alloc);
+    for (targets) |target| {
+        if (techs.items.len > 0) try techs.appendSlice(alloc, ", ");
+        const text = switch (target) {
+            .unit => |id| try std.fmt.allocPrint(alloc, "#{d}", .{@intFromEnum(id)}),
+            .artillery => |id| try std.fmt.allocPrint(alloc, "artillery #{d}", .{@intFromEnum(id)}),
+        };
+        defer alloc.free(text);
+        try techs.appendSlice(alloc, text);
+    }
     if (techs.items.len > 0) return std.fmt.allocPrint(alloc, "tech {s}", .{techs.items});
     if (p.posted_hq != .none) return std.fmt.allocPrint(alloc, "HQ · {s}", .{clip(try hqName(alloc, gs, p.posted_hq), 16)});
     if (p.assigned_force != .none) return std.fmt.allocPrint(alloc, "{s} (no seat)", .{clip(try forceName(alloc, gs, p.assigned_force), 12)});
@@ -3386,8 +3392,8 @@ pub fn personActions(alloc: Alloc, gs: *GameState, id: types.PersonId) !PersonAc
         .can_triage = p.status == .wounded,
         .can_leave = p.isAvailable(day) and !posture.isCompanyDeployed(gs, company),
         .can_train = p.status == .active and p.training == null and gs.trainingHqFor(p) != null,
-        .can_post = p.role.isAdmin(),
-        .can_transfer = p.isOnBooks(),
+        .can_post = p.role.isAdmin() and !personnel_owner.artilleryDepartureBlocked(gs, id),
+        .can_transfer = p.isOnBooks() and !personnel_owner.artilleryDepartureBlocked(gs, id),
         .can_fire = p.isOnBooks(),
         .primary_skill = p.role.primarySkill(),
         .restless = medical.turnoverRisk(p, day) > 0,
@@ -3408,9 +3414,9 @@ pub fn openSeats(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]Seat {
     while (it.next()) |e| {
         const u = e.value_ptr;
         if (u.isParked()) continue;
-        if (u.force == .none and !crew.canReachPool(gs, p)) continue; // the pool is at the seat; their company is away
+        if (crew.assignBlock(gs, u, p) != null) continue;
         const ch = chassis_mod.find(u.chassis_key);
-        const label = try std.fmt.allocPrint(alloc, "#{d: <3} {s: <8} {s: <16} {s}", .{ @intFromEnum(u.id), u.chassis_key, if (ch) |c| c.name else "?", if (u.force == .none) "unassigned pool" else clip(try forceName(alloc, gs, gs.companyOf(u.force)), 20) });
+        const label = try std.fmt.allocPrint(alloc, "#{d: <3} {s: <8} {s: <16} {s}", .{ @intFromEnum(u.id), try table.plain(alloc, u.chassis_key), if (ch) |c| try table.plain(alloc, c.name) else "?", if (u.force == .none) "unassigned pool" else clip(try forceName(alloc, gs, gs.companyOf(u.force)), 20) });
         if (unit_mod.crewRoleFor(u.kind) == p.role and gs.person(u.pilot) == null) {
             try out.append(alloc, .{ .unit = u.id, .slot = .pilot, .text = try std.fmt.allocPrint(alloc, "{s}  {{a}}pilot seat{{/}}", .{label}) });
         }
@@ -5458,7 +5464,7 @@ pub fn companyChoices(alloc: Alloc, gs: *GameState, what: enum { unit, person, s
         .person => {
             p = gs.person(@enumFromInt(subject)) orelse return out.toOwnedSlice(alloc);
             from = gs.companyOf(p.?.assigned_force);
-            if (posture.isCompanyDeployed(gs, from)) blocked = "their company is deployed";
+            if (posture.isCompanyDeployed(gs, from) or personnel_owner.artilleryDepartureBlocked(gs, p.?.id)) blocked = "their company is deployed";
         },
     }
     var fit = gs.forces.iterator();
@@ -5517,10 +5523,12 @@ pub fn hqChoices(alloc: Alloc, gs: *GameState, person_id: types.PersonId) ![]Pic
         const h = e.value_ptr;
         const req = h.staffRequired().total();
         const here = p.posted_hq == h.id;
-        try out.append(alloc, .{ .sel = .{ .hq = h.id }, .eligible = !here, .why = if (here) "already posted here" else "", .cells = if (here)
-            try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{try table.plain(alloc, h.name)}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{@tagName(h.tier)}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{planetName(h.planet_key)}), try std.fmt.allocPrint(alloc, "{{d}}{d}/{d}{{/}}", .{ h.staff_assigned, req }), "{d}posted here{/}" })
+        const block = personnel_owner.canPostToHq(gs, person_id, h.id);
+        const why = if (block != null) "cannot leave their artillery company" else if (here) "already posted here" else "";
+        try out.append(alloc, .{ .sel = .{ .hq = h.id }, .eligible = why.len == 0, .why = why, .cells = if (why.len > 0)
+            try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{try table.plain(alloc, h.name)}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{@tagName(h.tier)}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{try table.plain(alloc, planetName(h.planet_key))}), try std.fmt.allocPrint(alloc, "{{d}}{d}/{d}{{/}}", .{ h.staff_assigned, req }), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{why}) })
         else
-            try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{try table.plain(alloc, h.name)}), @tagName(h.tier), planetName(h.planet_key), try std.fmt.allocPrint(alloc, "{s}{d}/{d}{{/}}", .{ if (h.staff_assigned < req) "{c}" else "{g}", h.staff_assigned, req }), if (h.staff_assigned < req) "short-handed" else "" }) });
+            try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{try table.plain(alloc, h.name)}), @tagName(h.tier), try table.plain(alloc, planetName(h.planet_key)), try std.fmt.allocPrint(alloc, "{s}{d}/{d}{{/}}", .{ if (h.staff_assigned < req) "{c}" else "{g}", h.staff_assigned, req }), if (h.staff_assigned < req) "short-handed" else "" }) });
     }
     const Ctx = struct { gs: *GameState };
     std.mem.sort(PickRow, out.items, Ctx{ .gs = gs }, struct {
@@ -5555,10 +5563,11 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
         if (!p.isOnBooks()) continue;
         const b = crew.assignBlock(gs, u, p);
         const why: []const u8 = if (b) |x| crew.assignBlockText(x) else "";
-        const seat = gs.pilotSeat(p.id);
+        const assignment = crew.operatingAssignment(gs, p.id);
+        const seat: types.UnitId = if (assignment != null and assignment.? == .unit) assignment.?.unit else .none;
         const load = if (slot == .tech) maintenance.techWeeklyLoadHours(gs, p.id) else 0;
         const now: []const u8 = if (slot == .pilot)
-            (if (seat == unit_id) "this seat" else if (seat != .none) try std.fmt.allocPrint(alloc, "pilot of #{d}", .{@intFromEnum(seat)}) else "{g}free{/}")
+            (if (seat == unit_id) "this seat" else if (seat != .none) try std.fmt.allocPrint(alloc, "pilot of #{d}", .{@intFromEnum(seat)}) else if (assignment != null) try assignmentText(alloc, gs, p) else "{g}free{/}")
         else
             (if (u.tech == p.id) "this hull's tech" else try std.fmt.allocPrint(alloc, "{s}{d}h of {d}h{{/}}", .{ if (load == 0) "{g}" else "", load, maintenance.techWeeklyHoursAvailable(gs, p) }));
         const skill = p.skill(p.role.primarySkill()) orelse 9;
@@ -5570,7 +5579,7 @@ pub fn crewChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]PickR
         else
             try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{name}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{@tagName(p.role)}), try std.fmt.allocPrint(alloc, "{{d}}{d}{{/}}", .{skill}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{why}), "" });
         try out.append(alloc, .{ .sel = .{ .person = p.id }, .eligible = eligible, .why = why, .slot = slot, .cells = cells });
-        try ranks.append(alloc, .{ .same = same, .busy = if (slot == .pilot) @intFromBool(seat != .none and seat != unit_id) else load, .skill = skill });
+        try ranks.append(alloc, .{ .same = same, .busy = if (slot == .pilot) @intFromBool(assignment != null and seat != unit_id) else load, .skill = skill });
     }
     // Sort an index permutation, then rebuild: eligible, own company, free, sharper.
     const order = try alloc.alloc(usize, out.items.len);
@@ -6139,6 +6148,19 @@ pub fn hqLinks(alloc: Alloc, gs: *GameState) ![]const []const u8 {
 }
 
 /// The bay at one HQ: the occupancy line, then each job.
+fn bayJobText(alloc: Alloc, gs: *GameState, job: *const state_mod.BayJob) ![]const u8 {
+    const target = try hq_operations.bayTarget(gs, job);
+    const label = switch (target) {
+        .unit => |id| try std.fmt.allocPrint(alloc, "#{d} {s}", .{ @intFromEnum(id), try table.plain(alloc, (gs.unit(id) orelse return error.CorruptSave).chassis_key) }),
+        .artillery => |id| try std.fmt.allocPrint(alloc, "artillery #{d} {s}", .{ @intFromEnum(id), try table.plain(alloc, artillery.carrier().name) }),
+        .item => |key| try table.plain(alloc, key),
+    };
+    const timing = if (job.done_day) |day| try std.fmt.allocPrint(alloc, "done day {d}", .{day}) else try std.fmt.allocPrint(alloc, "queued ({d} days once a slot frees)", .{job.duration_days});
+    const odds = if (target == .unit and (job.kind == .depot_repair or job.kind == .refit)) try std.fmt.allocPrint(alloc, " · {s}", .{try hq_operations.repairOddsText(alloc, gs, job.hq, target.unit)}) else "";
+    const waiting = if (target == .artillery and !artillery_service.jobCanWork(gs, job)) " · waiting for local mechanic" else "";
+    return std.fmt.allocPrint(alloc, "  {s: <13} {s} {s}{s}{s}", .{ @tagName(job.kind), label, timing, odds, waiting });
+}
+
 pub fn bays(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]const []const u8 {
     const hq_ops = @import("hq_ops.zig");
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -6146,12 +6168,7 @@ pub fn bays(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]const []const u8
     try out.append(alloc, try std.fmt.allocPrint(alloc, "hq:{d} {s} — {d}/{d} bay slots busy, {d} queued", .{ @intFromEnum(hq_id), try hqName(alloc, gs, hq_id), load.busy, hq_ops.baySlots(gs, hq_id), load.queued }));
     for (gs.bay_jobs.items) |j| {
         if (j.hq != hq_id) continue;
-        const what = if (j.unit != .none) (if (gs.unit(j.unit)) |u| u.chassis_key else "?") else j.item_key;
-        if (j.done_day) |d| {
-            try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <13} {s: <10} done day {d}", .{ @tagName(j.kind), what, d }));
-        } else {
-            try out.append(alloc, try std.fmt.allocPrint(alloc, "  {s: <13} {s: <10} queued ({d} days once a slot frees)", .{ @tagName(j.kind), what, j.duration_days }));
-        }
+        try out.append(alloc, try bayJobText(alloc, gs, &j));
     }
     return out.toOwnedSlice(alloc);
 }
@@ -6222,7 +6239,7 @@ pub fn companyRoster(alloc: Alloc, gs: *GameState, co: types.ForceId) ![]const [
         var pb: [48]u8 = undefined;
         var tb: [48]u8 = undefined;
         try out.append(alloc, try std.fmt.allocPrint(alloc, "  #{d: <3} {s: <8} {s: <9} pilot {s: <12}{s} tech {s: <12}{s}", .{
-            @intFromEnum(u.id),                                                          u.chassis_key,
+            @intFromEnum(u.id),                                                          try table.plain(alloc, u.chassis_key),
             @tagName(u.status),
             if (pilot) |p| try table.plain(alloc, p.shortName(&pb)) else "—",
             if (pilot != null and pilot.?.isAvailable(day)) " " else "!",
@@ -6244,8 +6261,8 @@ pub fn companyRoster(alloc: Alloc, gs: *GameState, co: types.ForceId) ![]const [
     while (pit2.next()) |entry| {
         const p = entry.value_ptr;
         if (gs.companyOf(p.assigned_force) != co or !p.isAvailable(day)) continue;
-        if (!p.role.isCombat() or gs.pilotSeat(p.id) != .none) continue;
-        try pool.appendSlice(alloc, try std.fmt.allocPrint(alloc, " #{d} {s} ({s})", .{ @intFromEnum(p.id), p.last_name, @tagName(p.role) }));
+        if (!p.role.isCombat() or crew.operatingAssignment(gs, p.id) != null) continue;
+        try pool.appendSlice(alloc, try std.fmt.allocPrint(alloc, " #{d} {s} ({s})", .{ @intFromEnum(p.id), try table.plain(alloc, p.last_name), @tagName(p.role) }));
     }
     try out.append(alloc, try std.fmt.allocPrint(alloc, "  unassigned pool:{s}", .{if (pool.items.len > 0) pool.items else " none"}));
     return out.toOwnedSlice(alloc);
@@ -6271,7 +6288,7 @@ pub fn hqRoster(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]const []cons
     while (pit2.next()) |entry| {
         const p = entry.value_ptr;
         if (p.status != .active or !crew.isUnassigned(gs, p)) continue;
-        try pool.appendSlice(alloc, try std.fmt.allocPrint(alloc, " #{d} {s} ({s})", .{ @intFromEnum(p.id), p.last_name, @tagName(p.role) }));
+        try pool.appendSlice(alloc, try std.fmt.allocPrint(alloc, " #{d} {s} ({s})", .{ @intFromEnum(p.id), try table.plain(alloc, p.last_name), @tagName(p.role) }));
     }
     try out.append(alloc, try std.fmt.allocPrint(alloc, "  unposted & unassigned:{s}", .{if (pool.items.len > 0) pool.items else " none"}));
     return out.toOwnedSlice(alloc);
@@ -9529,4 +9546,107 @@ test "retired HQ history preserves typed selection and safe names without action
     try std.testing.expectError(error.OutOfMemory, ledgerLines(std.testing.failing_allocator, &gs, .{ .hq = other }, 20));
     try std.testing.expectError(error.OutOfMemory, logLines(std.testing.failing_allocator, &gs, 20, .{ .hq = other }));
     try std.testing.expectEqual(before, @import("digest.zig").stateHash(&gs));
+}
+
+test "artillery assignment labels preserve people identity pool meaning and shared numeric targets" {
+    const commands = @import("commands.zig");
+    const operations = @import("artillery_operations.zig");
+    const rules = @import("../domain/artillery_operations.zig");
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, true);
+    const f = gs.artillery_formations.get(id).?;
+    const ordinary = try gs.addUnit("SCP-1N");
+    try std.testing.expectEqual(@intFromEnum(id), @intFromEnum(ordinary));
+    gs.unit(ordinary).?.tech = f.tech;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for (rules.seats, f.crew) |seat, person| {
+        const expected = try std.fmt.allocPrint(a, "artillery #{d} {s}", .{ @intFromEnum(id), @tagName(seat) });
+        try std.testing.expectEqualStrings(expected, try assignmentText(a, &gs, gs.person(person).?));
+        const record = try personRecord(a, &gs, person);
+        try std.testing.expect(std.mem.indexOf(u8, record[2], expected) != null);
+        gs.person(person).?.status = .wounded;
+        try std.testing.expectEqualStrings(expected, try assignmentText(a, &gs, gs.person(person).?));
+        gs.person(person).?.status = .active;
+    }
+    try std.testing.expectEqualStrings("tech #1, artillery #1", try assignmentText(a, &gs, gs.person(f.tech).?));
+    const targets = try crew.technicianTargets(a, &gs, f.tech);
+    try std.testing.expectEqual(ordinary, targets[0].unit);
+    try std.testing.expectEqual(id, targets[1].artillery);
+    try std.testing.expect(!crew.isUnassigned(&gs, gs.person(f.tech).?));
+    const all = try people(a, &gs, .all);
+    for (all.rows) |row| {
+        for (rules.seats, f.crew) |seat, occupant| if (row.id == occupant) {
+            try std.testing.expect(std.mem.indexOf(u8, row.cells[7], @tagName(seat)) != null);
+        };
+    }
+    try std.testing.expectEqual(@as(usize, 0), (try people(a, &gs, .unassigned)).rows.len);
+    const roster = try companyRoster(a, &gs, f.placement.company);
+    try std.testing.expectEqualStrings("  unassigned pool: none", roster[roster.len - 1]);
+    _ = try artillery.detach(&gs, id);
+    _ = try commands.execute(&gs, .{ .assign_artillery_tech = .{ .formation = id, .person = f.tech } });
+    gs.unit(ordinary).?.tech = .none;
+    gs.person(f.tech).?.assigned_force = .none;
+    try std.testing.expectEqualStrings("tech artillery #1", try assignmentText(a, &gs, gs.person(f.tech).?));
+    const pool = try people(a, &gs, .unassigned);
+    for (pool.rows) |row| try std.testing.expect(row.id != f.tech);
+    const before = digest.stateHash(&gs);
+    try std.testing.expectError(error.OutOfMemory, assignmentText(std.testing.failing_allocator, &gs, gs.person(f.tech).?));
+    try std.testing.expectError(error.OutOfMemory, people(std.testing.failing_allocator, &gs, .all));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "mixed HQ bay labels preserve typed facility rows and escape dynamic labels" {
+    const operations = @import("artillery_operations.zig");
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, false);
+    const home = gs.seat();
+    const far = try @import("founding.zig").foundHq(&gs, "{c}Remote\x1b\xff", .regional, "skye");
+    const ordinary = try gs.addUnit("SCP-1N");
+    gs.unit(ordinary).?.chassis_key = "{g}very-long-catalogue-label\x1b\xff";
+    try gs.bay_jobs.appendSlice(gs.allocator(), &.{
+        .{ .hq = home, .kind = .artillery_depot_repair, .artillery = id, .duration_days = 2, .queued_day = 0 },
+        .{ .hq = home, .kind = .depot_repair, .unit = ordinary, .duration_days = 3, .queued_day = 0, .started_day = 0, .done_day = 3 },
+        .{ .hq = far, .kind = .fabrication, .item_key = "comp_chassis_h", .duration_days = 2, .queued_day = 0 },
+    });
+    gs.person(gs.artillery_formations.get(id).?.tech).?.leave_until_day = 10;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for ([_]types.HqId{ home, far }) |hq| {
+        const lines = try bays(a, &gs, hq);
+        try std.testing.expectEqual(@as(usize, if (hq == home) 3 else 2), lines.len);
+        for (lines) |line| {
+            try std.testing.expect(std.mem.indexOf(u8, line, "\x1b") == null);
+            if (std.mem.indexOf(u8, line, "very-long") != null) try std.testing.expect(std.mem.indexOf(u8, line, "{{g}very") != null);
+            try std.testing.expect(std.unicode.utf8ValidateSlice(line));
+        }
+        const detail = try hqDetailView(a, &gs, hq);
+        try std.testing.expectEqual(detail.lines.len, detail.facility.len);
+        var facility_index: usize = 0;
+        for (detail.lines, detail.facility) |line, facility| {
+            if (facility) |kind| {
+                try std.testing.expectEqual(gs.hqs.get(hq).?.facilities.items[facility_index].kind, kind);
+                facility_index += 1;
+            }
+            if (std.mem.indexOf(u8, line, "artillery #") != null or std.mem.indexOf(u8, line, "depot_repair") != null or std.mem.indexOf(u8, line, "fabrication") != null) try std.testing.expect(facility == null);
+        }
+        try std.testing.expectEqual(gs.hqs.get(hq).?.facilities.items.len, facility_index);
+    }
+    const home_lines = try bays(a, &gs, home);
+    try std.testing.expect(std.mem.indexOf(u8, home_lines[1], "artillery #1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, home_lines[1], "queued") != null);
+    try std.testing.expect(std.mem.indexOf(u8, home_lines[1], "waiting for local mechanic") != null);
+    try std.testing.expect(std.mem.indexOf(u8, home_lines[2], "done day 3") != null);
+    std.mem.swap(state_mod.BayJob, &gs.bay_jobs.items[0], &gs.bay_jobs.items[1]);
+    try std.testing.expect(std.mem.indexOf(u8, (try bays(a, &gs, home))[2], "artillery #1") != null);
+    const before = digest.stateHash(&gs);
+    try std.testing.expectError(error.OutOfMemory, bays(std.testing.failing_allocator, &gs, home));
+    try std.testing.expectError(error.OutOfMemory, hqDetailView(std.testing.failing_allocator, &gs, home));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
 }

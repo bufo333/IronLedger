@@ -5326,7 +5326,7 @@ test "a rebuilt store loads to the identical digest" {
     // Digest is identical: the rebuild changed no data.
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    try std.testing.expectEqual(@as(u64, 7222777433613484386), hash_before);
+    try std.testing.expectEqual(@as(u64, 4891880808279109320), hash_before);
 }
 
 test "every next-ID counter resumes past a higher owned id after load" {
@@ -5834,9 +5834,11 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     defer gs.deinit();
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
-    // The scripted campaign's hash detects any simulation or persistence change.
-    try std.testing.expectEqual(@as(u64, 13565609406863393148), digestBeforeArtilleryForTest(&gs));
-    try std.testing.expectEqual(@as(u64, 7222777433613484386), digest.stateHash(&gs));
+    // P2g adds the persisted service checkpoint and bay target representation.
+    // The approved shared-service policy also uses available, physically local
+    // technicians and local pool teams; recovering/training/absent staff no
+    // longer provide service remotely. Pin this complete new policy outcome.
+    try std.testing.expectEqual(@as(u64, 4891880808279109320), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5848,36 +5850,6 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     const commands = @import("../sim/commands.zig");
     for ([_]*GameState{ &gs, &loaded }) |g| _ = try commands.execute(g, .{ .advance_days = 60 });
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &buf) orelse "");
-}
-
-/// Schema-v59 digest representation checks unchanged conventional evolution.
-/// The new empty HQ archive is excluded only in this historical test projection.
-fn digestBeforeArtilleryForTest(gs: *const GameState) u64 {
-    @setEvalBranchQuota(200_000);
-    var hash = std.hash.Wyhash.init(0x42544d43);
-    inline for (@typeInfo(GameState).@"struct".fields) |field| {
-        if (comptime GameState.persistenceOf(field.name) == .persisted or GameState.persistenceOf(field.name) == .derived) {
-            if (comptime std.mem.eql(u8, field.name, "retired_hqs") or std.mem.startsWith(u8, field.name, "artillery_") or std.mem.startsWith(u8, field.name, "next_artillery_")) continue;
-            digest.update(&hash, field.name);
-            if (comptime std.mem.eql(u8, field.name, "hull_instances")) {
-                digest.update(&hash, @as(u64, gs.hull_instances.count()));
-                for (gs.hull_instances.keys(), gs.hull_instances.values()) |key, hull| {
-                    digest.update(&hash, key);
-                    inline for (@typeInfo(@TypeOf(hull)).@"struct".fields) |f| {
-                        if (comptime !std.mem.eql(u8, f.name, "catalogue")) digest.update(&hash, @field(hull, f.name));
-                    }
-                }
-            } else if (comptime std.mem.eql(u8, field.name, "hull_ownership_history")) {
-                digest.update(&hash, @as(u64, gs.hull_ownership_history.items.len));
-                for (gs.hull_ownership_history.items) |row| {
-                    inline for (@typeInfo(@TypeOf(row)).@"struct".fields) |f| {
-                        if (comptime std.mem.eql(u8, f.name, "to_day")) digest.update(&hash, row.to_day orelse @as(u32, 0)) else digest.update(&hash, @field(row, f.name));
-                    }
-                }
-            } else digest.update(&hash, @field(gs, field.name));
-        }
-    }
-    return hash.final();
 }
 
 test "pool-path salvage: hull_instance_id round-trips through save/load" {
@@ -9967,7 +9939,7 @@ test "real v60 archive migration is empty deterministic repeatable and rejects l
     try db.exec("DROP TABLE retired_hq; DELETE FROM meta WHERE key='retired_hq_count'; UPDATE setting SET value=60 WHERE key='schema_version'; UPDATE campaign SET schema_version=60; UPDATE meta SET value=0 WHERE key='next_hq_id'");
     const migrated = try Store.fromDb(db);
     defer migrated.close();
-    try std.testing.expectEqual(@as(i64, 61), migrated.getSetting("schema_version", 0));
+    try std.testing.expectEqual(@as(i64, schema_version), migrated.getSetting("schema_version", 0));
     var loaded = try migrated.load(std.testing.allocator, gs.campaign_id);
     defer loaded.deinit();
     try std.testing.expectEqual(@as(usize, 0), loaded.retired_hqs.count());
@@ -9986,4 +9958,354 @@ test "real v60 archive migration is empty deterministic repeatable and rejects l
     try std.testing.expectError(error.CorruptSave, migrated.load(std.testing.allocator, gs.campaign_id));
     try db.exec("UPDATE event_log SET hq=1; UPDATE txn SET hq=99 WHERE hq=1");
     try std.testing.expectError(error.CorruptSave, migrated.load(std.testing.allocator, gs.campaign_id));
+}
+
+// Schema-61 fixture definitions are independently copied from the pre-P2g documented schema.
+fn downgradeArtilleryToV61ForTest(db: sqlite.Db) !void {
+    try db.exec("PRAGMA foreign_keys=OFF");
+    try db.exec(
+        \\CREATE TABLE artillery_formation__v61 (
+        \\    cid INTEGER NOT NULL,
+        \\    ord INTEGER NOT NULL CHECK (ord >= 0),
+        \\    id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295),
+        \\    hull INTEGER NOT NULL CHECK (hull BETWEEN 1 AND 4294967295),
+        \\    acquisition_day INTEGER NOT NULL CHECK (acquisition_day BETWEEN 0 AND 4294967295),
+        \\    paid_price INTEGER NOT NULL CHECK (paid_price > 0),
+        \\    placement TEXT NOT NULL CHECK (placement IN ('hq_pool','company','freight','sold')),
+        \\    pool_hq INTEGER,
+        \\    company INTEGER,
+        \\    from_hq INTEGER,
+        \\    to_hq INTEGER,
+        \\    dispatch_day INTEGER,
+        \\    eta_day INTEGER,
+        \\    paid_cost INTEGER,
+        \\    PRIMARY KEY (cid,id),
+        \\    UNIQUE (cid,ord),
+        \\    UNIQUE (cid,hull),
+        \\    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+        \\    FOREIGN KEY (cid,hull) REFERENCES hull_instance(cid,id) DEFERRABLE INITIALLY DEFERRED,
+        \\    FOREIGN KEY (cid,pool_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED,
+        \\    FOREIGN KEY (cid,company) REFERENCES force(cid,id) DEFERRABLE INITIALLY DEFERRED,
+        \\    FOREIGN KEY (cid,from_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED,
+        \\    FOREIGN KEY (cid,to_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED,
+        \\    CHECK ((pool_hq IS NOT NULL) = (placement='hq_pool')),
+        \\    CHECK ((company IS NOT NULL) = (placement='company')),
+        \\    CHECK ((from_hq IS NOT NULL) = (placement='freight')),
+        \\    CHECK ((to_hq IS NOT NULL) = (placement='freight')),
+        \\    CHECK ((dispatch_day IS NOT NULL) = (placement='freight')),
+        \\    CHECK ((eta_day IS NOT NULL) = (placement='freight')),
+        \\    CHECK ((paid_cost IS NOT NULL) = (placement='freight')),
+        \\    CHECK (pool_hq IS NULL OR pool_hq BETWEEN 1 AND 4294967295),
+        \\    CHECK (company IS NULL OR company BETWEEN 1 AND 4294967295),
+        \\    CHECK (from_hq IS NULL OR from_hq BETWEEN 1 AND 4294967295),
+        \\    CHECK (to_hq IS NULL OR to_hq BETWEEN 1 AND 4294967295),
+        \\    CHECK (placement!='freight' OR (from_hq!=to_hq AND dispatch_day BETWEEN 0 AND 4294967295 AND eta_day > dispatch_day AND eta_day <= 4294967295 AND paid_cost >= 0))
+        \\);
+        \\CREATE TABLE bay_job__v61 (
+        \\    cid             INTEGER NOT NULL,
+        \\    ord             INTEGER NOT NULL,
+        \\    hq              INTEGER,                         -- -> hq.id
+        \\    kind            TEXT,                            -- depot_repair | reactivation | fabrication | refit
+        \\    unit            INTEGER,                         -- -> unit.id; 0 for fabrication
+        \\    item_key        TEXT,                            -- component being fabricated
+        \\    duration        INTEGER,                         -- days
+        \\    queued          INTEGER,                         -- day
+        \\    started         INTEGER,                         -- day; null while waiting for a slot
+        \\    done            INTEGER,                         -- day
+        \\    cost            INTEGER,                         -- labor posted to the HQ at completion
+        \\    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+        \\);
+    );
+    try db.exec(
+        \\INSERT INTO artillery_formation__v61 SELECT cid,ord,id,hull,acquisition_day,paid_price,placement,pool_hq,company,from_hq,to_hq,dispatch_day,eta_day,paid_cost FROM artillery_formation;
+        \\INSERT INTO bay_job__v61 SELECT cid,ord,hq,kind,COALESCE(unit,0),item_key,duration,queued,started,done,cost FROM bay_job;
+        \\DROP TABLE artillery_crew;
+        \\DROP TABLE artillery_slot;
+        \\DROP TABLE artillery_formation;
+        \\ALTER TABLE artillery_formation__v61 RENAME TO artillery_formation;
+        \\DROP TABLE bay_job;
+        \\ALTER TABLE bay_job__v61 RENAME TO bay_job;
+        \\DELETE FROM meta WHERE key='last_artillery_service_day';
+        \\UPDATE campaign SET schema_version=61;
+        \\UPDATE setting SET value=61 WHERE key='schema_version';
+    );
+    try db.exec("PRAGMA foreign_keys=ON");
+}
+
+test "real schema 61 upgrades every artillery placement with empty deterministic defaults and existing jobs" {
+    const rules = @import("../domain/artillery_operations.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const home = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const far = try founding.foundHq(&gs, "Remote", .regional, "skye");
+    const shipping = try founding.foundHq(&gs, "Shipping", .regional, "galatea");
+    const sales = try founding.foundHq(&gs, "Sales", .regional, "galatea");
+    const company = try gs.createForce("Alpha", .company, .none);
+    try artillery.syncMarkets(&gs);
+    const homes = [_]types.HqId{ home, far, shipping, sales };
+    var ids: [4]types.ArtilleryFormationId = undefined;
+    for (homes, &ids) |hq, *id| {
+        gs.hqs.getPtr(hq).?.funds = artillery.purchasePrice() * 4;
+        const offer = for (gs.artillery_offers.items) |o| {
+            if (o.hq == hq) break o.id;
+        } else return error.TestUnexpectedResult;
+        id.* = (try artillery.buy(&gs, .{ .hq = hq, .offer = offer })).artillery_formation;
+    }
+    _ = try artillery.attach(&gs, .{ .formation = ids[0], .company = company });
+    try gs.hq_links.append(gs.allocator(), .{ .a = shipping, .b = home, .level = 2, .established_day = 0 });
+    _ = try artillery.transfer(&gs, .{ .formation = ids[2], .to_hq = home });
+    _ = try artillery.sell(&gs, ids[3]);
+    try gs.bay_jobs.append(gs.allocator(), .{ .hq = home, .kind = .fabrication, .item_key = "comp_chassis_h", .duration_days = 2, .queued_day = 0 });
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    const initial = try Store.fromDb(raw);
+    try initial.save(&gs);
+    try downgradeArtilleryToV61ForTest(raw);
+    const migrated = try Store.fromDb(raw);
+    var loaded = try migrated.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(@as(i64, 62), migrated.getSetting("schema_version", 0));
+    try std.testing.expectEqual(@as(?u32, null), loaded.last_artillery_service_day);
+    for (ids) |id| {
+        const old = gs.artillery_formations.get(id).?;
+        const actual = loaded.artillery_formations.get(id).?;
+        try std.testing.expectEqualDeep(old, actual);
+        try std.testing.expectEqual(@as(u8, 100), actual.armor_pct);
+        for (actual.crew) |p| try std.testing.expectEqual(types.PersonId.none, p);
+        for (rules.descriptors, actual.slots) |d, slot| {
+            _ = d;
+            try std.testing.expectEqual(@as(u16, 0), slot.rounds);
+        }
+    }
+    try std.testing.expectEqualDeep(gs.bay_jobs.items, loaded.bay_jobs.items);
+    try std.testing.expectEqual(gs.rng, loaded.rng);
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    const repeated = try Store.fromDb(raw);
+    var retry = try repeated.load(std.testing.allocator, gs.campaign_id);
+    defer retry.deinit();
+    try std.testing.expectEqual(digest.stateHash(&loaded), digest.stateHash(&retry));
+    try migrated.save(&loaded);
+    try migrated.deleteCampaign(gs.campaign_id);
+    const orphan = try raw.prepare("SELECT (SELECT count(*) FROM artillery_crew)+(SELECT count(*) FROM artillery_slot)");
+    defer orphan.finalize();
+    try std.testing.expect(try orphan.next());
+    try std.testing.expectEqual(@as(i64, 0), orphan.int(0));
+}
+
+test "schema 62 operational corruption and partially upgraded legacy data are never repaired on load" {
+    const operations = @import("../sim/artillery_operations.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try operations.fixtureForTest(&gs, true);
+    _ = try gs.addUnit("SCP-1N");
+    const store = try Store.open(":memory:");
+    defer store.close();
+    const before = digest.stateHash(&gs);
+    for ([_][*:0]const u8{
+        "DELETE FROM artillery_crew WHERE seat='loader'",
+        "DELETE FROM artillery_slot WHERE slot='hitch'",
+        "UPDATE artillery_crew SET seat='unknown' WHERE seat='driver'",
+        "UPDATE artillery_slot SET slot='unknown' WHERE slot='hitch'",
+        "UPDATE artillery_slot SET condition='ok'||char(0)||'bad' WHERE slot='hitch'",
+        "UPDATE artillery_crew SET seat='driver'||char(0) WHERE seat='driver'",
+        "UPDATE artillery_formation SET quality='c'||char(0)",
+        "UPDATE artillery_formation SET armor=100.5",
+        "UPDATE artillery_formation SET armor=101",
+        "UPDATE artillery_formation SET last_maintenance=1",
+        "UPDATE artillery_formation SET last_maintenance=0.5",
+        "UPDATE artillery_formation SET tech=99999",
+        "UPDATE artillery_formation SET tech=tech+0.5",
+        "UPDATE artillery_crew SET person=99999 WHERE seat='driver'",
+        "UPDATE artillery_crew SET person=person+0.5 WHERE seat='driver'",
+        "UPDATE unit SET pilot=(SELECT person FROM artillery_crew WHERE seat='gunner')",
+        "UPDATE person SET assigned_force=0 WHERE role='vehicle_crew'",
+        "UPDATE meta SET value=1 WHERE key='next_person_id'",
+        "UPDATE artillery_slot SET rounds=6 WHERE slot='long_tom_bin_1'",
+        "UPDATE artillery_slot SET rounds=1.5 WHERE slot='long_tom_bin_1'",
+        "UPDATE artillery_slot SET rounds=1,condition='destroyed' WHERE slot='long_tom_bin_1'",
+        "UPDATE artillery_slot SET rounds=0 WHERE slot='main_gun'",
+        "UPDATE artillery_slot SET rounds=NULL WHERE slot='machine_gun_bin'",
+        "UPDATE meta SET value=1 WHERE key='last_artillery_service_day'",
+        "UPDATE meta SET value=-2 WHERE key='last_artillery_service_day'",
+        "UPDATE meta SET value=0.5 WHERE key='last_artillery_service_day'",
+        "DELETE FROM meta WHERE key='last_artillery_service_day'",
+        "UPDATE campaign SET schema_version=61",
+    }) |tamper| {
+        try store.save(&gs);
+        try store.db.exec("PRAGMA foreign_keys=OFF; PRAGMA ignore_check_constraints=ON");
+        try store.db.exec(tamper);
+        try store.db.exec("PRAGMA foreign_keys=ON; PRAGMA ignore_check_constraints=OFF");
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+    }
+    try store.save(&gs);
+    try store.db.exec("UPDATE campaign SET schema_version=63");
+    try std.testing.expectError(error.SaveNewerThanGame, store.load(std.testing.allocator, gs.campaign_id));
+}
+
+test "operational save continues through shared service injury repair reload and freight identically" {
+    const commands = @import("../sim/commands.zig");
+    const operations = @import("../sim/artillery_operations.zig");
+    const maintenance = @import("../sim/maintenance.zig");
+    const rules = @import("../domain/artillery_operations.zig");
+    const artillery_crew = @import("../sim/artillery_crew.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 625 });
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, true);
+    const f = gs.artillery_formations.getPtr(id).?;
+    f.slots[@intFromEnum(rules.Slot.communications)].condition = .missing;
+    f.armor_pct = 80;
+    try gs.addStock(.{ .hq = gs.seat() }, "artillery_spares", 2);
+    try gs.addStock(.{ .hq = gs.seat() }, rules.packageKey(.long_tom), 5);
+    try gs.addStock(.{ .hq = gs.seat() }, rules.packageKey(.machine_gun), 1);
+    _ = try commands.execute(&gs, .{ .reload_artillery = .{ .formation = id, .family = .long_tom } });
+    _ = try commands.execute(&gs, .{ .reload_artillery = .{ .formation = id, .family = .machine_gun } });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    for ([_]*GameState{ &gs, &loaded }) |g| {
+        g.clock.day_index = 7;
+        try maintenance.runWeeklyService(g);
+        const carrier = g.artillery_formations.getPtr(id).?;
+        try std.testing.expectEqual(@import("../domain/unit.zig").PartCondition.ok, carrier.slots[@intFromEnum(rules.Slot.communications)].condition);
+        const tech = carrier.tech;
+        try maintenance.injureTech(g, tech, 3, "continuation accident");
+        try std.testing.expectEqual(types.PersonId.none, carrier.tech);
+        const replacement = try g.hirePerson("Replacement", "Mechanic", .tech_mechanic);
+        _ = try artillery_crew.assignTech(g, .{ .formation = id, .person = replacement });
+        carrier.slots[@intFromEnum(rules.Slot.long_tom_bin_2)].rounds = 0;
+        _ = try commands.execute(g, .{ .reload_artillery = .{ .formation = id, .family = .long_tom } });
+        _ = try artillery.detach(g, id);
+        const far = try founding.foundHq(g, "Remote", .regional, "skye");
+        try artillery.syncMarkets(g);
+        try g.hq_links.append(g.allocator(), .{ .a = g.seat(), .b = far, .level = 2, .established_day = 0 });
+        const transfer_result = try commands.execute(g, .{ .transfer_artillery = .{ .formation = id, .to_hq = far } });
+        try std.testing.expect(operations.operationSite(g, carrier) == null);
+        g.clock.day_index = transfer_result.artillery_eta_day;
+        try artillery.runArrivals(g);
+        try artillery.validate(g);
+        try std.testing.expectEqual(@as(u16, rules.long_tom_rounds_per_bin), carrier.slots[@intFromEnum(rules.Slot.long_tom_bin_2)].rounds);
+    }
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    try store.save(&loaded);
+    var continued = try store.load(std.testing.allocator, loaded.campaign_id);
+    defer continued.deinit();
+    try std.testing.expectEqual(digest.stateHash(&loaded), digest.stateHash(&continued));
+    // Pin the complete operational command script, including service and injury streams.
+    try std.testing.expectEqual(@as(u64, 8112967050850264948), digest.stateHash(&continued));
+}
+
+test "artillery bay targets round trip and malformed mutually exclusive targets reject loading" {
+    const operations = @import("../sim/artillery_operations.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, false);
+    _ = try gs.addUnit("SCP-1N");
+    try gs.bay_jobs.append(gs.allocator(), .{ .hq = gs.seat(), .kind = .artillery_depot_repair, .artillery = id, .duration_days = 2, .queued_day = 0 });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    try std.testing.expectEqual(id, loaded.bay_jobs.items[0].artillery);
+    try std.testing.expectEqual(types.UnitId.none, loaded.bay_jobs.items[0].unit);
+    for ([_][*:0]const u8{
+        "UPDATE bay_job SET artillery=NULL",
+        "UPDATE bay_job SET artillery=99999",
+        "UPDATE bay_job SET artillery=1.5",
+        "UPDATE bay_job SET unit=1",
+        "UPDATE bay_job SET kind='fabrication',item_key='comp_chassis_h'",
+        "UPDATE bay_job SET kind='artillery_depot_repair'||char(0)",
+        "UPDATE bay_job SET item_key='comp_chassis_h'",
+        "UPDATE bay_job SET started=1,done=2",
+        "UPDATE bay_job SET duration=0",
+        "INSERT INTO bay_job SELECT cid,ord+1,hq,kind,unit,item_key,duration,queued,started,done,cost,artillery FROM bay_job",
+    }) |tamper| {
+        try store.save(&gs);
+        try store.db.exec("PRAGMA foreign_keys=OFF; PRAGMA ignore_check_constraints=ON");
+        try store.db.exec(tamper);
+        try store.db.exec("PRAGMA foreign_keys=ON; PRAGMA ignore_check_constraints=OFF");
+        var invalid = store.load(std.testing.allocator, gs.campaign_id) catch |err| {
+            try std.testing.expectEqual(error.CorruptSave, err);
+            continue;
+        };
+        invalid.deinit();
+        std.debug.print("accepted bay corruption: {s}\n", .{tamper});
+        return error.TestExpectedError;
+    }
+}
+
+test "absent pool mechanic and captive operating crew retain valid saved assignments without remote service" {
+    const operations = @import("../sim/artillery_operations.zig");
+    const artillery_crew = @import("../sim/artillery_crew.zig");
+    for ([_]bool{ false, true }) |pooled| {
+        var gs = GameState.init(std.testing.allocator, .{});
+        defer gs.deinit();
+        const id = try operations.fixtureForTest(&gs, true);
+        const f = gs.artillery_formations.get(id).?;
+        if (pooled) {
+            _ = try artillery.detach(&gs, id);
+            _ = try artillery_crew.assignTech(&gs, .{ .formation = id, .person = f.tech });
+            gs.force(f.placement.company).?.location_planet = "galatea";
+        } else {
+            gs.person(f.crew[0]).?.status = .pow;
+            gs.person(f.crew[1]).?.training = .{ .skill = .gunnery_vee, .done_day = 1 };
+            gs.force(f.placement.company).?.return_eta_day = 10;
+        }
+        try artillery.validate(&gs);
+        try std.testing.expect(operations.serviceCapability(&gs, gs.artillery_formations.getPtr(id).?) == null);
+        const store = try Store.open(":memory:");
+        defer store.close();
+        try store.save(&gs);
+        var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+        defer loaded.deinit();
+        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+        try std.testing.expect(operations.serviceCapability(&loaded, loaded.artillery_formations.getPtr(id).?) == null);
+        try std.testing.expectEqual(gs.artillery_formations.get(id).?.tech, loaded.artillery_formations.get(id).?.tech);
+        try std.testing.expectEqual(gs.artillery_formations.get(id).?.crew, loaded.artillery_formations.get(id).?.crew);
+    }
+}
+
+test "operational row write failures preserve first-save and overwrite identity until successful retry" {
+    const operations = @import("../sim/artillery_operations.zig");
+    const rules = @import("../domain/artillery_operations.zig");
+    const old_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = old_log_level;
+    for ([_][]const u8{ "artillery_crew", "artillery_slot" }) |table| {
+        var gs = GameState.init(std.testing.allocator, .{});
+        defer gs.deinit();
+        const id = try operations.fixtureForTest(&gs, true);
+        gs.artillery_formations.getPtr(id).?.slots[@intFromEnum(rules.Slot.long_tom_bin_1)].rounds = 3;
+        const store = try Store.open(":memory:");
+        defer store.close();
+        var sql: [256]u8 = undefined;
+        const trigger = try std.fmt.bufPrintZ(&sql, "CREATE TRIGGER reject_operations BEFORE INSERT ON {s} BEGIN SELECT RAISE(ABORT,'injected'); END", .{table});
+        try store.db.exec(trigger);
+        const before = digest.stateHash(&gs);
+        try std.testing.expectError(error.ConstraintViolation, store.save(&gs));
+        try std.testing.expectEqual(@as(i64, 0), gs.campaign_id);
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+        try store.db.exec("DROP TRIGGER reject_operations");
+        try store.save(&gs);
+        const saved = digest.stateHash(&gs);
+        gs.artillery_formations.getPtr(id).?.armor_pct = 90;
+        gs.last_artillery_service_day = 0;
+        const changed = digest.stateHash(&gs);
+        try store.db.exec(trigger);
+        try std.testing.expectError(error.ConstraintViolation, store.save(&gs));
+        try std.testing.expectEqual(changed, digest.stateHash(&gs));
+        var prior = try store.load(std.testing.allocator, gs.campaign_id);
+        defer prior.deinit();
+        try std.testing.expectEqual(saved, digest.stateHash(&prior));
+        try store.db.exec("DROP TRIGGER reject_operations");
+        try store.save(&gs);
+        var retried = try store.load(std.testing.allocator, gs.campaign_id);
+        defer retried.deinit();
+        try std.testing.expectEqual(changed, digest.stateHash(&retried));
+    }
 }

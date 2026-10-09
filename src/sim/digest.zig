@@ -369,3 +369,48 @@ test "every archived HQ field and active archive membership affects the complete
     try gs.hqs.put(gs.allocator(), id, live);
     try std.testing.expect(base != stateHash(&gs));
 }
+
+test "every artillery operational field checkpoint and bay target affects the complete digest" {
+    const operations = @import("artillery_operations.zig");
+    const rules = @import("../domain/artillery_operations.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, true);
+    const f = gs.artillery_formations.getPtr(id).?;
+    const original = f.*;
+    const baseline = stateHash(&gs);
+    f.quality = .b;
+    try std.testing.expect(baseline != stateHash(&gs));
+    f.* = original;
+    f.armor_pct -= 1;
+    try std.testing.expect(baseline != stateHash(&gs));
+    f.* = original;
+    f.last_maintenance_day = 0;
+    try std.testing.expect(baseline != stateHash(&gs));
+    f.* = original;
+    f.tech = .none;
+    try std.testing.expect(baseline != stateHash(&gs));
+    for (rules.seats, 0..) |_, i| {
+        f.* = original;
+        f.crew[i] = .none;
+        try std.testing.expect(baseline != stateHash(&gs));
+    }
+    for (rules.descriptors, 0..) |d, i| {
+        f.* = original;
+        f.slots[i].condition = .damaged;
+        try std.testing.expect(baseline != stateHash(&gs));
+        if (d.family != null) {
+            f.* = original;
+            f.slots[i].rounds = 1;
+            try std.testing.expect(baseline != stateHash(&gs));
+        }
+    }
+    f.* = original;
+    gs.last_artillery_service_day = 0;
+    try std.testing.expect(baseline != stateHash(&gs));
+    gs.last_artillery_service_day = null;
+    try gs.bay_jobs.append(gs.allocator(), .{ .hq = gs.seat(), .kind = .artillery_depot_repair, .artillery = id, .duration_days = 1, .queued_day = 0 });
+    const queued = stateHash(&gs);
+    gs.bay_jobs.items[0].artillery = .none;
+    try std.testing.expect(queued != stateHash(&gs));
+}
