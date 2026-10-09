@@ -78,6 +78,7 @@
         // is an optional asset for -Dbundle-music release trees, shipped
         // separately (docs/coding-contract.md rule 66).
         "data/chassis.zon",
+        "data/artillery.zon",
         "data/parts.zon",
         "data/planets.zon",
         "data/tables",

@@ -34,6 +34,7 @@ pub fn build(b: *std.Build) void {
         .{ .import_name = "chassis_zon", .rel = "chassis.zon" },
         .{ .import_name = "planets_zon", .rel = "planets.zon" },
         .{ .import_name = "parts_zon", .rel = "parts.zon" },
+        .{ .import_name = "artillery_zon", .rel = "artillery.zon" },
         // Tables: tuning knobs, MekLab construction tables, names …
         .{ .import_name = "tuning_zon", .rel = "tables/tuning.zon" },
         .{ .import_name = "meklab_zon", .rel = "tables/meklab.zon" },

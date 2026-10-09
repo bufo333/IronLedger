@@ -55,6 +55,7 @@ CASES = [
     ("a manufacturing_chassis entry with an unknown chassis key (P3e.1)", lambda: {"tables/factions.zon": mutate("tables/factions.zon", r'"RFL-3N"', '"__bad_chassis__"')}, True),
     ("an invalid arm_actuators tag on CPLT-C1 (P3d)", lambda: {"chassis.zon": mutate("chassis.zon", r'\.left_arm_actuators = \.no_lower_arm', ".left_arm_actuators = .__bad_actuators__")}, True),
     ("a conventional chassis without source provenance", lambda: {"chassis.zon": mutate("chassis.zon", r'(\.key = "SCP-1N".*?\.source_path = )"[^"]+"', r'\1""', re.S)}, True),
+    ("artillery construction with an unknown mounted item", lambda: {"artillery.zon": mutate("artillery.zon", r'\.key = "long_tom", \.count = 1', '.key = "__unknown__", .count = 1')}, True),
     ("a conventional chassis with the wrong source revision", lambda: {"chassis.zon": mutate("chassis.zon", r'(\.key = "SCP-1N".*?\.source_revision = )"[^"]+"', r'\1"__wrong_revision__"', re.S)}, True),
     ("an unaudited conventional chassis admitted to market", lambda: {"chassis.zon": mutate("chassis.zon", r'(\.key = "VDT".*?\.source_path = "[^"]+")', r'\1, .market_eligible = true', re.S)}, True),
     ("an approved conventional chassis quarantined from market", lambda: {"chassis.zon": mutate("chassis.zon", r'(\.key = "SCP-1N".*?\.market_eligible = )true', r'\1false', re.S)}, True),

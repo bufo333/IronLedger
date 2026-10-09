@@ -1,0 +1,23 @@
+// P2e Mobile Long Tom construction facts, re-encoded from the pinned mm-data
+// BLK. Calculated BV and cost intentionally never appear in this catalogue.
+.{
+    .{
+        .key = "LT-MOB-25",
+        .name = "Mobile Long Tom Artillery",
+        .model = "LT-MOB-25",
+        .category = .mobile_artillery_carrier,
+        .intro_year = 2602,
+        .source_revision = "2a62993f8da306f489116233d489d1f6222945e3",
+        .source_path = "data/mekfiles/vehicles/3039u/Mobile Long Tom LT-MOB-25.blk",
+        .vehicle = .{ .tons = 75, .cruise_mp = 3, .engine_rating = 225, .armor = .{ 16, 16, 16, 16 }, .internal_structure = 8, .is_tracked = true, .is_ice = true },
+        .mounts = .{
+            .{ .key = "long_tom", .count = 1, .location = .front },
+            .{ .key = "long_tom_ammo", .count = 4, .location = .body },
+            .{ .key = "machine_gun", .count = 2, .location = .right },
+            .{ .key = "machine_gun", .count = 2, .location = .left },
+            .{ .key = "machine_gun_ammo_half", .count = 1, .location = .body },
+            .{ .key = "communications_size_3", .count = 1, .location = .body },
+            .{ .key = "hitch", .count = 1, .location = .rear },
+        },
+    },
+}
