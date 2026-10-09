@@ -13,6 +13,44 @@ fn positiveId(comptime T: type, raw: i64) !T {
     return @enumFromInt(value);
 }
 
+test "artillery full campaign load rejects placement TEXT containing embedded NUL" {
+    const store_mod = @import("store.zig");
+    const artillery = @import("../sim/artillery.zig");
+    const digest = @import("../sim/digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const home = try @import("../sim/founding.zig").createCommander(&gs, "T", .LC, .quartermaster);
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
+    _ = try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
+    const store = try store_mod.Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var valid = try store.load(std.testing.allocator, gs.campaign_id);
+    defer valid.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&valid));
+    const malformed = "hq_pool\x00invalid";
+    try store.db.exec("PRAGMA ignore_check_constraints=ON");
+    const update = try store.db.prepare("UPDATE artillery_formation SET placement=?1 WHERE cid=?2");
+    defer update.finalize();
+    try update.bindAll(.{ malformed, gs.campaign_id });
+    try update.run();
+    try store.db.exec("PRAGMA ignore_check_constraints=OFF");
+    const check = try store.db.prepare("SELECT placement,typeof(placement)='text' FROM artillery_formation WHERE cid=?1");
+    defer check.finalize();
+    try check.bindAll(.{gs.campaign_id});
+    try std.testing.expect(try check.next());
+    try std.testing.expectEqual(@as(i64, 1), check.int(1));
+    const bytes = try check.text(0, std.testing.allocator);
+    defer std.testing.allocator.free(bytes);
+    try std.testing.expectEqualSlices(u8, malformed, bytes);
+    var loaded = store.load(std.testing.allocator, gs.campaign_id) catch |err| {
+        try std.testing.expectEqual(error.CorruptSave, err);
+        return;
+    };
+    loaded.deinit();
+    return error.TestExpectedError;
+}
+
 fn optionalId(comptime T: type, st: sqlite.Stmt, column: c_int) !?T {
     return if (st.optInt(column)) |raw| try positiveId(T, raw) else null;
 }
@@ -73,7 +111,9 @@ pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
         // storage classes before any payload conversion (contract rule 47).
         if (fs.int(13) != 1) return error.CorruptSave;
         _ = try fs.intAs(usize, 12);
-        const tag = fs.enumValue(std.meta.Tag(dom.Placement), 4) orelse return error.CorruptSave;
+        const tag_bytes = try fs.text(4, gs.scratch());
+        defer gs.scratch().free(tag_bytes);
+        const tag = std.meta.stringToEnum(std.meta.Tag(dom.Placement), tag_bytes) orelse return error.CorruptSave;
         const pool = try optionalId(types.HqId, fs, 5);
         const co = try optionalId(types.ForceId, fs, 6);
         const from = try optionalId(types.HqId, fs, 7);
@@ -401,4 +441,102 @@ test "offer completeness preserves zero boards and delayed initialization of new
         try std.testing.expect(!g.artillery_offers.items[0].available);
     }
     try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+}
+
+fn placementCampaignForTest(gs: *GameState, placement: std.meta.Tag(dom.Placement)) !void {
+    const artillery = @import("../sim/artillery.zig");
+    const founding = @import("../sim/founding.zig");
+    const home = try founding.createCommander(gs, "T", .LC, .quartermaster);
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice() * 10;
+    const bought = try artillery.buy(gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
+    switch (placement) {
+        .hq_pool => {},
+        .company => {
+            const company = try gs.createForce("Company", .company, .none);
+            try @import("../sim/toe.zig").assignCompanyToHq(gs, company, home);
+            _ = try artillery.attach(gs, .{ .formation = bought.artillery_formation, .company = company });
+        },
+        .freight => {
+            const far = try founding.foundHq(gs, "Far", .regional, "skye");
+            try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = far, .level = 2, .established_day = 0 });
+            _ = try artillery.transfer(gs, .{ .formation = bought.artillery_formation, .to_hq = far });
+        },
+        .sold => _ = try artillery.sell(gs, bought.artillery_formation),
+    }
+    try artillery.validate(gs);
+}
+
+test "every artillery placement round trips exact tags and rejects incomplete TEXT" {
+    const store_mod = @import("store.zig");
+    const digest = @import("../sim/digest.zig");
+    for (std.enums.values(std.meta.Tag(dom.Placement))) |placement| {
+        var gs = GameState.init(std.testing.allocator, .{});
+        defer gs.deinit();
+        try placementCampaignForTest(&gs, placement);
+        const store = try store_mod.Store.open(":memory:");
+        defer store.close();
+        try store.save(&gs);
+        var valid = try store.load(std.testing.allocator, gs.campaign_id);
+        defer valid.deinit();
+        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&valid));
+        const embedded = try std.fmt.allocPrint(std.testing.allocator, "{s}\x00invalid", .{@tagName(placement)});
+        defer std.testing.allocator.free(embedded);
+        const trailing = try std.fmt.allocPrint(std.testing.allocator, "{s}\x00", .{@tagName(placement)});
+        defer std.testing.allocator.free(trailing);
+        for ([_][]const u8{ embedded, trailing, "", "unknown" }) |value| {
+            try store.save(&gs);
+            try store.db.exec("PRAGMA ignore_check_constraints=ON");
+            const update = try store.db.prepare("UPDATE artillery_formation SET placement=?1 WHERE cid=?2");
+            defer update.finalize();
+            try update.bindAll(.{ value, gs.campaign_id });
+            try update.run();
+            try std.testing.expectEqual(@as(i64, 1), store.db.changes());
+            try store.db.exec("PRAGMA ignore_check_constraints=OFF");
+            const check = try store.db.prepare("SELECT placement,typeof(placement)='text' FROM artillery_formation WHERE cid=?1");
+            defer check.finalize();
+            try check.bindAll(.{gs.campaign_id});
+            try std.testing.expect(try check.next());
+            try std.testing.expectEqual(@as(i64, 1), check.int(1));
+            const bytes = try check.text(0, std.testing.allocator);
+            defer std.testing.allocator.free(bytes);
+            try std.testing.expectEqualSlices(u8, value, bytes);
+            var malformed = store.load(std.testing.allocator, gs.campaign_id) catch |err| {
+                try std.testing.expectEqual(error.CorruptSave, err);
+                continue;
+            };
+            malformed.deinit();
+            return error.TestExpectedError;
+        }
+    }
+}
+
+test "placement tag scratch propagates allocation failure and releases bytes on every outcome" {
+    const db = try openCodecFixture();
+    defer db.close();
+    for ([_][]const u8{ "hq_pool", "hq_pool\x00invalid" }) |value| {
+        try resetCodecFixture(db, .hq_pool);
+        const update = try db.prepare("UPDATE artillery_formation SET placement=?1");
+        defer update.finalize();
+        try update.bindAll(.{value});
+        try update.run();
+        for ([_]usize{ 0, 1, std.math.maxInt(usize) }) |fail_index| {
+            var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+            {
+                var rows = GameState.init(failing.allocator(), .{});
+                defer rows.deinit();
+                if (fail_index == 0 or (fail_index == 1 and std.mem.eql(u8, value, "hq_pool"))) {
+                    try std.testing.expectError(error.OutOfMemory, load(db, &rows, 1, 60));
+                    try std.testing.expect(failing.has_induced_failure);
+                } else if (std.mem.eql(u8, value, "hq_pool")) {
+                    try load(db, &rows, 1, 60);
+                    // Only the campaign arena block remains; enum bytes are reclaimed.
+                    try std.testing.expectEqual(@as(usize, 1), failing.deallocations);
+                } else {
+                    try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 60));
+                    try std.testing.expectEqual(@as(usize, value.len), failing.freed_bytes);
+                }
+            }
+            try std.testing.expectEqual(failing.allocated_bytes, failing.freed_bytes);
+        }
+    }
 }

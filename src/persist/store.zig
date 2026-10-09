@@ -2757,11 +2757,14 @@ pub const Store = struct {
             if (try st.intAs(u32, 5) != gs.retired_hqs.count()) return error.CorruptSave;
             const id = try toId(types.HqId, st.int(0));
             if (id == .none) return error.CorruptSave;
+            const tier_bytes = try st.text(3, gs.scratch());
+            defer gs.scratch().free(tier_bytes);
+            const tier = std.meta.stringToEnum(hq_mod.HqTier, tier_bytes) orelse return error.CorruptSave;
             const h: hq_mod.RetiredHq = .{
                 .id = id,
                 .name = try st.text(1, alloc),
                 .planet_key = try st.text(2, alloc),
-                .tier = st.enumValue(hq_mod.HqTier, 3) orelse return error.CorruptSave,
+                .tier = tier,
                 .sold_day = try st.intAs(u32, 4),
             };
             const gop = try gs.retired_hqs.getOrPut(alloc, id);
@@ -9550,6 +9553,186 @@ fn retiredCampaignForTest(gs: *GameState) !types.HqId {
     _ = try commands.execute(gs, .{ .sell_artillery = bought.artillery_formation });
     _ = try commands.execute(gs, .{ .sell_hq = other });
     return other;
+}
+
+fn tamperEnumTextForTest(store: Store, cid: i64, table: []const u8, column: []const u8, key: []const u8, id: u32, value: []const u8) !void {
+    var sql: [256]u8 = undefined;
+    try store.db.exec("PRAGMA ignore_check_constraints=ON");
+    const update = try store.db.prepare(try std.fmt.bufPrint(&sql, "UPDATE {s} SET {s}=?1 WHERE cid=?2 AND {s}=?3", .{ table, column, key }));
+    defer update.finalize();
+    try update.bindAll(.{ value, cid, id });
+    try update.run();
+    try std.testing.expectEqual(@as(i64, 1), store.db.changes());
+    try store.db.exec("PRAGMA ignore_check_constraints=OFF");
+    const check = try store.db.prepare(try std.fmt.bufPrint(&sql, "SELECT {s},typeof({s})='text' FROM {s} WHERE cid=?1 AND {s}=?2", .{ column, column, table, key }));
+    defer check.finalize();
+    try check.bindAll(.{ cid, id });
+    try std.testing.expect(try check.next());
+    try std.testing.expectEqual(@as(i64, 1), check.int(1));
+    const bytes = try check.text(0, std.testing.allocator);
+    defer std.testing.allocator.free(bytes);
+    try std.testing.expectEqualSlices(u8, value, bytes);
+}
+
+fn expectEnumLoadRejectedForTest(store: Store, cid: i64) !void {
+    var loaded = store.load(std.testing.allocator, cid) catch |err| {
+        try std.testing.expectEqual(error.CorruptSave, err);
+        return;
+    };
+    loaded.deinit();
+    return error.TestExpectedError;
+}
+
+test "shared hull enum TEXT controls reject incomplete carrier and ownership tags" {
+    for ([_]bool{ false, true }) |sold| {
+        var gs = GameState.init(std.testing.allocator, .{});
+        defer gs.deinit();
+        const formation = try artilleryCampaignForTest(&gs);
+        const carrier = gs.artillery_formations.get(formation).?.hull;
+        if (sold) _ = try artillery.sell(&gs, formation);
+        const unit_id = try gs.addUnit("WSP-1A");
+        try gs.recordHullAcquisition(gs.unit(unit_id).?, .purchase, "market");
+        const conventional = gs.unit(unit_id).?.hull_instance_id;
+        const store = try Store.open(":memory:");
+        defer store.close();
+        try store.save(&gs);
+        var valid = try store.load(std.testing.allocator, gs.campaign_id);
+        defer valid.deinit();
+        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&valid));
+        const fields = [_]struct { column: []const u8, id: types.HullInstanceId, tag: []const u8 }{
+            .{ .column = "status", .id = carrier, .tag = "active" },
+            .{ .column = "owner_type", .id = carrier, .tag = if (sold) "market" else "player" },
+            .{ .column = "catalogue", .id = carrier, .tag = "artillery" },
+            .{ .column = "catalogue", .id = conventional, .tag = "chassis" },
+        };
+        for (fields) |field| {
+            const embedded = try std.fmt.allocPrint(std.testing.allocator, "{s}\x00invalid", .{field.tag});
+            defer std.testing.allocator.free(embedded);
+            const trailing = try std.fmt.allocPrint(std.testing.allocator, "{s}\x00", .{field.tag});
+            defer std.testing.allocator.free(trailing);
+            for ([_][]const u8{ embedded, trailing, "", "unknown" }) |value| {
+                try store.save(&gs);
+                try tamperEnumTextForTest(store, gs.campaign_id, "hull_instance", field.column, "id", @intFromEnum(field.id), value);
+                try expectEnumLoadRejectedForTest(store, gs.campaign_id);
+            }
+        }
+        for (gs.hull_ownership_history.items, 0..) |interval, ord| {
+            if (interval.hull_instance_id != carrier) continue;
+            const embedded = try std.fmt.allocPrint(std.testing.allocator, "{s}\x00invalid", .{@tagName(interval.acquisition_type)});
+            defer std.testing.allocator.free(embedded);
+            const trailing = try std.fmt.allocPrint(std.testing.allocator, "{s}\x00", .{@tagName(interval.acquisition_type)});
+            defer std.testing.allocator.free(trailing);
+            for ([_][]const u8{ embedded, trailing, "", "unknown" }) |value| {
+                try store.save(&gs);
+                try tamperEnumTextForTest(store, gs.campaign_id, "hull_ownership_history", "acquisition_type", "ord", @intCast(ord), value);
+                try expectEnumLoadRejectedForTest(store, gs.campaign_id);
+            }
+        }
+    }
+}
+
+test "archived HQ full campaign load rejects tier TEXT containing embedded NUL" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try retiredCampaignForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var valid = try store.load(std.testing.allocator, gs.campaign_id);
+    defer valid.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&valid));
+    const malformed = "regional\x00invalid";
+    try store.db.exec("PRAGMA ignore_check_constraints=ON");
+    const update = try store.db.prepare("UPDATE retired_hq SET tier=?1 WHERE cid=?2");
+    defer update.finalize();
+    try update.bindAll(.{ malformed, gs.campaign_id });
+    try update.run();
+    try store.db.exec("PRAGMA ignore_check_constraints=OFF");
+    const check = try store.db.prepare("SELECT tier,typeof(tier)='text' FROM retired_hq WHERE cid=?1");
+    defer check.finalize();
+    try check.bindAll(.{gs.campaign_id});
+    try std.testing.expect(try check.next());
+    try std.testing.expectEqual(@as(i64, 1), check.int(1));
+    const bytes = try check.text(0, std.testing.allocator);
+    defer std.testing.allocator.free(bytes);
+    try std.testing.expectEqualSlices(u8, malformed, bytes);
+    var loaded = store.load(std.testing.allocator, gs.campaign_id) catch |err| {
+        try std.testing.expectEqual(error.CorruptSave, err);
+        return;
+    };
+    loaded.deinit();
+    return error.TestExpectedError;
+}
+
+test "every archived HQ tier round trips exact tags and rejects incomplete TEXT" {
+    for (std.enums.values(hq_mod.HqTier)) |tier| {
+        var gs = GameState.init(std.testing.allocator, .{});
+        defer gs.deinit();
+        const retired = try retiredCampaignForTest(&gs);
+        gs.retired_hqs.getPtr(retired).?.tier = tier;
+        const store = try Store.open(":memory:");
+        defer store.close();
+        try store.save(&gs);
+        var valid = try store.load(std.testing.allocator, gs.campaign_id);
+        defer valid.deinit();
+        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&valid));
+        const embedded = try std.fmt.allocPrint(std.testing.allocator, "{s}\x00invalid", .{@tagName(tier)});
+        defer std.testing.allocator.free(embedded);
+        const trailing = try std.fmt.allocPrint(std.testing.allocator, "{s}\x00", .{@tagName(tier)});
+        defer std.testing.allocator.free(trailing);
+        for ([_][]const u8{ embedded, trailing, "", "unknown" }) |value| {
+            try store.save(&gs);
+            try tamperEnumTextForTest(store, gs.campaign_id, "retired_hq", "tier", "id", @intFromEnum(retired), value);
+            try expectEnumLoadRejectedForTest(store, gs.campaign_id);
+        }
+    }
+}
+
+test "archive tier codec rejects original nontext storage without affinity coercion" {
+    const db = try sqlite.Db.open(":memory:");
+    defer db.close();
+    try db.exec("CREATE TABLE retired_hq(cid,ord,id,name,planet,tier,sold_day); CREATE TABLE meta(cid,key,value); INSERT INTO meta VALUES(1,'retired_hq_count',1); INSERT INTO meta VALUES(1,'next_hq_id',3)");
+    const store: Store = .{ .db = db };
+    for ([_][]const u8{ "1", "1.5", "X'726567696f6e616c'", "NULL" }) |value| {
+        var sql: [256]u8 = undefined;
+        try db.exec("DELETE FROM retired_hq; INSERT INTO retired_hq VALUES(1,0,2,'Historical','skye','regional',0)");
+        try db.exec(try std.fmt.bufPrintZ(&sql, "UPDATE retired_hq SET tier={s}", .{value}));
+        var rows = GameState.init(std.testing.allocator, .{});
+        defer rows.deinit();
+        try std.testing.expectError(error.CorruptSave, store.loadRetiredHq(&rows, 1, 61));
+    }
+}
+
+test "archive tier scratch propagates allocation failure and releases bytes on every outcome" {
+    const db = try sqlite.Db.open(":memory:");
+    defer db.close();
+    try db.exec("CREATE TABLE retired_hq(cid,ord,id,name,planet,tier,sold_day); CREATE TABLE meta(cid,key,value); INSERT INTO meta VALUES(1,'retired_hq_count',1); INSERT INTO meta VALUES(1,'next_hq_id',3); INSERT INTO retired_hq VALUES(1,0,2,'Historical','skye','regional',0)");
+    const store: Store = .{ .db = db };
+    for ([_][]const u8{ "regional", "regional\x00invalid" }) |value| {
+        const update = try db.prepare("UPDATE retired_hq SET tier=?1");
+        defer update.finalize();
+        try update.bindAll(.{value});
+        try update.run();
+        for ([_]usize{ 0, 1, std.math.maxInt(usize) }) |fail_index| {
+            var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+            {
+                var rows = GameState.init(failing.allocator(), .{});
+                defer rows.deinit();
+                if (fail_index == 0 or (fail_index == 1 and std.mem.eql(u8, value, "regional"))) {
+                    try std.testing.expectError(error.OutOfMemory, store.loadRetiredHq(&rows, 1, 61));
+                    try std.testing.expect(failing.has_induced_failure);
+                } else if (std.mem.eql(u8, value, "regional")) {
+                    try store.loadRetiredHq(&rows, 1, 61);
+                    // Retained name/world bytes belong to the campaign arena.
+                    try std.testing.expectEqual(@as(usize, 1), failing.deallocations);
+                } else {
+                    try std.testing.expectError(error.CorruptSave, store.loadRetiredHq(&rows, 1, 61));
+                    try std.testing.expectEqual(@as(usize, value.len), failing.freed_bytes);
+                }
+            }
+            try std.testing.expectEqual(failing.allocated_bytes, failing.freed_bytes);
+        }
+    }
 }
 
 test "multiple retired HQs preserve sale order independently of ID order" {
