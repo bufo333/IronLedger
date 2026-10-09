@@ -9,10 +9,10 @@ A package has one primary invariant or subsystem outcome.
 
 - [x] P2v-a conventional data and provenance: replace the static catalogue with
   verified source facts and pinned source-path provenance.
-- [ ] P2v-b conventional market and vehicle parity: replenishing vehicle/fighter
+- [x] P2v-b conventional market and vehicle parity: replenishing vehicle/fighter
   offers, player acquisition, ownership persistence, and vehicle
   readiness/repair/battle/salvage parity.
-- [ ] P2v-c aerospace combat parity: fighter battle, damage, ammunition, salvage,
+- [x] P2v-c aerospace combat parity: fighter battle, damage, ammunition, salvage,
   AAR, and verified aerospace repair behavior.
 - [x] P2v-d NPC conventional procurement: mek-first vehicle substitution for line
   lances, aerospace procurement for air lances, and replenishing conventional
@@ -24,8 +24,10 @@ A package has one primary invariant or subsystem outcome.
   each candidate's actual later introduction date, and full P2a research before
   a separately approved implementation plan; verified domain facts,
   acquisition/attachment, crewing, readiness, and persistence.
-- [ ] P2-artillery (P2e-P2g): verified domain facts, acquisition/attachment,
-  crewing, readiness, and persistence.
+- [x] P2e artillery domain catalogue: verified Mobile Long Tom construction
+  facts, provenance, calculated BV/cost, and static artillery category.
+- [ ] P2-artillery (P2f-P2g): acquisition/attachment, crewing, readiness,
+  and persistence.
 - [ ] P2-battle-ui (P2h-P2i): artillery battle effects and REPL/TUI/query
   surfaces; battle-armor UI remains deferred with P2b-P2d.
 - [ ] NPC world-contract design: shared world conflicts and typed opposing forces
