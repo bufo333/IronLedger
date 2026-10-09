@@ -519,9 +519,15 @@ pub const Store = struct {
         var create_buf: [2048:0]u8 = undefined;
         _ = std.fmt.bufPrintZ(&create_buf, "CREATE TABLE hull_ownership_history__new{s}", .{ddl[begin + marker.len .. end]}) catch return error.SqliteError;
         try db.exec(&create_buf);
-        const rows = try db.prepare("SELECT cid,hull_instance_id,ord,from_day,to_day FROM hull_ownership_history ORDER BY cid,hull_instance_id,ord");
+        const rows = try db.prepare(
+            \\SELECT cid,hull_instance_id,ord,from_day,to_day,
+            \\       typeof(cid)='integer' AND typeof(hull_instance_id)='integer'
+            \\       AND typeof(ord)='integer' AND typeof(from_day)='integer'
+            \\       AND typeof(to_day) IN ('integer','null')
+            \\FROM hull_ownership_history ORDER BY cid,hull_instance_id,ord
+        );
         defer rows.finalize();
-        const successor = try db.prepare("SELECT from_day FROM hull_ownership_history WHERE cid=?1 AND hull_instance_id=?2 AND ord>?3 ORDER BY ord LIMIT 1");
+        const successor = try db.prepare("SELECT from_day,typeof(from_day)='integer' FROM hull_ownership_history WHERE cid=?1 AND hull_instance_id=?2 AND ord>?3 ORDER BY ord LIMIT 1");
         defer successor.finalize();
         const insert = try db.prepare("INSERT INTO hull_ownership_history__new SELECT cid,hull_instance_id,ord,from_day,?4,acquisition_type,prior_owner_key FROM hull_ownership_history WHERE cid=?1 AND hull_instance_id=?2 AND ord=?3");
         defer insert.finalize();
@@ -529,6 +535,7 @@ pub const Store = struct {
         var previous_hull: i64 = 0;
         var previous_to: ?u32 = null;
         while (try rows.next()) {
+            if (rows.int(5) != 1) return error.CorruptSave;
             const cid = rows.int(0);
             const hull = rows.int(1);
             const ord = try rows.intAs(u32, 2);
@@ -536,7 +543,10 @@ pub const Store = struct {
             const from = try rows.intAs(u32, 3);
             const legacy_to: ?u32 = if (rows.optInt(4)) |v| std.math.cast(u32, v) orelse return error.CorruptSave else null;
             try successor.bindAll(.{ cid, hull, ord });
-            const next: ?u32 = if (try successor.next()) try successor.intAs(u32, 0) else null;
+            const next: ?u32 = if (try successor.next()) blk: {
+                if (successor.int(1) != 1) return error.CorruptSave;
+                break :blk try successor.intAs(u32, 0);
+            } else null;
             successor.reset();
             const closing = if (legacy_to == null or legacy_to.? == 0) next else legacy_to;
             if (closing) |day| if (day < from) return error.CorruptSave;
@@ -2582,10 +2592,11 @@ pub const Store = struct {
     fn loadHullOwnershipHistory(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
         const hull_inst_mod = @import("../domain/hull_instance.zig");
-        const st = try self.db.prepare("SELECT hull_instance_id, from_day, to_day, acquisition_type, prior_owner_key FROM hull_ownership_history WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT hull_instance_id, from_day, to_day, acquisition_type, prior_owner_key, typeof(to_day) IN ('integer','null') FROM hull_ownership_history WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
+            if (st.int(5) != 1) return error.CorruptSave;
             const hid = try toId(types.HullInstanceId, st.int(0));
             _ = gs.hull_instances.getPtr(hid) orelse return error.CorruptSave; // orphan FK
             const acq = st.enumValue(hull_inst_mod.AcquisitionType, 3) orelse return error.CorruptSave;
@@ -9132,6 +9143,38 @@ test "artillery load rejects malformed payloads and every new counter without re
     }
 }
 
+test "nullable ownership closing dates reject silent coercion and preserve closed day zero" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try artilleryCampaignForTest(&gs);
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .sell_artillery = id });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var valid = try store.load(std.testing.allocator, gs.campaign_id);
+    defer valid.deinit();
+    try std.testing.expectEqualDeep(gs.hull_ownership_history.items, valid.hull_ownership_history.items);
+    try std.testing.expectEqual(@as(?u32, 0), valid.hull_ownership_history.items[0].to_day);
+    try std.testing.expectEqual(@as(?u32, null), valid.hull_ownership_history.items[valid.hull_ownership_history.items.len - 1].to_day);
+    for ([_][*:0]const u8{
+        "UPDATE hull_ownership_history SET to_day=0.5 WHERE to_day IS NOT NULL",
+        "UPDATE hull_ownership_history SET to_day='invalid' WHERE to_day IS NOT NULL",
+        "UPDATE hull_ownership_history SET to_day=X'30' WHERE to_day IS NOT NULL",
+    }) |tamper| {
+        try store.save(&gs);
+        try store.db.exec("PRAGMA ignore_check_constraints=ON");
+        try store.db.exec(tamper);
+        try store.db.exec("PRAGMA ignore_check_constraints=OFF");
+        var loaded = store.load(std.testing.allocator, gs.campaign_id) catch |err| {
+            try std.testing.expectEqual(error.CorruptSave, err);
+            continue;
+        };
+        loaded.deinit();
+        std.debug.print("accepted malformed ownership closing date: {s}\n", .{tamper});
+        return error.TestExpectedError;
+    }
+}
+
 test "artillery first save and overwrite failure roll back every table and campaign identity" {
     const prior_log_level = std.testing.log_level;
     std.testing.log_level = .err;
@@ -9220,6 +9263,16 @@ test "real v59 schema migration disambiguates open ordinary and repeated day-zer
 
 test "malformed v59 ownership migration rejects and leaves schema and rows unchanged" {
     for ([_][*:0]const u8{
+        "UPDATE hull_ownership_history SET to_day=0.5",
+        "UPDATE hull_ownership_history SET to_day='invalid'",
+        "UPDATE hull_ownership_history SET to_day=X'30'",
+        "UPDATE hull_ownership_history SET from_day=0.5",
+        "UPDATE hull_ownership_history SET from_day='invalid'",
+        "UPDATE hull_ownership_history SET from_day=X'30'",
+        "UPDATE hull_ownership_history SET ord=0.5",
+        "UPDATE hull_ownership_history SET cid=1.5",
+        "UPDATE hull_ownership_history SET hull_instance_id=hull_instance_id+0.5",
+        "INSERT INTO hull_ownership_history SELECT cid,hull_instance_id,ord+1,0.5,0,acquisition_type,prior_owner_key FROM hull_ownership_history",
         "UPDATE hull_ownership_history SET from_day=-1",
         "UPDATE hull_ownership_history SET to_day=-1",
         "UPDATE hull_ownership_history SET from_day=4294967296",
