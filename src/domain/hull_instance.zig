@@ -28,6 +28,9 @@ pub const HullOwner = union(OwnerType) {
     destroyed,
 };
 
+/// Explicit catalogue namespace for the stable construction key.
+pub const HullCatalogue = enum { chassis, artillery };
+
 /// The operational status of this physical hull.
 pub const HullStatus = enum { active, permanently_destroyed };
 
@@ -38,7 +41,8 @@ pub const HullLoadout = struct { part_key: []const u8 = "" };
 
 pub const HullInstance = struct {
     id: types.HullInstanceId = .none,
-    base_key: []const u8 = "", // -> chassis.zon stable key
+    catalogue: HullCatalogue = .chassis,
+    base_key: []const u8 = "", // Stable key in the explicitly selected catalogue.
     name: ?[]const u8 = null,
     nickname: ?[]const u8 = null,
     status: HullStatus = .active,
@@ -148,7 +152,7 @@ pub const AcquisitionType = enum { purchase, salvage, transfer, initial };
 /// One ownership interval for a physical hull: who it belonged to before
 /// this interval (prior_owner_key — a faction key, "player", or "unknown";
 /// a free provenance string that may name a gone entity, NOT a typed FK),
-/// how the current owner got it, and the day span. to_day == 0 is the
+/// how the current owner got it, and the day span. to_day == null is the
 /// still-open current interval. Child of HullInstance, keyed
 /// (cid, hull_instance_id, ord); hull_instance_id is the one validated FK.
 /// Append-only: a row is never deleted or rewritten; the single permitted
@@ -157,18 +161,37 @@ pub const AcquisitionType = enum { purchase, salvage, transfer, initial };
 pub const HullOwnershipHistory = struct {
     hull_instance_id: types.HullInstanceId = .none,
     from_day: u32 = 0,
-    to_day: u32 = 0, // 0 = current owner (open interval)
+    to_day: ?u32 = null, // Null is open; day zero is a real closing day.
     acquisition_type: AcquisitionType = .initial,
     prior_owner_key: []const u8 = "",
+
+    /// Null alone denotes the current interval (docs/p2-artillery-acquisition-design.md).
+    pub fn isOpen(self: HullOwnershipHistory) bool {
+        return self.to_day == null;
+    }
+
+    /// Close only an open interval, including on day zero. Infallible, no allocation.
+    pub fn close(self: *HullOwnershipHistory, day: u32) void {
+        if (self.isOpen()) self.to_day = day;
+    }
 };
 
 test "HullOwnershipHistory defaults" {
     const h: HullOwnershipHistory = .{};
     try std.testing.expectEqual(types.HullInstanceId.none, h.hull_instance_id);
     try std.testing.expectEqual(@as(u32, 0), h.from_day);
-    try std.testing.expectEqual(@as(u32, 0), h.to_day);
+    try std.testing.expectEqual(@as(?u32, null), h.to_day);
     try std.testing.expectEqual(AcquisitionType.initial, h.acquisition_type);
     try std.testing.expectEqualStrings("", h.prior_owner_key);
+}
+
+test "closing day zero is a closed interval and cannot be closed again" {
+    var row: HullOwnershipHistory = .{};
+    try std.testing.expect(row.isOpen());
+    row.close(0);
+    try std.testing.expect(!row.isOpen());
+    row.close(1);
+    try std.testing.expectEqual(@as(?u32, 0), row.to_day);
 }
 
 test "HullInstance defaults and loadout append" {

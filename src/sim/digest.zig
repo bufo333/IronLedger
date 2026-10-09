@@ -25,6 +25,52 @@ fn hashed(comptime name: []const u8) bool {
     };
 }
 
+test "artillery acquisition placement freight offers counters and catalogue all affect state hash" {
+    const artillery = @import("artillery.zig");
+    const founding = @import("founding.zig");
+    const types = @import("../domain/types.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const home = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
+    const bought = try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
+    const original = gs.artillery_formations.get(bought.artillery_formation).?;
+    const hash = stateHash(&gs);
+    const f = gs.artillery_formations.getPtr(bought.artillery_formation).?;
+    f.paid_price += 1;
+    try std.testing.expect(hash != stateHash(&gs));
+    f.* = original;
+    f.acquisition_day += 1;
+    try std.testing.expect(hash != stateHash(&gs));
+    f.* = original;
+    f.hull = @enumFromInt(@intFromEnum(original.hull) + 1);
+    try std.testing.expect(hash != stateHash(&gs));
+    f.* = original;
+    f.placement = .{ .company = @enumFromInt(1) };
+    try std.testing.expect(hash != stateHash(&gs));
+    const freight: @import("../domain/artillery_formation.zig").Freight = .{ .from_hq = home, .to_hq = @enumFromInt(2), .dispatch_day = 0, .eta_day = 3, .paid_cost = 10 };
+    f.placement = .{ .freight = freight };
+    const moving = stateHash(&gs);
+    inline for (@typeInfo(@TypeOf(freight)).@"struct".fields) |field| {
+        f.placement = .{ .freight = freight };
+        const T = @TypeOf(@field(f.placement.freight, field.name));
+        if (T == types.HqId) @field(f.placement.freight, field.name) = @enumFromInt(@intFromEnum(@field(freight, field.name)) + 1) else @field(f.placement.freight, field.name) += 1;
+        try std.testing.expect(moving != stateHash(&gs));
+    }
+    f.* = original;
+    gs.artillery_offers.items[0].available = true;
+    try std.testing.expect(hash != stateHash(&gs));
+    gs.artillery_offers.items[0].available = false;
+    gs.next_artillery_offer_id += 1;
+    try std.testing.expect(hash != stateHash(&gs));
+    gs.next_artillery_offer_id -= 1;
+    gs.next_artillery_formation_id += 1;
+    try std.testing.expect(hash != stateHash(&gs));
+    gs.next_artillery_formation_id -= 1;
+    gs.hull_instances.getPtr(original.hull).?.catalogue = .chassis;
+    try std.testing.expect(hash != stateHash(&gs));
+}
+
 /// The golden master: a digest of every persisted and derived field of a
 /// campaign, RNG words and `next_*_id` counters included. Two runs with the
 /// same seed and command script produce the same hash, and a save loads

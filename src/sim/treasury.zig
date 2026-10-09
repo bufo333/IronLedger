@@ -8,6 +8,7 @@
 //! (one account, payroll and loans); the per-entity treasuries, couriers
 //! and liquidation-backed credit are this game's (docs/mekhq-map.md).
 
+const artillery = @import("artillery.zig");
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
@@ -149,6 +150,7 @@ pub fn monthlyHullUpkeep(gs: *GameState) types.CBills {
     var total: types.CBills = 0;
     var it = gs.units.iterator();
     while (it.next()) |entry| total += entry.value_ptr.monthlyBill();
+    total += artillery.monthlyCarry(gs);
     return total;
 }
 
@@ -191,6 +193,7 @@ pub fn liquidationValue(alloc: std.mem.Allocator, gs: *GameState) !types.CBills 
     var total: types.CBills = 0;
     var uit = gs.units.iterator();
     while (uit.next()) |e| total += try market.unitSaleValue(alloc, e.value_ptr);
+    for (gs.artillery_formations.values()) |*f| total += artillery.saleValue(f);
     var sit = gs.spare_parts.iterator();
     while (sit.next()) |e| total += market.stockSaleValue(e.key_ptr.*, e.value_ptr.*);
     var hqs_it = gs.hqs.iterator();

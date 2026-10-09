@@ -210,6 +210,13 @@ cheap, copyable, and impossible to mix up.
   Covers meks, vehicles, aerospace, infantry, support vehicles (MASH and cargo
   trucks) and DropShips/JumpShips with one struct + kind enum; the enum also
   reserves battle armor for Product completion P2.
+- **Artillery formation** — one organizational identity and one physical
+  Mobile Long Tom `HullInstance`, with an explicit artillery catalogue and
+  nullable ownership closing days. It is separate from `Unit`: acquisition,
+  direct company attachment, HQ pools/freight and carrying/resale accounting
+  are live. Operational state and battle effects have separate later owners.
+  [Artillery acquisition policy](docs/p2-artillery-acquisition-design.md) defines
+  the monthly local offers and declared transport/accounting abstractions.
 - **Part** — static part definition (catalog) plus fungible quantities in site
   inventories; mounted unit slots carry condition, hulls carry maintenance
   quality A–F, and catalogue availability A–F controls sourcing. Acquisition

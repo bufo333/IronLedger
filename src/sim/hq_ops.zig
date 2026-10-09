@@ -7,6 +7,7 @@
 //! No MekHQ counterpart: the HQ network is this game's extension
 //! (docs/mekhq-map.md).
 
+const artillery = @import("artillery.zig");
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
@@ -1188,8 +1189,11 @@ pub fn sellHq(gs: *GameState, hq_id: types.HqId) !void {
     const h = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
     if (gs.hqs.count() <= 1) return error.LastHq;
     if (toe.companiesAtHq(gs, hq_id) > 0) return error.HqInUse;
+    if (artillery.hqHasCarriers(gs, hq_id)) return error.HqInUse;
     const value = market_mod.hqSaleProceeds(h);
     const name = h.name;
+    const posting = try gs.prepareTreasuryPosting(.outfit, .{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = "HQ sold" });
+    const log = try gs.prepareLog(.market, .{}, "[sale] {s} sold off for {d}", .{ name, value });
     var pit = gs.people.iterator();
     while (pit.next()) |e| if (e.value_ptr.posted_hq == hq_id) {
         e.value_ptr.posted_hq = .none;
@@ -1234,6 +1238,7 @@ pub fn sellHq(gs: *GameState, hq_id: types.HqId) !void {
     for (gs.fund_couriers.items) |*c| if (std.meta.eql(c.to, .{ .hq = hq_id })) {
         c.to = .outfit;
     };
+    artillery.removeHqOffers(gs, hq_id);
     _ = gs.hqs.orderedRemove(hq_id);
     const seat: types.HqId = gs.seat();
     var uit2 = gs.units.iterator();
@@ -1241,8 +1246,34 @@ pub fn sellHq(gs: *GameState, hq_id: types.HqId) !void {
         e.value_ptr.berth_hq = seat;
     };
     refreshHqStaffing(gs);
-    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = value, .category = .unit_sale, .note = "HQ sold" });
-    try gs.log(.market, .{}, "[sale] {s} sold off for {d}", .{ name, value });
+    gs.commitTreasuryPosting(posting);
+    gs.commitLog(log);
+}
+
+test "free HQ sale prepares ledger and log before deleting its artillery offers" {
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .quartermaster);
+    const other = try @import("founding.zig").foundHq(&gs, "Other", .regional, "skye");
+    try artillery.syncMarkets(&gs);
+    try std.testing.expectEqual(@as(usize, 2), gs.artillery_offers.items.len);
+    const before = digest.stateHash(&gs);
+    const arena_state = gs.arena.state;
+    const child = gs.arena.child_allocator;
+    gs.arena.state = .{};
+    gs.arena.child_allocator = std.testing.failing_allocator;
+    try std.testing.expectError(error.OutOfMemory, sellHq(&gs, other));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    gs.arena.state = arena_state;
+    gs.arena.child_allocator = child;
+    const funds = gs.funds;
+    const value = market_mod.hqSaleProceeds(gs.hqs.getPtr(other).?);
+    try sellHq(&gs, other);
+    try std.testing.expectEqual(funds + value, gs.funds);
+    try std.testing.expect(!gs.hqs.contains(other));
+    try std.testing.expectEqual(@as(usize, 1), gs.artillery_offers.items.len);
+    try artillery.validate(&gs);
 }
 
 /// Send a hull to the depot for structural repair; returns the HQ whose bay took it.

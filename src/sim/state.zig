@@ -29,6 +29,7 @@ const rival_mod = @import("../domain/rival.zig");
 const merc_company_mod = @import("../domain/merc_company.zig");
 const world_state_mod = @import("../domain/world_state.zig");
 const officer_mod = @import("../domain/officer.zig");
+const artillery_dom = @import("../domain/artillery_formation.zig");
 const hull_instance_mod = @import("../domain/hull_instance.zig");
 
 pub const Config = struct {
@@ -372,6 +373,11 @@ pub const GameState = struct {
 
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
+
+    artillery_formations: std.AutoArrayHashMapUnmanaged(types.ArtilleryFormationId, artillery_dom.Formation) = .empty,
+    artillery_offers: std.ArrayListUnmanaged(artillery_dom.Offer) = .empty,
+    next_artillery_formation_id: u32 = 1,
+    next_artillery_offer_id: u32 = 1,
 
     next_person_id: u32 = 1,
     next_unit_id: u32 = 1,
@@ -1053,12 +1059,12 @@ pub const GameState = struct {
         }
         const owned_key = try alloc.dupe(u8, prior_owner_key);
         for (self.hull_ownership_history.items) |*h| {
-            if (h.hull_instance_id == u.hull_instance_id and h.to_day == 0) h.to_day = self.clock.day_index;
+            if (h.hull_instance_id == u.hull_instance_id and h.isOpen()) h.close(self.clock.day_index);
         }
         try self.hull_ownership_history.append(alloc, .{
             .hull_instance_id = u.hull_instance_id,
             .from_day = self.clock.day_index,
-            .to_day = 0,
+            .to_day = null,
             .acquisition_type = acq,
             .prior_owner_key = owned_key,
         });
@@ -1112,13 +1118,14 @@ pub const GameState = struct {
         hull: types.HullInstanceId,
         owner: hull_instance_mod.HullOwner,
         prior_owner_key: []const u8,
+        reason: hull_instance_mod.AcquisitionType,
     };
 
     /// Own the provenance text and reserve history capacity for a hull transfer.
-    pub fn prepareHullTransfer(self: *GameState, hid: types.HullInstanceId, new_owner: hull_instance_mod.HullOwner, prior_owner_key: []const u8) !PreparedHullTransfer {
+    pub fn prepareHullTransfer(self: *GameState, hid: types.HullInstanceId, new_owner: hull_instance_mod.HullOwner, prior_owner_key: []const u8, reason: hull_instance_mod.AcquisitionType) !PreparedHullTransfer {
         const owned_key = try self.allocator().dupe(u8, prior_owner_key);
         try self.hull_ownership_history.ensureUnusedCapacity(self.allocator(), 1);
-        return .{ .hull = hid, .owner = new_owner, .prior_owner_key = owned_key };
+        return .{ .hull = hid, .owner = new_owner, .prior_owner_key = owned_key, .reason = reason };
     }
 
     /// Commit a prepared hull transfer without allocation.
@@ -1127,20 +1134,20 @@ pub const GameState = struct {
         inst.owner = prepared.owner;
         inst.status = .active;
         for (self.hull_ownership_history.items) |*h| {
-            if (h.hull_instance_id == prepared.hull and h.to_day == 0) h.to_day = self.clock.day_index;
+            if (h.hull_instance_id == prepared.hull and h.isOpen()) h.close(self.clock.day_index);
         }
         self.hull_ownership_history.appendAssumeCapacity(.{
             .hull_instance_id = prepared.hull,
             .from_day = self.clock.day_index,
-            .to_day = 0,
-            .acquisition_type = .salvage,
+            .to_day = null,
+            .acquisition_type = prepared.reason,
             .prior_owner_key = prepared.prior_owner_key,
         });
     }
 
-    pub fn transferHullOwnership(self: *GameState, hid: types.HullInstanceId, new_owner: hull_instance_mod.HullOwner, prior_owner_key: []const u8) !void {
+    pub fn transferHullOwnership(self: *GameState, hid: types.HullInstanceId, new_owner: hull_instance_mod.HullOwner, prior_owner_key: []const u8, reason: hull_instance_mod.AcquisitionType) !void {
         if (self.hull_instances.getPtr(hid) == null) return;
-        const prepared = try self.prepareHullTransfer(hid, new_owner, prior_owner_key);
+        const prepared = try self.prepareHullTransfer(hid, new_owner, prior_owner_key, reason);
         self.commitHullTransfer(prepared);
     }
 
@@ -1170,7 +1177,7 @@ pub const GameState = struct {
         _ = self.hull_instances.getPtr(hid) orelse return null;
         var origin_key: []const u8 = "";
         for (self.hull_ownership_history.items) |h| {
-            if (h.hull_instance_id == hid and h.to_day == 0) origin_key = h.prior_owner_key;
+            if (h.hull_instance_id == hid and h.isOpen()) origin_key = h.prior_owner_key;
         }
         const owned_key = try self.allocator().dupe(u8, origin_key);
         try self.hull_ownership_history.ensureUnusedCapacity(self.allocator(), 1);
@@ -1188,12 +1195,12 @@ pub const GameState = struct {
         const inst = self.hull_instances.getPtr(prepared.hull).?;
         inst.owner = .{ .faction = prepared.origin_key };
         for (self.hull_ownership_history.items) |*h| {
-            if (h.hull_instance_id == prepared.hull and h.to_day == 0) h.to_day = self.clock.day_index;
+            if (h.hull_instance_id == prepared.hull and h.isOpen()) h.close(self.clock.day_index);
         }
         self.hull_ownership_history.appendAssumeCapacity(.{
             .hull_instance_id = prepared.hull,
             .from_day = self.clock.day_index,
-            .to_day = 0,
+            .to_day = null,
             .acquisition_type = .transfer,
             .prior_owner_key = prepared.origin_key,
         });
@@ -1212,7 +1219,7 @@ pub const GameState = struct {
         inst.owner = .destroyed;
         // Close the open ownership interval in place (terminal; no new row).
         for (self.hull_ownership_history.items) |*h| {
-            if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = self.clock.day_index;
+            if (h.hull_instance_id == hid and h.isOpen()) h.close(self.clock.day_index);
         }
     }
 
@@ -1230,7 +1237,7 @@ pub const GameState = struct {
         try self.hull_ownership_history.append(alloc, .{
             .hull_instance_id = u.hull_instance_id,
             .from_day = self.clock.day_index,
-            .to_day = 0,
+            .to_day = null,
             .acquisition_type = .initial,
             .prior_owner_key = owned_key,
         });
@@ -1352,6 +1359,10 @@ pub const GameState = struct {
         .{ "hull_combat_records", .persisted },
         .{ "maintenance_entries", .persisted },
         .{ "hull_ownership_history", .persisted },
+        .{ "artillery_formations", .persisted },
+        .{ "artillery_offers", .persisted },
+        .{ "next_artillery_formation_id", .persisted },
+        .{ "next_artillery_offer_id", .persisted },
         .{ "next_hull_instance_id", .persisted },
         .{ "faction_rosters", .persisted },
         .{ "merc_company_rosters", .persisted },
@@ -1491,7 +1502,7 @@ test "recordHullAcquisition creates instance, opens interval, and closes prior o
     const first = gs.hull_ownership_history.items[0];
     try std.testing.expectEqual(u.hull_instance_id, first.hull_instance_id);
     try std.testing.expectEqual(@as(u32, 10), first.from_day);
-    try std.testing.expectEqual(@as(u32, 0), first.to_day);
+    try std.testing.expectEqual(@as(?u32, null), first.to_day);
     try std.testing.expectEqual(hull_instance_mod.AcquisitionType.purchase, first.acquisition_type);
     try std.testing.expectEqualStrings("unknown", first.prior_owner_key);
 
@@ -1499,10 +1510,24 @@ test "recordHullAcquisition creates instance, opens interval, and closes prior o
     gs.clock.day_index = 20;
     try gs.recordHullAcquisition(u, .salvage, "DC");
     try std.testing.expectEqual(@as(usize, 2), gs.hull_ownership_history.items.len);
-    try std.testing.expectEqual(@as(u32, 20), gs.hull_ownership_history.items[0].to_day); // closed
+    try std.testing.expectEqual(@as(?u32, 20), gs.hull_ownership_history.items[0].to_day); // closed
     const second = gs.hull_ownership_history.items[1];
     try std.testing.expectEqual(@as(u32, 20), second.from_day);
-    try std.testing.expectEqual(@as(u32, 0), second.to_day); // open
+    try std.testing.expectEqual(@as(?u32, null), second.to_day); // open
     try std.testing.expectEqual(hull_instance_mod.AcquisitionType.salvage, second.acquisition_type);
     try std.testing.expectEqualStrings("DC", second.prior_owner_key);
+}
+
+test "day-zero ownership closure survives a later transfer" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const uid = try gs.addUnit("WSP-1A");
+    const u = gs.unit(uid).?;
+    try gs.recordHullAcquisition(u, .purchase, "market");
+    try gs.transferHullOwnership(u.hull_instance_id, .market, "player", .transfer);
+    gs.clock.day_index = 1;
+    try gs.transferHullOwnership(u.hull_instance_id, .player, "market", .salvage);
+    try std.testing.expectEqual(@as(?u32, 0), gs.hull_ownership_history.items[0].to_day);
+    try std.testing.expectEqual(@as(?u32, 1), gs.hull_ownership_history.items[1].to_day);
+    try std.testing.expect(gs.hull_ownership_history.items[2].isOpen());
 }

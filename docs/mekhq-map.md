@@ -37,6 +37,7 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 
 | Feature | Ours | Stage |
 |---|---|---|
+| Mobile Long Tom formation acquisition, HQ monthly offers and direct company attachment | `src/domain/artillery_formation.zig`, `src/sim/artillery.zig`; SQLite rows in `src/persist/artillery_store.zig`. Transport and vehicle accounting equivalences are project abstractions in `docs/p2-artillery-acquisition-design.md`, with no asserted MekHQ counterpart | P2f |
 | Companies as concurrent deployable profit centers | `src/domain/force.zig`, per-company P&L in `src/econ/finance.zig` | 9 |
 | Brigade/Regional/Field HQ tiers with facility upgrade paths & staffing overhead | `src/domain/hq.zig` (`Hq.staffRequired`, `Project`); postings and autostaffing in `src/sim/hq_ops.zig` (`hqStaff`, `staffHqToRequirement`) | 9 |
 | Influence rings gating the contract market + beachhead expansion | `src/domain/hq.zig` (`influenceLy`) + `src/econ/market.zig` (`visibilityFor`) | 4/9 |

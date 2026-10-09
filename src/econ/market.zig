@@ -84,10 +84,25 @@ pub fn unitSaleValue(alloc: std.mem.Allocator, u: *const unit_mod.Unit) !types.C
     // A wreck is worth what can be stripped off it.
     if (u.status == .destroyed) return try stripValue(alloc, u);
     const base: types.CBills = if (u.purchase_price > 0) u.purchase_price else if (chassis_mod.find(u.chassis_key)) |c| c.cost else 0;
-    const by_condition = @divTrunc(base * @as(types.CBills, u.conditionPct()) * tuning.unit.sale_bp, 10_000 * 100);
+    return intactHullSaleValue(base, u.conditionPct(), u.quality);
+}
+
+/// Condition/quality resale arithmetic shared by conventional hulls and the
+/// artillery accounting abstraction (ARCHITECTURE.md §9.8).
+pub fn intactHullSaleValue(base: types.CBills, condition_pct: u8, quality: types.Quality) types.CBills {
+    const by_condition = @divTrunc(base * @as(types.CBills, condition_pct) * tuning.unit.sale_bp, 10_000 * 100);
     // Quality on the ticket: ± per step from C (A worst, F best).
-    const steps: i64 = @as(i64, @intFromEnum(u.quality)) - @intFromEnum(types.Quality.c);
+    const steps: i64 = @as(i64, @intFromEnum(quality)) - @intFromEnum(types.Quality.c);
     return types.applyBp(by_condition, @intCast(10_000 + steps * tuning.maintenance.quality_sale_bp_per_step));
+}
+
+test "intact hull resale and conventional Unit consumer agree across quality and condition" {
+    var hull: unit_mod.Unit = .{ .id = @enumFromInt(1), .chassis_key = "WSP-1A", .kind = .mek };
+    hull.purchase_price = 2_000_000;
+    for (std.enums.values(types.Quality)) |quality| {
+        hull.quality = quality;
+        try std.testing.expectEqual(intactHullSaleValue(hull.purchase_price, hull.conditionPct(), quality), try unitSaleValue(std.testing.allocator, &hull));
+    }
 }
 
 /// One line of what stripping a hull recovers.

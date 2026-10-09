@@ -134,7 +134,7 @@ pub fn seedFactionRosters(gs: *GameState) !void {
             gs.hull_ownership_history.appendAssumeCapacity(.{
                 .hull_instance_id = hid,
                 .from_day = 0,
-                .to_day = 0,
+                .to_day = null,
                 .acquisition_type = .initial,
                 .prior_owner_key = f.key, // static catalogue memory
             });
@@ -313,7 +313,7 @@ pub fn seedMercCompanies(gs: *GameState) !void {
             gs.hull_ownership_history.appendAssumeCapacity(.{
                 .hull_instance_id = hid,
                 .from_day = 0,
-                .to_day = 0,
+                .to_day = null,
                 .acquisition_type = .initial,
                 .prior_owner_key = mc.faction_key, // static catalog memory
             });
@@ -370,7 +370,7 @@ test "seedFactionRosters: each manufacturing faction gets the expected roster si
                 found += 1;
                 try std.testing.expectEqual(hull_mod.AcquisitionType.initial, h.acquisition_type);
                 try std.testing.expectEqual(@as(u32, 0), h.from_day);
-                try std.testing.expectEqual(@as(u32, 0), h.to_day);
+                try std.testing.expectEqual(@as(?u32, null), h.to_day);
                 try std.testing.expectEqualStrings(f.key, h.prior_owner_key);
             }
             try std.testing.expectEqual(@as(usize, 1), found);
@@ -514,7 +514,7 @@ test "seedMercCompanies: seeded shape matches tuning values" {
                     found += 1;
                     try std.testing.expectEqual(hull_mod.AcquisitionType.initial, h.acquisition_type);
                     try std.testing.expectEqual(@as(u32, 0), h.from_day);
-                    try std.testing.expectEqual(@as(u32, 0), h.to_day);
+                    try std.testing.expectEqual(@as(?u32, null), h.to_day);
                     try std.testing.expectEqualStrings(mc.faction_key, h.prior_owner_key);
                 }
                 try std.testing.expectEqual(@as(usize, 1), found);
@@ -746,7 +746,7 @@ pub fn seedPirateRoster(gs: *GameState) !void {
         gs.hull_ownership_history.appendAssumeCapacity(.{
             .hull_instance_id = hid,
             .from_day = 0,
-            .to_day = 0,
+            .to_day = null,
             .acquisition_type = .initial,
             .prior_owner_key = per_key, // static catalogue memory
         });
@@ -792,7 +792,7 @@ test "seedPirateRoster: PER gets the flat pool, owner .faction PER, one open .in
             found += 1;
             try std.testing.expectEqual(hull_mod.AcquisitionType.initial, h.acquisition_type);
             try std.testing.expectEqual(@as(u32, 0), h.from_day);
-            try std.testing.expectEqual(@as(u32, 0), h.to_day);
+            try std.testing.expectEqual(@as(?u32, null), h.to_day);
             try std.testing.expectEqualStrings("PER", h.prior_owner_key);
         }
         try std.testing.expectEqual(@as(usize, 1), found);

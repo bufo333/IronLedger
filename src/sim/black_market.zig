@@ -212,12 +212,12 @@ pub fn commitEnemyWreckDispersal(
                 inst.owner = source_owner;
                 inst.status = .active;
                 for (gs.hull_ownership_history.items) |*h| {
-                    if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = battle_day;
+                    if (h.hull_instance_id == hid and h.isOpen()) h.close(battle_day);
                 }
                 gs.hull_ownership_history.appendAssumeCapacity(.{
                     .hull_instance_id = hid,
                     .from_day = battle_day,
-                    .to_day = 0,
+                    .to_day = null,
                     .acquisition_type = .transfer,
                     .prior_owner_key = prior_owner_key,
                 });
@@ -231,12 +231,12 @@ pub fn commitEnemyWreckDispersal(
                 inst.owner = source_owner;
                 inst.status = .active;
                 for (gs.hull_ownership_history.items) |*h| {
-                    if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = battle_day;
+                    if (h.hull_instance_id == hid and h.isOpen()) h.close(battle_day);
                 }
                 gs.hull_ownership_history.appendAssumeCapacity(.{
                     .hull_instance_id = hid,
                     .from_day = battle_day,
-                    .to_day = 0,
+                    .to_day = null,
                     .acquisition_type = .transfer,
                     .prior_owner_key = prior_owner_key,
                 });
@@ -263,13 +263,13 @@ pub fn commitEnemyWreckDispersal(
         inst.status = .active;
         // Close the open ownership interval.
         for (gs.hull_ownership_history.items) |*h| {
-            if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = battle_day;
+            if (h.hull_instance_id == hid and h.isOpen()) h.close(battle_day);
         }
         // Open a transfer interval naming the original source affiliation.
         gs.hull_ownership_history.appendAssumeCapacity(.{
             .hull_instance_id = hid,
             .from_day = battle_day,
-            .to_day = 0,
+            .to_day = null,
             .acquisition_type = .transfer,
             .prior_owner_key = prior_owner_key,
         });
@@ -452,12 +452,12 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
             inst.owner = .{ .faction = per_key };
             inst.status = .active;
             for (gs.hull_ownership_history.items) |*h| {
-                if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = day;
+                if (h.hull_instance_id == hid and h.isOpen()) h.close(day);
             }
             gs.hull_ownership_history.appendAssumeCapacity(.{
                 .hull_instance_id = hid,
                 .from_day = day,
-                .to_day = 0,
+                .to_day = null,
                 .acquisition_type = .transfer,
                 .prior_owner_key = "market", // static string literal — no dupe needed
             });
@@ -468,12 +468,12 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
             inst.owner = .{ .merc_company = merc_id };
             inst.status = .active;
             for (gs.hull_ownership_history.items) |*h| {
-                if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = day;
+                if (h.hull_instance_id == hid and h.isOpen()) h.close(day);
             }
             gs.hull_ownership_history.appendAssumeCapacity(.{
                 .hull_instance_id = hid,
                 .from_day = day,
-                .to_day = 0,
+                .to_day = null,
                 .acquisition_type = .transfer,
                 .prior_owner_key = "market",
             });
@@ -579,7 +579,7 @@ pub fn runPirateReplenishment(gs: *GameState) !void {
         gs.hull_ownership_history.appendAssumeCapacity(.{
             .hull_instance_id = inst.id,
             .from_day = day,
-            .to_day = 0,
+            .to_day = null,
             .acquisition_type = .initial,
             .prior_owner_key = per_key, // static catalogue key — no dupe needed
         });
@@ -619,7 +619,7 @@ fn seedLimboWrecks(
         try gs.hull_ownership_history.append(gs.allocator(), .{
             .hull_instance_id = hid,
             .from_day = 0,
-            .to_day = 0,
+            .to_day = null,
             .acquisition_type = .initial,
             .prior_owner_key = faction_key,
         });
@@ -781,7 +781,7 @@ test "disperseEnemyWrecks: recovered merc-company wrecks return to their company
         try gs.hull_ownership_history.append(gs.allocator(), .{
             .hull_instance_id = hid.*,
             .from_day = 0,
-            .to_day = 0,
+            .to_day = null,
             .acquisition_type = .initial,
             .prior_owner_key = faction_key,
         });
@@ -1031,7 +1031,7 @@ test "runNpcBlackMarketDraw: pirates consume only PER-world listings, mercs only
         try gs.hull_ownership_history.append(gs.allocator(), .{
             .hull_instance_id = hid,
             .from_day = 0,
-            .to_day = 0,
+            .to_day = null,
             .acquisition_type = .transfer,
             .prior_owner_key = "DC",
         });

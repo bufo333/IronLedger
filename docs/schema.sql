@@ -1,6 +1,6 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 59. The executable DDL and its column migrations
+-- Matches schema_version 60. The executable DDL and its column migrations
 -- live in src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
@@ -1045,6 +1045,7 @@ CREATE TABLE hull_instance (
     owner_type      TEXT    NOT NULL DEFAULT 'player', -- OwnerType tag name (active union tag)
     owner_faction_key TEXT  NOT NULL DEFAULT '',       -- FactionRow.key when owner_type='faction'; else ''
     owner_merc_company_id INTEGER NOT NULL DEFAULT 0,  -- MercCompanyId int when owner_type='merc_company'; else 0
+    catalogue TEXT NOT NULL DEFAULT 'chassis' CHECK (catalogue IN ('chassis','artillery')),
     PRIMARY KEY (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
@@ -1114,11 +1115,12 @@ CREATE INDEX IF NOT EXISTS ix_maintenance_entry_cid ON maintenance_entry(cid);
 CREATE TABLE hull_ownership_history (
     cid              INTEGER NOT NULL,
     hull_instance_id INTEGER NOT NULL,                  -- -> hull_instance.id (validated)
-    ord              INTEGER NOT NULL,                  -- stable insertion order (append-only)
-    from_day         INTEGER NOT NULL DEFAULT 0,        -- day_index the interval opened
-    to_day           INTEGER NOT NULL DEFAULT 0,        -- day_index the interval closed; 0 = open
+    ord              INTEGER NOT NULL CHECK (ord >= 0),                  -- stable insertion order (append-only)
+    from_day         INTEGER NOT NULL DEFAULT 0 CHECK (from_day BETWEEN 0 AND 4294967295),        -- day_index the interval opened
+    to_day           INTEGER CHECK (to_day IS NULL OR (to_day BETWEEN from_day AND 4294967295)), -- NULL = open; zero closes on day zero
     acquisition_type TEXT    NOT NULL DEFAULT 'initial', -- AcquisitionType tag
     prior_owner_key  TEXT    NOT NULL DEFAULT '',        -- provenance: faction key, "player", or "unknown"
+    UNIQUE (cid,ord),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
     FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
 );
@@ -1179,3 +1181,60 @@ CREATE TABLE merc_company_roster (
     FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_merc_company_roster_cid ON merc_company_roster(cid);
+
+-- Artillery formation and HQ offer fields are persisted (schema v60).
+-- Catalogue facts and attached location are derived; quotes are scratch.
+-- Placement payload columns are nullable and disjoint. Sold records retain identity.
+CREATE TABLE artillery_formation (
+    cid INTEGER NOT NULL,
+    ord INTEGER NOT NULL CHECK (ord >= 0),
+    id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295),
+    hull INTEGER NOT NULL CHECK (hull BETWEEN 1 AND 4294967295),
+    acquisition_day INTEGER NOT NULL CHECK (acquisition_day BETWEEN 0 AND 4294967295),
+    paid_price INTEGER NOT NULL CHECK (paid_price > 0),
+    placement TEXT NOT NULL CHECK (placement IN ('hq_pool','company','freight','sold')),
+    pool_hq INTEGER,
+    company INTEGER,
+    from_hq INTEGER,
+    to_hq INTEGER,
+    dispatch_day INTEGER,
+    eta_day INTEGER,
+    paid_cost INTEGER,
+    PRIMARY KEY (cid,id),
+    UNIQUE (cid,ord),
+    UNIQUE (cid,hull),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid,hull) REFERENCES hull_instance(cid,id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid,pool_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid,company) REFERENCES force(cid,id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid,from_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid,to_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED,
+    CHECK ((pool_hq IS NOT NULL) = (placement='hq_pool')),
+    CHECK ((company IS NOT NULL) = (placement='company')),
+    CHECK ((from_hq IS NOT NULL) = (placement='freight')),
+    CHECK ((to_hq IS NOT NULL) = (placement='freight')),
+    CHECK ((dispatch_day IS NOT NULL) = (placement='freight')),
+    CHECK ((eta_day IS NOT NULL) = (placement='freight')),
+    CHECK ((paid_cost IS NOT NULL) = (placement='freight')),
+    CHECK (pool_hq IS NULL OR pool_hq BETWEEN 1 AND 4294967295),
+    CHECK (company IS NULL OR company BETWEEN 1 AND 4294967295),
+    CHECK (from_hq IS NULL OR from_hq BETWEEN 1 AND 4294967295),
+    CHECK (to_hq IS NULL OR to_hq BETWEEN 1 AND 4294967295),
+    CHECK (placement!='freight' OR (from_hq!=to_hq AND dispatch_day BETWEEN 0 AND 4294967295 AND eta_day > dispatch_day AND eta_day <= 4294967295 AND paid_cost >= 0))
+);
+CREATE INDEX IF NOT EXISTS ix_artillery_formation_cid ON artillery_formation(cid);
+CREATE TABLE artillery_offer (
+    cid INTEGER NOT NULL,
+    ord INTEGER NOT NULL CHECK (ord >= 0),
+    id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295),
+    hq INTEGER NOT NULL CHECK (hq BETWEEN 1 AND 4294967295),
+    year INTEGER NOT NULL CHECK (year BETWEEN 1 AND 65535),
+    month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+    available INTEGER NOT NULL CHECK (available IN (0,1)),
+    PRIMARY KEY (cid,id),
+    UNIQUE (cid,ord),
+    UNIQUE (cid,hq),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid,hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_artillery_offer_cid ON artillery_offer(cid);

@@ -590,7 +590,7 @@ fn stageBuy(stage: *LifecycleStage, alloc: std.mem.Allocator, buy: BuyPlan, day:
 
 fn closeOwnershipHistory(history: *std.ArrayListUnmanaged(hull_instance_mod.HullOwnershipHistory), hull_id: types.HullInstanceId, day: u32) void {
     for (history.items) |*entry| {
-        if (entry.hull_instance_id == hull_id and entry.to_day == 0) entry.to_day = day;
+        if (entry.hull_instance_id == hull_id and entry.isOpen()) entry.close(day);
     }
 }
 
@@ -652,7 +652,7 @@ test "liquidateMercCompany: transfers hulls to market, clears roster, sets disso
         gs.hull_ownership_history.append(alloc, .{
             .hull_instance_id = hid,
             .from_day = 0,
-            .to_day = 0,
+            .to_day = null,
             .acquisition_type = .initial,
             .prior_owner_key = "DC",
         }) catch @panic("OOM");
@@ -706,7 +706,7 @@ test "liquidateMercCompany: OOM atomicity — stateHash unchanged on failure" {
     try gs.hull_ownership_history.append(alloc, .{
         .hull_instance_id = hid,
         .from_day = 0,
-        .to_day = 0,
+        .to_day = null,
         .acquisition_type = .initial,
         .prior_owner_key = "DC",
     });
@@ -751,9 +751,9 @@ test "buyHullsForCompany: buys affordable+eligible hulls, spends cbills, asset-s
     try gs.hull_instances.put(alloc, h1, .{ .id = h1, .base_key = "LCT-1V", .owner = .market });
     try gs.hull_instances.put(alloc, h2, .{ .id = h2, .base_key = "LCT-1V", .owner = .market });
     try gs.hull_instances.put(alloc, h3, .{ .id = h3, .base_key = "JR7-D", .owner = .market });
-    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h1, .from_day = 0, .to_day = 0, .acquisition_type = .transfer, .prior_owner_key = "market" });
-    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h2, .from_day = 0, .to_day = 0, .acquisition_type = .transfer, .prior_owner_key = "market" });
-    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h3, .from_day = 0, .to_day = 0, .acquisition_type = .transfer, .prior_owner_key = "market" });
+    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h1, .from_day = 0, .to_day = null, .acquisition_type = .transfer, .prior_owner_key = "market" });
+    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h2, .from_day = 0, .to_day = null, .acquisition_type = .transfer, .prior_owner_key = "market" });
+    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h3, .from_day = 0, .to_day = null, .acquisition_type = .transfer, .prior_owner_key = "market" });
     const cheap_price: types.CBills = 500_000;
     const expensive_price: types.CBills = 50_000_000; // unaffordable
     try gs.market_listings.append(alloc, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = cheap_price, .id = @enumFromInt(1), .hull_instance_id = h1, .black_market = false });
@@ -804,7 +804,7 @@ test "selectNpcProcurement: affordable mek beats affordable vehicle" {
     try std.testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
     try std.testing.expectEqualStrings("SCP-1N", gs.market_listings.items[0].item_key);
     try std.testing.expectEqual(hull_instance_mod.HullOwner{ .merc_company = company_id }, gs.hull_instances.get(backed_mek).?.owner);
-    try std.testing.expectEqual(@as(u32, 1), gs.hull_ownership_history.items[0].to_day);
+    try std.testing.expectEqual(@as(?u32, 1), gs.hull_ownership_history.items[0].to_day);
     try std.testing.expectEqual(hull_instance_mod.AcquisitionType.transfer, gs.hull_ownership_history.items[1].acquisition_type);
     try std.testing.expectEqualStrings("market", gs.hull_ownership_history.items[1].prior_owner_key);
 }
@@ -1046,7 +1046,7 @@ test "buyHullsForCompany: OOM atomicity — stateHash unchanged on failure" {
     });
     const h1: types.HullInstanceId = @enumFromInt(1);
     try gs.hull_instances.put(alloc, h1, .{ .id = h1, .base_key = "LCT-1V", .owner = .market });
-    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h1, .from_day = 0, .to_day = 0, .acquisition_type = .transfer, .prior_owner_key = "market" });
+    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h1, .from_day = 0, .to_day = null, .acquisition_type = .transfer, .prior_owner_key = "market" });
     try gs.market_listings.append(alloc, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 500_000, .id = @enumFromInt(1), .hull_instance_id = h1, .black_market = false });
 
     const hash_before = digest.stateHash(&gs);
@@ -1208,7 +1208,7 @@ test "runMercLifecycle: (a) insolvent company liquidated+replaced, active count 
     });
     const h_bad: types.HullInstanceId = @enumFromInt(1);
     try gs.hull_instances.put(alloc, h_bad, .{ .id = h_bad, .base_key = "LCT-1V", .owner = .{ .merc_company = mc_insolvent } });
-    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h_bad, .from_day = 0, .to_day = 0, .acquisition_type = .initial, .prior_owner_key = "DC" });
+    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h_bad, .from_day = 0, .to_day = null, .acquisition_type = .initial, .prior_owner_key = "DC" });
     var r_bad: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
     try r_bad.append(alloc, h_bad);
     try gs.merc_company_rosters.put(alloc, mc_insolvent, r_bad);
@@ -1254,7 +1254,7 @@ test "runMercLifecycle: (b) bankrupt company (cbills < 0) triggers liquidation e
     for (0..5) |i| {
         const hid: types.HullInstanceId = @enumFromInt(1 + @as(u32, @intCast(i)));
         try gs.hull_instances.put(alloc, hid, .{ .id = hid, .base_key = "LCT-1V", .owner = .{ .merc_company = mc_bankrupt } });
-        try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = hid, .from_day = 0, .to_day = 0, .acquisition_type = .initial, .prior_owner_key = "DC" });
+        try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = hid, .from_day = 0, .to_day = null, .acquisition_type = .initial, .prior_owner_key = "DC" });
     }
     // BV = 5 * 432 = 2160 >= 2000 (solvent by mercCompanyInsolvent definition).
     var rb: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
@@ -1319,7 +1319,7 @@ test "runMercLifecycle: (c) determinism — two same-seed campaigns hash equal a
         });
         const h_bad: types.HullInstanceId = @enumFromInt(1);
         try gs.hull_instances.put(alloc2, h_bad, .{ .id = h_bad, .base_key = "LCT-1V", .owner = .{ .merc_company = mc1 } });
-        try gs.hull_ownership_history.append(alloc2, .{ .hull_instance_id = h_bad, .from_day = 0, .to_day = 0, .acquisition_type = .initial, .prior_owner_key = "DC" });
+        try gs.hull_ownership_history.append(alloc2, .{ .hull_instance_id = h_bad, .from_day = 0, .to_day = null, .acquisition_type = .initial, .prior_owner_key = "DC" });
         var r: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
         try r.append(alloc2, h_bad);
         try gs.merc_company_rosters.put(alloc2, mc1, r);

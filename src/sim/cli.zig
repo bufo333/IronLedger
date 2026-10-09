@@ -635,6 +635,15 @@ pub fn errorText(err: anyerror) []const u8 {
         error.UnknownTreasury => "no treasury by that name: outfit, hq:N or co:N",
         error.InsufficientStock => "not enough of that part in stock there",
         error.UnknownSite => "no site by that id",
+        error.NoSuchArtilleryFormation => "no artillery formation has that id",
+        error.NoSuchArtilleryOffer => "no artillery offer has that id",
+        error.ArtilleryUnavailable => "that artillery carrier or offer is unavailable",
+        error.ArtilleryWrongLocation => "the artillery carrier and company must be at the required home HQ pool",
+        error.ArtilleryAttachmentFull => "that company already has its artillery attachment",
+        error.ArtilleryAttached => "detach the artillery carrier before changing or removing its company",
+        error.ArtilleryIdExhausted => "no artillery IDs remain — nothing was changed",
+        error.ArtilleryDateExhausted => "the artillery arrival date cannot be represented — nothing was changed",
+        error.ArtilleryFundsExhausted => "the artillery sale would exceed the treasury range — nothing was changed",
         error.UnknownHq => "no HQ has that id",
         error.NotAComponent => "that part is not a structural component (comp_*)",
         error.NoSuchCandidate => "no hall candidate with that number",
@@ -1128,6 +1137,7 @@ test "every verb is listed once" {
 }
 
 test "every command refusal and parse error has a sentence, never an error name" {
+    try std.testing.expectEqualStrings("detach the artillery carrier before changing or removing its company", errorText(error.ArtilleryAttached));
     try std.testing.expectEqualStrings("no hull instance IDs remain — nothing was changed", errorText(error.HullInstanceIdExhausted));
     inline for (@typeInfo(game.commands.Error).error_set.?) |e| {
         const text = errorText(@field(anyerror, e.name));

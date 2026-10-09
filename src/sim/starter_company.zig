@@ -218,14 +218,14 @@ test "a fresh starter company seeds pre-campaign hull history (P3c.5)" {
         const inst = gs.hull_instances.getPtr(u.hull_instance_id) orelse return error.TestFailed;
         try std.testing.expect(inst.pre_campaign);
 
-        // Exactly one .initial ownership row per unit, open (to_day == 0), from day 0.
+        // Exactly one .initial ownership row per unit, open (to_day == null), from day 0.
         var own_count: usize = 0;
         for (gs.hull_ownership_history.items) |row| {
             if (row.hull_instance_id != u.hull_instance_id) continue;
             own_count += 1;
             try std.testing.expectEqual(hull_instance_mod.AcquisitionType.initial, row.acquisition_type);
             try std.testing.expectEqual(@as(u32, 0), row.from_day);
-            try std.testing.expectEqual(@as(u32, 0), row.to_day);
+            try std.testing.expectEqual(@as(?u32, null), row.to_day);
             // commander origin is LC; key() is a static string
             try std.testing.expectEqualStrings("LC", row.prior_owner_key);
         }
@@ -270,7 +270,7 @@ test "a company raised mid-campaign links instances but seeds no pre-campaign hi
             own_count += 1;
             try std.testing.expectEqual(hull_instance_mod.AcquisitionType.initial, row.acquisition_type);
             try std.testing.expectEqual(@as(u32, 100), row.from_day);
-            try std.testing.expectEqual(@as(u32, 0), row.to_day);
+            try std.testing.expectEqual(@as(?u32, null), row.to_day);
         }
         try std.testing.expectEqual(@as(usize, 1), own_count);
 

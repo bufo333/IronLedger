@@ -150,7 +150,7 @@ pub fn runMonthly(gs: *GameState) !void {
             gs.hull_ownership_history.appendAssumeCapacity(.{
                 .hull_instance_id = inst.id,
                 .from_day = day,
-                .to_day = 0,
+                .to_day = null,
                 .acquisition_type = .initial,
                 .prior_owner_key = f.key, // static catalogue memory (no dupe needed)
             });
@@ -177,13 +177,13 @@ pub fn runMonthly(gs: *GameState) !void {
             inst_ptr.owner = .market;
             // Close the initial ownership interval.
             for (gs.hull_ownership_history.items) |*h| {
-                if (h.hull_instance_id == hid and h.to_day == 0) h.to_day = day;
+                if (h.hull_instance_id == hid and h.isOpen()) h.close(day);
             }
             // Open a transfer interval naming the faction as prior owner.
             gs.hull_ownership_history.appendAssumeCapacity(.{
                 .hull_instance_id = hid,
                 .from_day = day,
-                .to_day = 0,
+                .to_day = null,
                 .acquisition_type = .transfer,
                 .prior_owner_key = f.key, // static catalogue memory
             });
@@ -243,7 +243,7 @@ fn seedTestFactionRoster(gs: *GameState, faction_key: []const u8, n: u32) !void 
         try gs.hull_ownership_history.append(alloc, .{
             .hull_instance_id = hid,
             .from_day = 0,
-            .to_day = 0,
+            .to_day = null,
             .acquisition_type = .initial,
             .prior_owner_key = faction_key,
         });
@@ -321,7 +321,7 @@ test "runMonthly: asymmetric locality — pressured faction lists fewer surplus 
         // Identify faction from hull instance owner history (prior_owner_key on initial row).
         for (gs.hull_ownership_history.items) |h| {
             if (h.hull_instance_id == l.hull_instance_id and
-                h.acquisition_type == .transfer and h.to_day == 0)
+                h.acquisition_type == .transfer and h.to_day == null)
             {
                 if (std.mem.eql(u8, h.prior_owner_key, "LC")) lc_listings += 1;
                 if (std.mem.eql(u8, h.prior_owner_key, "DC")) dc_listings += 1;

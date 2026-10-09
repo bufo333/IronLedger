@@ -11,6 +11,7 @@ const Treasury = @import("state.zig").Treasury;
 const posture = @import("posture.zig");
 const treasury = @import("treasury.zig");
 const types = @import("../domain/types.zig");
+const artillery = @import("artillery.zig");
 const contract_market = @import("contract_market.zig");
 const faction_surplus = @import("faction_surplus.zig");
 const black_market = @import("black_market.zig");
@@ -60,6 +61,7 @@ pub fn advanceDay(gs: *GameState) !void {
 
     // Phase order per DayPhase.
     if (gs.clock.day_index % types.days_per_week == 0) network.resetWeeklyThroughput(gs); // links' week
+    try artillery.runArrivals(gs);
     try runTravel(gs); // deliveries, couriers, transfers
     try runPolicies(gs); // standing cash top-ups and resupply
     try runStockPolicies(gs); // warehouse reorder points
@@ -91,6 +93,24 @@ pub fn advanceDay(gs: *GameState) !void {
     }
     try runFinances(gs);
     try contract_events.expireDue(gs); // decisions phase: deadlines pass
+}
+
+test "invalid artillery arrival destination propagates corruption through advance commands" {
+    const artillery_dom = @import("../domain/artillery_formation.zig");
+    const founding = @import("founding.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const home = gs.seat();
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
+    const bought = try commands.execute(&gs, .{ .buy_artillery = .{ .hq = home, .offer = gs.artillery_offers.items[0].id } });
+    const missing: types.HqId = @enumFromInt(999);
+    const invalid: artillery_dom.Placement = .{ .freight = .{ .from_hq = home, .to_hq = missing, .dispatch_day = 0, .eta_day = 1, .paid_cost = 0 } };
+    gs.artillery_formations.getPtr(bought.artillery_formation).?.placement = invalid;
+    const logs = gs.event_log.items.len;
+    try std.testing.expectError(error.CorruptSave, commands.execute(&gs, .advance_day));
+    try std.testing.expectEqualDeep(invalid, gs.artillery_formations.get(bought.artillery_formation).?.placement);
+    try std.testing.expectEqual(logs, gs.event_log.items.len);
 }
 
 /// Standing policies, checked daily. Cash: top an entity up to its
@@ -530,6 +550,7 @@ fn runSupplyConsumption(gs: *GameState) !void {
 /// markets phase: hiring halls churn daily; the contract board and
 /// site-market listings refresh on the 1st.
 fn runMarkets(gs: *GameState) !void {
+    try artillery.syncMarkets(gs);
     try contract_market.churnCandidates(gs); // people move daily
     if (gs.clock.date.day != 1) return;
     try contract_market.refresh(gs);

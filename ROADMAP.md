@@ -1376,6 +1376,14 @@ pinned MegaMek GitHub records verifying each proposed candidate's actual later
 introduction date. Artillery continues in order through P2e-P2g, P2h artillery
 battle effects, and P2i artillery REPL/TUI/query surfaces.
 
+P2f delivers Mobile Long Tom formation and physical carrier identities,
+player-only monthly HQ acquisition, direct company attachment, HQ pool/freight
+placement, shared lift demand and ownership carrying/resale accounting in schema
+v60. The explicit game abstractions and typed command boundary are recorded in
+`docs/p2-artillery-acquisition-design.md`. P2g retains crewing, readiness,
+reloads, repairs, supply and their operational persistence; P2h retains battle
+effects; P2i retains artillery query, REPL and TUI actions.
+
 This foundation lets player and NPC companies buy the same assets from the
 market. The later NPC merc-company economy work sets the four-active-lance
 (16-mek) readiness rule; combat vehicles and aerospace may then be retained as

@@ -16,9 +16,10 @@ const GameState = @import("state.zig").GameState;
 const hq_ops = @import("hq_ops.zig");
 const contract_market = @import("contract_market.zig");
 const commands = @import("commands.zig");
+const artillery = @import("artillery.zig");
 const roster_seed = @import("roster_seed.zig");
 
-pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld, UnknownSite } || std.mem.Allocator.Error;
+pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld, UnknownSite, ArtilleryIdExhausted } || std.mem.Allocator.Error;
 
 /// A generous fixed bound on the starter HQ's staff plan (rule 11-13:
 /// every founding allocation is pre-sized before anything commits). Derived
@@ -137,6 +138,8 @@ pub fn createCommander(
     const can_fund = gs.funds >= founding_funds;
     if (can_fund) try gs.reserveLedger(2); // debit + credit
 
+    const artillery_offer = try artillery.prepareInitialOffer(gs, &hq, @enumFromInt(gs.next_hq_id));
+
     // ---- commit: no fallible operation past this point ----
     gs.commander = .{
         .name = owned_name,
@@ -145,6 +148,7 @@ pub fn createCommander(
     };
 
     const id = gs.commitHq(hq);
+    artillery.commitInitialOffer(gs, artillery_offer);
 
     for (built[0..staff_count]) |person| {
         var p = person;

@@ -1372,7 +1372,7 @@ fn resolveEngagementWithResolutionScratch(gs: *GameState, c: *contract_mod.Contr
         // immediately (B6). No inbox, no player unit; cash already posted.
         if (pool_path and held_field) {
             for (drawn, opfor_outcomes) |hid, oc| {
-                if (oc == .destroyed) try gs.transferHullOwnership(hid, .{ .faction = c.employer_key }, c.enemy_key);
+                if (oc == .destroyed) try gs.transferHullOwnership(hid, .{ .faction = c.employer_key }, c.enemy_key, .salvage);
             }
         }
         break :blk if (exchange_cash > 0) try std.fmt.allocPrint(gs.allocator(), "salvage exchange — the employer keeps the wrecks and pays {s} c-bills for your {d} BV claim", .{ try types.moneyText(gs.allocator(), exchange_cash), salvage_bv }) else "";
@@ -2014,7 +2014,7 @@ pub fn takeSalvage(
         if (cand.hull_instance_id != .none) {
             // Pool path: link the existing instance; do not mint a new one.
             u.hull_instance_id = cand.hull_instance_id;
-            try gs.transferHullOwnership(cand.hull_instance_id, .player, c.enemy_key);
+            try gs.transferHullOwnership(cand.hull_instance_id, .player, c.enemy_key, .salvage);
         } else {
             // Abstraction path: mint a new instance as before.
             try gs.recordHullAcquisition(u, .salvage, c.enemy_key);
@@ -4232,7 +4232,7 @@ test "salvage recovery records a .salvage ownership row with the enemy key" {
     for (salvage_rows) |row| {
         try testing.expectEqual(@import("../domain/hull_instance.zig").AcquisitionType.salvage, row.acquisition_type);
         try testing.expectEqualStrings("DC", row.prior_owner_key);
-        try testing.expectEqual(@as(u32, 0), row.to_day);
+        try testing.expectEqual(@as(?u32, null), row.to_day);
         try testing.expect(gs.hull_instances.contains(row.hull_instance_id));
     }
 }
@@ -4258,7 +4258,7 @@ fn seedOpforHulls(gs: *GameState, faction_key: []const u8, n: usize) ![]types.Hu
         try gs.hull_ownership_history.append(alloc, .{
             .hull_instance_id = hid,
             .from_day = 0,
-            .to_day = 0, // open interval
+            .to_day = null, // open interval
             .acquisition_type = .initial,
             .prior_owner_key = "",
         });
@@ -4326,7 +4326,7 @@ test "pool draw: destroyed hulls are pool-removed and have a valid final disposi
             try testing.expectEqual(hull_instance_mod.OwnerType.destroyed, std.meta.activeTag(inst.owner));
             for (gs.hull_ownership_history.items) |h| {
                 if (h.hull_instance_id == rec.hull_instance_id) {
-                    try testing.expect(h.to_day != 0); // closed
+                    try testing.expect(h.to_day != null); // closed
                 }
             }
         }
@@ -4804,7 +4804,7 @@ test "pool-path takeSalvage: chosen hull transfers, unchosen is finalized" {
         try gs.hull_ownership_history.append(gs.allocator(), .{
             .hull_instance_id = hid,
             .from_day = 0,
-            .to_day = 0,
+            .to_day = null,
             .acquisition_type = .initial,
             .prior_owner_key = "",
         });
@@ -4832,7 +4832,7 @@ test "pool-path takeSalvage: chosen hull transfers, unchosen is finalized" {
     // A .salvage ownership row is open for hid0.
     var found_salvage = false;
     for (gs.hull_ownership_history.items) |h| {
-        if (h.hull_instance_id == hid0 and h.acquisition_type == .salvage and h.to_day == 0) {
+        if (h.hull_instance_id == hid0 and h.acquisition_type == .salvage and h.to_day == null) {
             found_salvage = true;
             break;
         }
@@ -4845,7 +4845,7 @@ test "pool-path takeSalvage: chosen hull transfers, unchosen is finalized" {
     try testing.expectEqual(hull_instance_mod.OwnerType.destroyed, std.meta.activeTag(inst1.owner));
     // All ownership intervals for hid1 are closed (terminal state).
     for (gs.hull_ownership_history.items) |h| {
-        if (h.hull_instance_id == hid1) try testing.expect(h.to_day != 0);
+        if (h.hull_instance_id == hid1) try testing.expect(h.to_day != null);
     }
 }
 
@@ -5001,13 +5001,13 @@ test "transferHullOwnership: employer exchange routes hull to faction, active, s
     try gs.hull_ownership_history.append(gs.allocator(), .{
         .hull_instance_id = hid,
         .from_day = 0,
-        .to_day = 0,
+        .to_day = null,
         .acquisition_type = .initial,
         .prior_owner_key = "",
     });
 
     // The exchange branch transfers to employer (LC = employer_key).
-    try gs.transferHullOwnership(hid, .{ .faction = "LC" }, "DC");
+    try gs.transferHullOwnership(hid, .{ .faction = "LC" }, "DC", .salvage);
 
     const inst = gs.hull_instances.getPtr(hid).?;
     // Faction-owned by employer, active (not permanently_destroyed).
@@ -5019,8 +5019,8 @@ test "transferHullOwnership: employer exchange routes hull to faction, active, s
     var salvage_row = false;
     for (gs.hull_ownership_history.items) |h| {
         if (h.hull_instance_id != hid) continue;
-        if (h.to_day == 0) open_count += 1;
-        if (h.acquisition_type == .salvage and h.to_day == 0) salvage_row = true;
+        if (h.to_day == null) open_count += 1;
+        if (h.acquisition_type == .salvage and h.to_day == null) salvage_row = true;
     }
     try testing.expectEqual(@as(usize, 1), open_count);
     try testing.expect(salvage_row);

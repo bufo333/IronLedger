@@ -1009,6 +1009,24 @@ test "offers are priced per company — a second company does not double every c
     try std.testing.expect(whole > @divTrunc(two * 18, 10));
 }
 
+test "company operating estimate consumes the shared artillery carrying owner" {
+    const artillery = @import("artillery.zig");
+    const unit = @import("../domain/unit.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const home = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
+    const estimate = perCompanyOpsCost(&gs);
+    const liquidation = try treasury.liquidationValue(std.testing.allocator, &gs);
+    const bought = try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
+    try std.testing.expectEqual(unit.monthlyCarryCost(.vehicle), artillery.monthlyCarry(&gs));
+    try std.testing.expectEqual(estimate + artillery.monthlyCarry(&gs), perCompanyOpsCost(&gs));
+    try std.testing.expectEqual(liquidation + artillery.saleValue(gs.artillery_formations.getPtr(bought.artillery_formation).?), try treasury.liquidationValue(std.testing.allocator, &gs));
+    _ = try artillery.sell(&gs, bought.artillery_formation);
+    try std.testing.expectEqual(estimate, perCompanyOpsCost(&gs));
+    try std.testing.expectEqual(liquidation, try treasury.liquidationValue(std.testing.allocator, &gs));
+}
+
 pub const NegotiateOutcome = enum { improved, hardened, withdrawn };
 
 /// Can this company take this offer? An offer belongs to the board
@@ -1103,7 +1121,7 @@ fn buyDispersedListingAtHq(gs: *GameState, index: usize, listing: market.Listing
     else
         null;
     const hull_transfer = if (!fraud and listing.hull_instance_id != .none)
-        try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market")
+        try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market", .salvage)
     else
         null;
     var prepared_unit: ?GameState.PreparedUnit = null;
@@ -1213,7 +1231,7 @@ fn buyContractWorldHull(gs: *GameState, index: usize, listing: market.Listing, p
     else
         null;
     const transfer = if (listing.hull_instance_id != .none)
-        try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market")
+        try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market", .salvage)
     else
         null;
     const placement = try toe.prepareCompanyPoolPlacement(gs, company);
@@ -1239,7 +1257,7 @@ fn buyContractWorldHull(gs: *GameState, index: usize, listing: market.Listing, p
 
 fn buyExistingHullAtHq(gs: *GameState, index: usize, listing: market.Listing, price: types.CBills, hq: types.HqId, berth_kind: ?unit_mod.UnitKind) !BuyResult {
     const prepared_unit = try gs.prepareUnit(listing.item_key);
-    const transfer = try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market");
+    const transfer = try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market", .salvage);
     const posting = try gs.prepareTreasuryPosting(.{ .hq = hq }, .{ .day = gs.clock.day_index, .amount = -price, .category = .unit_purchase, .hq = hq, .note = listing.item_key });
     const log = try gs.prepareLog(.market, .{ .hq = hq }, "[market] bought {s} ({s}) for {d}{s}", .{ listing.item_key, if (listing.condition) |condition| condition.label() else "new", price, if (berth_kind != null) " — berthed here" else "" });
 
@@ -1328,7 +1346,7 @@ pub fn buyListing(gs: *GameState, index: usize, buyer: types.Site) !BuyResult {
             null;
         var prepared_unit: ?GameState.PreparedUnit = null;
         const hull_transfer = if (!fraud)
-            try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market")
+            try gs.prepareHullTransfer(listing.hull_instance_id, .player, "market", .salvage)
         else
             null;
         if (!fraud) {
@@ -1419,7 +1437,7 @@ pub fn buyListing(gs: *GameState, index: usize, buyer: types.Site) !BuyResult {
                 const bought_bm = gs.unit(uid).?;
                 if (listing.hull_instance_id != .none) {
                     bought_bm.hull_instance_id = listing.hull_instance_id;
-                    try gs.transferHullOwnership(listing.hull_instance_id, .player, "market");
+                    try gs.transferHullOwnership(listing.hull_instance_id, .player, "market", .salvage);
                 } else {
                     if (listing.condition) |cond| market.applyHullCondition(bought_bm, cond, gs.rng.random(.market));
                     try gs.recordHullAcquisition(bought_bm, .purchase, "unknown");
@@ -1442,7 +1460,7 @@ pub fn buyListing(gs: *GameState, index: usize, buyer: types.Site) !BuyResult {
                 // transfer ownership market → player (pattern from takeSalvage).
                 // Condition and acquisition record are on the pre-existing instance.
                 bought_hq.hull_instance_id = listing.hull_instance_id;
-                try gs.transferHullOwnership(listing.hull_instance_id, .player, "market");
+                try gs.transferHullOwnership(listing.hull_instance_id, .player, "market", .salvage);
             } else {
                 // Abstraction-path listing: no pre-existing instance; apply condition
                 // and record acquisition as usual.
@@ -2177,7 +2195,7 @@ test "buying a hull listing creates a HullInstance and an open purchase ownershi
     try std.testing.expectEqual(@import("../domain/hull_instance.zig").AcquisitionType.purchase, row.acquisition_type);
     try std.testing.expectEqualStrings("unknown", row.prior_owner_key);
     try std.testing.expectEqual(@as(u32, 5), row.from_day);
-    try std.testing.expectEqual(@as(u32, 0), row.to_day);
+    try std.testing.expectEqual(@as(?u32, null), row.to_day);
 }
 
 test "a funds-short buy refusal creates no HullInstance and no ownership row" {
@@ -2292,7 +2310,7 @@ test "buying a surplus listing transfers the pre-existing HullInstance to the pl
     try gs.hull_ownership_history.append(gs.allocator(), .{
         .hull_instance_id = hid,
         .from_day = 1,
-        .to_day = 0,
+        .to_day = null,
         .acquisition_type = .transfer,
         .prior_owner_key = "LC",
     });
@@ -2378,7 +2396,7 @@ test "buying a dispersed black-market hull transfers its existing HullInstance o
         try std.testing.expectEqual(hull_mod.OwnerType.player, std.meta.activeTag(gs.hull_instances.getPtr(hid).?.owner));
         try std.testing.expectEqual(history_before + 1, gs.hull_ownership_history.items.len);
         try std.testing.expectEqual(@as(u32, gs.clock.day_index), gs.hull_ownership_history.items[history_before - 1].to_day);
-        try std.testing.expectEqual(@as(u32, 0), gs.hull_ownership_history.items[history_before].to_day);
+        try std.testing.expectEqual(@as(?u32, null), gs.hull_ownership_history.items[history_before].to_day);
         for (gs.market_listings.items) |listing| try std.testing.expect(listing.id != listing_id);
     }
     try std.testing.expect(sold);
@@ -2404,7 +2422,7 @@ test "surplus listing age-out returns hull to originating faction pool" {
     try gs.hull_ownership_history.append(gs.allocator(), .{
         .hull_instance_id = hid,
         .from_day = 50,
-        .to_day = 0,
+        .to_day = null,
         .acquisition_type = .transfer,
         .prior_owner_key = "LC",
     });

@@ -8,6 +8,8 @@ const types = @import("../domain/types.zig");
 const GameState = @import("state.zig").GameState;
 const posture = @import("posture.zig");
 const toe = @import("toe.zig");
+const artillery = @import("artillery.zig");
+const artillery_dom = @import("../domain/artillery_formation.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 
 /// Transports of one kind holding a berth at an HQ.
@@ -60,6 +62,44 @@ pub fn hasCrewedDropship(gs: *GameState, company: types.ForceId) bool {
     return false;
 }
 
+/// Shared bay demand for query and committing lift; artillery uses the explicit
+/// vehicle-bay abstraction in docs/p2-artillery-acquisition-design.md.
+pub fn companyLiftDemand(gs: *GameState, company_id: types.ForceId) [3]u32 {
+    var need: [3]u32 = .{ 0, 0, 0 };
+    var uit = gs.units.iterator();
+    while (uit.next()) |e| {
+        const u = e.value_ptr;
+        if (gs.companyOf(u.force) != company_id or u.isParked() or u.status == .in_transit) continue;
+        const bay = u.kind.bayKind() orelse continue;
+        need[@intFromEnum(bay)] += 1;
+    }
+    need[2] += artillery.attachedCount(gs, company_id) * artillery_dom.carrier_vehicle_bays;
+    return need;
+}
+
+test "artillery bay demand agrees with query and commit and requires matching ship bays" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const home = try @import("founding.zig").createCommander(&gs, "T", .LC, .quartermaster);
+    const co = try gs.createForce("Company", .company, .none);
+    try toe.assignCompanyToHq(&gs, co, home);
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
+    const bought = try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
+    try std.testing.expectEqual(@as(u32, 0), companyLiftDemand(&gs, co)[2]);
+    _ = try artillery.attach(&gs, .{ .formation = bought.artillery_formation, .company = co });
+    const ship = try gs.addUnit("UNION");
+    gs.unit(ship).?.berth_hq = home;
+    gs.unit(ship).?.pilot = try gs.hirePerson("Fit", "Pilot", .dropship_crew);
+    const demand = companyLiftDemand(&gs, co);
+    const query = try planLiftQuery(&gs, co);
+    const committed = try planLift(&gs, co, true);
+    try std.testing.expectEqual(artillery_dom.carrier_vehicle_bays, demand[2]);
+    try std.testing.expectEqualDeep(query, committed);
+    const bays = chassis_mod.find("UNION").?.vehicle_bays;
+    try std.testing.expectEqual(@min(@as(u32, bays), demand[2]), committed.carried);
+    try std.testing.expectEqual(if (bays == 0) types.ForceId.none else co, gs.unit(ship).?.force);
+}
+
 pub const LiftPlan = struct {
     needed: u32 = 0,
     carried: u32 = 0,
@@ -73,14 +113,7 @@ pub const LiftPlan = struct {
 /// queries, and test code. Explicit error set: only allocation can fail.
 pub fn planLiftQuery(gs: *GameState, company_id: types.ForceId) error{OutOfMemory}!LiftPlan {
     var plan: LiftPlan = .{};
-    var need: [3]u32 = .{ 0, 0, 0 };
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| {
-        const u = e.value_ptr;
-        if (gs.companyOf(u.force) != company_id or u.isParked() or u.status == .in_transit) continue;
-        const bay = u.kind.bayKind() orelse continue;
-        need[@intFromEnum(bay)] += 1;
-    }
+    const need = companyLiftDemand(gs, company_id);
     plan.needed = need[0] + need[1] + need[2];
     if (plan.needed == 0) return plan;
     const at_home = posture.isCompanyHome(gs, company_id);
@@ -120,14 +153,7 @@ pub fn planLiftQuery(gs: *GameState, company_id: types.ForceId) error{OutOfMemor
 /// marks the ships as sailing with the company (`force` = company).
 pub fn planLift(gs: *GameState, company_id: types.ForceId, commit: bool) !LiftPlan {
     var plan: LiftPlan = .{};
-    var need: [3]u32 = .{ 0, 0, 0 };
-    var uit = gs.units.iterator();
-    while (uit.next()) |e| {
-        const u = e.value_ptr;
-        if (gs.companyOf(u.force) != company_id or u.isParked() or u.status == .in_transit) continue;
-        const bay = u.kind.bayKind() orelse continue;
-        need[@intFromEnum(bay)] += 1;
-    }
+    const need = companyLiftDemand(gs, company_id);
     plan.needed = need[0] + need[1] + need[2];
     if (plan.needed == 0) return plan;
     const at_home = posture.isCompanyHome(gs, company_id);

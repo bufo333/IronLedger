@@ -13,6 +13,7 @@ const force_mod = @import("../domain/force.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
+const artillery = @import("artillery.zig");
 const commands = @import("commands.zig");
 const starter_company = @import("starter_company.zig");
 const contract_market = @import("contract_market.zig");
@@ -90,7 +91,7 @@ pub fn lancesOfEchelon(gs: *GameState, parent: types.ForceId, echelon: force_mod
     return n;
 }
 
-pub const AssignHqError = error{ UnknownForce, UnknownHq, NotACompany, CapacityFull, TooManyLances };
+pub const AssignHqError = error{ UnknownForce, UnknownHq, NotACompany, CapacityFull, TooManyLances, ArtilleryAttached };
 
 /// Assign a company to an HQ, enforcing the HQ's capacity slots
 /// (ARCH §9.3): companies per HQ and lances per company.
@@ -102,6 +103,7 @@ pub fn assignCompanyToHq(gs: *GameState, company: types.ForceId, hq_id: types.Hq
     const already = companiesAtHq(gs, hq_id) - @intFromBool(f.supplying_hq == hq_id);
     if (already >= cap.combat_companies) return error.CapacityFull;
     if (combatLancesOf(gs, company) > cap.lances_per_company) return error.TooManyLances;
+    if (gs.homeHqFor(company) != hq_id and artillery.attachedCount(gs, company) > 0) return error.ArtilleryAttached;
     f.supplying_hq = hq_id;
 }
 
@@ -637,6 +639,7 @@ pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_compa
     const f = gs.forces.getPtr(co) orelse return Error.UnknownForce;
     if (f.echelon != .company) return Error.NotACompany;
     if (!posture.isCompanyHome(gs, co)) return Error.CompanyDeployed;
+    if (artillery.attachedCount(gs, co) > 0) return error.ArtilleryAttached;
     const name = f.name;
 
     // ---- collect + quote (fallible, no mutation) ----

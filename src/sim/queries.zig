@@ -1734,7 +1734,7 @@ pub fn hullRecord(alloc: Alloc, gs: *GameState, id: types.HullInstanceId) ![]con
     var current_owner: ?[]const u8 = null;
     for (gs.hull_ownership_history.items) |h| if (h.hull_instance_id == id) {
         own_count += 1;
-        if (h.to_day == 0) current_owner = try table.plain(alloc, h.prior_owner_key);
+        if (h.isOpen()) current_owner = try table.plain(alloc, h.prior_owner_key);
     };
     try out.append(alloc, try std.fmt.allocPrint(alloc, "engagements {d}  kills {d}  maintenance entries {d}  ownership intervals {d}", .{
         engagements, kills_total, maint_count, own_count,
@@ -1789,7 +1789,7 @@ pub fn hullOwnershipChain(alloc: Alloc, gs: *GameState, id: types.HullInstanceId
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     for (gs.hull_ownership_history.items) |h| {
         if (h.hull_instance_id != id) continue;
-        const to_str: []const u8 = if (h.to_day == 0) "now" else try std.fmt.allocPrint(alloc, "d{d}", .{h.to_day});
+        const to_str: []const u8 = if (h.isOpen()) "now" else try std.fmt.allocPrint(alloc, "d{d}", .{h.to_day.?});
         try out.append(alloc, try std.fmt.allocPrint(alloc, "d{d}–{s}  {s}  prior: {s}", .{
             h.from_day, to_str, @tagName(h.acquisition_type), try table.plain(alloc, h.prior_owner_key),
         }));
@@ -9219,7 +9219,7 @@ test "hull lifecycle views render a seeded hull (rule 67)" {
         try std.testing.expect(found_repair);
     }
 
-    // hullOwnershipChain: one .initial interval (to_day == 0 → "now").
+    // hullOwnershipChain: one .initial interval (to_day == null → "now").
     const chain = try hullOwnershipChain(al, &gs, hid);
     try std.testing.expectEqual(@as(usize, 1), chain.len);
     try std.testing.expect(std.mem.indexOf(u8, chain[0], "initial") != null);

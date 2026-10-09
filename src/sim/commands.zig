@@ -44,9 +44,15 @@ const refit_m = @import("refit.zig");
 const crew = @import("crew.zig");
 const toe = @import("toe.zig");
 const personnel = @import("personnel.zig");
+const artillery = @import("artillery.zig");
 const held_hulls = @import("held_hulls.zig");
 
 pub const Command = union(enum) {
+    buy_artillery: struct { offer: types.ArtilleryOfferId, hq: types.HqId },
+    attach_artillery: struct { formation: types.ArtilleryFormationId, company: types.ForceId },
+    detach_artillery: types.ArtilleryFormationId,
+    transfer_artillery: struct { formation: types.ArtilleryFormationId, to_hq: types.HqId },
+    sell_artillery: types.ArtilleryFormationId,
     /// End the turn: advance one day. Turn-based — time only moves here,
     /// and nothing blocks it; decisions wait in the inbox with deadlines.
     advance_day,
@@ -304,6 +310,16 @@ pub const Command = union(enum) {
 };
 
 pub const Error = error{
+    CorruptSave,
+    NoSuchArtilleryFormation,
+    NoSuchArtilleryOffer,
+    ArtilleryUnavailable,
+    ArtilleryWrongLocation,
+    ArtilleryAttachmentFull,
+    ArtilleryAttached,
+    ArtilleryIdExhausted,
+    ArtilleryDateExhausted,
+    ArtilleryFundsExhausted,
     UnknownPerson,
     UnknownForce,
     UnknownUnit,
@@ -479,6 +495,10 @@ pub const Error = error{
 } || std.mem.Allocator.Error;
 
 pub const Result = struct {
+    artillery_formation: types.ArtilleryFormationId = .none,
+    hull_instance: types.HullInstanceId = .none,
+    artillery_freight_cost: types.CBills = 0,
+    artillery_eta_day: u32 = 0,
     days_advanced: u32 = 0,
     /// advance: why a multi-day advance stopped before the requested count.
     /// `.none` when the full count ran or when zero days elapsed (the zero-
@@ -632,6 +652,11 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .sell_unit => |unit_id| return held_hulls.execSellUnit(gs, unit_id),
         .strip_unit => |unit_id| return held_hulls.execStripUnit(gs, unit_id),
         .sell_hq => |hq_id| return hq_ops.execSellHq(gs, hq_id),
+        .buy_artillery => |p| return artillery.buy(gs, p),
+        .attach_artillery => |p| return artillery.attach(gs, p),
+        .detach_artillery => |id| return artillery.detach(gs, id),
+        .transfer_artillery => |p| return artillery.transfer(gs, p),
+        .sell_artillery => |id| return artillery.sell(gs, id),
         .disband_company => |co| return toe.execDisbandCompany(gs, co),
         .reactivate => |unit_id| return hq_ops.execReactivate(gs, unit_id),
         .fabricate => |f0| return hq_ops.execFabricate(gs, f0),

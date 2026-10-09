@@ -26,8 +26,10 @@ A package has one primary invariant or subsystem outcome.
   acquisition/attachment, crewing, readiness, and persistence.
 - [x] P2e artillery domain catalogue: verified Mobile Long Tom construction
   facts, provenance, calculated BV/cost, and static artillery category.
-- [ ] P2-artillery (P2f-P2g): acquisition/attachment, crewing, readiness,
-  and persistence.
+- [x] P2f artillery acquisition and attachment: Mobile Long Tom ownership,
+  market acquisition, placement, transport, and persisted formation identity.
+- [ ] P2g artillery operations: crewing, readiness, reloads, repairs, supply,
+  and operational persistence.
 - [ ] P2-battle-ui (P2h-P2i): artillery battle effects and REPL/TUI/query
   surfaces; battle-armor UI remains deferred with P2b-P2d.
 - [ ] NPC world-contract design: shared world conflicts and typed opposing forces

@@ -241,6 +241,7 @@ pub fn assignCompany(gs: *GameState, company: types.ForceId, hq: types.HqId) !vo
         error.NotACompany => return error.NotACompany,
         error.CapacityFull => return error.CapacityFull,
         error.TooManyLances => return error.TooManyLances,
+        error.ArtilleryAttached => return error.ArtilleryAttached,
     };
 }
 
@@ -423,4 +424,31 @@ test "establishLink leaves funds, ledger and hq_links unchanged when allocation 
     try std.testing.expectEqual(before, digest.stateHash(&gs));
     try std.testing.expectEqual(links_before, gs.hq_links.items.len);
     try std.testing.expectEqual(funds_before, gs.funds);
+}
+
+test "attached artillery blocks changed home assignment at owner network and command boundaries" {
+    const artillery = @import("artillery.zig");
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const home = gs.seat();
+    const other = try founding.foundHq(&gs, "Other", .regional, "skye");
+    const co = try gs.createForce("Company", .company, .none);
+    try toe.assignCompanyToHq(&gs, co, home);
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
+    const bought = try commands.execute(&gs, .{ .buy_artillery = .{ .hq = home, .offer = gs.artillery_offers.items[0].id } });
+    _ = try commands.execute(&gs, .{ .attach_artillery = .{ .formation = bought.artillery_formation, .company = co } });
+    const before = digest.stateHash(&gs);
+    try std.testing.expectError(error.ArtilleryAttached, toe.assignCompanyToHq(&gs, co, other));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectError(error.ArtilleryAttached, assignCompany(&gs, co, other));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectError(error.ArtilleryAttached, commands.execute(&gs, .{ .assign_company = .{ .company = co, .hq = other } }));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    _ = try commands.execute(&gs, .{ .assign_company = .{ .company = co, .hq = home } });
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    _ = try commands.execute(&gs, .{ .detach_artillery = bought.artillery_formation });
+    _ = try commands.execute(&gs, .{ .assign_company = .{ .company = co, .hq = other } });
+    try std.testing.expectEqual(other, gs.homeHqFor(co));
 }
