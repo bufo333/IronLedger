@@ -2,7 +2,8 @@
 
 IRON LEDGER uses one thin long-lived dispatcher and six short-lived worker roles.
 Tools share this process, `AGENTS.md`, and immutable artifacts, not session state.
-John approves plans and local Git writes. Agents never use GitHub or a remote.
+John approves plans and local Git writes. Agents never perform Git remote
+operations or access GitHub.
 
 ## Migration transition
 
@@ -33,6 +34,19 @@ Codex role configurations are in `.codex/agents/`. Claude's tracked settings
 supply permissions, and local overrides and hooks can affect enforcement.
 Verify effective role selection and permissions before dispatch. Do not edit
 user-level profiles, memory, local overrides or external hooks in this migration.
+
+## Git remote and GitHub restrictions
+
+Git remote operations and all GitHub access remain John-owned and outside
+agent authority. Agents must not fetch, pull, push, change Git remotes, or
+perform other Git remote operations. GitHub access is prohibited through
+every interface, including browser, API, CLI, and hosted source downloads;
+read-only access is included. Read-only web and source research outside
+GitHub is permitted when it is within the dispatched task and role and
+allowed by effective instructions and existing permissions. This grants
+no external write, publishing, or messaging authority and does not bypass
+sandbox or network restrictions. Research permission does not expand a
+role's file-write or Git authority.
 
 ## Governance bootstrap
 
@@ -180,8 +194,9 @@ review acceptance. Both ignore rules remain for transition safety.
    including governance and P2f, with all findings explicitly disposed and no
    blocking finding. The full applicable gate, unchanged original main base,
    delivery checklist, and separate prompted integration remain mandatory.
-   This resolution permits no early merge, automatic retry loop, remote access,
-   role substitution, or override of higher-priority runtime instructions.
+   This resolution permits no early merge, automatic retry loop, Git remote
+   operations or GitHub access, role substitution, or override of higher-priority
+   runtime instructions.
 
 7. After acceptance, the coordinator invokes a fresh integrator. It verifies the
    artifact, accepted exact commit, expected branch, clean worktree, unchanged base and fast-forward ancestry.
@@ -226,10 +241,22 @@ write only plan artifacts, and reviewers and integrators never implement. A
 worker must not treat edits to tracked role configuration as a change to its
 own loaded authority or use the proposed authority during that invocation.
 The governance amendment receives a prompted commit and fresh review before
-amended authority is used. Effective role activation is verified separately
-from file contents. If an available role or launcher cannot activate the
-approved instructions, stop and report that runtime prerequisite; do not ask
-John to apply the files, modify a global profile, or bypass the restriction.
+amended authority is used. The Git remote/GitHub scope amendment must complete
+its local prompted commit, fresh exact-commit review, and separate local
+integration before its narrowed
+research authority is used. Then dispatch fresh roles and verify that their
+actual effective instructions and permissions permit that research. Tracked
+edits, a delegation message, and plan approval cannot amend a running
+invocation's higher-priority instructions. A remaining blanket runtime
+restriction is an activation prerequisite; stop and report it without bypassing
+it or editing a global profile. The governance implementation uses
+already-effective local authority and needs no remote access. The historical
+bounded P2f activation exception in delivery step 6 remains unchanged.
+
+Effective role activation is verified separately from file contents. If an
+available role or launcher cannot activate the approved instructions, stop and
+report that runtime prerequisite; do not ask John to apply the files, modify a
+global profile, or bypass the restriction.
 
 The ordinary correction limit remains in force. A governance-only amendment
 after escalation may proceed only under already-effective authority and an
@@ -255,13 +282,13 @@ explicitly approved governance plan.
 Permissions reduce accidental authority but are not a sandbox against arbitrary
 programs launched through Bash. Durable controls are the hashed approved
 artifact, executable gates, fresh exact-commit review, fast-forward-only local
-integration, and John retaining all remote authority.
+integration, and John retaining all Git remote and GitHub authority.
 
 Branch creation belongs only to branch-bootstrap; commits only to implementer;
 local integration and branch deletion only to integrator after the transition.
 Never commit directly to `main`. Every Git mutation above needs John's explicit
 permission prompt showing the exact command. Integrator has no implementation,
-correction, bootstrap or remote authority. Governance mode is bounded by the
-explicitly approved named-file scope; ordinary implementation cannot change
-contracts, gates, registries, CI, agent configuration, project instructions or
-memory. No role may fetch, pull, push, change remotes, or use GitHub.
+correction, bootstrap or Git remote/GitHub authority. Governance mode is bounded
+by the explicitly approved named-file scope; ordinary implementation cannot
+change contracts, gates, registries, CI, agent configuration, project instructions or
+memory. No role may fetch, pull, push, change Git remotes, or access GitHub.

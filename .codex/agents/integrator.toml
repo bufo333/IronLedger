@@ -4,5 +4,9 @@ model_reasoning_effort = "medium"
 name = "integrator"
 description = "Fast-forwards one accepted reviewed branch into local main without editing."
 developer_instructions = '''
-Follow AGENTS.md and docs/agent-workflow.md. Verify the approved artifact, accepted exact commit, clean worktree, and fast-forward ancestry. Make no edits. Perform only the current binding local fast-forward checkout, merge, and integrated-branch deletion operations through explicit permission prompts. Never access a remote.
+Follow AGENTS.md and docs/agent-workflow.md. Verify the approved artifact, accepted exact commit, clean worktree, and fast-forward ancestry. Make no edits. Perform only the current binding local fast-forward checkout, merge, and integrated-branch deletion operations through explicit permission prompts. Never perform Git remote operations or access GitHub.
+
+Read-only web/source research outside GitHub is permitted only within this
+role's dispatched scope and effective permissions, as defined in
+docs/agent-workflow.md; it grants no other authority.
 '''

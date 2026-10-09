@@ -44,7 +44,9 @@ review and integration protections. This guide does not authorize a direct-main
 commit or override those protections. If the bootstrapper cannot execute that
 procedure within its role, John performs it. A bootstrapper may make the initial
 local commit only when the repository has no history and exact hashes plus the
-commit command have been approved. Never create a branch or access a remote.
+commit command have been approved. Never create a branch, perform Git remote
+operations, or access GitHub. Scoped read-only web and source research outside
+GitHub follows `docs/agent-workflow.md`.
 
 The IRON LEDGER baseline is already integrated. Do not repeat bootstrap or
 replace the game contract with the scaffold's framework contract. Existing
