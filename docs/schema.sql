@@ -1,7 +1,10 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 62. The executable DDL and its column migrations
--- live in src/persist/store.zig; this file is the readable reference for
+-- Matches schema_version 62, the only supported store and campaign format.
+-- Older and newer formats are refused before persistent mutation under
+-- docs/engineering-contract.md rule 51; only empty stores initialize schema 62.
+-- The executable DDL and dormant historical migration declarations live in
+-- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
 --
 -- One store file holds many campaigns. `player`, `setting` and `campaign`
@@ -67,7 +70,7 @@ CREATE TABLE campaign (
     commander       TEXT,
     day             INTEGER NOT NULL,                -- day_index at save
     date            TEXT    NOT NULL,                -- in-game date at save
-    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- version that wrote it; newer than the game refuses to load
+    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 62; older/newer versions are refused before load or overwrite
     save_seq        INTEGER NOT NULL,                -- store-wide save counter, orders "most recent"
     player_id       INTEGER NOT NULL DEFAULT 0       -- -> player.id; 0 = none
 );
@@ -108,9 +111,10 @@ CREATE TABLE meta_text (
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
--- One row per named RNG stream (sim/rng.zig Stream). A stream with no row
--- starts fresh from meta rng_seed, so adding a stream never reseeds the
--- others. A malformed row or unknown stream name is a corrupt save.
+-- Exactly one valid row per required named RNG stream (sim/rng.zig Stream)
+-- and the saved meta rng_seed are required by engineering-contract.md rule 52.
+-- Missing, duplicate or malformed rows and unknown stream names are corrupt
+-- saves; loading never seeds a missing stream or falls back to a legacy blob.
 CREATE TABLE rng_stream (
     cid             INTEGER NOT NULL,
     stream          TEXT    NOT NULL,                -- 'generation','market','battle',...
@@ -120,9 +124,9 @@ CREATE TABLE rng_stream (
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
--- Single-blob RNG state of older saves: every stream's native-endian state
--- in a fixed order. Read only when a campaign has no rng_stream rows;
--- saving writes none.
+-- Dormant legacy single-blob RNG representation: every stream's native-endian
+-- state in a fixed order. Schema 62 neither loads nor writes these rows.
+-- This retained DDL grants no old-format support or RNG fallback.
 CREATE TABLE rng (
     cid             INTEGER PRIMARY KEY,
     state           BLOB    NOT NULL,

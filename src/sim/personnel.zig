@@ -24,6 +24,8 @@ const sites = @import("sites.zig");
 const commands = @import("commands.zig");
 const artillery_crew = @import("artillery_crew.zig");
 const artillery = @import("artillery.zig");
+const artillery_operations = @import("artillery_operations.zig");
+const artillery_service = @import("artillery_service.zig");
 
 /// Recruit a randomly generated person (AtB-style: experience on 2d6,
 /// skills from the band, names from the tables). No signing bonus: that
@@ -388,8 +390,11 @@ pub fn companyCrewStats(gs: *GameState, company: types.ForceId) CrewStats {
     return st;
 }
 
-/// Tech hours: what a company's hulls want per week against
-/// what its techs, at their skill and with their astech teams, can give.
+/// Weekly company demand includes ordinary hulls and attached artillery;
+/// eligible local artillery mechanics provide their shared skill pacing.
+/// Capacity counts each company tech once, with its shared astech team.
+/// Source: ARCHITECTURE.md §9.9 and artillery operations design,
+/// Condition, maintenance, repairs and shared hours. No mutation or RNG.
 pub const TechHours = struct { needed: u32, have: u32 };
 
 pub fn techHours(gs: *GameState, company: types.ForceId) TechHours {
@@ -400,6 +405,10 @@ pub fn techHours(gs: *GameState, company: types.ForceId) TechHours {
         const u = e.value_ptr;
         if (u.isParked() or u.kind == .infantry or gs.companyOf(u.force) != company) continue;
         needed += if (gs.person(u.tech)) |t| maintenance.techWeeklyHoursFor(gs, t, u) else maintenance.hullHours(gs, u);
+    }
+    for (gs.artillery_formations.values()) |*f| {
+        if (f.placement != .company or f.placement.company != company) continue;
+        needed += if (artillery_operations.serviceCapability(gs, f) != null) artillery_service.techHours(gs, f) else artillery_service.baseHours(f);
     }
     var pit = gs.people.iterator();
     while (pit.next()) |e| {
@@ -1239,4 +1248,96 @@ test "artillery departure advice and commands agree at home afield and return tr
     try std.testing.expectEqual(far, gs.person(f.crew[0]).?.posted_hq);
     _ = try commands.execute(&gs, .{ .transfer_person = .{ .person = f.tech, .to_force = other } });
     try std.testing.expectEqual(types.PersonId.none, gs.artillery_formations.get(id).?.tech);
+}
+
+test "company tech hours and manning include unstaffed staffed and mixed artillery demand" {
+    const queries = @import("queries.zig");
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try artillery_operations.fixtureForTest(&gs, true);
+    const f = gs.artillery_formations.getPtr(id).?;
+    const company = f.placement.company;
+    const tech = f.tech;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    _ = try commands.execute(&gs, .{ .unassign_artillery_tech = id });
+    const unstaffed = techHours(&gs, company);
+    try std.testing.expectEqual(artillery_service.baseHours(f), unstaffed.needed);
+    const unstaffed_text = try std.fmt.allocPrint(alloc, "{d} of {d} tech-hours/week covered", .{ unstaffed.have, artillery_service.baseHours(f) });
+    for (try queries.manning(alloc, &gs, company)) |row| if (row.role == .astech or row.role == .tech_mek) {
+        try std.testing.expect(std.mem.indexOf(u8, row.cells[4], unstaffed_text) != null);
+    };
+
+    try gs.person(tech).?.skills.put(gs.allocator(), .tech_mechanic, 2);
+    _ = try commands.execute(&gs, .{ .assign_artillery_tech = .{ .formation = id, .person = tech } });
+    const staffed = techHours(&gs, company);
+    try std.testing.expectEqual(artillery_service.techHours(&gs, f), staffed.needed);
+    try std.testing.expectEqual(maintenance.techWeeklyHoursAvailable(&gs, gs.person(tech).?), staffed.have);
+    try std.testing.expectEqual(staffed.needed, maintenance.techWeeklyLoadHours(&gs, tech));
+    try std.testing.expect(staffed.needed < unstaffed.needed);
+
+    const vehicle = try gs.addUnit("SCP-1N");
+    try toe.placeUnitInCompanyPool(&gs, vehicle, company);
+    gs.unit(vehicle).?.tech = tech;
+    const ordinary_hours = maintenance.techWeeklyHoursFor(&gs, gs.person(tech).?, gs.unit(vehicle).?);
+    const before = digest.stateHash(&gs);
+    const mixed = techHours(&gs, company);
+    try std.testing.expectEqual(ordinary_hours + staffed.needed, mixed.needed);
+    try std.testing.expectEqual(staffed.have, mixed.have);
+    try std.testing.expectEqual(mixed.needed, maintenance.techWeeklyLoadHours(&gs, tech));
+    const mixed_text = try std.fmt.allocPrint(alloc, "{d} of {d} tech-hours/week covered", .{ mixed.have, ordinary_hours + staffed.needed });
+    for (try queries.manning(alloc, &gs, company)) |row| if (row.role == .astech or row.role == .tech_mek) {
+        try std.testing.expect(std.mem.indexOf(u8, row.cells[4], mixed_text) != null);
+    };
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+
+    _ = try commands.execute(&gs, .{ .unassign_artillery_tech = id });
+    _ = try artillery.detach(&gs, id);
+    try std.testing.expectEqual(ordinary_hours, techHours(&gs, company).needed);
+}
+
+test "artillery company tech demand uses local eligible mechanics and excludes other placements" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try artillery_operations.fixtureForTest(&gs, true);
+    const f = gs.artillery_formations.getPtr(id).?;
+    const company = f.placement.company;
+    const tech = f.tech;
+    const remote = try founding.foundHq(&gs, "Remote", .regional, "skye");
+    const other = try gs.createForce("Other", .company, .none);
+    gs.force(other).?.supplying_hq = remote;
+    try gs.person(tech).?.skills.put(gs.allocator(), .tech_mechanic, 2);
+    const base = artillery_service.baseHours(f);
+    const paced = artillery_service.techHours(&gs, f);
+    try std.testing.expect(paced < base);
+    try std.testing.expectEqual(paced, techHours(&gs, company).needed);
+    try std.testing.expectEqual(@as(u32, 0), techHours(&gs, other).needed);
+
+    gs.person(tech).?.assigned_force = other;
+    try std.testing.expect(artillery_operations.serviceCapability(&gs, f) == null);
+    try std.testing.expectEqual(base, techHours(&gs, company).needed);
+    try std.testing.expectEqual(@as(u32, 0), techHours(&gs, company).have);
+    gs.person(tech).?.assigned_force = company;
+    gs.person(tech).?.training = .{ .skill = .tech_mechanic, .done_day = 1 };
+    try std.testing.expectEqual(base, techHours(&gs, company).needed);
+    gs.person(tech).?.training = null;
+    gs.person(tech).?.skills.clearRetainingCapacity();
+    try std.testing.expectEqual(base, techHours(&gs, company).needed);
+    try gs.person(tech).?.skills.put(gs.allocator(), .tech_mechanic, 2);
+    gs.force(company).?.location_planet = "galatea";
+    try std.testing.expectEqual(paced, techHours(&gs, company).needed);
+    gs.force(company).?.return_eta_day = 10;
+    try std.testing.expectEqual(base, techHours(&gs, company).needed);
+    gs.force(company).?.return_eta_day = null;
+    gs.force(company).?.location_planet = null;
+
+    f.placement = .{ .hq_pool = gs.seat() };
+    try std.testing.expectEqual(@as(u32, 0), techHours(&gs, company).needed);
+    f.placement = .{ .freight = .{ .from_hq = gs.seat(), .to_hq = remote, .dispatch_day = 0, .eta_day = 10, .paid_cost = 0 } };
+    try std.testing.expectEqual(@as(u32, 0), techHours(&gs, company).needed);
+    f.placement = .sold;
+    try std.testing.expectEqual(@as(u32, 0), techHours(&gs, company).needed);
 }
