@@ -399,6 +399,8 @@ pub fn replaceTechReferences(gs: *GameState, tech_id: types.PersonId, ids: []con
         const f = gs.artillery_formations.getPtr(id).?;
         if (artillery_crew.bestMechanic(gs, f, true)) |replacement| {
             f.tech = replacement;
+            const p = gs.person(replacement).?;
+            if (f.placement == .company and p.assigned_force == .none) p.assigned_force = f.placement.company;
             swapped += 1;
         } else {
             f.tech = .none;

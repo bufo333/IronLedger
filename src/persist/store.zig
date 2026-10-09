@@ -3019,18 +3019,22 @@ pub const Store = struct {
 
     fn loadBayJob(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT hq,kind,unit,item_key,duration,queued,started,done,cost,artillery,typeof(cid)='integer' AND typeof(ord)='integer' AND typeof(hq)='integer' AND typeof(kind)='text' AND typeof(unit) IN ('integer','null') AND typeof(item_key)='text' AND typeof(duration)='integer' AND typeof(queued)='integer' AND typeof(started) IN ('integer','null') AND typeof(done) IN ('integer','null') AND typeof(cost)='integer' AND typeof(artillery) IN ('integer','null') FROM bay_job WHERE cid=?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT hq,kind,unit,item_key,duration,queued,started,done,cost,artillery,typeof(cid)='integer' AND typeof(ord)='integer' AND typeof(hq)='integer' AND typeof(kind)='text' AND typeof(unit) IN ('integer','null') AND typeof(item_key)='text' AND typeof(duration)='integer' AND typeof(queued)='integer' AND typeof(started) IN ('integer','null') AND typeof(done) IN ('integer','null') AND typeof(cost)='integer' AND typeof(artillery) IN ('integer','null'),ord FROM bay_job WHERE cid=?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
-            if (st.int(10) != 1) return error.CorruptSave;
+            if (st.int(10) != 1 or st.int(11) < 0) return error.CorruptSave;
+            const raw_unit = st.optInt(2);
+            const raw_artillery = st.optInt(9);
+            if (raw_unit) |raw| if (raw <= 0) return error.CorruptSave;
+            if (raw_artillery) |raw| if (raw <= 0) return error.CorruptSave;
             const kind_bytes = try st.text(1, gs.scratch());
             defer gs.scratch().free(kind_bytes);
             try gs.bay_jobs.append(alloc, .{
                 .hq = try toId(types.HqId, st.int(0)),
                 .kind = std.meta.stringToEnum(state_mod.BayJobKind, kind_bytes) orelse return error.CorruptSave,
-                .unit = if (st.optInt(2)) |raw| try toId(types.UnitId, raw) else .none,
-                .artillery = if (st.optInt(9)) |raw| try toId(types.ArtilleryFormationId, raw) else .none,
+                .unit = if (raw_unit) |raw| try toId(types.UnitId, raw) else .none,
+                .artillery = if (raw_artillery) |raw| try toId(types.ArtilleryFormationId, raw) else .none,
                 .item_key = try st.text(3, alloc),
                 .duration_days = try st.intAs(u32, 4),
                 .queued_day = try st.intAs(u32, 5),
@@ -5834,10 +5838,10 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     defer gs.deinit();
     try playedYearForTest(&gs);
     try std.testing.expect(gs.battle_reports.kept.items.len > 0); // the year saw fighting
-    // P2g adds the persisted service checkpoint and bay target representation.
-    // The approved shared-service policy also uses available, physically local
-    // technicians and local pool teams; recovering/training/absent staff no
-    // longer provide service remotely. Pin this complete new policy outcome.
+    // The digest includes the service checkpoint and typed bay targets. Shared
+    // service requires available, physically local technicians and local pool
+    // teams (docs/p2-artillery-operations-design.md,
+    // Condition, maintenance, repairs and shared hours).
     try std.testing.expectEqual(@as(u64, 4891880808279109320), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
@@ -10217,6 +10221,9 @@ test "artillery bay targets round trip and malformed mutually exclusive targets 
         "UPDATE bay_job SET artillery=NULL",
         "UPDATE bay_job SET artillery=99999",
         "UPDATE bay_job SET artillery=1.5",
+        "UPDATE bay_job SET unit=0",
+        "UPDATE bay_job SET artillery=0",
+        "UPDATE bay_job SET kind='fabrication',artillery=0,item_key='comp_chassis_h'",
         "UPDATE bay_job SET unit=1",
         "UPDATE bay_job SET kind='fabrication',item_key='comp_chassis_h'",
         "UPDATE bay_job SET kind='artillery_depot_repair'||char(0)",
@@ -10237,6 +10244,45 @@ test "artillery bay targets round trip and malformed mutually exclusive targets 
         std.debug.print("accepted bay corruption: {s}\n", .{tamper});
         return error.TestExpectedError;
     }
+}
+
+test "negative bay insertion order rejects loading with SQL constraints bypassed" {
+    const operations = @import("../sim/artillery_operations.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, false);
+    try gs.bay_jobs.append(gs.allocator(), .{ .hq = gs.seat(), .kind = .artillery_depot_repair, .artillery = id, .duration_days = 2, .queued_day = 0 });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec("PRAGMA ignore_check_constraints=ON; UPDATE bay_job SET ord=-1; PRAGMA ignore_check_constraints=OFF");
+    var invalid = store.load(std.testing.allocator, gs.campaign_id) catch |err| {
+        try std.testing.expectEqual(error.CorruptSave, err);
+        return;
+    };
+    invalid.deinit();
+    return error.TestExpectedError;
+}
+
+test "attached artillery accident replacement preserves complete assignment through save and load" {
+    const operations = @import("../sim/artillery_operations.zig");
+    const maintenance = @import("../sim/maintenance.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, true);
+    const original = gs.artillery_formations.get(id).?;
+    const replacement = try gs.hirePerson("Spare", "Mechanic", .tech_mechanic);
+    gs.person(replacement).?.weekly_hours = 100;
+    try maintenance.injureTech(&gs, original.tech, 3, "shared accident");
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    try std.testing.expectEqual(replacement, loaded.artillery_formations.get(id).?.tech);
+    try std.testing.expectEqual(original.placement.company, loaded.person(replacement).?.assigned_force);
+    try std.testing.expect(operations.serviceCapability(&loaded, loaded.artillery_formations.getPtr(id).?) != null);
 }
 
 test "absent pool mechanic and captive operating crew retain valid saved assignments without remote service" {

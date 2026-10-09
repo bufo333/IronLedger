@@ -127,7 +127,7 @@ const ServiceBatch = struct {
         const scratch = self.view.allocator();
         for (self.view.people.values()) |p| {
             const original = gs.person(p.id).?;
-            if (p.status == original.status and p.injuries.items.len == original.injuries.items.len and p.awards.items.len == original.awards.items.len and p.morale == original.morale) continue;
+            if (p.status == original.status and p.injuries.items.len == original.injuries.items.len and p.awards.items.len == original.awards.items.len and p.morale == original.morale and p.assigned_force == original.assigned_force) continue;
             var copy = p;
             copy.injuries = .empty;
             try copy.injuries.appendSlice(alloc, p.injuries.items);
@@ -303,7 +303,7 @@ pub fn completeJob(gs: *GameState, index: usize) !bool {
         f.slots[@intFromEnum(rules.Slot.chassis)].condition = .ok;
         if (outcome == .fault or outcome == .botch) try damageGear(view, f, true);
         if (outcome == .botch) changeQuality(f, .drop);
-        if (original.cost > 0) try view.postTreasury(.{ .hq = original.hq }, .{ .day = view.clock.day_index, .amount = -original.cost, .category = .maintenance, .hq = original.hq, .note = "artillery depot labor" });
+        if (original.cost > 0) try view.postTreasury(.{ .hq = original.hq }, .{ .day = view.clock.day_index, .amount = -types.applyBp(original.cost, commander.costMultBp(view.commander, .repair)), .category = .maintenance, .hq = original.hq, .note = "artillery depot labor" });
         if (view.rng.roll2d6(.medical) == 2) try maintenance.injureTechPrepared(view, p.id, tuning.maintenance.bay_accident_days_base + view.rng.roll2d6(.medical), "artillery bay accident");
         try view.log(.construction, .{ .hq = original.hq }, "[artillery] formation {d} chassis repair completed: {s}", .{ @intFromEnum(f.id), @tagName(outcome) });
     }
@@ -454,6 +454,15 @@ test "weekly preparation accident queue and completion refuse every allocation f
             defer outer.deinit();
             var gs = GameState.init(outer.allocator(), .{ .seed = 625 });
             const id = try depotFixtureForTest(&gs);
+            var replacement: types.PersonId = .none;
+            if (action == .accident) {
+                const company = try gs.createForce("Alpha", .company, .none);
+                _ = try artillery.attach(&gs, .{ .formation = id, .company = company });
+                const tech = try gs.hirePerson("Local", "Mechanic", .tech_mechanic);
+                _ = try crew.assignTech(&gs, .{ .formation = id, .person = tech });
+                replacement = try gs.hirePerson("Spare", "Mechanic", .tech_mechanic);
+                gs.person(replacement).?.weekly_hours = 100;
+            }
             if (action == .completion) {
                 _ = try queueRepair(&gs, id);
                 gs.bay_jobs.items[0].started_day = 0;
@@ -491,9 +500,58 @@ test "weekly preparation accident queue and completion refuse every allocation f
                     .completion => _ = try completeJob(&gs, 0),
                 }
                 try std.testing.expect(before != digest.stateHash(&gs));
+                if (action == .accident) {
+                    const f = gs.artillery_formations.get(id).?;
+                    try std.testing.expectEqual(replacement, f.tech);
+                    try std.testing.expectEqual(f.placement.company, gs.person(replacement).?.assigned_force);
+                }
             }
         }
         try std.testing.expect(failed);
+    }
+}
+
+test "accident replacement joins an attached formation company from wholly unassigned personnel" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, true);
+    const original = gs.artillery_formations.get(id).?;
+    const replacement = try gs.hirePerson("Spare", "Mechanic", .tech_mechanic);
+    gs.person(replacement).?.weekly_hours = 100;
+    try std.testing.expectEqual(types.ForceId.none, gs.person(replacement).?.assigned_force);
+    try std.testing.expectEqual(types.HqId.none, gs.person(replacement).?.posted_hq);
+    try maintenance.injureTech(&gs, original.tech, 3, "shared accident");
+    try std.testing.expectEqual(person.Status.wounded, gs.person(original.tech).?.status);
+    try std.testing.expectEqual(replacement, gs.artillery_formations.get(id).?.tech);
+    try std.testing.expectEqual(original.placement.company, gs.person(replacement).?.assigned_force);
+    try artillery.validate(&gs);
+    try std.testing.expect(operations.serviceCapability(&gs, gs.artillery_formations.getPtr(id).?) != null);
+}
+
+test "depot completion debits actual HQ labor with the shared commander repair multiplier" {
+    for ([_]commander.Profession{ .paymaster, .chief_engineer }) |profession| {
+        var gs = GameState.init(std.testing.allocator, .{});
+        defer gs.deinit();
+        const id = try depotFixtureForTest(&gs);
+        gs.commander.?.profession = profession;
+        const quote = try repairQuote(&gs, gs.artillery_formations.getPtr(id).?);
+        _ = try queueRepair(&gs, id);
+        gs.clock.day_index = quote.duration_days;
+        gs.bay_jobs.items[0].started_day = 0;
+        gs.bay_jobs.items[0].done_day = gs.clock.day_index;
+        const before = gs.hqs.get(gs.seat()).?.funds;
+        var tries: usize = 0;
+        while (!try completeJob(&gs, 0)) : (tries += 1) {
+            try std.testing.expect(tries < 100);
+            try std.testing.expectEqual(before, gs.hqs.get(gs.seat()).?.funds);
+            gs.clock.day_index = gs.bay_jobs.items[0].done_day.?;
+        }
+        const labor = types.applyBp(quote.labor, commander.costMultBp(gs.commander, .repair));
+        try std.testing.expectEqual(before - labor, gs.hqs.get(gs.seat()).?.funds);
+        const posting = gs.ledger.transactions.items[gs.ledger.transactions.items.len - 1];
+        try std.testing.expectEqual(-labor, posting.amount);
+        try std.testing.expectEqual(gs.seat(), posting.hq);
+        try std.testing.expectEqual(labor < quote.labor, profession == .chief_engineer);
     }
 }
 

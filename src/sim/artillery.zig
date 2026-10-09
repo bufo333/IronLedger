@@ -733,10 +733,10 @@ test "fixed seed artillery acquisition attachment freight and disposal script ha
     try std.testing.expectEqual(@as(usize, 2), gs.hull_ownership_history.items.len);
     try std.testing.expectEqual(@as(?u32, transfer_result.artillery_eta_day), gs.hull_ownership_history.items[0].to_day);
     try std.testing.expect(gs.hull_ownership_history.items[1].isOpen());
-    // P2g persists quality, armor, four empty crew seats, mechanic, canonical
-    // condition/magazine rows and the service checkpoint. These deterministic
-    // defaults change the full digest while the P2f identity/history checks
-    // above continue to pin the same acquisition and transport semantics.
+    // The digest pins quality, armor, empty crew/tech, canonical condition and
+    // magazines, service checkpoint and acquisition/transport history together
+    // (docs/p2-artillery-operations-design.md,
+    // Acquisition, placement, sale and defaults).
     try std.testing.expectEqual(@as(u64, 4777170326037980488), digest.stateHash(&gs));
 }
 
