@@ -38,6 +38,12 @@ pub fn save(db: sqlite.Db, gs: *const GameState, cid: i64) !void {
         try os.bindAll(.{ cid, ord, o.id, o.hq, o.year, o.month, o.available });
         try os.run();
     }
+    // The serialized count distinguishes a deleted board from an HQ that is
+    // legitimately awaiting its first market phase. It is not gameplay state.
+    const count = try db.prepare("INSERT INTO meta VALUES (?1,'artillery_offer_count',?2)");
+    defer count.finalize();
+    try count.bindAll(.{ cid, gs.artillery_offers.items.len });
+    try count.run();
 }
 
 /// Decode required current payloads without defaults; schema checks also enforce
@@ -80,16 +86,23 @@ pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
         if (flag > 1) return error.CorruptSave;
         try gs.artillery_offers.append(gs.allocator(), .{ .id = try positiveId(types.ArtilleryOfferId, os.int(0)), .hq = try positiveId(types.HqId, os.int(1)), .year = try os.intAs(u16, 2), .month = try os.intAs(u8, 3), .available = flag == 1 });
     }
+    if (version >= 60 and gs.artillery_offers.items.len != try requiredMetaUint(db, cid, "artillery_offer_count")) return error.CorruptSave;
     if (version < 60 and (gs.artillery_formations.count() != 0 or gs.artillery_offers.items.len != 0)) return error.CorruptSave;
 }
 
 fn requiredCounter(db: sqlite.Db, cid: i64, key: []const u8) !u32 {
-    const st = try db.prepare("SELECT value FROM meta WHERE cid=?1 AND key=?2");
+    const value = try requiredMetaUint(db, cid, key);
+    if (value == 0) return error.CorruptSave;
+    return value;
+}
+
+fn requiredMetaUint(db: sqlite.Db, cid: i64, key: []const u8) !u32 {
+    const st = try db.prepare("SELECT value,typeof(value)='integer' FROM meta WHERE cid=?1 AND key=?2");
     defer st.finalize();
     try st.bindAll(.{ cid, key });
-    if (!try st.next()) return error.CorruptSave;
+    if (!try st.next() or st.int(1) != 1) return error.CorruptSave;
     const value = try st.intAs(u32, 0);
-    if (value == 0 or try st.next()) return error.CorruptSave;
+    if (try st.next()) return error.CorruptSave;
     return value;
 }
 
@@ -125,4 +138,92 @@ test "artillery row codecs and transactional facade preserve consumed offers and
     defer campaign.deinit();
     try std.testing.expectEqualDeep(rows.artillery_formations.values(), campaign.artillery_formations.values());
     try std.testing.expectEqual(company, campaign.artillery_formations.get(bought.artillery_formation).?.placement.company);
+}
+
+test "artillery consumed offer deletion fails closed before market synchronization" {
+    const store_mod = @import("store.zig");
+    const artillery = @import("../sim/artillery.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const home = try @import("../sim/founding.zig").createCommander(&gs, "T", .LC, .quartermaster);
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
+    _ = try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
+    const store = try store_mod.Store.open(":memory:");
+    defer store.close();
+    _ = try @import("../sim/founding.zig").foundHq(&gs, "Far", .regional, "skye");
+    try artillery.syncMarkets(&gs);
+    for ([_][*:0]const u8{
+        "DELETE FROM artillery_offer WHERE available=0",
+        "DELETE FROM artillery_offer WHERE available=1",
+        "DELETE FROM artillery_offer",
+        "DELETE FROM meta WHERE key='artillery_offer_count'",
+        "UPDATE meta SET value=-1 WHERE key='artillery_offer_count'",
+        "UPDATE meta SET value=4294967296 WHERE key='artillery_offer_count'",
+        "UPDATE meta SET value=0 WHERE key='artillery_offer_count'",
+        "UPDATE meta SET value=3 WHERE key='artillery_offer_count'",
+        "UPDATE meta SET value=2.5 WHERE key='artillery_offer_count'",
+        "UPDATE meta SET value='invalid' WHERE key='artillery_offer_count'",
+    }) |tamper| {
+        try store.save(&gs);
+        try store.db.exec(tamper);
+        var loaded = store.load(std.testing.allocator, gs.campaign_id) catch |err| {
+            try std.testing.expectEqual(error.CorruptSave, err);
+            continue;
+        };
+        loaded.deinit();
+        return error.TestExpectedError;
+    }
+}
+
+test "offer completeness preserves zero boards and delayed initialization of new eligible HQs" {
+    const store_mod = @import("store.zig");
+    const artillery = @import("../sim/artillery.zig");
+    const founding = @import("../sim/founding.zig");
+    const hq_ops = @import("../sim/hq_ops.zig");
+    const digest = @import("../sim/digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const store = try store_mod.Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var empty = try store.load(std.testing.allocator, gs.campaign_id);
+    defer empty.deinit();
+    try std.testing.expectEqual(@as(usize, 0), empty.artillery_offers.items.len);
+    for ([_][*:0]const u8{
+        "UPDATE meta SET value='invalid' WHERE key='artillery_offer_count'",
+        "UPDATE meta SET value=0.5 WHERE key='artillery_offer_count'",
+        "UPDATE meta SET value=X'00' WHERE key='artillery_offer_count'",
+    }) |tamper| {
+        try store.save(&gs);
+        try store.db.exec(tamper);
+        var malformed = store.load(std.testing.allocator, gs.campaign_id) catch |err| {
+            try std.testing.expectEqual(error.CorruptSave, err);
+            continue;
+        };
+        malformed.deinit();
+        return error.TestExpectedError;
+    }
+
+    const home = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
+    _ = try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
+    _ = try founding.foundHq(&gs, "New", .regional, "skye");
+    const promoted = try founding.foundHq(&gs, "Promoted", .field, "alkaid");
+    gs.hqs.getPtr(promoted).?.funds = hq_ops.tier_upgrade_cost;
+    try hq_ops.startTierUpgrade(&gs, promoted);
+    gs.clock.day_index = gs.hqs.getPtr(promoted).?.projects.items[0].construction_done_day;
+    try hq_ops.runDaily(&gs);
+    try std.testing.expectEqual(@import("../domain/hq.zig").HqTier.regional, gs.hqs.getPtr(promoted).?.tier);
+    try std.testing.expectEqual(@as(usize, 1), gs.artillery_offers.items.len);
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    for ([_]*GameState{ &gs, &loaded }) |g| {
+        try artillery.syncMarkets(g);
+        try artillery.validate(g);
+        try std.testing.expectEqual(@as(usize, 3), g.artillery_offers.items.len);
+        try std.testing.expect(!g.artillery_offers.items[0].available);
+    }
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
 }

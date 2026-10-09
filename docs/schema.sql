@@ -82,7 +82,11 @@ CREATE TABLE campaign (
 -- next_listing_id, next_candidate_id, next_loan_id (added v35),
 -- next_operation_id (added v40), next_actor_id (added v44),
 -- next_rival_id (added v46), next_officer_arc_id (added v47),
--- next_hull_instance_id (added v48).
+-- next_hull_instance_id (added v48), next_artillery_formation_id and
+-- next_artillery_offer_id (added v60). v60 also requires artillery_offer_count:
+-- a nonnegative serialization completeness check, computed from the offer list
+-- on save and checked on load; not an independent GameState field. A missing
+-- board must not be mistaken for a newly eligible HQ awaiting its first phase.
 CREATE TABLE meta (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,

@@ -9038,7 +9038,7 @@ test "P3f.1: v56 store upgrades to v57, existing listings load with planet_key='
 }
 
 fn removeArtilleryFromLegacyFixture(db: sqlite.Db) !void {
-    try db.exec("DELETE FROM artillery_offer; DELETE FROM artillery_formation; DELETE FROM meta WHERE key IN ('next_artillery_formation_id','next_artillery_offer_id')");
+    try db.exec("DELETE FROM artillery_offer; DELETE FROM artillery_formation; DELETE FROM meta WHERE key IN ('next_artillery_formation_id','next_artillery_offer_id','artillery_offer_count')");
 }
 
 fn artilleryCampaignForTest(gs: *GameState) !types.ArtilleryFormationId {

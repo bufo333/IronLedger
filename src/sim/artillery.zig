@@ -455,6 +455,93 @@ test "purchase freight disposal and arrival failures preserve complete gameplay 
     }
 }
 
+fn twoDueArrivals(gs: *GameState) !void {
+    const home = try fixture(gs);
+    const far = try @import("founding.zig").foundHq(gs, "Far", .regional, "skye");
+    const destination = try @import("founding.zig").foundHq(gs, "Destination", .field, "alkaid");
+    gs.hqs.getPtr(far).?.funds = purchasePrice() * 4;
+    try syncMarkets(gs);
+    const first = try buyAt(gs, home);
+    const second = try buyAt(gs, far);
+    try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = far, .level = 2, .established_day = 0 });
+    try gs.hq_links.append(gs.allocator(), .{ .a = far, .b = destination, .level = 2, .established_day = 0 });
+    const outward = try transfer(gs, .{ .formation = first.artillery_formation, .to_hq = far });
+    const onward = try transfer(gs, .{ .formation = second.artillery_formation, .to_hq = destination });
+    gs.clock.day_index = @max(outward.artillery_eta_day, onward.artillery_eta_day);
+}
+
+test "partial artillery arrival allocation failure retries each carrier exactly once" {
+    const digest = @import("digest.zig");
+    var clean = GameState.init(std.testing.allocator, .{});
+    defer clean.deinit();
+    try twoDueArrivals(&clean);
+    try runArrivals(&clean);
+    const complete = digest.stateHash(&clean);
+    var saw_partial_failure = false;
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+        var gs = GameState.init(outer.allocator(), .{});
+        defer gs.deinit();
+        try twoDueArrivals(&gs);
+        const first = gs.artillery_formations.values()[0];
+        const second = gs.artillery_formations.values()[1];
+        const log_count = gs.event_log.items.len;
+        const ledger_count = gs.ledger.transactions.items.len;
+        const funds = gs.funds;
+        const home_funds = gs.hqs.get(gs.seat()).?.funds;
+        const far_funds = gs.hqs.get(first.placement.freight.to_hq).?.funds;
+        const reservations = [2]u32{ gs.hq_links.items[0].tons_this_week, gs.hq_links.items[1].tons_this_week };
+        const next_formation = gs.next_artillery_formation_id;
+        const next_hull = gs.next_hull_instance_id;
+        const next_offer = gs.next_artillery_offer_id;
+        const before = digest.stateHash(&gs);
+        // One append fits; the second must grow. A fresh arena makes the
+        // failing allocator exercise real log preparation allocations.
+        try gs.reserveLog(2);
+        gs.event_log.capacity = log_count + 1;
+        gs.arena.state = .{};
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index, .resize_fail_index = 0 });
+        gs.arena.child_allocator = failing.allocator();
+        const result = runArrivals(&gs);
+        gs.arena.child_allocator = outer.allocator();
+        if (result) |_| {
+            try std.testing.expectEqual(complete, digest.stateHash(&gs));
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expect(failing.has_induced_failure);
+            if (gs.artillery_formations.get(first.id).?.placement == .hq_pool) {
+                saw_partial_failure = true;
+                try std.testing.expectEqual(dom.Placement{ .hq_pool = first.placement.freight.to_hq }, gs.artillery_formations.get(first.id).?.placement);
+                try std.testing.expectEqualDeep(second, gs.artillery_formations.get(second.id).?);
+                try std.testing.expectEqual(log_count + 1, gs.event_log.items.len);
+                try std.testing.expectEqual(first.placement.freight.to_hq, gs.event_log.items[log_count].hq);
+                try std.testing.expectEqual(ledger_count, gs.ledger.transactions.items.len);
+                try std.testing.expectEqual(funds, gs.funds);
+                try std.testing.expectEqual(home_funds, gs.hqs.get(gs.seat()).?.funds);
+                try std.testing.expectEqual(far_funds, gs.hqs.get(first.placement.freight.to_hq).?.funds);
+                try std.testing.expectEqual(reservations, [2]u32{ gs.hq_links.items[0].tons_this_week, gs.hq_links.items[1].tons_this_week });
+                try std.testing.expectEqual(next_formation, gs.next_artillery_formation_id);
+                try std.testing.expectEqual(next_hull, gs.next_hull_instance_id);
+                try std.testing.expectEqual(next_offer, gs.next_artillery_offer_id);
+                try std.testing.expectEqual(first.hull, gs.artillery_formations.get(first.id).?.hull);
+            } else {
+                try std.testing.expectEqual(before, digest.stateHash(&gs));
+            }
+            try runArrivals(&gs);
+            // Compare all gameplay state with uninterrupted delivery, including
+            // log order/tags, charges, reservations, hull history, IDs and RNG.
+            try std.testing.expectEqual(complete, digest.stateHash(&gs));
+            try std.testing.expectEqual(log_count + 2, gs.event_log.items.len);
+            try runArrivals(&gs);
+            try std.testing.expectEqual(complete, digest.stateHash(&gs));
+        }
+    }
+    try std.testing.expect(saw_partial_failure);
+}
+
 test "attachment cap actual home and noncombat echelons refuse atomically" {
     const digest = @import("digest.zig");
     const toe = @import("toe.zig");
