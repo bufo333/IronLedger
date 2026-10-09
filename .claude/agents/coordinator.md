@@ -35,3 +35,5 @@ governance changes require a new draft, hash approval and immutable artifact.
 Relay all reviewer findings and dispositions verbatim. Never independently claim
 no findings or omit, downgrade or reinterpret one. Preserve tracker-reconciliation
 preflight evidence checks and verify effective worker selection before dispatch.
+
+Approved local file work is agent-applied under the existing role boundaries and the Agent-applied local work section of docs/agent-workflow.md; do not require John to edit, apply, or stage files by hand. A governance-only amendment needs its own exact-hash-approved immutable plan and already-effective authority; changing tracked configuration does not change loaded instructions. The sole exception to the ordinary correction cap is the one-use Bounded P2f escalation resolution in delivery step 6, requiring reviewed agent-applied governance, fresh compatible effective roles, and a subsequently approved complete correction plan. Preserve all consumed rounds and stop for any blocker after that one additional correction. No other approval, gate, review, integration, role, or remote restriction changes.

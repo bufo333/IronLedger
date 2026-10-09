@@ -28,3 +28,5 @@ existing branch/diff without restarting ordinary implementation on a dirty tree.
 Inspect the full diff, stage only intended files and answer the delivery checklist.
 No integration authority. Reverify tracker wording and reachable local-main
 evidence for tracker reconciliation; stop on drift or policy expansion.
+
+Approved local file work is agent-applied under the existing role boundaries and the Agent-applied local work section of docs/agent-workflow.md; do not require John to edit, apply, or stage files by hand. A governance-only amendment needs its own exact-hash-approved immutable plan and already-effective authority; changing tracked configuration does not change loaded instructions. The sole exception to the ordinary correction cap is the one-use Bounded P2f escalation resolution in delivery step 6, requiring reviewed agent-applied governance, fresh compatible effective roles, and a subsequently approved complete correction plan. Preserve all consumed rounds and stop for any blocker after that one additional correction. No other approval, gate, review, integration, role, or remote restriction changes.

@@ -152,6 +152,37 @@ review acceptance. Both ignore rules remain for transition safety.
    must pass the applicable gate and receive fresh review; previous acceptance
    does not transfer. After three rounds, stop and escalate to John rather than
    continue corrections. Material expansion always requires a new approved plan.
+
+   **Bounded P2f escalation resolution.** For
+   `sim/p2f-artillery-acquisition`, preserve the three consumed correction rounds
+   ending at `69242f5bd766e030a7af75afbb9995eed55e2673` and original main base
+   `3c9db755f764b42534d146451f67ded4c839c463`. An agent-applied governance-only
+   amendment on that branch may be reviewed separately without accepting or
+   integrating its blocked application changes. After that amendment is
+   committed and its exact governance delta passes fresh review, fresh roles
+   may activate its explicitly approved authority on the existing branch.
+   Verify actual effective instructions; a tracked configuration edit alone
+   does not activate authority.
+
+   A subsequently approved and frozen complete P2f plan may authorize one
+   additional correction confined to the complete-text enum decoders in
+   `src/persist/artillery_store.zig` and `src/persist/store.zig`, their owning
+   regressions, and the full gate. That plan must name the exact governance
+   commit as its correction starting revision, retain the original main base,
+   all prior feature requirements, and the exhausted correction history.
+   This allowance is used at most once, is not a reset, and does not renew on
+   another plan, session, interruption, or branch name. An interrupted worker
+   resumes the same bounded task. Any blocking finding after its resulting
+   commit stops delivery and is escalated again; no further correction is
+   authorized here. Material expansion requires a new approved plan.
+
+   Final acceptance requires a fresh exact-commit review of the entire branch,
+   including governance and P2f, with all findings explicitly disposed and no
+   blocking finding. The full applicable gate, unchanged original main base,
+   delivery checklist, and separate prompted integration remain mandatory.
+   This resolution permits no early merge, automatic retry loop, remote access,
+   role substitution, or override of higher-priority runtime instructions.
+
 7. After acceptance, the coordinator invokes a fresh integrator. It verifies the
    artifact, accepted exact commit, expected branch, clean worktree, unchanged base and fast-forward ancestry.
    It makes no edits, stages nothing and runs only prompted `git checkout main`,
@@ -178,6 +209,35 @@ A partial implementer is resumed by task ID. If its session no longer exists,
 continuation mode verifies the same approved artifact and inspects the existing
 branch and diff before proceeding. It never restarts ordinary implementation on
 a dirty branch.
+
+## Agent-applied local work
+
+Authorized agents perform all approved local file edits and fixes, including
+amendments to governance files explicitly named in an approved immutable plan.
+John supplies product and policy decisions, exact-hash approvals, and required
+command permission approvals. No plan or handoff may require John to edit files,
+apply a patch, or stage changes by hand. An agent that lacks authority reports
+the specific boundary and obtains an authorized role; it does not transfer file
+application to John.
+
+A fresh implementer applies named-file governance amendments using existing
+effective governance authority. The coordinator remains read-only, planners
+write only plan artifacts, and reviewers and integrators never implement. A
+worker must not treat edits to tracked role configuration as a change to its
+own loaded authority or use the proposed authority during that invocation.
+The governance amendment receives a prompted commit and fresh review before
+amended authority is used. Effective role activation is verified separately
+from file contents. If an available role or launcher cannot activate the
+approved instructions, stop and report that runtime prerequisite; do not ask
+John to apply the files, modify a global profile, or bypass the restriction.
+
+The ordinary correction limit remains in force. A governance-only amendment
+after escalation may proceed only under already-effective authority and an
+explicitly approved named-file plan. It changes no application code, grants
+no implicit extra correction, and neither consumes nor resets the exhausted
+application correction count. Its review certifies only the governance delta;
+known blocking application findings remain blocking. Do not integrate an
+incomplete branch to activate its governance amendment.
 
 ## Boundaries
 
