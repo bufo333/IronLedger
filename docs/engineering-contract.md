@@ -31,9 +31,10 @@ application, persistence, and presentation boundaries.
 ### 2. Determinism is a compatibility promise
 
 The same initial state and the same commands produce the same state. This
-includes state reached after save/load, migration, and executable restart.
+includes state reached after save/load and executable restart, and after any
+migration explicitly supported under [rule 51](#51-save-format-support-is-explicit).
 Random-stream identity, iteration order where it affects outcomes, arithmetic
-rounding, and migration defaults are part of save compatibility.
+rounding, and defaults in a supported migration are part of that promise.
 
 ### 3. One rule, one owner, one result
 
@@ -513,16 +514,22 @@ derived.
 A missing campaign, required row, parent entity, RNG stream, unknown enum,
 invalid range, duplicate identity, malformed blob, or broken reference returns
 `NoSuchCampaign`, `SaveNewerThanGame`, or `CorruptSave` as appropriate.
+Unsupported older campaign and store formats receive typed `SaveOlderThanGame`
+and `StoreOlderThanGame` refusals under
+[rule 51](#51-save-format-support-is-explicit).
 
 Loaders do not skip malformed rows, retain initialization defaults, silently
-truncate, or use unchecked integer casts. Compatibility defaults exist only in
-an explicit versioned migration.
+truncate, or use unchecked integer casts. Defaults never repair current-format
+corruption; conversion defaults apply only in a migration explicitly supported
+under [rule 51](#51-save-format-support-is-explicit).
 
 ### 48. IDs are validated globally
 
 After load, each next-ID counter is greater than every owned ID and every
-reference to that ID. Migration backfills inspect all owners and references,
-handle overflow, and reject impossible maxima.
+reference to that ID. Backfills in migrations supported under
+[rule 51](#51-save-format-support-is-explicit) inspect all owners and references,
+handle overflow, and reject impossible maxima. Current-format IDs and counters
+are never silently reconciled.
 
 ### 49. Saves are transactionally atomic in memory and storage
 
@@ -535,29 +542,48 @@ unchanged and can be retried safely.
 
 The loader validates every relationship, and the executable schema declares
 foreign keys, unique keys, and checks where SQLite can enforce them. Foreign
-keys are enabled on every connection before schema use. Existing tables gain
-constraints through planned table-rebuild migrations; new tables do not defer
-constraints merely because old ones lack them.
+keys are enabled on every connection before schema use. A new empty store uses
+the current constrained DDL. Where a migration is explicitly supported under
+[rule 51](#51-save-format-support-is-explicit), existing tables gain constraints
+through planned table-rebuild migrations; new tables do not defer constraints
+merely because old ones lack them.
 
 The runtime table registry is tested against executable DDL so campaign clear,
 delete, and overwrite cannot omit a table.
 
-### 51. Migrations are explicit and deterministic
+### 51. Save-format support is explicit
 
-Each migration names source and target versions, runs transactionally, and
-defines deterministic defaults or reconstruction rules. It is idempotent when
-guarded for partially upgraded historical stores and has a fixture test.
+While IRON LEDGER is unreleased, new work has no obligation to migrate or
+preserve compatibility with older save formats. The executable declares its
+supported store and campaign format. A nonempty store or campaign outside
+that supported format is refused before persistent mutation; no automatic
+reset, deletion, rewrite, backfill, reseeding, or replacement is permitted.
+An empty database may initialize the current schema transactionally.
 
-Unknown future store or campaign versions are refused before mutation.
+Supported current-format saves preserve all gameplay state, named RNG streams,
+identities and counters exactly, fail closed on corruption, and continue
+deterministically after save/load and executable restart. Format versions
+remain explicit rejection boundaries. Future formats are refused before
+mutation. Changing format support requires an approved plan; this policy
+does not authorize a repository-wide deletion of historical migration code.
+
+If a later approved release policy requires migrations, each migration must
+name source and target versions, run transactionally, define deterministic
+reconstruction, and carry fixture and failure/retry tests. That future policy
+is not selected here. Existing-view consumer integrity and platform or ABI
+compatibility are separate obligations and remain governed by their owners.
 
 ### 52. RNG serialization is stable and named
 
 RNG state is serialized per stable stream name with an explicit format
-version, not as raw memory or one array blob. The campaign retains the seed or
-another documented compatibility seed so newly introduced streams can be
-initialized deterministically for old saves.
+version, not as raw memory or one array blob. The campaign retains its seed.
+A supported current format requires that seed and every required named stream;
+a missing stream is corruption, never an implicit fresh stream. Deterministic
+initialization of new streams in old saves applies only to a migration explicitly
+supported under [rule 51](#51-save-format-support-is-explicit), using the retained
+seed or another documented compatibility seed.
 
-Adding an unused stream does not invalidate or reseed existing streams.
+Adding an unused stream does not reseed or alter existing stream identities.
 
 ### 53. The integrity digest is canonical and complete
 
@@ -576,7 +602,9 @@ continued evolution preserve it.
 - Does every database integer use a checked conversion?
 - Can a missing RNG row or parent row silently retain a default?
 - Does the digest change when each representative field changes?
-- Can adding a stream load an old save without reseeding existing streams?
+- Is an old save rejected under rule 51's support policy, or initialized
+  deterministically only through an explicitly supported migration, with existing
+  stream state unchanged in either applicable path?
 
 ---
 
@@ -751,7 +779,9 @@ Persistence tests cover:
 - negative and overflowing database integers;
 - unknown enum values and missing parents;
 - every next-ID counter;
-- RNG format upgrades and newly added streams;
+- current RNG stream completeness and format corruption;
+- unsupported-format refusal without persistent mutation;
+- RNG upgrades and new-stream initialization fixtures only when upgrades are supported;
 - save, load, and continued deterministic evolution.
 
 ### 71. Locality tests are asymmetric
@@ -1049,7 +1079,8 @@ Every branch answers before integration:
    failure atomicity guaranteed after it?
 3. Which allocations and container capacities are prepared before commit?
 4. Does any new or changed state field have a persistence classification,
-   digest coverage, migration behavior, and next-ID impact?
+   digest coverage, format support/rejection behavior and migration behavior
+   when supported, and next-ID impact?
 5. Is every site-sensitive rule passed an explicit site, and which asymmetric
    test proves locality?
 6. Is every capability predicate complete for status, location, crew, and

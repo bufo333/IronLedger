@@ -38,8 +38,11 @@ gzipped XML files (`.cpnx.gz`) and loads static unit/equipment data from
 MegaMek's flat data files (`.mtf`/`.blk` unit definitions). What MekHQ has is a
 rich *object model*, and that is what we absorb — then persist it properly in
 **SQLite**, which suits this game far better (queries over rosters, ledgers,
-inventory; incremental saves; migrations). The executable DDL and ordered
-migrations live in `src/persist/store.zig`; [`docs/schema.sql`](docs/schema.sql)
+inventory; incremental saves; current-schema persistence). The executable DDL
+and retained historical migration declarations live in `src/persist/store.zig`;
+save-format support is owned by
+[contract rule 51](docs/engineering-contract.md#51-save-format-support-is-explicit).
+[`docs/schema.sql`](docs/schema.sql)
 is the human-readable schema reference. The MekHQ→ours mapping is in
 [`docs/mekhq-map.md`](docs/mekhq-map.md).
 
@@ -126,7 +129,7 @@ section explains the shape, the contract states the rules.
 │  data/   static game data (chassis, weapons, tables,│
 │          factions, planets) loaded from .zon files  │
 ├─────────────────────────────────────────────────────┤
-│  persist/  SQLite save files, schema migrations     │
+│  persist/  SQLite saves, current-schema persistence │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -757,6 +760,8 @@ non-PER listings; `runPirateReplenishment` then mints a monthly hull trickle
 into the PER roster independently of the market. Schema v57 adds both
 `planet_key` and `available_after` columns to the `listing` table with `ADD
 COLUMN NOT NULL DEFAULT` migrations (docs/p3f-faction-loop-design.md §2.3, §3).
+Those historical upgrades do not establish supported save formats; support is
+governed by [contract rule 51](docs/engineering-contract.md#51-save-format-support-is-explicit).
 
 **Merc-company insolvency (P3e.7).** A world merc company whose fieldable
 battle value — the sum of chassis BV across all `.active` hulls in its pool
@@ -954,13 +959,28 @@ maps `GameState` ↔ rows (the executable DDL lives in `persist/store.zig`;
 schema version it matches). Static data (chassis,
 weapons, planets, name tables, salary/price tables) ships as `.zon` files in
 `data/` — versioned separately from saves; saves reference static data by
-stable string keys. Each campaign records its `schema_version`; migrations
-are forward-only. The golden-master hash proves round trips: save → load →
-identical hash, and identical evolution thereafter; a test that differs
-names the first value that did not survive (`digest.firstStateDifference`).
+stable string keys. Each campaign records its `schema_version`; support and
+rejection follow
+[contract rule 51](docs/engineering-contract.md#51-save-format-support-is-explicit).
+The golden-master hash proves exact current-format round trips: save → load →
+identical hash, and identical evolution after load and executable restart;
+a test that differs names the first value that did not survive
+(`digest.firstStateDifference`).
+
+**Approved P2g format boundary, pending implementation.** New empty stores
+initialize schema 62 transactionally. Existing store and campaign versions
+must both be 62; older formats are refused intact and newer formats retain
+their distinct refusal before persistent mutation. A nonempty unversioned
+database is not a new store, and a current store is validated without healing
+missing tables or rows. No automatic reset, deletion, rewrite, backfill or
+reseeding is allowed. This governance amendment records the approved target;
+Phase B must bring runtime store adoption, loading, overwriting and RNG handling
+into agreement through a separately approved complete correction plan. It does
+not claim these runtime changes are already delivered.
 
 **Loading fails closed.** The schema declares enforceable foreign keys
-(containment references) via a table-rebuild migration (v37); the loader
+(containment references); the historical v37 table-rebuild declaration does not
+grant upgrade support under rule 51. The loader
 remains the integrity check for soft and polymorphic references that use
 NULL/0-as-none: every stored integer and id is range-checked, and a
 missing parent row, an unknown enum value,
@@ -973,10 +993,13 @@ only after COMMIT.
 
 **RNG state is saved per stream**: the campaign seed plus one
 `rng_stream` row per named stream (format 1: the generator's words,
-little-endian). A stream with no row starts fresh from the seed, so a
-stream added later never reseeds an old save; a malformed row or an
-unknown stream is `CorruptSave`. Saves from before per-stream rows hold
-one legacy blob, which still loads.
+little-endian). The approved current-format boundary requires the seed and
+exactly one valid row for every required named stream. Missing or malformed
+state, duplicate rows and unknown streams are `CorruptSave`; current rows never
+default to fresh streams. Unsupported old stream blobs are not loaded. Adding
+an unused stream preserves existing stream identity and state; deterministic
+initialization in an older save would require an explicitly supported migration
+under rule 51. Strict current-format enforcement remains pending Phase B.
 
 **Licensing note:** MekHQ/MegaMek code is GPLv2+ and their data files carry
 their own terms; BattleTech IP belongs to Topps/CGL, with Microsoft rights over

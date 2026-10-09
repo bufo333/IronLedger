@@ -112,7 +112,7 @@ maintenance day, a fixed condition per canonical equipment slot, and magazines.
 The domain owns a canonical ordered slot descriptor for the chassis plus each individual
 pinned catalogue mount, expanding count into stable slots: main gun, each of
 four MGs, each of four Long Tom bins, the MG bin, communications and hitch.
-All start intact. Slot order is persisted compatibility; loading rejects any
+All start intact. Slot order is canonical current-format identity; loading rejects any
 missing/duplicate/unknown slot. Chassis is structure; weapons, equipment and
 ammo bins use existing `SlotClass` and `PartCondition` meanings.
 
@@ -305,37 +305,70 @@ waiting reason; OOM/invariant failures propagate. Depot completion is atomic
 per job; earlier completed jobs may remain committed, with existing removed-job
 retry semantics and tests. No unrelated tick retry redesign is authorized.
 
-## Persistence and migration
+## Current-format persistence
 
-Schema **61→62** is transactional. Retain existing acquisition fields and
-identities. The artillery representation persists:
+Save support is governed by
+[contract rule 51](engineering-contract.md#51-save-format-support-is-explicit).
+The approved P2g boundary supports schema **62** for both store and campaign;
+version numbering is retained. This is the target for the separately approved
+Phase B correction: the governance amendment does not change runtime behavior.
+Older formats are preserved but refused, with typed `StoreOlderThanGame` or
+`SaveOlderThanGame` errors; future versions retain distinct
+`StoreNewerThanGame`/`SaveNewerThanGame` refusals. A missing campaign remains
+`NoSuchCampaign`.
+
+`cli.errorText` owns the shared old-format refusal sentence: `that save uses an
+older unsupported development format; start a new campaign in a new save file`.
+Existing error-display paths consume it without a reset, replacement save, new
+campaign or parser verb; corruption, system and newer-format errors remain distinct.
+
+Store adoption classifies the database with read-only queries before DDL,
+version stamping, rebuilding or any persistent mutation. Only a truly empty
+database initializes complete current DDL, indexes and version in one transaction.
+A nonempty database with missing setting table or version is refused intact;
+version metadata requires one exact integer record with a positive bounded value.
+Current opening validates required structures without creating missing tables,
+healing rows or resetting versions. FK enforcement precedes supported schema use.
+Old migration and campaign-upgrade paths are unreachable through adoption or
+load. Historical declarations confer no support; repository-wide removal or
+repair of those declarations is outside P2g.
+
+Campaign version is validated before gameplay decoding or upgrades. Overwriting
+an existing campaign checks its version before clearing or replacing rows;
+failed or unsupported overwrites preserve storage and memory. No automatic
+delete, reset, rewrite, backfill, replacement or reseeding is permitted. Explicit
+player-owned deletion of supported campaigns retains its existing semantics.
+Current saves preserve all gameplay state, identities, counters and named RNG
+streams exactly and continue deterministically after load and executable restart.
+The seed and exactly one valid format/state row per required named RNG stream
+are mandatory; missing current state is corruption, never legacy-blob loading
+or fresh-stream fallback. Stable stream salts and sequences are retained.
+
+Retain existing acquisition fields and identities. The artillery representation persists:
 quality, armor, nullable last-covered maintenance day, nullable technician;
 normalized crew rows keyed by formation+seat; normalized canonical slot rows
 with condition and an ammo count only for ammo slots. BayJob carries a nullable artillery
 target with the new kind, enforcing mutually exclusive targets for
 all job kinds. No additional formation/person/slot ID allocator is needed;
 slots/seats have stable enum identity, people use the existing counter.
-GameState persists the nullable global last-artillery-service-day checkpoint.
+GameState persists the nullable global last-artillery-service-day checkpoint,
+encoded in integer metadata as -1 for absence; day zero is a real checkpoint.
 
 Every formation, including sold history, has exactly the canonical crew and
 slot row set; unfilled Person references are SQL NULL, not fabricated IDs.
 New tables have campaign/formation/Person FKs, primary/unique keys, enum,
-integer-type and range checks; the bay table is rebuilt with appropriate
-new target constraints, preserving all existing jobs. The store clear/delete/overwrite registry and DDL parity test include these
+integer-type and range checks; fresh schema 62 directly creates the bay table
+with the appropriate target constraints. The store clear/delete/overwrite registry and DDL parity test include these
 tables. The store facade
 owns transactions; existing artillery_store encodes/decodes its subsystem.
 No second save path or new persistence-module gate exception.
 
-For every schema-61 formation, migrate to intact, armor 100%, quality C,
-empty crew/tech/magazines, no last maintenance and no artillery job, regardless
-of pooled/attached/freight/sold placement. Preserve P2f placement, money, hull,
-provenance, offers, RNG and every existing person/job. The checkpoint begins absent. Its nullable GameState day is encoded in the
-integer meta table as -1 (day zero remains a real checkpoint). Migration applies
-no retroactive costs, free supplies or random draws. Current stores
-require exact row completeness even for empty crews/magazines; defaults are
-legal only at the version boundary. Partially upgraded legacy payloads must
-match the explicit deterministic defaults or be rejected; never overwrite
-nondefault operational data under an old version silently.
+Current stores require exact row completeness even for empty crews/magazines
+and sold formations. New-purchase defaults apply only to a real new asset,
+never to repair a loaded row. No schema-61 upgrade, old-row defaulting or upgrade
+retry is supported. Unsupported-format tests assert unchanged schema, rows and
+versions; current-format tests retain constraint, corruption, identity, digest,
+failure/retry and continued-evolution coverage.
 
 Persist/classify all fields and job targets, include them in digest, check
 Person next-ID references as well as owners, and reject unknown enums/full
@@ -344,7 +377,16 @@ values, overcapacity magazines, rounds in destroyed/missing bins, duplicate
 cross-asset seats, invalid company-seat membership, sold references/jobs, impossible
 maintenance/checkpoint future days and missing parents. Recovering occupants
 are valid saves even though unavailable; locality changes during a company's
-normal transit are valid and suppress capability. A pool mechanic whose
+normal transit are valid and suppress capability. A queued or started artillery
+bay job retains its valid live HQ and formation while the attached company is
+outward, returning, deployed or idle afield. Persistent topology validates the
+pool HQ or attached home-HQ relationship independently of present work capability;
+freight/sold targets, missing or wrong HQs, duplicate targets, invalid kind/timing
+and mixed Unit/artillery payloads remain invalid. Physical absence suspends work
+through `jobCanWork` and the actual local mechanic/facility owners. A started job
+keeps its shared bay and waits without RNG, labor, charges or repair; returning
+home permits deterministic resumption. This does not add a company-departure
+prohibition or bypass ordinary travel command rules. A pool mechanic whose
 company subsequently departs remains a valid unavailable assignment, never
 remote service; saved physical absence alone is not corruption. Static descriptors/capacity,
 readiness/location/quotes are derived; preparation and HourBooks are scratch.

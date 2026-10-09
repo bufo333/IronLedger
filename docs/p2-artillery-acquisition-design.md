@@ -11,9 +11,11 @@ unsold stock never accumulates and consumed stock stays consumed until rollover.
 The price is the catalogue's calculated construction cost. Commander founding
 prepares the starting eligible HQ board atomically; the daily acquisition and
 markets phase synchronizes newly founded or promoted eligible HQs and rollover.
-Those later HQs receive their first offer during that phase. Legacy campaigns
-initialize current-month boards through the explicit schema upgrade. Stable HQ ID order governs offer allocation,
-and the board consumes no random stream.
+Those later HQs receive their first offer during that phase. Stable HQ ID order
+governs offer allocation, and the board consumes no random stream. Current-format
+boards are persisted exactly; unsupported older campaigns are not initialized
+through a schema upgrade under
+[contract rule 51](engineering-contract.md#51-save-format-support-is-explicit).
 
 An unattached carrier occupies an HQ pool. A combat company can attach at most
 one formation, only while physically home at the same HQ. Detaching returns it
@@ -47,9 +49,9 @@ actual quality and armor, capped at the named chassis-damage valuation limit
 when structure is non-intact, without extracting ammunition or creating stock.
 
 Ownership intervals use nullable closing days: null means open; zero is a real
-closed day. Schema 59 to 60 preserves nonzero closing days, closes legacy zero rows
-at the successor interval's start, and leaves final zero rows open. Invalid ordered
-history is rejected. Explicit acquisition reasons preserve conventional salvage
+closed day. Current ordered history is validated and persisted exactly; schema-59
+intervals are unsupported at the approved P2g format boundary and are not converted.
+Invalid ordered history is rejected. Explicit acquisition reasons preserve conventional salvage
 behavior and record artillery disposal as transfer.
 
 All formation and offer records, acquisition facts, placement payloads and counters
@@ -79,18 +81,20 @@ Commit installs the archive, removes active children/HQ, credits the unchanged
 HQ-sale proceeds owner and records one HQ-tagged log. The outfit receives the
 sale proceeds, including the disposed treasury, exactly once.
 
-Schema 60 to 61 transactionally creates `retired_hq`; older campaigns receive an
-empty archive. Lost legacy HQ names/worlds/tiers/days cannot be reconstructed:
-legacy dangling historical tags are rejected as corrupt, including historical
-references that old versions did not validate. Unexpected legacy archive rows
-and inconsistent partially upgraded payloads also fail closed. Schema 59 to 60
-ownership migration remains unchanged.
+The approved P2g boundary supports schema 62 stores and campaigns, as specified
+in [current-format persistence](p2-artillery-operations-design.md#current-format-persistence)
+and [contract rule 51](engineering-contract.md#51-save-format-support-is-explicit).
+Older formats, including schema 59 and 60, are refused intact; no legacy boards,
+ownership intervals or archives are synthesized. Historical HQ names, worlds,
+tiers, days and other values may not be reconstructed. Current archives and
+their exact historical identities remain required, including every reference
+that must resolve to a live or retired HQ.
 
 Current saves require a strictly checked archive row-count metadata value,
 including zero, and original SQLite integer/text storage classes for every archive
 field. IDs, tier, world and sale day are validated; current next-HQ metadata must
-be an integer, nonzero and greater than every live/archived identity. Only the
-legacy version boundary reconciles a counter after reference validation. Founding
+be an integer, nonzero and greater than every live/archived identity. Current
+counters are validated without reconciliation. Founding
 checks HQ identity collision/exhaustion before allocation or gameplay mutation.
 
 Existing typed history queries safely render archived names and retain original

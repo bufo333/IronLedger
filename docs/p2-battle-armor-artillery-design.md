@@ -59,7 +59,7 @@ P2g operational gameplay is project-designed under
 docs/p2-artillery-operations-design.md. Its approved crew complement,
 seat roles and qualifications, ammunition loading units and capacities,
 supply prices and availability, maintenance, repair, readiness and
-migration defaults are IRON LEDGER adaptations, not external source
+new-purchase defaults are IRON LEDGER adaptations, not external source
 facts. For these P2g policies only, that durable project design replaces
 this document's external-verification and no-invention requirements.
 P2e physical catalogue facts, identity, provenance, era, calculated BV
@@ -126,10 +126,12 @@ readiness-relevant state, reports, histories, and any queues or listings.
 Existing `Unit`, `HullInstance`, `HullOwnershipHistory`, `HullCombatRecord`,
 `force_unit`, market listings, battle reports, and the store facade may be
 reused only where the approved model fits; no parallel save path is allowed.
-If an increment needs persisted fields or tables, it must provide an explicit,
-deterministic schema migration, validate references and next IDs, cover the
-digest, fail closed, and include migration, save-load, and continued-evolution
-tests. P2a adds no state and therefore no migration.
+If an increment needs persisted fields or tables, its support boundary follows
+[contract rule 51](engineering-contract.md#51-save-format-support-is-explicit).
+It must validate current-format references and next IDs, cover the digest, fail
+closed, and test unsupported-format refusal without mutation, exact save-load,
+and continued evolution. Migration fixtures apply only when a migration is
+explicitly supported. P2a adds no state or save-format change.
 
 ## Ordered delivery
 
@@ -183,8 +185,10 @@ interfaces and acceptance boundaries without unsourced values.
   with deterministic stream selection in the initiating simulation subsystem.
 - Created entities and actionable query rows carry typed IDs; CLI verbs, usage,
   and refusal text remain singular in `src/sim/cli.zig`.
-- Persistence increments cover fail-closed load, migration fixtures, save-load
-  digest, and continued evolution.
+- Persistence increments cover fail-closed current-format load, save-load digest,
+  unsupported-format refusal without mutation, and continued evolution under
+  [contract rule 51](engineering-contract.md#51-save-format-support-is-explicit);
+  migration fixtures apply only to explicitly supported migrations.
 - Applicable implementation branches run the required formatting, test, and
   contract checks; P2i and changes to the prescribed frontend boundary also
   run both smoke scripts. Final delivery runs the applicable clean-package and

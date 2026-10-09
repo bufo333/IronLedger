@@ -198,6 +198,31 @@ review acceptance. Both ignore rules remain for transition safety.
    operations or GitHub access, role substitution, or override of higher-priority
    runtime instructions.
 
+   **Bounded P2g unreleased-save policy activation.** For
+   `sim/p2g-artillery-operations`, retain original main base
+   `2dd016604d8667846cebf530f7b6fff9918977f8` and starting HEAD
+   `58424dfab71712ad4948450c18bb1bc186442056`. Correction round 1 is consumed;
+   the second application correction stopped before edits and remains round 2.
+   An explicitly approved named-file governance-only amendment may be committed
+   on this existing branch under already-effective implementer authority and
+   freshly reviewed as its exact governance delta. Application blockers remain
+   blocking; the branch may not be integrated to activate that policy.
+
+   After that governance commit passes fresh delta review, fresh roles may use
+   the approved save-format policy on this branch only after checking actual
+   effective instructions and permissions. A subsequently approved and frozen
+   complete P2g correction plan must name the exact governance commit as its
+   starting HEAD and retain the original main base, all gameplay, validation,
+   existing-view and gate requirements, immutable artifacts and correction history.
+   No invocation may infer authority from its own edits or tracked configuration;
+   an incompatible effective role or integration prerequisite stops dispatch.
+
+   The interrupted second application correction remains round 2 under the
+   ordinary three-round limit. Governance grants no extra round, count reset,
+   automatic retry, early integration or new role or Git authority. Final review
+   covers the entire original-base branch, including governance; the applicable
+   gate, delivery checklist and separate prompted integration remain mandatory.
+
 7. After acceptance, the coordinator invokes a fresh integrator. It verifies the
    artifact, accepted exact commit, expected branch, clean worktree, unchanged base and fast-forward ancestry.
    It makes no edits, stages nothing and runs only prompted `git checkout main`,
