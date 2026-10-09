@@ -16,7 +16,7 @@ scratch/
 
 # local agent planning artifacts
 .claude/plans/
-
+.ai/plans/
 # Python bytecode from the docs/ scripts
 __pycache__/
 *.pyc
