@@ -1,3 +1,6 @@
+model = "gpt-6-astra"
+model_reasoning_effort = "high"
+
 name = "planner"
 description = "Inspects the repository and writes or freezes one approved-plan artifact without implementing."
 developer_instructions = '''

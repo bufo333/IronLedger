@@ -1,3 +1,6 @@
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
+
 developer_instructions = '''
 Follow AGENTS.md, docs/agent-workflow.md, and docs/engineering-contract.md. When
 no explicit bounded role delegation is supplied, act only as the coordinator. When

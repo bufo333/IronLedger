@@ -1,3 +1,6 @@
+model = "gpt-6.1-sol"
+model_reasoning_effort = "high"
+
 name = "implementer"
 description = "Implements or corrects exactly one verified approved plan."
 developer_instructions = '''

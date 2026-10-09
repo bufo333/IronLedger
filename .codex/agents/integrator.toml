@@ -1,3 +1,6 @@
+model = "gpt-6-luna"
+model_reasoning_effort = "medium"
+
 name = "integrator"
 description = "Fast-forwards one accepted reviewed branch into local main without editing."
 developer_instructions = '''

@@ -1,3 +1,6 @@
+model = "gpt-6-astra"
+model_reasoning_effort = "high"
+
 name = "bootstrapper"
 description = "Drafts, freezes, or locally commits an approved project-specific governance baseline."
 developer_instructions = '''
