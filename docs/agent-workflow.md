@@ -2,8 +2,9 @@
 
 IRON LEDGER uses one thin long-lived dispatcher and six short-lived worker roles.
 Tools share this process, `AGENTS.md`, and immutable artifacts, not session state.
-John approves plans and local Git writes. Agents never perform Git remote
-operations or access GitHub.
+John approves exact plans and integration of exact accepted commits for ordinary
+delivery, subject to the amendment transition below. Agents never perform Git
+remote operations or access GitHub.
 
 ## Migration transition
 
@@ -16,6 +17,59 @@ that worker is unavailable. Do not activate the new integrator early. Preserve
 the legacy transition snapshot at its original ignored path through review and
 integration; it may remain as a historical compatibility copy afterward.
 
+## Autonomous-delivery amendment transition
+
+This amendment is implemented, gated, committed, reviewed, corrected if needed,
+and integrated under the workflow effective at its original base. Its exact-plan
+approval does not activate its proposed authority. For
+`governance/autonomous-delivery`, current exact-command permissions and the
+three-round ordinary correction limit remain binding. Moving tracked Claude
+Git patterns from ask to allow does not waive those transition approvals.
+Preserve all consumed correction rounds, historical conditions and immutable
+artifacts; this amendment grants no retrospective extra round or acceptance.
+
+The prospective ordinary policy below activates only after the exact reviewed
+amendment reaches local `main` and its branch is deleted. Dispatch fresh roles
+and verify their actual effective instructions and permissions. Existing loaded
+roles can retain higher-priority instructions: tracked configuration or a
+handoff message does not prove activation and cannot widen a worker's authority.
+If authority is unavailable, report its exact source and obtain an authorized
+fresh role or the required runtime permission; never use one's own edits to
+bootstrap expanded authority.
+
+Ordinary project authorization and runtime permission are distinct. Tools,
+sandboxes, managed policy, local overrides and hooks can still prompt or block
+an authorized operation. Honor and explain the specific observed restriction;
+do not bypass it with another tool, change global profiles or automatically
+request blanket privilege. Tracked Claude command patterns are coarse runtime
+permissions, never standalone task or integration approval. No suppression of
+higher-priority prompts is guaranteed.
+
+## Ordinary approval and continuous dispatch
+
+Ordinary delivery has two user decisions: approval of the complete exact plan
+hash, then approval to integrate the exact accepted commit. Exact-plan approval
+authorizes freezing the unchanged draft, creating the named local branch from
+the exact base, planned edits, required verification, staging only intended
+paths, local commits and in-scope corrections through the designated roles.
+Protected governance changes must be explicitly named in a governance plan;
+an application plan never authorizes incidental policy edits. Plan approval
+never authorizes integration in advance.
+
+After approval, the coordinator verifies each handoff, dispatches the next
+fresh authorized worker, waits for and monitors its task, relays findings and
+dispositions verbatim, and continues the same approved delivery until accepted
+and ready for the integration decision. It gives progress updates and does not
+end its turn merely after dispatch or ask John to continue an already authorized
+step. It remains read-only and does not inspect application code or write plans.
+It cannot select unrelated work or start another branch.
+
+A host suspension or runtime limit can stop continuous execution. Record the
+exact artifact, base, branch, revision, findings, correction history, completed
+checks and pending handoff so evidence-based resumption of unchanged scope does
+not require renewed project approval. Do not promise execution after the host
+stops the session.
+
 ## Roles
 
 | Agent | Lifetime | Authority |
@@ -26,7 +80,7 @@ integration; it may remain as a historical compatibility copy afterward.
 | `branch-bootstrap` | one approved branch | Creates the branch from local `main`; never edits or commits |
 | `implementer` | one approved task | Edits, verifies, commits, or corrects one approved plan |
 | `reviewer` | one committed revision | Independently reviews; never writes |
-| `integrator` | one accepted exact revision | Read-only checks and prompted local fast-forward/delete; never edits |
+| `integrator` | one accepted exact revision | Read-only checks and approved local fast-forward/delete; never edits |
 
 `AGENTS.md`, `docs/engineering-contract.md`, and this workflow supply shared
 project authority. Claude's project-local adapters are in `.claude/agents/`;
@@ -86,7 +140,10 @@ exact SHA-256. A fresh planner freezes it byte-for-byte only after the
 coordinator confirms the hash has not changed. The coordinator independently
 checks the approved snapshot and gives its path and hash to every downstream
 worker. A mutable draft, pasted plan, or conversation summary is not an
-implementation handoff.
+implementation handoff. Every complete plan names the exact base revision,
+branch and creation command, authorized work, affected files, ordered changes,
+tests, documentation, gate, risks and non-goals. Approval applies only to that
+bounded work and its designated roles under the ordinary policy above.
 
 For TODO-backed tracker reconciliation, the planner inspects current local
 `main`, identifies the exact completed item or group and its reachable commit
@@ -121,14 +178,17 @@ review acceptance. Both ignore rules remain for transition safety.
 3. The coordinator and a fresh `branch-bootstrap` verify a clean worktree,
    current local `main`, exact approved base, and no other local implementation
    branch. A branch/name collision stops delivery. Branch-bootstrap creates only
-   the snapshot's approved branch through the exact-command permission prompt.
+   the snapshot's approved branch with its exact creation command under plan
+   authorization; honor any required effective runtime permission.
 4. Dispatch names implementation, correction, or continuation mode and provides
    the immutable artifact path, full SHA-256, branch and exact base revision.
    A fresh `implementer` verifies the snapshot path, hash, metadata and branch,
    then confirms a clean worktree and exact expected branch/base before editing,
    runs the applicable full gate, inspects the full diff, stages only intended
-   files, and commits through a permission prompt. A failed gate stops delivery;
-   never weaken a rule or borrow a file from another branch to pass. For an
+   files, and commits under exact-plan authorization, subject to required runtime
+   permissions. A failed gate blocks review acceptance and integration; repair
+   of an in-scope implementation defect remains authorized. Never weaken a rule
+   or borrow a file from another branch to pass. For an
    approved tracker-reconciliation artifact, it also re-verifies the approved
    base, cited commits, and current TODO wording; changes only approved
    tracker/governance files; removes only the verified completed item or group;
@@ -158,6 +218,54 @@ review acceptance. Both ignore rules remain for transition safety.
    artifact or subsequent approved work that owns it; it is not silently
    accepted as resolved. A `non-issue` finding states the inspected evidence
    that refutes the concern. Only an empty finding list may report no findings.
+6. An in-scope blocking finding automatically returns to a fresh implementer
+   in correction mode with the same snapshot, followed by a fresh exact-commit
+   reviewer. Repeat as many rounds as needed with no fixed numerical limit or
+   renewed approval solely because of the round number. Every changed revision
+   must pass the applicable gate and receive fresh review; prior acceptance
+   never transfers. Track all findings, dispositions, revisions and correction
+   history truthfully. Repairing implementation to meet an already approved
+   requirement is not itself a scope expansion.
+
+   Material additions or changes to approved behavior, architecture, contract,
+   governance, file scope or product policy require a revised complete draft,
+   exact-hash approval and freeze before dependent work. Report real blockers,
+   including unavailable effective authority, unresolved policy choices and
+   unresolvable external prerequisites. Never replace a blocker with an arbitrary
+   retry cap, waived finding, weakened gate or silently expanded scope.
+
+7. After acceptance and completion of the contract delivery checklist, the
+   coordinator presents the immutable artifact path and full hash, original
+   main base, branch, accepted full commit hash, gate evidence, all findings and
+   dispositions, and the exact local checkout/fast-forward/delete sequence.
+   John's explicit approval covers that one integration operation, including
+   deletion of the successfully integrated branch. Acceptance, passing tests,
+   silence and plan approval cannot substitute for integration approval.
+
+   A fresh integrator receives that approval record and verifies the artifact,
+   accepted exact commit, unchanged approved base and branch, clean worktree
+   and fast-forward ancestry before mutation. It edits and stages nothing;
+   it runs only the approved `git checkout main`, `git merge --ff-only <branch>`
+   and `git branch -d <branch>` sequence. Verify main at the accepted commit
+   before deletion. Stop on mismatch, failed command or unexpected state.
+   Changing the accepted commit or integration target invalidates approval.
+   Do not create separate project approvals for unchanged steps of this one
+   operation; honor any required runtime permissions.
+
+   If interrupted, first verify which steps actually completed and perform only
+   the still-authorized remainder. Never repeat blindly, reset state or infer
+   approval for another commit or branch. Integrate only the exact gated and
+   reviewed commit.
+8. Agents stop. John pushes local `main` after closing the agent session.
+
+## Historical bounded delivery provisions
+
+The following prior correction policy and bounded P2f/P2g conditions apply only
+to their historical deliveries, not to prospective ordinary tasks. Their
+consumed counts, artifacts and acceptance evidence remain unchanged; neither
+this amendment nor a new session grants them additional corrections. The
+amendment branch itself remains subject to the transition above.
+
 6. Confirmed findings inside approved scope go to an implementer in correction
    mode with the same snapshot. A material behavior, architecture, contract,
    governance, or scope change requires a new draft, hash, approval and frozen
@@ -223,14 +331,7 @@ review acceptance. Both ignore rules remain for transition safety.
    covers the entire original-base branch, including governance; the applicable
    gate, delivery checklist and separate prompted integration remain mandatory.
 
-7. After acceptance, the coordinator invokes a fresh integrator. It verifies the
-   artifact, accepted exact commit, expected branch, clean worktree, unchanged base and fast-forward ancestry.
-   It makes no edits, stages nothing and runs only prompted `git checkout main`,
-   `git merge --ff-only <branch>` and `git branch -d <branch>` mutations. A stale
-   review/base or branch collision stops the handoff. Answer the contract's
-   delivery checklist before integration; integrate only the exact gated and
-   reviewed commit.
-8. Agents stop. John pushes local `main` after closing the agent session.
+## Review acceptance and continuation
 
 At handoff, the coordinator records and relays the reviewer's findings and
 stated dispositions verbatim. It may verify that every finding has a
@@ -254,9 +355,10 @@ a dirty branch.
 
 Authorized agents perform all approved local file edits and fixes, including
 amendments to governance files explicitly named in an approved immutable plan.
-John supplies product and policy decisions, exact-hash approvals, and required
-command permission approvals. No plan or handoff may require John to edit files,
-apply a patch, or stage changes by hand. An agent that lacks authority reports
+John supplies product and policy decisions, exact-hash plan approval, exact
+accepted-commit integration approval, and any required runtime permissions.
+No plan or handoff may require John to edit files, apply a patch, or stage
+changes by hand. An agent that lacks authority reports
 the specific boundary and obtains an authorized role; it does not transfer file
 application to John.
 
@@ -265,8 +367,9 @@ effective governance authority. The coordinator remains read-only, planners
 write only plan artifacts, and reviewers and integrators never implement. A
 worker must not treat edits to tracked role configuration as a change to its
 own loaded authority or use the proposed authority during that invocation.
-The governance amendment receives a prompted commit and fresh review before
-amended authority is used. The Git remote/GitHub scope amendment must complete
+A governance amendment uses already-effective authority for its local commit
+and fresh review; the applicable transition determines when amended authority
+may be used. The historical Git remote/GitHub scope amendment must complete
 its local prompted commit, fresh exact-commit review, and separate local
 integration before its narrowed
 research authority is used. Then dispatch fresh roles and verify that their
@@ -276,15 +379,17 @@ invocation's higher-priority instructions. A remaining blanket runtime
 restriction is an activation prerequisite; stop and report it without bypassing
 it or editing a global profile. The governance implementation uses
 already-effective local authority and needs no remote access. The historical
-bounded P2f activation exception in delivery step 6 remains unchanged.
+bounded P2f activation exception in Historical bounded delivery provisions
+remains unchanged.
 
 Effective role activation is verified separately from file contents. If an
 available role or launcher cannot activate the approved instructions, stop and
 report that runtime prerequisite; do not ask John to apply the files, modify a
 global profile, or bypass the restriction.
 
-The ordinary correction limit remains in force. A governance-only amendment
-after escalation may proceed only under already-effective authority and an
+The historical bounded correction limits and the amendment transition remain
+in force for those deliveries. A governance-only amendment after escalation
+may proceed only under already-effective authority and an
 explicitly approved named-file plan. It changes no application code, grants
 no implicit extra correction, and neither consumes nor resets the exhausted
 application correction count. Its review certifies only the governance delta;
@@ -295,7 +400,8 @@ incomplete branch to activate its governance amendment.
 
 The coordinator asks John only for product or architectural-policy choices not
 settled by durable project sources, approval of an exact plan hash, material
-plan revisions, and git permission prompts. Technical choices belong to the
+plan revisions, exact accepted-commit integration approval, and any actually
+required runtime permissions. Technical choices belong to the
 fresh planner. Historical approval, remote refs, stale patches, imports, module
 ownership, helper shape, test placement, tracker wording, and rule-76 registry
 treatment are not sent to John as decision menus.
@@ -311,9 +417,11 @@ integration, and John retaining all Git remote and GitHub authority.
 
 Branch creation belongs only to branch-bootstrap; commits only to implementer;
 local integration and branch deletion only to integrator after the transition.
-Never commit directly to `main`. Every Git mutation above needs John's explicit
-permission prompt showing the exact command. Integrator has no implementation,
-correction, bootstrap or Git remote/GitHub authority. Governance mode is bounded
+Never commit directly to `main`. Ordinary branch creation, staging and commits
+are authorized by exact-plan approval; integration and branch deletion require
+the single exact integration approval. The amendment transition and any
+actually required runtime permissions remain binding. Integrator has no
+implementation, correction, bootstrap or Git remote/GitHub authority. Governance mode is bounded
 by the explicitly approved named-file scope; ordinary implementation cannot
 change contracts, gates, registries, CI, agent configuration, project instructions or
 memory. No role may fetch, pull, push, change Git remotes, or access GitHub.

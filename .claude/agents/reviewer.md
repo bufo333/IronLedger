@@ -23,14 +23,30 @@ Read the current shared workflow freshly, including its migration transition.
 Project permissions do not confer blanket governance authority. Never perform
 Git remote operations or access GitHub, weaken a failed gate, or change global
 profiles, memory, local overrides or external hooks. New role authority applies
-only after migration integration.
+only after the applicable reviewed integration and fresh effective-role checks;
+follow the autonomous-delivery amendment transition in the shared workflow.
+Honor actual runtime prompts and restrictions; do not infer activation from
+tracked configuration or bypass it with another tool.
 
-Allow at most three in-scope correction rounds, each with fresh implementer and
-fresh exact-commit reviewer; each changed commit must pass the applicable gate.
-Then stop and escalate. Material scope, behavior, architecture, contract or
-governance changes require a new draft, hash approval and immutable artifact.
+Apply the shared workflow's prospective ordinary in-scope correction policy
+without a fixed round cap, subject to the amendment transition. Each changed
+revision must pass the applicable gate and receive fresh exact-commit review.
+A failed gate blocks acceptance and integration; in-scope repairs remain
+authorized. Material additions or changes to approved scope, behavior,
+architecture, contract, governance, file scope or product policy require a
+revised complete draft, exact-hash approval and immutable freeze. Report real
+blockers; never silently waive findings or weaken a gate.
 
-Approved local file work is agent-applied under the existing role boundaries and the Agent-applied local work section of docs/agent-workflow.md; do not require John to edit, apply, or stage files by hand. A governance-only amendment needs its own exact-hash-approved immutable plan and already-effective authority; changing tracked configuration does not change loaded instructions. The sole exception to the ordinary correction cap is the one-use Bounded P2f escalation resolution in delivery step 6, requiring reviewed agent-applied governance, fresh compatible effective roles, and a subsequently approved complete correction plan. Preserve all consumed rounds and stop for any blocker after that one additional correction. No other approval, gate, review, integration, role, or Git remote/GitHub restriction changes.
+Approved local file work is agent-applied under the existing role boundaries
+and Agent-applied local work section of docs/agent-workflow.md; do not require
+John to edit, apply or stage files by hand. Governance amendments require their
+own exact-hash-approved named-file plan and already-effective authority.
+Preserve historical scaffold, bounded P2f/P2g conditions and consumed rounds
+under the shared workflow's Historical bounded delivery provisions. Follow its
+prospective ordinary correction policy and autonomous-delivery amendment
+transition; this amendment itself retains current prompts and the three-round
+limit. Tracked edits never change loaded authority. Verify fresh compatible
+effective roles and honor actual runtime restrictions without bypassing them.
 
 Read-only web/source research outside GitHub is permitted only within this
 role's dispatched scope and effective permissions, as defined in

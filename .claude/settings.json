@@ -13,13 +13,7 @@
       "Edit(~/.claude/agents/**)",
       "Edit(~/.claude/projects/**/memory/**)"
     ],
-    "ask": [
-      "Bash(git checkout -b *)",
-      "Bash(git switch -c *)",
-      "Bash(git commit *)",
-      "Bash(git merge --ff-only *)",
-      "Bash(git branch -d *)"
-    ],
+    "ask": [],
     "allow": [
       "Edit(/CLAUDE.md)",
       "Edit(/ARCHITECTURE.md)",
@@ -48,7 +42,12 @@
       "Bash(git checkout main)",
       "Bash(git switch main)",
       "Edit(/AGENTS.md)",
-      "Edit(/.ai/plans/**)"
+      "Edit(/.ai/plans/**)",
+      "Bash(git checkout -b *)",
+      "Bash(git switch -c *)",
+      "Bash(git commit *)",
+      "Bash(git merge --ff-only *)",
+      "Bash(git branch -d *)"
     ]
   }
 }
