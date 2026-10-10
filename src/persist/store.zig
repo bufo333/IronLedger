@@ -3767,7 +3767,6 @@ fn validateStoredStrings(gs: *GameState) error{CorruptSave}!void {
         if (r.operation_intent) |i| try Check.shown(@tagName(i));
         if (r.artillery) |a| {
             try Check.shown(a.catalogue_name);
-            for (a.seats) |seat| try Check.shown(seat.name);
         }
         for (r.hulls) |h| {
             try Check.hull(h.chassis_key);

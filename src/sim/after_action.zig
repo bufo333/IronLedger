@@ -25,6 +25,83 @@ const part_mod = @import("../domain/part.zig");
 const medical = @import("medical.zig");
 const operations_m = @import("operations.zig");
 
+test "terminal artillery and mixed captured hull losses are truthful in narrative and both views" {
+    const GameState = @import("state.zig").GameState;
+    const queries = @import("queries.zig");
+    const table = @import("table.zig");
+    const combat = @import("../domain/artillery_combat.zig");
+    const digest = @import("digest.zig");
+    const hulls = [_]HullHit{.{ .unit = @enumFromInt(1), .chassis_key = "LCT-1V", .chassis_name = "Locust", .armor_before = 20, .armor_after = 0, .destroyed = true, .lost = true, .crew = .{ .fate = .missing } }};
+    for ([_]struct { held: bool, damage: combat.DamageOutcome, ordinary: bool, missing: u32 }{
+        .{ .held = true, .damage = .permanently_destroyed, .ordinary = false, .missing = 0 },
+        .{ .held = false, .damage = .scuttled, .ordinary = false, .missing = 2 },
+        .{ .held = false, .damage = .scuttled, .ordinary = true, .missing = 3 },
+    }) |case| {
+        var gs = GameState.init(std.testing.allocator, .{});
+        defer gs.deinit();
+        const r: BattleReport = .{
+            .id = @enumFromInt(1),
+            .day = 0,
+            .contract = @enumFromInt(1),
+            .company = .none,
+            .kind = "recon raid",
+            .enemy_key = "DC",
+            .scenario = "",
+            .terrain = "",
+            .weather = "",
+            .outcome = if (case.held) .victory else .defeat,
+            .held_field = case.held,
+            .lost_hulls = 1 + @as(u32, @intFromBool(case.ordinary)),
+            .missing = case.missing,
+            .hulls = if (case.ordinary) &hulls else &.{},
+            .artillery = .{
+                .formation = @enumFromInt(1),
+                .hull = @enumFromInt(1),
+                .catalogue_key = "LT-MOB-25",
+                .catalogue_name = "Mobile Long Tom",
+                .damage = case.damage,
+                .slots_before = @splat(.{}),
+                .slots_after = @splat(.{}),
+                .rounds_before = @splat(0),
+                .rounds_after = @splat(0),
+                .armor_before = 100,
+                .armor_after = 0,
+            },
+        };
+        try gs.battle_reports.record(gs.allocator(), r);
+        const before = digest.stateHash(&gs);
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const al = arena.allocator();
+        const narrative = try render(al, &r);
+        const view = (try queries.afterAction(al, &gs, r.id)).?;
+        const flat = (try queries.battleReport(al, &gs, r.id)).?;
+        for ([_][]const []const u8{ narrative, view.fight, view.flat, flat }) |lines| {
+            var captured = false;
+            var terminal = false;
+            var missing = false;
+            for (lines) |shown| {
+                const line = if (lines.ptr == narrative.ptr) shown else try table.plainText(al, shown);
+                if (std.mem.indexOf(u8, line, "left to DC") != null) {
+                    try std.testing.expect(std.mem.indexOf(u8, line, "1 hull left to DC") != null);
+                    captured = true;
+                }
+                if (std.mem.indexOf(u8, line, @tagName(case.damage)) != null) terminal = true;
+                if (std.mem.indexOf(u8, line, "people missing") != null) {
+                    try std.testing.expect(std.mem.indexOf(u8, line, try std.fmt.allocPrint(al, "{d} people missing", .{case.missing})) != null);
+                    missing = true;
+                }
+                try std.testing.expect(std.mem.indexOf(u8, line, "pilot(s) missing") == null);
+                if (case.held) try std.testing.expect(std.mem.indexOf(u8, line, "field lost") == null);
+            }
+            try std.testing.expectEqual(case.ordinary, captured);
+            try std.testing.expect(terminal);
+            try std.testing.expectEqual(case.missing > 0, missing);
+        }
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+    }
+}
+
 /// The `[AAR]` lines for a report, in log order. The one place a battle
 /// becomes prose: `battle.zig` logs what this returns and nothing else, so
 /// a field added above shows up in the narrative by changing one function.
@@ -87,12 +164,7 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
         try out.append(alloc, "[AAR]   salvage: none — the field was not held");
     }
 
-    if (r.lost_hulls > 0) {
-        try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   field lost: {d} hull{s} left to {s}{s} — battle-loss comp covers {d}% under the terms", .{
-            r.lost_hulls,                                                                                                                                if (r.lost_hulls == 1) "" else "s", r.enemy_key,
-            if (r.missing > 0) try std.fmt.allocPrint(alloc, ", {d} pilot{s} missing (inbox)", .{ r.missing, if (r.missing == 1) "" else "s" }) else "", r.battle_loss_pct,
-        }));
-    }
+    try out.appendSlice(alloc, try fieldLossLines(alloc, r));
 
     // Per-lance task results (P4e). One line per assigned lance.
     for (r.tasks) |lt| {
@@ -117,6 +189,21 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
         spent.items, r.silenced_mounts, left.items, r.armor_left,
     }));
 
+    return out.toOwnedSlice(alloc);
+}
+
+/// Conventional lost hulls alone are enemy-held; terminal artillery has its own
+/// typed damage narrative. Missing people include ordinary and artillery crew.
+/// Source: artillery combat design, Recovery and existing views. Caller owns memory.
+pub fn fieldLossLines(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    var captured: usize = 0;
+    for (r.hulls) |h| captured += @intFromBool(h.lost);
+    if (captured > 0) try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   field lost: {d} hull{s} left to {s}{s} — battle-loss comp covers {d}% under the terms", .{
+        captured,                                                                                                                                                            if (captured == 1) "" else "s", r.enemy_key,
+        if (r.artillery == null and r.missing > 0) try std.fmt.allocPrint(alloc, ", {d} pilot{s} missing (inbox)", .{ r.missing, if (r.missing == 1) "" else "s" }) else "", r.battle_loss_pct,
+    }));
+    if (r.artillery != null and r.missing > 0) try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   {d} people missing (inbox)", .{r.missing}));
     return out.toOwnedSlice(alloc);
 }
 

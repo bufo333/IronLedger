@@ -863,7 +863,6 @@ fn validateResult(gs: *GameState, r: *const @import("../domain/battle_report.zig
     if ((a.enemy_power_before != null) != (a.enemy_power_after != null)) return error.CorruptSave;
     if (a.enemy_power_before) |power| if (power < 0 or a.enemy_power_after.? != power - a.suppressed_power or a.enemy_power_after.? != r.enemy_power) return error.CorruptSave;
     const no_fight = r.conceded or a.no_fire == .enemy_forfeit;
-    try validateCapturedDamage(r, a, no_fight);
     if (no_fight and (fired or a.severity != null or a.exposure_percent != null or a.damage != .not_exposed or a.recovery != null or a.compensation_basis != 0 or a.fired_rounds[1] != 0)) return error.CorruptSave;
     if (!a.physical_participation and (a.damage != .not_exposed or a.exposure_percent != null or a.fired_rounds[1] != 0)) return error.CorruptSave;
     if (a.exposure_percent) |pct| {
@@ -872,29 +871,8 @@ fn validateResult(gs: *GameState, r: *const @import("../domain/battle_report.zig
     } else if (a.exposure_roll != null or a.severity != null) return error.CorruptSave;
     if (a.severity) |severity| if (severity < combat.minimum_target or severity > combat.maximum_target or (a.struck_slot != null) != (severity >= @import("../domain/tuning.zig").t.battle.slot_hit_severity)) return error.CorruptSave;
     if (a.severity == null and (a.struck_slot != null or a.struck_seat != null or a.newly_wrecked)) return error.CorruptSave;
-    var present: usize = 0;
-    for (a.seats, operation_rules.seats, 0..) |seat, identity, index| {
-        if (seat.seat != identity) return error.CorruptSave;
-        if (seat.person == .none) {
-            if (seat.name.len != 0 or seat.present or !seat.outcome.untouched() or seat.escape != null or seat.xp_participation) return error.CorruptSave;
-        } else {
-            if (@intFromEnum(seat.person) >= gs.next_person_id or gs.person(seat.person) == null or seat.name.len == 0) return error.CorruptSave;
-            for (a.seats[0..index]) |other| if (other.person == seat.person) return error.CorruptSave;
-        }
-        present += @intFromBool(seat.present);
-        if (seat.present and !a.physical_participation) return error.CorruptSave;
-        if (seat.xp_participation and (!fired or !seat.present or seat.outcome.fate == .kia)) return error.CorruptSave;
-        if (seat.escape != null and (!seat.present or r.held_field or (a.damage != .permanently_destroyed and a.damage != .scuttled) or seat.outcome.fate == .kia)) return error.CorruptSave;
-        if (seat.outcome.fate == .missing and (seat.escape == null or seat.escape.?.roll >= seat.escape.?.target)) return error.CorruptSave;
-        if (seat.outcome.wound) |w| if (w.severity < 1 or w.severity > 3 or a.struck_seat != identity) return error.CorruptSave;
-        if (seat.outcome.fate == .kia and a.struck_seat != identity) return error.CorruptSave;
-        if (!seat.outcome.untouched() and !seat.present) return error.CorruptSave;
-        if (seat.escape) |escape| {
-            if (escape.target != tuning.loss.escape_target or (seat.outcome.fate == .missing) != (escape.roll < escape.target)) return error.CorruptSave;
-        }
-    }
-    if (a.severity != null and (a.struck_seat != null) != (present > 0)) return error.CorruptSave;
-    if (a.struck_seat) |seat| if (!a.seats[@intFromEnum(seat)].present) return error.CorruptSave;
+    try validateCapturedDamage(r, a, no_fight);
+    try validateCapturedCrew(gs, r, a, fired);
     if (a.recovery != null and (r.held_field or (a.damage != .recovered and a.damage != .scuttled))) return error.CorruptSave;
     if (a.recovery) |recovery_roll| if (recovery_roll.target != tuning.loss.recovery_target) return error.CorruptSave;
     if (a.damage == .recovered and (a.recovery == null or a.recovery.?.roll < a.recovery.?.target)) return error.CorruptSave;
@@ -911,6 +889,36 @@ fn validateResult(gs: *GameState, r: *const @import("../domain/battle_report.zig
         history += 1;
     };
     if (history != @intFromBool(a.physical_participation and !no_fight)) return error.CorruptSave;
+}
+
+/// Captured fate determines XP and evacuation evidence independently of later
+/// personnel status. Source: artillery combat design, Recovery and rewards.
+fn validateCapturedCrew(gs: *GameState, r: *const battle_report.BattleReport, a: *const battle_report.ArtilleryResult, fired: bool) error{CorruptSave}!void {
+    const terminal = a.damage == .permanently_destroyed or a.damage == .scuttled;
+    var present: usize = 0;
+    for (a.seats, operation_rules.seats, 0..) |seat, identity, index| {
+        if (seat.seat != identity) return error.CorruptSave;
+        if (seat.person == .none) {
+            if (seat.name.len != 0 or seat.present or !seat.outcome.untouched() or seat.escape != null or seat.xp_participation) return error.CorruptSave;
+        } else {
+            if (@intFromEnum(seat.person) >= gs.next_person_id or gs.person(seat.person) == null or seat.name.len == 0) return error.CorruptSave;
+            for (a.seats[0..index]) |other| if (other.person == seat.person) return error.CorruptSave;
+        }
+        present += @intFromBool(seat.present);
+        if (seat.present and !a.physical_participation) return error.CorruptSave;
+        const survivor = seat.present and seat.outcome.fate != .kia;
+        if (seat.xp_participation != (fired and survivor and seat.outcome.fate != .missing)) return error.CorruptSave;
+        if ((seat.escape != null) != (survivor and !r.held_field and terminal)) return error.CorruptSave;
+        if (seat.outcome.fate == .missing and (seat.escape == null or seat.escape.?.roll >= seat.escape.?.target)) return error.CorruptSave;
+        if (seat.outcome.wound) |w| if (w.severity < 1 or w.severity > 3 or a.struck_seat != identity) return error.CorruptSave;
+        if (seat.outcome.fate == .kia and a.struck_seat != identity) return error.CorruptSave;
+        if (!seat.outcome.untouched() and !seat.present) return error.CorruptSave;
+        if (seat.escape) |escape| {
+            if (escape.target != tuning.loss.escape_target or (seat.outcome.fate == .missing) != (escape.roll < escape.target)) return error.CorruptSave;
+        }
+    }
+    if (a.severity != null and (a.struck_seat != null) != (present > 0)) return error.CorruptSave;
+    if (a.struck_seat) |seat| if (!a.seats[@intFromEnum(seat)].present) return error.CorruptSave;
 }
 
 /// Replay only captured ammunition and damage facts, never mutable live condition.

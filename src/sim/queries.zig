@@ -6432,10 +6432,7 @@ pub fn afterAction(alloc: Alloc, gs: *GameState, id: types.BattleId) !?AfterActi
             if (r.kia > 0) "{c}" else "{g}",
             r.kia,
         }));
-        if (r.lost_hulls > 0) try fight.append(alloc, try std.fmt.allocPrint(alloc, "{{c}}{d} hull(s) left to {s}{{/}}{s}", .{
-            r.lost_hulls, r.enemy_key,
-            if (r.missing > 0) try std.fmt.allocPrint(alloc, " {{c}}· {d} pilot(s) missing{{/}}", .{r.missing}) else "",
-        }));
+        for (try @import("after_action.zig").fieldLossLines(alloc, r)) |line| try fight.append(alloc, try table.plain(alloc, line));
         // Applied to every active hand.
         try fight.append(alloc, try std.fmt.allocPrint(alloc, "morale {s}{s}{d}{{/}} · fatigue {{a}}+{d}{{/}}", .{
             if (r.morale_delta < 0) "{c}" else "{g}", if (r.morale_delta > 0) "+" else "", r.morale_delta, r.fatigue_add,

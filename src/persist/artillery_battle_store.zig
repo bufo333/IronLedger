@@ -197,8 +197,13 @@ pub fn validateParents(db: sqlite.Db, cid: i64) !void {
 }
 
 fn campaignForTest(gs: *GameState) !types.ContractId {
+    const cid = try prepareCampaignForTest(gs);
+    try @import("../sim/battle.zig").resolveEngagement(gs, gs.contracts.getPtr(cid).?);
+    return cid;
+}
+
+fn prepareCampaignForTest(gs: *GameState) !types.ContractId {
     const capabilities = @import("../sim/artillery_operations.zig");
-    const battle = @import("../sim/battle.zig");
     const part = @import("../domain/part.zig");
     const id = try capabilities.fixtureForTest(gs, true);
     const co = try @import("../sim/starter_company.zig").generateInto(gs, "Line company");
@@ -215,8 +220,177 @@ fn campaignForTest(gs: *GameState) !types.ContractId {
     try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .recon_raid, .employer_key = "LC", .enemy_key = "PER", .planet_key = gs.seatPlanetKey().?, .assigned_company = co, .status = .active, .terms = .{ .length_months = 6, .base_pay_month = 400_000, .battle_loss_pct = 30, .salvage_pct = 30 }, .monthly_net = 300_000 });
     try gs.addStock(.{ .company = co }, "armor", 60);
     for (part.munition_keys) |key| try gs.addStock(.{ .company = co }, key, 40);
-    try battle.resolveEngagement(gs, gs.contracts.getPtr(cid).?);
     return cid;
+}
+
+test "captured player crew names survive command battle save load and escaped views" {
+    const Store = @import("store.zig").Store;
+    const commands = @import("../sim/commands.zig");
+    const battle = @import("../sim/battle.zig");
+    const queries = @import("../sim/queries.zig");
+    const table = @import("../sim/table.zig");
+    const digest = @import("../sim/digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    const cid = try prepareCampaignForTest(&gs);
+    const formation_id = gs.artillery_formations.values()[0].id;
+    _ = try commands.execute(&gs, .{ .unassign_artillery_crew = .{ .formation = formation_id, .seat = .gunner } });
+    const hired = try commands.execute(&gs, .{ .hire = .{ .first = "Captured", .last = "{c}Name{/}", .role = .vehicle_crew } });
+    try gs.person(hired.hired).?.skills.put(gs.allocator(), .gunnery_vee, 4);
+    _ = try commands.execute(&gs, .{ .transfer_person = .{ .person = hired.hired, .to_force = gs.contracts.get(cid).?.assigned_company } });
+    _ = try commands.execute(&gs, .{ .assign_artillery_crew = .{ .formation = formation_id, .seat = .gunner, .person = hired.hired } });
+    try battle.resolveEngagement(&gs, gs.contracts.getPtr(cid).?);
+    const captured = gs.battle_reports.kept.items[0];
+    const name = captured.artillery.?.seats[@intFromEnum(operations.Seat.gunner)].name;
+    try std.testing.expect(std.mem.indexOf(u8, name, "Captured {c}Name{/}") != null);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    try std.testing.expectEqualStrings(name, loaded.battle_reports.kept.items[0].artillery.?.seats[@intFromEnum(operations.Seat.gunner)].name);
+    loaded.person(hired.hired).?.last_name = "Replacement";
+    const before = digest.stateHash(&loaded);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const view = (try queries.afterAction(arena.allocator(), &loaded, captured.id)).?;
+    const flat = (try queries.battleReport(arena.allocator(), &loaded, captured.id)).?;
+    for ([_][]const []const u8{ view.fight, view.flat, flat }) |lines| {
+        var found = false;
+        for (lines) |line| if (std.mem.indexOf(u8, line, "Captured {{c}Name{{/}") != null) {
+            try std.testing.expect(std.mem.indexOf(u8, try table.plainText(arena.allocator(), line), name) != null);
+            found = true;
+        };
+        try std.testing.expect(found);
+    }
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+}
+
+fn capturedCampaignForTest(gs: *GameState, held: bool) !void {
+    const capabilities = @import("../sim/artillery_operations.zig");
+    const artillery_battle = @import("../sim/artillery_battle.zig");
+    const scenario = @import("../domain/scenario.zig");
+    const id = try capabilities.fixtureForTest(gs, true);
+    const f = gs.artillery_formations.getPtr(id).?;
+    f.armor_pct = 10;
+    f.last_maintenance_day = 0;
+    f.slots[@intFromEnum(operations.Slot.long_tom_bin_1)].rounds = operations.long_tom_rounds_per_bin;
+    const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .recon_raid, .employer_key = "LC", .enemy_key = "PER", .planet_key = gs.seatPlanetKey().?, .assigned_company = f.placement.company, .status = .active, .terms = .{ .length_months = 6, .base_pay_month = 400_000 } });
+    const c = gs.contracts.getPtr(cid).?;
+    var a = try artillery_battle.snapshot(gs, c, .not_ready);
+    const enemy_power = artillery_battle.fire(gs, &a, 0, 10000);
+    _ = try artillery_battle.applyExposure(gs, &a, combat.percent_scale * combat.exposure_divisor, false);
+    var random = gs.rng;
+    _ = try artillery_battle.recover(gs, &a, c, scenario.roll(&random, .battle, c.kind), .defeat, .standard, held, false, 0, 1);
+    try artillery_battle.reward(gs, &a, -1);
+    const r: report.BattleReport = .{ .id = @enumFromInt(gs.next_battle_id), .day = 0, .contract = cid, .company = c.assigned_company, .kind = "recon raid", .enemy_key = c.enemy_key, .scenario = "", .terrain = "", .weather = "", .outcome = .defeat, .held_field = held, .enemy_power = enemy_power, .artillery = a };
+    gs.next_battle_id += 1;
+    try gs.battle_reports.record(gs.allocator(), r);
+    try artillery_battle.recordHistory(gs, a, r.id, cid);
+}
+
+test "full load rejects battle XP awarded to a captured missing crew member" {
+    const Store = @import("store.zig").Store;
+    const digest = @import("../sim/digest.zig");
+    for (0..512) |seed| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer gs.deinit();
+        try capturedCampaignForTest(&gs, false);
+        const a = gs.battle_reports.kept.items[0].artillery.?;
+        var missing = false;
+        for (a.seats) |seat| missing = missing or seat.outcome.fate == .missing;
+        if (!missing) continue;
+        const store = try Store.open(":memory:");
+        defer store.close();
+        try store.save(&gs);
+        var valid = try store.load(std.testing.allocator, gs.campaign_id);
+        defer valid.deinit();
+        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&valid));
+        try store.db.exec("UPDATE artillery_battle_seat SET xp=1 WHERE fate='missing'");
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+        return;
+    }
+    return error.TestExpectedMissingCrew;
+}
+
+test "full load requires successful terminal evacuation evidence for present survivors" {
+    const Store = @import("store.zig").Store;
+    const digest = @import("../sim/digest.zig");
+    for (0..512) |seed| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer gs.deinit();
+        try capturedCampaignForTest(&gs, false);
+        const a = gs.battle_reports.kept.items[0].artillery.?;
+        var escaped = false;
+        for (a.seats) |seat| escaped = escaped or (seat.escape != null and seat.outcome.fate == .unhurt);
+        if (!escaped) continue;
+        const store = try Store.open(":memory:");
+        defer store.close();
+        try store.save(&gs);
+        var valid = try store.load(std.testing.allocator, gs.campaign_id);
+        defer valid.deinit();
+        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&valid));
+        try store.db.exec("UPDATE artillery_battle_seat SET escape_roll=NULL,escape_target=NULL WHERE fate='unhurt' AND escape_roll IS NOT NULL");
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+        return;
+    }
+    return error.TestExpectedEscapedCrew;
+}
+
+test "full load validates captured severity before canonical damage arithmetic" {
+    const Store = @import("store.zig").Store;
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    try capturedCampaignForTest(&gs, true);
+    try std.testing.expect(gs.battle_reports.kept.items[0].artillery.?.severity != null);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var valid = try store.load(std.testing.allocator, gs.campaign_id);
+    defer valid.deinit();
+    for ([_]u8{ 0, 1, 13, 255 }) |severity| {
+        try store.save(&gs);
+        var sql: [128:0]u8 = undefined;
+        try store.db.exec(try std.fmt.bufPrintZ(&sql, "PRAGMA ignore_check_constraints=ON; UPDATE artillery_battle SET severity={d}", .{severity}));
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    }
+}
+
+test "captured crew XP and forbidden escape rolls stay independent of later personnel status through full load" {
+    const Store = @import("store.zig").Store;
+    const digest = @import("../sim/digest.zig");
+    const commands = @import("../sim/commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    const cid = try campaignForTest(&gs);
+    const a = gs.battle_reports.kept.items[0].artillery.?;
+    try std.testing.expect(a.fire != .not_fired);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    for ([_]bool{ false, true }) |invent_escape| {
+        try store.save(&gs);
+        if (!invent_escape) {
+            try store.db.exec("UPDATE artillery_battle_seat SET xp=0 WHERE xp=1");
+        } else {
+            const target = @import("../domain/tuning.zig").t.loss.escape_target;
+            var sql: [192:0]u8 = undefined;
+            try store.db.exec(try std.fmt.bufPrintZ(&sql, "UPDATE artillery_battle_seat SET escape_roll=999,escape_target={d} WHERE escape_roll IS NULL", .{target}));
+        }
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    }
+    const survivor = a.seats[@intFromEnum(operations.Seat.gunner)].person;
+    try std.testing.expect(a.seats[@intFromEnum(operations.Seat.gunner)].xp_participation);
+    gs.contracts.getPtr(cid).?.status = .completed;
+    _ = try commands.execute(&gs, .{ .fire = survivor });
+    try std.testing.expect(!gs.person(survivor).?.isOnBooks());
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    try std.testing.expect(loaded.battle_reports.kept.items[0].artillery.?.seats[@intFromEnum(operations.Seat.gunner)].xp_participation);
 }
 
 test "normalized combat save overwrite load and continued battle preserve complete state" {
