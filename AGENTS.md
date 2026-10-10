@@ -37,7 +37,7 @@ The coordinator workflow and role boundaries are in `docs/agent-workflow.md`.
 Implementation begins only from a user-approved plan. A fresh reviewer checks
 the committed branch before a separate integration task may fast-forward it
 into local `main`. The user owns every Git remote operation.
-Scoped read-only web and source research outside GitHub follows
+Scoped read-only web and source research follows
 `docs/agent-workflow.md`.
 
 Never optimize for a mechanical metric at the expense of its architectural
@@ -115,7 +115,7 @@ git branch -d <branch>
 ```
 
 - Never commit directly to `main`.
-- Agents never push, fetch, pull, change Git remotes, or access GitHub. John
+- Agents never push, fetch, pull, change Git remotes. John
   pushes local `main` himself after closing the agent session.
 - Branch creation belongs to the `branch-bootstrap` agent and commits to the
   implementer, authorized by the exact approved plan. Fast-forward merge and

@@ -24,7 +24,7 @@ operations, or bypass a failed contract or gate.
 
 Read the current shared workflow freshly, including its migration transition.
 Project permissions do not confer blanket governance authority. Never perform
-Git remote operations or access GitHub, weaken a failed gate, or change global
+Git remote operations, weaken a failed gate, or change global
 profiles, memory, local overrides or external hooks. New role authority applies
 only after the applicable reviewed integration and fresh effective-role checks;
 follow the autonomous-delivery amendment transition in the shared workflow.
@@ -60,6 +60,6 @@ transition; this amendment itself retains current prompts and the three-round
 limit. Tracked edits never change loaded authority. Verify fresh compatible
 effective roles and honor actual runtime restrictions without bypassing them.
 
-Read-only web/source research outside GitHub is permitted only within this
+Read-only web/source research is permitted only within this
 role's dispatched scope and effective permissions, as defined in
 docs/agent-workflow.md; it grants no other authority.

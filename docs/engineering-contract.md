@@ -1039,8 +1039,8 @@ fast-forwarded into local `main` and the local branch is deleted.
   plan and this contract before integration.
 - Local integration uses `git merge --ff-only`; it never creates a merge
   commit or changes the reviewed commit.
-- Git remote operations and GitHub access happen outside the agent workflow
-  after local integration. Scoped read-only research outside GitHub follows
+- Git remote operations happen outside the agent workflow
+  after local integration. Scoped read-only research follows
   `docs/agent-workflow.md`.
 - No file is borrowed from another branch to make verification pass.
 - Large work is split into independently correct increments that each land.
