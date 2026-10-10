@@ -48,6 +48,6 @@ transition; this amendment itself retains current prompts and the three-round
 limit. Tracked edits never change loaded authority. Verify fresh compatible
 effective roles and honor actual runtime restrictions without bypassing them.
 
-Read-only web/source research outside GitHub is permitted only within this
+Read-only web/source research is permitted only within this
 role's dispatched scope and effective permissions, as defined in
 docs/agent-workflow.md; it grants no other authority.
