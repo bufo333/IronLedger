@@ -115,11 +115,12 @@ test "asset roots run explicit choice, install prefix, portable, source tree" {
     defer arena.deinit();
     const al = arena.allocator();
 
+    const sep = std.fs.path.sep_str;
     const with_exe = try rootCandidates(al, "/opt/iron/bin", "/mods/mine");
     try std.testing.expectEqual(@as(usize, 4), with_exe.len);
     try std.testing.expectEqualStrings("/mods/mine", with_exe[0]);
-    try std.testing.expectEqualStrings("/opt/iron/bin/../share/iron-ledger", with_exe[1]);
-    try std.testing.expectEqualStrings("/opt/iron/bin/data", with_exe[2]);
+    try std.testing.expectEqualStrings("/opt/iron/bin" ++ sep ++ ".." ++ sep ++ "share" ++ sep ++ "iron-ledger", with_exe[1]);
+    try std.testing.expectEqualStrings("/opt/iron/bin" ++ sep ++ "data", with_exe[2]);
     try std.testing.expectEqualStrings("data", with_exe[3]);
 
     // No executable path and no override: only the source tree is left.

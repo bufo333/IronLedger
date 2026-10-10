@@ -1,0 +1,4 @@
+# Generated docs (e.g. docs/tui.md) are compared byte-for-byte against
+# LF-generated text in tests (see engineering-contract rule 39); keep LF on
+# every platform so a Windows checkout does not rewrite line endings.
+* text=auto eol=lf
