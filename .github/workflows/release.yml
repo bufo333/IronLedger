@@ -48,9 +48,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-13
-            label: macos-x64
-            zig_target: x86_64-macos
+          - runner: macos-latest
+            label: macos-arm64
+            zig_target: aarch64-macos
           - runner: ubuntu-24.04
             label: linux-x64
             zig_target: x86_64-linux
@@ -120,8 +120,16 @@ jobs:
           try { $stream.WriteByte(0) } finally { $stream.Dispose() }
           & python scripts/package_release.py verify-windows-sqlite --sqlite-archive $wrongArchive
           if ($LASTEXITCODE -eq 0) { throw 'altered SQLite archive unexpectedly verified' }
-          $lib = Get-Command lib.exe -ErrorAction Stop
-          python scripts/package_release.py prepare-windows-sqlite --sqlite-archive $sqliteArchive --output (Join-Path $env:RUNNER_TEMP 'sqlite') --lib-exe $lib.Source
+          $programRoots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { -not [string]::IsNullOrEmpty($_) }
+          $vsRoots = @($programRoots | ForEach-Object { Join-Path $_ 'Microsoft Visual Studio' } | Where-Object { Test-Path -LiteralPath $_ -PathType Container })
+          $libCandidates = @($vsRoots | ForEach-Object { Get-ChildItem -Path (Join-Path $_ '*\*\VC\Tools\MSVC\*\bin\Hostx64\x64\lib.exe') -File -ErrorAction SilentlyContinue })
+          if ($libCandidates.Count -eq 0) {
+            foreach ($root in $vsRoots) { Get-ChildItem -LiteralPath $root -Directory -Recurse -Depth 1 | ForEach-Object { Write-Host "found: $($_.FullName)" } }
+            throw "no MSVC x64 lib.exe found under: $($vsRoots -join '; ')"
+          }
+          $lib = $libCandidates | Sort-Object -Property @{ Expression = { $_.Directory.Parent.Parent.Parent.Name -as [version] } }, FullName -Descending | Select-Object -First 1
+          Write-Host "Using lib.exe: $($lib.FullName)"
+          python scripts/package_release.py prepare-windows-sqlite --sqlite-archive $sqliteArchive --output (Join-Path $env:RUNNER_TEMP 'sqlite') --lib-exe $lib.FullName
       - name: Run native gate (macOS and Linux)
         if: runner.os != 'Windows'
         shell: bash
@@ -224,7 +232,7 @@ jobs:
       # actions/download-artifact@v4
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
         with:
-          name: core-macos-x64
+          name: core-macos-arm64
           path: release-artifacts
           merge-multiple: true
       # actions/download-artifact@v4
@@ -250,7 +258,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          expected="iron-ledger-${version}-linux-x64.zip iron-ledger-${version}-macos-x64.zip iron-ledger-${version}-music.zip iron-ledger-${version}-windows-x64.zip"
+          expected="iron-ledger-${version}-linux-x64.zip iron-ledger-${version}-macos-arm64.zip iron-ledger-${version}-music.zip iron-ledger-${version}-windows-x64.zip"
           actual=$(printf '%s\n' release-artifacts/*.zip | xargs -n1 basename | sort | tr '\n' ' ' | sed 's/ $//')
           [ "$actual" = "$expected" ] || { echo "unexpected release ZIPs: $actual" >&2; exit 1; }
           cat release-artifacts/*.sha256 | sort > SHA256SUMS

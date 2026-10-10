@@ -75,9 +75,9 @@ Design and contributor notes live in `ARCHITECTURE.md`, `GAMEPLAY.md`,
 
 ## Release 1.0.0
 
-Release downloads provide native x64 core ZIPs:
+Release downloads provide native core ZIPs (Apple Silicon macOS, x64 Linux, x64 Windows):
 
-- `iron-ledger-1.0.0-macos-x64.zip`
+- `iron-ledger-1.0.0-macos-arm64.zip`
 - `iron-ledger-1.0.0-linux-x64.zip`
 - `iron-ledger-1.0.0-windows-x64.zip`
 

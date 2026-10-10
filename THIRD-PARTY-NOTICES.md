@@ -3,7 +3,7 @@
 ## SQLite 3.53.4
 
 The Windows x64 core ZIP includes SQLite 3.53.4 as `bin/sqlite3.dll`.
-The macOS x64 and Linux x64 core ZIPs use the host system SQLite library and
+The macOS arm64 and Linux x64 core ZIPs use the host system SQLite library and
 do not include SQLite binaries.
 
 - Official download: <https://www.sqlite.org/2026/sqlite-dll-win-x64-3530400.zip>

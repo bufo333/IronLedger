@@ -36,7 +36,8 @@ pub fn main(init: std.process.Init) !void {
     var session = try game.lobby.Session.fresh(init.gpa, 3025);
     defer session.close();
 
-    var args = std.process.Args.Iterator.init(init.minimal.args);
+    var args = try std.process.Args.Iterator.initAllocator(init.minimal.args, init.gpa);
+    defer args.deinit();
     _ = args.next(); // exe name
     var repl = false;
     var tui = false;

@@ -6,7 +6,7 @@
 `v` followed by that version. For version `1.0.0`, the tag is `v1.0.0` and the
 release archives are:
 
-- `iron-ledger-1.0.0-macos-x64.zip`
+- `iron-ledger-1.0.0-macos-arm64.zip`
 - `iron-ledger-1.0.0-linux-x64.zip`
 - `iron-ledger-1.0.0-windows-x64.zip`
 - `iron-ledger-1.0.0-music.zip`
@@ -68,20 +68,20 @@ python3 docs/data-fixtures.py
 python3 docs/tui_smoke.py zig-out/bin/game /tmp/iron-ledger-tui.db
 bash docs/repl_smoke.sh zig-out/bin/game /tmp/iron-ledger-repl.db
 zig build -Doptimize=ReleaseFast -Dcpu=baseline --prefix /tmp/iron-ledger-dist
-python3 scripts/package_release.py package --prefix /tmp/iron-ledger-dist --version 1.0.0 --target macos-x64 --output /tmp/iron-ledger-release --source-root .
-python3 scripts/package_release.py validate --archive /tmp/iron-ledger-release/iron-ledger-1.0.0-macos-x64.zip --version 1.0.0 --target macos-x64 --source-root .
+python3 scripts/package_release.py package --prefix /tmp/iron-ledger-dist --version 1.0.0 --target macos-arm64 --output /tmp/iron-ledger-release --source-root .
+python3 scripts/package_release.py validate --archive /tmp/iron-ledger-release/iron-ledger-1.0.0-macos-arm64.zip --version 1.0.0 --target macos-arm64 --source-root .
 python3 scripts/package_release.py test-music --source-root .
 python3 scripts/package_release.py package-music --version 1.0.0 --output /tmp/iron-ledger-release --source-root .
 python3 scripts/package_release.py validate-music --archive /tmp/iron-ledger-release/iron-ledger-1.0.0-music.zip --version 1.0.0 --source-root .
 ```
 
-Use `linux-x64` instead of `macos-x64` on Linux. Windows CI performs its native
+Use `linux-x64` instead of `macos-arm64` on Linux. The macOS package is Apple Silicon (`aarch64-macos`) only. Windows CI performs its native
 SQLite acquisition, import-library build, PowerShell smoke, and package
 validation. It rejects a deliberately altered SQLite archive before extraction.
 
 ## GitHub Actions
 
-`ci.yml` runs native read-only CI for pull requests and `main` on `macos-13`,
+`ci.yml` runs native read-only CI for pull requests and `main` on `macos-latest` (Apple Silicon),
 `ubuntu-24.04`, and `windows-2022`. It installs Zig 0.16 from the official
 metadata-verified download, runs the platform's gate and smoke harness, creates
 a validated core ZIP, and retains it only as a CI artifact. Its separate Linux

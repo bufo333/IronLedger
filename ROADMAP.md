@@ -1343,7 +1343,7 @@ the player reads, and a turn that stops until they have.
 
 ## Product Release — 1.0.0 ✅
 
-Native macOS x64, Linux x64, and Windows x64 CI and tag releases publish three
+Native macOS arm64, Linux x64, and Windows x64 CI and tag releases publish three
 music-free core ZIPs containing the executable, logo assets, license, asset
 terms, and third-party notices. Windows packages a verified official SQLite
 3.53.4 DLL beside `game.exe`; macOS and Linux use system SQLite. Release

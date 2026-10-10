@@ -32,6 +32,9 @@ catalog:
 
 - PNG files from the first asset root's `logos/` directory (installed as
   `share/iron-ledger/logos/`, built from `data/logos/` at build time).
+  The grid frame is drawn before any thumbnail is decoded; the run loop then
+  decodes the visible cells one per input poll, so keys stay responsive while
+  the pictures fill in.
   Selecting a catalog logo auto-fills the outfit name (title-cased from the
   filename stem); manually editing the outfit name freezes this auto-fill.
   The chosen catalog key is reserved from rival merc companies for the

@@ -19,7 +19,7 @@ NOTICE_FILES = ("LICENSE", "ASSETS.md", "THIRD-PARTY-NOTICES.md")
 MUSIC_SET_DIRECTORIES = frozenset({"OST", "OST Part 2", "Supplimental Music"})
 MUSIC_SUFFIXES = frozenset({".aac", ".m4a"})
 TARGETS = {
-    "macos-x64": "game",
+    "macos-arm64": "game",
     "linux-x64": "game",
     "windows-x64": "game.exe",
 }

@@ -331,6 +331,13 @@ pub const App = struct {
     /// When true the outfit name auto-fills from the selected catalog logo;
     /// set false once the player types to prevent clobbering a manual edit.
     w_outfit_auto: bool = true,
+    /// The undecoded visible catalog cells still to attempt, as the index
+    /// range [w_thumb_next, w_thumb_end) into `w_thumbs`. `drawWizardOutfit`
+    /// sets it from the visible window after the frame is composed; the run
+    /// loop decodes one cell per input poll until the range is empty, so a
+    /// frame never waits on a PNG decode. Empty (0, 0) on every other screen.
+    w_thumb_next: usize = 0,
+    w_thumb_end: usize = 0,
 
     mode: Mode = .welcome,
     step: WizardStep = .commander,
@@ -456,7 +463,16 @@ pub const App = struct {
                 self.clampFocus();
             }
             try self.draw();
-            const key = self.term.readKey(500);
+            // Catalog thumbnails decode between input polls, one per poll, so
+            // the frame is on screen first and a key never waits on a decode.
+            var key: Key = .none;
+            var decoded = false;
+            while (self.w_thumb_next < self.w_thumb_end) {
+                key = self.term.readKey(0);
+                if (key != .none) break;
+                decoded = self.decodeNextThumb() or decoded;
+            }
+            if (key == .none) key = self.term.readKey(if (decoded) 0 else 500);
             if (self.music) |*m| {
                 m.poll();
                 // A new track is worth a line in the status strip.
@@ -556,6 +572,8 @@ pub const App = struct {
         self.n_placements = 0;
         self.focus_scroll = null;
         self.panes_drawn = 0;
+        self.w_thumb_next = 0;
+        self.w_thumb_end = 0;
         if (self.modal == .none) self.modal_colscroll = 0;
         const too_small = self.screen.cols < 80 or self.screen.rows < 24;
         if (too_small) {
@@ -909,18 +927,9 @@ pub const App = struct {
         if (selected_row < self.w_logo_top) self.w_logo_top = selected_row;
         if (selected_row >= self.w_logo_top + visible_rows) self.w_logo_top = selected_row - visible_rows + 1;
 
-        // Lazy thumbnail loading: decode every unloaded visible logo per draw call
-        // so the visible window fills in a single draw.
-        outer: for (0..visible_rows) |vr| {
-            const row = self.w_logo_top + vr;
-            for (0..@as(usize, cols)) |col| {
-                const idx = row * cols + col;
-                if (idx >= self.w_thumbs.len) break :outer;
-                if (self.w_thumbs[idx] == null) {
-                    self.loadThumbAt(idx);
-                }
-            }
-        }
+        // Thumbnails are not decoded here: the frame is flushed first and the
+        // run loop decodes the visible window one cell per input poll.
+        self.queueVisibleThumbs(self.w_logo_top * cols, @min(self.w_thumbs.len, (self.w_logo_top + visible_rows) * cols));
 
         // Draw each visible cell.
         for (0..visible_rows) |vr| {
@@ -1853,8 +1862,8 @@ pub const App = struct {
                         }
                         self.step = .outfit;
                         self.w_field = 0;
-                        // Load catalog logo names the first time the outfit step is entered.
-                        // Thumbnails are decoded lazily (one per draw call) to avoid blocking.
+                        // Load catalog logo names the first time the outfit step is entered;
+                        // the run loop decodes the visible thumbnails after the frame is drawn.
                         if (self.logos.len == 0) {
                             try self.loadLogoList();
                             if (self.logos.len > 0) {
@@ -1988,11 +1997,37 @@ pub const App = struct {
         self.adoptLogoName();
     }
 
+    /// Queue the visible catalog cells [first, end) for decoding by the run
+    /// loop. The range is left empty when every cell in it is already decoded,
+    /// so an idle outfit step never polls without waiting.
+    fn queueVisibleThumbs(self: *App, first: usize, end: usize) void {
+        var idx = first;
+        while (idx < end) : (idx += 1) {
+            if (self.w_thumbs[idx] == null) {
+                self.w_thumb_next = idx;
+                self.w_thumb_end = end;
+                return;
+            }
+        }
+    }
+
+    /// Attempt the next queued catalog cell and advance past it. Returns true
+    /// when a thumbnail was decoded (the frame should be redrawn without
+    /// waiting); a cell that fails to decode stays null and is not retried
+    /// until the outfit step is drawn again.
+    fn decodeNextThumb(self: *App) bool {
+        while (self.w_thumb_next < self.w_thumb_end and self.w_thumbs[self.w_thumb_next] != null) self.w_thumb_next += 1;
+        if (self.w_thumb_next >= self.w_thumb_end) return false;
+        const idx = self.w_thumb_next;
+        self.w_thumb_next += 1;
+        self.loadThumbAt(idx);
+        return self.w_thumbs[idx] != null;
+    }
+
     /// Decode one catalog logo into `w_thumbs[idx]` if not already loaded.
     /// Silently skips logos that cannot be read or decoded (stores null).
     /// Transmits decoded bytes to kitty once on first load.
-    /// Called lazily from the draw path for each unloaded visible cell;
-    /// idempotent — returns immediately if already loaded.
+    /// Idempotent — returns immediately if already loaded.
     fn loadThumbAt(self: *App, idx: usize) void {
         if (idx >= self.w_thumbs.len) return;
         if (self.w_thumbs[idx] != null) return; // already loaded
@@ -2025,9 +2060,9 @@ pub const App = struct {
         const entropy: u64 = self.seed_override orelse @truncate(@as(u96, @bitCast(now.nanoseconds)));
         const seed: u64 = entropy ^ (self.w_seed *% 7919) ^ (@as(u64, @intCast(self.w_faction)) *% 13);
         // Use the selected catalog thumbnail's bytes as the campaign emblem image.
-        // Force-load the selected cell before reading its bytes: the draw loop decodes
-        // lazily (one cell per frame) so navigating down and immediately pressing next
-        // can leave the selected cell null. loadThumbAt is idempotent and best-effort.
+        // Force-load the selected cell before reading its bytes: the run loop decodes
+        // visible cells one per input poll, so a cell selected and submitted before
+        // its turn is still null. loadThumbAt is idempotent and best-effort.
         self.loadThumbAt(self.w_logo);
         const image: []const u8 = if (self.w_logo < self.w_thumbs.len)
             if (self.w_thumbs[self.w_logo]) |e| e.bytes else &.{}
@@ -5382,6 +5417,48 @@ test "generateCampaign force-loads selected thumbnail before reading its bytes (
     // After generateCampaign the thumbnail should be decoded (PNG is on disk).
     try std.testing.expect(app.w_thumbs[5] != null);
     try std.testing.expect(app.w_thumbs[5].?.bytes.len > 0);
+}
+
+test "outfit frame queues visible thumbnails instead of decoding them; the run loop decodes one per poll" {
+    const gpa = std.testing.allocator;
+    var sink = std.Io.Writer.Discarding.init(&.{});
+    var term: Term = .{ .in_fd = -1, .orig = undefined, .out = &sink.writer };
+    const store = try game.lobby.Lobby.open(":memory:");
+    defer store.close();
+    var app = try App.init(gpa, std.testing.io, &term, store);
+    defer app.deinit();
+    try app.screen.resize(200, 50);
+    app.mode = .wizard;
+    app.step = .outfit;
+    const logos = [_][]const u8{
+        "data/logos/ashfall_lancers.png",
+        "data/logos/balance_point_mercenaries.png",
+        "data/logos/blackstar_company.png",
+    };
+    app.logos = &logos;
+    const thumbs = try gpa.alloc(?emblem_mod.Emblem, logos.len);
+    @memset(thumbs, null);
+    app.w_thumbs = thumbs;
+
+    // The first outfit frame flushes with every cell still undecoded and the
+    // whole visible window queued.
+    try app.draw();
+    for (app.w_thumbs) |slot| try std.testing.expect(slot == null);
+    try std.testing.expectEqual(@as(usize, 0), app.w_thumb_next);
+    try std.testing.expectEqual(logos.len, app.w_thumb_end);
+
+    // Each poll decodes exactly one cell, in order, until the range is empty.
+    try std.testing.expect(app.decodeNextThumb());
+    try std.testing.expect(app.w_thumbs[0] != null);
+    try std.testing.expect(app.w_thumbs[1] == null);
+    try std.testing.expect(app.decodeNextThumb());
+    try std.testing.expect(app.decodeNextThumb());
+    try std.testing.expect(!app.decodeNextThumb());
+    for (app.w_thumbs) |slot| try std.testing.expect(slot != null);
+
+    // A fully decoded window leaves nothing queued, so the idle loop waits.
+    try app.draw();
+    try std.testing.expectEqual(app.w_thumb_next, app.w_thumb_end);
 }
 
 test "help overlay is context-aware: game shows focused screen only; switching tabs changes it" {
