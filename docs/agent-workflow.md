@@ -4,7 +4,7 @@ IRON LEDGER uses one thin long-lived dispatcher and six short-lived worker roles
 Tools share this process, `AGENTS.md`, and immutable artifacts, not session state.
 John approves exact plans and integration of exact accepted commits for ordinary
 delivery, subject to the amendment transition below. Agents never perform Git
-remote operations or access GitHub.
+remote operations.
 
 ## Migration transition
 
@@ -89,14 +89,12 @@ supply permissions, and local overrides and hooks can affect enforcement.
 Verify effective role selection and permissions before dispatch. Do not edit
 user-level profiles, memory, local overrides or external hooks in this migration.
 
-## Git remote and GitHub restrictions
+## Git remote  restrictions
 
-Git remote operations and all GitHub access remain John-owned and outside
+Git remote operations remain John-owned and outside
 agent authority. Agents must not fetch, pull, push, change Git remotes, or
-perform other Git remote operations. GitHub access is prohibited through
-every interface, including browser, API, CLI, and hosted source downloads;
-read-only access is included. Read-only web and source research outside
-GitHub is permitted when it is within the dispatched task and role and
+perform other Git remote operations. Read-only web and source research
+is permitted when it is within the dispatched task and role and
 allowed by effective instructions and existing permissions. This grants
 no external write, publishing, or messaging authority and does not bypass
 sandbox or network restrictions. Research permission does not expand a
@@ -266,7 +264,7 @@ consumed counts, artifacts and acceptance evidence remain unchanged; neither
 this amendment nor a new session grants them additional corrections. The
 amendment branch itself remains subject to the transition above.
 
-6. Confirmed findings inside approved scope go to an implementer in correction
+1. Confirmed findings inside approved scope go to an implementer in correction
    mode with the same snapshot. A material behavior, architecture, contract,
    governance, or scope change requires a new draft, hash, approval and frozen
    snapshot. Allow at most three in-scope correction rounds with a fresh
@@ -303,7 +301,7 @@ amendment branch itself remains subject to the transition above.
    blocking finding. The full applicable gate, unchanged original main base,
    delivery checklist, and separate prompted integration remain mandatory.
    This resolution permits no early merge, automatic retry loop, Git remote
-   operations or GitHub access, role substitution, or override of higher-priority
+   operations, role substitution, or override of higher-priority
    runtime instructions.
 
    **Bounded P2g unreleased-save policy activation.** For
@@ -369,7 +367,7 @@ worker must not treat edits to tracked role configuration as a change to its
 own loaded authority or use the proposed authority during that invocation.
 A governance amendment uses already-effective authority for its local commit
 and fresh review; the applicable transition determines when amended authority
-may be used. The historical Git remote/GitHub scope amendment must complete
+may be used. The historical Git remote/scope amendment must complete
 its local prompted commit, fresh exact-commit review, and separate local
 integration before its narrowed
 research authority is used. Then dispatch fresh roles and verify that their
@@ -413,7 +411,7 @@ explicitly approved governance plan.
 Permissions reduce accidental authority but are not a sandbox against arbitrary
 programs launched through Bash. Durable controls are the hashed approved
 artifact, executable gates, fresh exact-commit review, fast-forward-only local
-integration, and John retaining all Git remote and GitHub authority.
+integration, and John retaining all Git remote authority.
 
 Branch creation belongs only to branch-bootstrap; commits only to implementer;
 local integration and branch deletion only to integrator after the transition.
@@ -421,7 +419,7 @@ Never commit directly to `main`. Ordinary branch creation, staging and commits
 are authorized by exact-plan approval; integration and branch deletion require
 the single exact integration approval. The amendment transition and any
 actually required runtime permissions remain binding. Integrator has no
-implementation, correction, bootstrap or Git remote/GitHub authority. Governance mode is bounded
+implementation, correction, bootstrap or Git remote authority. Governance mode is bounded
 by the explicitly approved named-file scope; ordinary implementation cannot
 change contracts, gates, registries, CI, agent configuration, project instructions or
-memory. No role may fetch, pull, push, change Git remotes, or access GitHub.
+memory. No role may fetch, pull, push, change Git remotes.
