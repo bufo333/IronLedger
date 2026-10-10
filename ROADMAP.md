@@ -1539,7 +1539,11 @@ owns the design-approval entry and delivery order.
   to four active mek lances (16 meks), a 50M formation floor, shared-market
   replacement, player-equivalent operating costs, and active-contract
   protection; the active world merc-company count holds at 12. The scheduled
-  identity work makes names and logo assignment campaign-wide unique.
+  identity work makes names and logo assignment campaign-wide unique. Founding
+  and dissolution are campaign-log events, every hull a company loses leaves
+  its roster when the battle's disposition resolves, and a replacement company
+  holds a roster row from the day it spawns so the insolvency rule always has
+  one to judge; `TODO.md` orders that work.
 - **Pirate replenishment.** Pirates gain a small base
   `replenishment_hulls_per_year` constant (2-3, tunable) for opportunistic
   acquisition and also compete for black-market listings. The delivered model
@@ -1864,6 +1868,68 @@ validated framework rather than adding a second story system.
 **Acceptance:** the game supports replayable, legible deployment stories whose
 choices affect force readiness, money, people, contracts, worlds and future
 opportunities without leaving the mercenary-command fantasy.
+
+## Forward-depot stocking — field HQ logistics
+
+A founded HQ opens with facilities and nothing on the shelf (`founding.prepareHq`).
+Stock reaches it only by a typed `ship` from another HQ: keep-stocked lines order
+from the catalogue against the destination HQ's own treasury, the resupply policy
+serves deployed companies, and `tick.bestSupplyHq` sources *from* a stocked field
+HQ but nothing stocks one. This section is the design for the other direction.
+
+- **Keep-stocked sources from the network first.** A keep-stocked line at any HQ
+  is filled, in order, by a shelf transfer from another HQ that can cover the
+  shortfall through `network.routeBetween` (the same quote-aware selection as
+  `tick.bestSupplyHq`, applied to HQ destinations), then by the catalogue order
+  it places today. The sending HQ pays the freight, as the resupply policy's
+  shipping treasury does; the catalogue fallback keeps paying from the
+  destination HQ. No treasury rule changes: the top-up policy remains the way to
+  fund a field HQ.
+- **Failures surface the day they happen.** A keep-stocked or resupply line that
+  cannot ship logs once per line per failure cause (not once a week) and the
+  F6 Supply inbound pane lists the failed line with its reason while the cause
+  stands. The refusal for a warehouse running at effective level 0 names the
+  staffing shortfall and the HQ screen's `S` remedy, not only `StorageFull`.
+  The effective-level rule (ARCH §9.4, `Hq.effectiveFacilityLevel`) is unchanged.
+- **Links are visible.** `queries.hqLinks` rows appear on F6 and F7 with each
+  link's level and tons/week, and an unlinked pair shows the level-1 charter
+  cap (`logistics.linkTonsPerWeek(1)`). A `NoRoute` refusal above that cap
+  names the cap and offers the link form; `link` gains a key (see TUI command
+  parity).
+- **Founding warns.** The F2 found flow and the F7 HQ screen say that a new
+  field HQ has no stock, no funds and a warehouse that runs at level 0 until
+  staffed, pointing at `S`, the top-up policy and keep-stocked lines.
+
+Delivery updates `ARCHITECTURE.md` §9.5 and `docs/tui.md` in the same change.
+No new tunable; existing freight, throughput and treasury owners are consumed,
+not duplicated. `TODO.md` owns the order.
+
+## TUI command parity — every verb a key and a modal
+
+The `:` command line is a scripting surface, not the only route to a verb.
+Every verb in `cli.verbs` that acts on campaign state has a screen key that
+opens the existing picker, amount, text or confirm widget (contract rule 36) and
+sends the same command through `execResult`. Known gaps at the time of writing:
+`ship` from F6 targets only a company (`s` opens a company picker; HQ→HQ
+shipping exists only as `:ship … hq:A hq:B`); `found` (F2 `f`) fills the command
+line instead of opening a modal for the HQ name, with the site and the founding
+cost shown; `link` and `assignco` have no key.
+
+- **Coverage matrix first.** The first deliverable is a table of every verb
+  against the F1–F10 key tables in `docs/tui.md`: keyed with a modal, keyed but
+  command-line only, or unkeyed. The matrix lives in `docs/tui.md`; later
+  deliverables close rows from it. Artillery verbs stay with P2i's dedicated
+  controls and are listed, not closed, here.
+- **Ship form takes HQ destinations.** The F6 `s` destination picker lists HQs
+  as well as companies; the emitted command is the existing `ship` verb with an
+  `hq:` destination.
+- **Found modal.** F2 `f` opens a text form for the HQ name with the world and
+  `tuning.hq.founding_funds` shown, then sends `found_hq`.
+- **`link` and `assignco` keys** on F7, through an HQ picker (and a level form
+  for `link`).
+
+Each verb row closed updates `docs/tui.md`'s key tables through the generated
+reference (rule 39); the matrix is the tracker, `TODO.md` the order.
 
 ## Distribution and packaging — not scheduled
 
