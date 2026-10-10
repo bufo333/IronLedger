@@ -5376,8 +5376,8 @@ test "wizard grid navigation moves w_logo correctly and clamps at bounds" {
 }
 
 test "generateCampaign force-loads selected thumbnail before reading its bytes (down-then-generate)" {
-    // Regression for the lazy-load gap: if the user navigates down to a cell
-    // that the draw loop has not yet decoded and immediately presses next,
+    // The draw path only queues thumbnails and the run loop decodes them one
+    // per input poll, so a cell can be selected and submitted while still null;
     // generateCampaign must still produce a non-empty emblem image.
     const gpa = std.testing.allocator;
     var sink = std.Io.Writer.Discarding.init(&.{});
