@@ -17,12 +17,13 @@ pub const Freight = struct {
     paid_cost: types.CBills,
 };
 
-/// Exactly one player placement, or sold non-player history; all payloads persisted.
+/// Exactly one player placement or terminal ownership history; all payloads persisted.
 pub const Placement = union(enum) {
     hq_pool: types.HqId,
     company: types.ForceId,
     freight: Freight,
     sold,
+    destroyed,
 };
 
 /// Organizational identity, physical carrier and persisted operational history.

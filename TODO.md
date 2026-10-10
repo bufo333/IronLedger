@@ -30,8 +30,10 @@ A package has one primary invariant or subsystem outcome.
   market acquisition, placement, transport, and persisted formation identity.
 - [x] P2g artillery operations: crewing, readiness, reloads, repairs, supply,
   operational persistence, and truthful existing personnel/shared-bay views.
-- [ ] P2-battle-ui (P2h-P2i): artillery battle effects and REPL/TUI/query
-  surfaces; battle-armor UI remains deferred with P2b-P2d.
+- [x] P2h artillery battle effects: atomic engagements, firing/ammunition,
+  carrier casualties/recovery/disposal, persistent reports and existing AAR panes.
+- [ ] P2i artillery REPL/TUI/query surfaces: dedicated controls and panels;
+  battle-armor UI remains deferred with P2b-P2d.
 - [ ] NPC world-contract design: shared world conflicts and typed opposing forces
   (faction, pirate, or named merc company); player offers, NPC commitments,
   location/transit, pay, readiness, withdrawal, breach, and completion.

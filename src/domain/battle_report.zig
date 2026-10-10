@@ -24,6 +24,8 @@ const person_mod = @import("person.zig");
 const force_mod = @import("force.zig");
 const autoresolve = @import("autoresolve.zig");
 const operation = @import("operation.zig");
+const artillery_operations = @import("artillery_operations.zig");
+const artillery_combat = @import("artillery_combat.zig");
 
 /// What a hit did to a mounted part.
 pub const SlotResult = enum {
@@ -150,6 +152,64 @@ pub const TaskedLance = struct {
     note: []const u8,
 };
 
+pub const RecordedRoll = struct { roll: i32, target: i32 };
+
+/// Persisted canonical operating-seat identity and captured occupant history.
+pub const ArtillerySeat = struct {
+    seat: artillery_operations.Seat,
+    person: types.PersonId = .none,
+    name: []const u8 = "",
+    present: bool = false,
+    outcome: CrewOutcome = .{},
+    escape: ?RecordedRoll = null,
+    xp_participation: bool = false,
+};
+
+fn emptyArtillerySeats() [artillery_operations.seats.len]ArtillerySeat {
+    var result: [artillery_operations.seats.len]ArtillerySeat = undefined;
+    for (artillery_operations.seats, &result) |seat, *row| row.* = .{ .seat = seat };
+    return result;
+}
+
+/// Persisted result for the attachment at engagement entry. Fixed slot/seat
+/// snapshots retain names, ammunition and condition independently of live assets.
+/// Source: artillery combat design, Records and accounting. Irrelevant rolls are null.
+pub const ArtilleryResult = struct {
+    formation: types.ArtilleryFormationId,
+    hull: types.HullInstanceId,
+    catalogue_key: []const u8,
+    catalogue_name: []const u8,
+    physical_participation: bool = false,
+    readiness: ?artillery_combat.ReadinessBlock = null,
+    no_fire: artillery_combat.NoFire = .not_present,
+    fire: artillery_combat.FireOutcome = .not_fired,
+    damage: artillery_combat.DamageOutcome = .not_exposed,
+    seats: [artillery_operations.seats.len]ArtillerySeat = emptyArtillerySeats(),
+    slots_before: artillery_operations.Slots,
+    slots_after: artillery_operations.Slots,
+    rounds_before: artillery_combat.Rounds,
+    rounds_after: artillery_combat.Rounds,
+    fired_rounds: artillery_combat.Rounds = @splat(0),
+    lost_rounds: artillery_combat.Rounds = @splat(0),
+    target: ?u8 = null,
+    accuracy_roll: ?u8 = null,
+    carrier_power: ?i64 = null,
+    enemy_power_before: ?i64 = null,
+    suppressed_power: i64 = 0,
+    enemy_power_after: ?i64 = null,
+    exposure_percent: ?u8 = null,
+    exposure_roll: ?u8 = null,
+    severity: ?u8 = null,
+    struck_slot: ?artillery_operations.Slot = null,
+    struck_seat: ?artillery_operations.Seat = null,
+    armor_before: u8,
+    armor_after: u8,
+    newly_wrecked: bool = false,
+    cause: unit_mod.WreckCause = .none,
+    recovery: ?RecordedRoll = null,
+    compensation_basis: types.CBills = 0,
+};
+
 /// One engagement, whole.
 pub const BattleReport = struct {
     id: types.BattleId,
@@ -206,6 +266,7 @@ pub const BattleReport = struct {
     silenced_mounts: u32 = 0,
     armor_left: u32 = 0,
     salvage: SalvageManifest = .{},
+    artillery: ?ArtilleryResult = null,
 
     /// The operation that produced this engagement (template name), or "".
     operation: []const u8 = "",

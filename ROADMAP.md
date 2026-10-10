@@ -1386,12 +1386,19 @@ history after an emptied HQ is sold. The explicit game abstractions and typed co
 P2g delivers four individual operating crew, a shared local mechanic, complete
 readiness, exact magazines and whole-bin reloads, local field/depot repairs,
 shared technician hours and bay queues, supply reserves and current schema-62
-persistence. Store and campaign formats outside schema 62 are preserved and
+persistence at its historical P2g boundary. The current P2h boundary is schema 63;
+store and campaign formats outside it are preserved and
 refused; older formats require a new campaign in a new save file.
 `docs/p2-artillery-operations-design.md` owns the project operational adaptations.
 Existing personnel, assignment and shared bay views expose truthful references.
-P2h retains battle effects; P2i retains dedicated artillery panels, parser verbs
-and TUI controls.
+P2h delivers project-designed loaded salvos and temporary pre-round suppression,
+carrier exposure, crew casualties, recovery/scuttling, terminal physical history,
+operating XP and immutable normalized battle reports in current format 63.
+Its prerequisite prepares and atomically publishes each complete engagement,
+including scheduling, existing aftermath and completion, while preserving ordinary
+non-artillery RNG ordering. Existing AAR panes/flat views expose recorded rounds
+and outcomes. `docs/p2-artillery-battle-design.md` owns this adaptation. P2i retains
+dedicated artillery panels, parser verbs and TUI controls; battle armor is deferred.
 
 This foundation lets player and NPC companies buy the same assets from the
 market. The later NPC merc-company economy work sets the four-active-lance

@@ -218,9 +218,12 @@ cheap, copyable, and impossible to mix up.
   nullable ownership closing days. It is separate from `Unit`: acquisition,
   direct company attachment, HQ pools/freight and carrying/resale accounting
   are live. P2g adds individual crew, condition/magazines, local service,
-  reloads and shared maintenance/depot repair in schema 62.
-  [Artillery operations policy](docs/p2-artillery-operations-design.md) owns
-  those project adaptations; combat effects remain P2h. Existing personnel,
+  reloads and shared maintenance/depot repair. P2h adds real loaded salvos,
+  temporary opening-power suppression, carrier/crew losses and immutable reports
+  in schema 63. Terminal formations retain the physical hull and closed ownership
+  interval while leaving all live accounting/capability paths.
+  [Artillery operations policy](docs/p2-artillery-operations-design.md) and
+  [combat policy](docs/p2-artillery-battle-design.md) own those project adaptations. Existing personnel,
   assignment and shared bay views consume typed owners. Dedicated artillery
   panels, parser verbs and TUI controls remain P2i.
   [Artillery acquisition policy](docs/p2-artillery-acquisition-design.md) defines
@@ -372,8 +375,9 @@ has a set of **elements** (lance/flight/platoon). Per round:
    live: supply state (each missing supply class is a penalty), fatigue,
    morale, days-since-hot-food (mess), scouting/recon quality, commander
    tactics skill, terrain & scenario type, attached support and air cover.
-   Product completion P2 adds artillery pre-round attrition and battle armor
-   holding objectives.
+   P2h artillery applies one ready, physically present loaded salvo before the
+   opposed roll: a hit temporarily suppresses enemy power, without permanent BV
+   destruction or kill credit. Battle armor holding objectives remains deferred.
 3. Exchange fire: opposed 2d6 rolls per element pair vs. target numbers built
    from the ratio of effective power; margins map to a **damage table**
    (armor loss → crits → unit destroyed/crew wounded/killed), borrowing the
@@ -458,6 +462,17 @@ BV under half the committed force, with a grace window to buy local
 replacements from local funds) trigger the **breach clause**: pro-rated
 advance clawback, forfeited remainder, reputation loss, and a cooling
 period with that employer's faction.
+
+Each engagement resolves in an isolated operation workspace, including concession,
+forfeit, casualties, salvage, prisoners, completion, reports, decisions, automatic
+field repair and combat history. Explicit nested-copy and promotion owners prepare
+all retained payloads and live capacities before infallible publication. Failure
+preserves complete gameplay state, RNG and identities. Daily battle scheduling
+stages its next-gap draw with that contract's engagement; earlier completed
+contracts remain committed and are skipped on same-day retry. This is a
+per-contract battle-phase retry unit, not whole-day rollback. Artillery details
+use typed fixed seat/slot snapshots and normalized report tables with a required
+parent presence marker; existing AAR/query panes render captured names and rounds.
 
 ## 8. Contract events & decisions
 
@@ -967,9 +982,9 @@ identical hash, and identical evolution after load and executable restart;
 a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
-**Current P2g format boundary.** New empty stores
-initialize schema 62 transactionally. Existing store and campaign versions
-must both be 62; older formats are refused intact and newer formats retain
+**Current P2h format boundary.** New empty stores
+initialize schema 63 transactionally. Existing store and campaign versions
+must both be 63; older formats are refused intact and newer formats retain
 their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
 missing tables or rows. No automatic reset, deletion, rewrite, backfill or

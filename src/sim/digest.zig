@@ -86,6 +86,29 @@ pub fn stateHash(gs: *const GameState) u64 {
     return h.final();
 }
 
+/// Test projection of campaigns without artillery combat, excluding only the
+/// optional artillery report field introduced at format 63. Every other gameplay
+/// field, identity and named RNG word remains covered by the base representation.
+pub fn nonArtilleryReferenceHash(gs: *const GameState) u64 {
+    std.debug.assert(@import("builtin").is_test);
+    var h = Hasher.init(0x42544d43);
+    inline for (@typeInfo(GameState).@"struct".fields) |f| {
+        if (comptime hashed(f.name)) {
+            update(&h, f.name);
+            if (comptime std.mem.eql(u8, f.name, "battle_reports")) {
+                update(&h, @as(u64, gs.battle_reports.kept.items.len));
+                for (gs.battle_reports.kept.items) |r| {
+                    std.debug.assert(r.artillery == null);
+                    inline for (@typeInfo(@TypeOf(r)).@"struct".fields) |field| {
+                        if (comptime !std.mem.eql(u8, field.name, "artillery")) update(&h, @field(r, field.name));
+                    }
+                }
+            } else update(&h, @field(gs, f.name));
+        }
+    }
+    return h.final();
+}
+
 /// The path to the first hashed value that differs between two campaigns
 /// ("candidates[2].skills"), for a round-trip test to name what did not
 /// survive; null when nothing does.
@@ -413,4 +436,40 @@ test "every artillery operational field checkpoint and bay target affects the co
     const queued = stateHash(&gs);
     gs.bay_jobs.items[0].artillery = .none;
     try std.testing.expect(queued != stateHash(&gs));
+}
+
+test "captured artillery combat payload and terminal placement affect the complete digest" {
+    const operations = @import("artillery_operations.zig");
+    const battle = @import("artillery_battle.zig");
+    const reports = @import("../domain/battle_report.zig");
+    const contracts = @import("../domain/contract.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, true);
+    const c: contracts.Contract = .{ .id = @enumFromInt(1), .kind = .recon_raid, .assigned_company = gs.artillery_formations.get(id).?.placement.company, .employer_key = "LC", .enemy_key = "DC", .planet_key = gs.seatPlanetKey().?, .terms = .{ .length_months = 6, .base_pay_month = 400_000 } };
+    const a = (try battle.snapshot(&gs, &c, .no_line_units)).?;
+    const r: reports.BattleReport = .{ .id = @enumFromInt(1), .day = 0, .contract = c.id, .company = c.assigned_company, .kind = "", .enemy_key = "DC", .scenario = "", .terrain = "", .weather = "", .outcome = .rout, .artillery = a };
+    try gs.battle_reports.record(gs.allocator(), r);
+    const baseline = stateHash(&gs);
+    const captured = &gs.battle_reports.kept.items[0].artillery.?;
+    captured.fired_rounds[0] = 1;
+    try std.testing.expect(baseline != stateHash(&gs));
+    captured.* = a;
+    captured.accuracy_roll = 7;
+    try std.testing.expect(baseline != stateHash(&gs));
+    captured.* = a;
+    captured.seats[0].name = "Changed snapshot";
+    try std.testing.expect(baseline != stateHash(&gs));
+    captured.* = a;
+    captured.seats[0].outcome.fate = .missing;
+    try std.testing.expect(baseline != stateHash(&gs));
+    captured.* = a;
+    captured.slots_after[0].condition = .destroyed;
+    try std.testing.expect(baseline != stateHash(&gs));
+    captured.* = a;
+    captured.compensation_basis = 1;
+    try std.testing.expect(baseline != stateHash(&gs));
+    captured.* = a;
+    gs.artillery_formations.getPtr(id).?.placement = .destroyed;
+    try std.testing.expect(baseline != stateHash(&gs));
 }

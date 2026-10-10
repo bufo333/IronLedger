@@ -32,6 +32,7 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
     var out: std.ArrayListUnmanaged([]const u8) = .empty;
     if (r.conceded) {
         try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR] {s}: no combat-effective units — objective conceded", .{r.kind}));
+        try out.appendSlice(alloc, try artilleryLines(alloc, r));
         return out.toOwnedSlice(alloc);
     }
 
@@ -60,6 +61,8 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
         r.enemy_destroyed_bv, r.kills_credited,   if (r.kills_credited == 1) "" else "s", if (r.prisoners > 0) try std.fmt.allocPrint(alloc, ", {d} prisoner{s} taken (inbox)", .{ r.prisoners, if (r.prisoners == 1) "" else "s" }) else "",
         r.salvage.claimed_bv, r.battle_loss_comp, r.score_after,
     }));
+
+    try out.appendSlice(alloc, try artilleryLines(alloc, r));
 
     for (r.hulls) |*h| {
         try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   #{d} {s} {s}: {s}armor {d}%→{d}%{s}{s}{s}{s}", .{
@@ -114,6 +117,41 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
         spent.items, r.silenced_mounts, left.items, r.armor_left,
     }));
 
+    return out.toOwnedSlice(alloc);
+}
+
+/// Recorded artillery detail shared by plain narrative and existing query panes.
+/// Captured names remain plain data; markup consumers escape every returned line.
+/// Source: artillery combat design, Records and existing views. Caller owns memory.
+pub fn artilleryLines(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const u8 {
+    const a = r.artillery orelse return &.{};
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   artillery #{d} {s}: {s}{s} · {s} · armor {d}%→{d}%", .{
+        @intFromEnum(a.formation),                           a.catalogue_name,
+        if (a.fire == .not_fired) "no fire: " else "salvo ", if (a.fire == .not_fired) @tagName(a.no_fire) else @tagName(a.fire),
+        @tagName(a.damage),                                  a.armor_before,
+        a.armor_after,
+    }));
+    if (a.readiness) |reason| try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   artillery unavailable: {s} · physically present: {s}", .{ @tagName(reason), if (a.physical_participation) "yes" else "no" }));
+    if (a.accuracy_roll) |roll| try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   artillery accuracy {d} vs {d} · enemy power {d}−{d}={d} (temporary suppression)", .{ roll, a.target.?, a.enemy_power_before.?, a.suppressed_power, a.enemy_power_after.? }));
+    try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   artillery rounds: Long Tom {d} before / {d} fired / {d} lost / {d} left; MG {d} before / {d} fired / {d} lost / {d} left · compensation basis {d}", .{
+        a.rounds_before[0], a.fired_rounds[0], a.lost_rounds[0], a.rounds_after[0], a.rounds_before[1], a.fired_rounds[1], a.lost_rounds[1], a.rounds_after[1], a.compensation_basis,
+    }));
+    if (a.exposure_percent) |pct| try out.append(alloc, if (a.exposure_roll) |roll|
+        try std.fmt.allocPrint(alloc, "[AAR]   artillery exposure {d}% · roll {d}{s}", .{ pct, roll, if (a.severity) |severity| try std.fmt.allocPrint(alloc, " · severity {d}", .{severity}) else " · no hit" })
+    else
+        try std.fmt.allocPrint(alloc, "[AAR]   artillery exposure {d}% · no roll", .{pct}));
+    if (a.recovery) |roll| try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   artillery recovery {d} vs {d}: {s}", .{ roll.roll, roll.target, @tagName(a.damage) }));
+    if (a.struck_slot) |slot| try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   artillery slot {s}: {s}→{s}", .{ @tagName(slot), @tagName(a.slots_before[@intFromEnum(slot)].condition), @tagName(a.slots_after[@intFromEnum(slot)].condition) }));
+    for (a.seats) |seat| {
+        if (seat.person == .none) continue;
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   artillery {s}: {s} · {s}{s}{s}{s}", .{
+            @tagName(seat.seat), seat.name, @tagName(seat.outcome.fate),
+            if (seat.outcome.wound) |w| try std.fmt.allocPrint(alloc, " · wounded ({s} {s})", .{ medical.severityLabel(w.severity), @tagName(w.location) }) else "",
+            if (seat.escape) |roll| try std.fmt.allocPrint(alloc, " · escape {d} vs {d}", .{ roll.roll, roll.target }) else "",
+            if (seat.xp_participation) " · battle XP" else "",
+        }));
+    }
     return out.toOwnedSlice(alloc);
 }
 

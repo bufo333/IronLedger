@@ -12,6 +12,7 @@ const crew = @import("artillery_crew.zig");
 const sites = @import("sites.zig");
 const personnel = @import("personnel.zig");
 const hq_ops = @import("hq_ops.zig");
+const combat = @import("../domain/artillery_combat.zig");
 
 /// Actual stock/facility site, absent during company/freight travel and sale.
 /// Source: operations design, Physical location and complete capabilities.
@@ -25,7 +26,7 @@ pub fn operationSite(gs: *GameState, f: *const dom.Formation) ?types.Site {
             .deployed, .idle_afield => .{ .company = company },
             .en_route, .returning => null,
         },
-        .freight, .sold => null,
+        .freight, .sold, .destroyed => null,
     };
 }
 
@@ -41,7 +42,7 @@ pub fn depotHome(gs: *GameState, f: *const dom.Formation) ?types.HqId {
     const home = switch (f.placement) {
         .hq_pool => |hq| hq,
         .company => |company| if (gs.force(company) != null) gs.homeHqFor(company) else return null,
-        .freight, .sold => return null,
+        .freight, .sold, .destroyed => return null,
     };
     return if (gs.hqs.contains(home)) home else null;
 }
@@ -61,17 +62,46 @@ pub fn serviceCapability(gs: *GameState, f: *const dom.Formation) ?types.Site {
 /// Complete primary-gun firing readiness for combat consumers. No battle effect
 /// is applied here. Source: operations design, Physical location and complete capabilities.
 pub fn operationalReadiness(gs: *GameState, f: *const dom.Formation) bool {
-    if (f.placement != .company or hasJob(gs, f.id) or f.armor_pct == 0) return false;
-    const site = serviceCapability(gs, f) orelse return false;
-    for ([_]rules.Slot{ .chassis, .main_gun, .communications }) |s| if (f.slots[@intFromEnum(s)].condition != .ok) return false;
-    const serviced = f.last_maintenance_day orelse return false;
-    if (serviced > gs.clock.day_index or gs.clock.day_index - serviced > rules.maintenance_age_days) return false;
+    return readinessBlock(gs, f) == null;
+}
+
+fn commonReadinessBlock(gs: *GameState, f: *const dom.Formation) ?combat.ReadinessBlock {
+    if (f.placement != .company) return .not_attached;
+    if (hasJob(gs, f.id)) return .depot_job;
+    if (f.armor_pct == 0) return .armor;
+    _ = operationSite(gs, f) orelse return .not_present;
+    const site = serviceCapability(gs, f) orelse return .mechanic;
+    if (f.slots[@intFromEnum(rules.Slot.chassis)].condition != .ok) return .chassis;
+    const serviced = f.last_maintenance_day orelse return .maintenance;
+    if (serviced > gs.clock.day_index or gs.clock.day_index - serviced > rules.maintenance_age_days) return .maintenance;
     for (rules.seats, f.crew) |seat, id| {
-        const p = gs.person(id) orelse return false;
-        if (!personnel.availableForDuty(p, gs.clock.day_index) or !rules.qualified(p, seat)) return false;
-        if (gs.companyOf(p.assigned_force) != f.placement.company or !crew.personPresent(gs, p, site)) return false;
+        const p = gs.person(id) orelse return .crew;
+        if (!personnel.availableForDuty(p, gs.clock.day_index) or !rules.qualified(p, seat)) return .crew;
+        if (gs.companyOf(p.assigned_force) != f.placement.company or !crew.personPresent(gs, p, site)) return .crew;
     }
-    for (rules.descriptors, f.slots) |d, s| if (d.family == .long_tom and s.condition == .ok and s.rounds > 0) return true;
+    return null;
+}
+
+/// Complete primary-gun refusal reason; all primary consumers call this owner.
+/// Source: operations design, Physical location and complete capabilities.
+pub fn readinessBlock(gs: *GameState, f: *const dom.Formation) ?combat.ReadinessBlock {
+    if (commonReadinessBlock(gs, f)) |block| return block;
+    if (f.slots[@intFromEnum(rules.Slot.main_gun)].condition != .ok) return .main_gun;
+    if (f.slots[@intFromEnum(rules.Slot.communications)].condition != .ok) return .communications;
+    for (rules.descriptors, f.slots) |d, s| if (d.family == .long_tom and s.condition == .ok and s.rounds > 0) return null;
+    return .ammunition;
+}
+
+/// Complete defensive readiness shares crew/service/maintenance ownership with
+/// primary readiness, while requiring only an intact loaded MG and its mount.
+/// Source: combat design, Defensive fire. Main gun and communications are irrelevant.
+pub fn defensiveReadiness(gs: *GameState, f: *const dom.Formation) bool {
+    if (commonReadinessBlock(gs, f) != null) return false;
+    const bin = f.slots[@intFromEnum(rules.Slot.machine_gun_bin)];
+    if (bin.condition != .ok or bin.rounds == 0) return false;
+    for (rules.descriptors, f.slots) |d, s| if (d.catalogue_key) |key| {
+        if (std.mem.eql(u8, key, "machine_gun") and s.condition == .ok) return true;
+    };
     return false;
 }
 
@@ -139,7 +169,7 @@ pub fn validate(gs: *GameState) error{CorruptSave}!void {
             if (count != 1) return error.CorruptSave;
         }
         if (f.tech != .none) {
-            if (f.placement == .sold or f.placement == .freight or @intFromEnum(f.tech) >= gs.next_person_id) return error.CorruptSave;
+            if (f.placement == .sold or f.placement == .destroyed or f.placement == .freight or @intFromEnum(f.tech) >= gs.next_person_id) return error.CorruptSave;
             const p = gs.person(f.tech) orelse return error.CorruptSave;
             if (p.isGone() or p.role != .tech_mechanic or p.skill(.tech_mechanic) == null or crew.isSeated(gs, p.id)) return error.CorruptSave;
             if (f.placement == .company and (gs.companyOf(p.assigned_force) != f.placement.company or p.posted_hq != .none)) return error.CorruptSave;
@@ -275,6 +305,69 @@ test "whole-bin reload preserves partial rounds and refuses aggregate shortage u
     _ = try reload(&gs, .{ .formation = id, .family = .machine_gun });
     try std.testing.expectEqual(rules.mg_rounds_per_bin, f.slots[@intFromEnum(rules.Slot.machine_gun_bin)].rounds);
     try std.testing.expectEqual(@as(u32, 1), gs.stockCount(site, rules.packageKey(.machine_gun)));
+}
+
+test "defensive readiness shares every crew service and condition prerequisite without primary dependencies" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try fixtureForTest(&gs, true);
+    const f = gs.artillery_formations.getPtr(id).?;
+    f.last_maintenance_day = 0;
+    f.slots[@intFromEnum(rules.Slot.machine_gun_bin)].rounds = 2;
+    f.slots[@intFromEnum(rules.Slot.main_gun)].condition = .destroyed;
+    f.slots[@intFromEnum(rules.Slot.communications)].condition = .missing;
+    try std.testing.expect(defensiveReadiness(&gs, f));
+    try std.testing.expect(!operationalReadiness(&gs, f));
+    for (f.crew) |id_person| {
+        const p = gs.person(id_person).?;
+        p.status = .wounded;
+        try std.testing.expect(!defensiveReadiness(&gs, f));
+        p.status = .active;
+        p.training = .{ .skill = .gunnery_vee, .done_day = 1 };
+        try std.testing.expect(!defensiveReadiness(&gs, f));
+        p.training = null;
+        p.leave_until_day = 1;
+        try std.testing.expect(!defensiveReadiness(&gs, f));
+        p.leave_until_day = null;
+        p.fatigue = 100;
+        try std.testing.expect(!defensiveReadiness(&gs, f));
+        p.fatigue = 0;
+    }
+    const technician = f.tech;
+    f.tech = .none;
+    try std.testing.expect(!defensiveReadiness(&gs, f));
+    f.tech = technician;
+    gs.person(technician).?.status = .wounded;
+    try std.testing.expect(!defensiveReadiness(&gs, f));
+    gs.person(technician).?.status = .active;
+    const occupant = f.crew[0];
+    f.crew[0] = .none;
+    try std.testing.expect(!defensiveReadiness(&gs, f));
+    f.crew[0] = occupant;
+    f.armor_pct = 0;
+    try std.testing.expect(!defensiveReadiness(&gs, f));
+    f.armor_pct = 100;
+    f.slots[@intFromEnum(rules.Slot.chassis)].condition = .damaged;
+    try std.testing.expect(!defensiveReadiness(&gs, f));
+    f.slots[@intFromEnum(rules.Slot.chassis)].condition = .ok;
+    f.last_maintenance_day = null;
+    try std.testing.expect(!defensiveReadiness(&gs, f));
+    f.last_maintenance_day = 0;
+    gs.clock.day_index = rules.maintenance_age_days + 1;
+    try std.testing.expect(!defensiveReadiness(&gs, f));
+    gs.clock.day_index = 0;
+    f.slots[@intFromEnum(rules.Slot.machine_gun_bin)].condition = .damaged;
+    try std.testing.expect(!defensiveReadiness(&gs, f));
+    f.slots[@intFromEnum(rules.Slot.machine_gun_bin)].condition = .ok;
+    for ([_]rules.Slot{ .machine_gun_right_1, .machine_gun_right_2, .machine_gun_left_1, .machine_gun_left_2 }) |slot| f.slots[@intFromEnum(slot)].condition = .missing;
+    try std.testing.expect(!defensiveReadiness(&gs, f));
+    f.slots[@intFromEnum(rules.Slot.machine_gun_left_2)].condition = .ok;
+    try std.testing.expect(defensiveReadiness(&gs, f));
+    try gs.bay_jobs.append(gs.allocator(), .{ .hq = gs.seat(), .kind = .artillery_depot_repair, .artillery = id, .duration_days = 2, .queued_day = 0 });
+    try std.testing.expect(!defensiveReadiness(&gs, f));
+    gs.bay_jobs.items[0].started_day = 0;
+    gs.bay_jobs.items[0].done_day = 2;
+    try std.testing.expect(!defensiveReadiness(&gs, f));
 }
 
 test "pending depot identity stays valid while its attached company travels" {

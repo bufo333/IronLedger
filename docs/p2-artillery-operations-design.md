@@ -6,8 +6,8 @@ Physical LT-MOB-25 construction, identity, era, calculated BV and price remain
 owned by the pinned P2e catalogue. Campaign maintenance, medical, payroll,
 procurement and transport formulas retain their existing owners.
 
-Artillery combat effects, firing expenditure, battle damage and AAR participation
-belong to P2h. Dedicated artillery panels, parser verbs and TUI controls belong to
+[Artillery battle effects](p2-artillery-battle-design.md) deliver P2h firing
+expenditure, carrier damage, recovery/disposal and existing AAR participation. Dedicated artillery panels, parser verbs and TUI controls belong to
 P2i. Existing personnel, assignment and shared bay views expose artillery
 references through typed owners within P2g. Battle armor remains deferred beyond the current 3025 era.
 
@@ -88,6 +88,11 @@ queries, commands, ticks and validators consume those answers.
   continues advancing. No duplicate persisted planet/ETA for company travel.
 - Sold: historical condition and magazines retained, no crew/tech references,
   job, maintenance, payroll, supply or readiness contribution.
+- Destroyed: permanent typed history, zero armor/magazines, destroyed chassis,
+  empty operating seats/tech and no depot job. It contributes no service, carry,
+  consumables, supply, manning, lift, resale or liquidation credit. Recoverable
+  wrecks remain active carried assets and use existing field/depot repair rules;
+  restoring condition never restores ammunition.
 - Complete primary-artillery readiness requires a player-owned active hull,
   company attachment physically present outside transit, no queued/active
   depot job, armor above zero, intact chassis, intact Long Tom and communications
@@ -316,7 +321,7 @@ retry semantics and tests. No unrelated tick retry redesign is authorized.
 
 Save support is governed by
 [contract rule 51](engineering-contract.md#51-save-format-support-is-explicit).
-The approved P2g boundary supports schema **62** for both store and campaign;
+The current P2h boundary supports schema **63** for both store and campaign;
 version numbering is retained. Store adoption, campaign loading and overwriting
 enforce this boundary before decoding or replacing gameplay rows.
 Older formats are preserved but refused, with typed `StoreOlderThanGame` or
@@ -364,7 +369,7 @@ encoded in integer metadata as -1 for absence; day zero is a real checkpoint.
 Every formation, including sold history, has exactly the canonical crew and
 slot row set; unfilled Person references are SQL NULL, not fabricated IDs.
 New tables have campaign/formation/Person FKs, primary/unique keys, enum,
-integer-type and range checks; fresh schema 62 directly creates the bay table
+integer-type and range checks; fresh schema 63 directly creates the bay table
 with the appropriate target constraints. The store clear/delete/overwrite registry and DDL parity test include these
 tables. The store facade
 owns transactions; existing artillery_store encodes/decodes its subsystem.

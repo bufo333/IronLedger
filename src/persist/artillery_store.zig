@@ -107,7 +107,7 @@ pub fn save(db: sqlite.Db, gs: *const GameState, cid: i64) !void {
 /// Decode required current payloads without defaults; schema checks also enforce
 /// disjoint placement, while decoding independently checks absent-column consistency.
 pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
-    if (version != 62) return error.CorruptSave;
+    if (version != 63) return error.CorruptSave;
     gs.next_artillery_formation_id = try requiredCounter(db, cid, "next_artillery_formation_id");
     gs.next_artillery_offer_id = try requiredCounter(db, cid, "next_artillery_offer_id");
     const fs = try db.prepare(
@@ -149,6 +149,7 @@ pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
             .hq_pool => .{ .hq_pool = pool.? },
             .company => .{ .company = co.? },
             .sold => .sold,
+            .destroyed => .destroyed,
             .freight => .{ .freight = .{ .from_hq = from.?, .to_hq = to.?, .dispatch_day = sent.?, .eta_day = eta.?, .paid_cost = cost.? } },
         };
         const quality_bytes = try fs.text(13, gs.scratch());
@@ -316,6 +317,7 @@ fn resetCodecFixture(db: sqlite.Db, placement: std.meta.Tag(dom.Placement)) !voi
         .company => try db.exec("UPDATE artillery_formation SET placement='company',pool_hq=NULL,company=1"),
         .freight => try db.exec("UPDATE artillery_formation SET placement='freight',pool_hq=NULL,from_hq=1,to_hq=2,dispatch_day=0,eta_day=10,paid_cost=0"),
         .sold => try db.exec("UPDATE artillery_formation SET placement='sold',pool_hq=NULL"),
+        .destroyed => try db.exec("UPDATE artillery_formation SET placement='destroyed',pool_hq=NULL"),
     }
 }
 
@@ -339,7 +341,7 @@ fn expectMalformedCodecValue(db: sqlite.Db, table: []const u8, field: []const u8
     try db.exec(try std.fmt.bufPrintZ(&sql, "UPDATE {s} SET {s}={s}", .{ table, field, value }));
     var rows = GameState.init(std.testing.allocator, .{});
     defer rows.deinit();
-    try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 62));
+    try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 63));
 }
 
 test "artillery codec rejects noninteger required fields and nontext placement tags" {
@@ -381,14 +383,14 @@ test "artillery codec preserves integer and null placements and rejects coerced 
         try resetCodecFixture(db, placement);
         var rows = GameState.init(std.testing.allocator, .{});
         defer rows.deinit();
-        try load(db, &rows, 1, 62);
+        try load(db, &rows, 1, 63);
         const formation = rows.artillery_formations.values()[0];
         try std.testing.expectEqual(placement, std.meta.activeTag(formation.placement));
         switch (formation.placement) {
             .hq_pool => |hq| try std.testing.expectEqual(@as(types.HqId, @enumFromInt(1)), hq),
             .company => |company| try std.testing.expectEqual(@as(types.ForceId, @enumFromInt(1)), company),
             .freight => |freight| try std.testing.expectEqualDeep(dom.Freight{ .from_hq = @enumFromInt(1), .to_hq = @enumFromInt(2), .dispatch_day = 0, .eta_day = 10, .paid_cost = 0 }, freight),
-            .sold => {},
+            .sold, .destroyed => {},
         }
         try std.testing.expectEqual(@as(u32, 0), formation.acquisition_day);
         try std.testing.expect(!rows.artillery_offers.items[0].available);
@@ -420,7 +422,7 @@ test "artillery codec requires integer counter and row count metadata" {
             try db.exec(try std.fmt.bufPrintZ(&sql, "UPDATE meta SET value={s} WHERE key='{s}'", .{ value, key }));
             var rows = GameState.init(std.testing.allocator, .{});
             defer rows.deinit();
-            try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 62));
+            try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 63));
         }
     }
 }
@@ -559,6 +561,7 @@ fn placementCampaignForTest(gs: *GameState, placement: std.meta.Tag(dom.Placemen
             _ = try artillery.transfer(gs, .{ .formation = bought.artillery_formation, .to_hq = far });
         },
         .sold => _ = try artillery.sell(gs, bought.artillery_formation),
+        .destroyed => try artillery.destroy(gs, bought.artillery_formation),
     }
     try artillery.validate(gs);
 }
@@ -622,15 +625,15 @@ test "placement tag scratch propagates allocation failure and releases bytes on 
                 var rows = GameState.init(failing.allocator(), .{});
                 defer rows.deinit();
                 if (fail_index == 0 or (fail_index == 1 and std.mem.eql(u8, value, "hq_pool"))) {
-                    try std.testing.expectError(error.OutOfMemory, load(db, &rows, 1, 62));
+                    try std.testing.expectError(error.OutOfMemory, load(db, &rows, 1, 63));
                     try std.testing.expect(failing.has_induced_failure);
                 } else if (std.mem.eql(u8, value, "hq_pool")) {
-                    try load(db, &rows, 1, 62);
+                    try load(db, &rows, 1, 63);
                     // Operational enums and row masks are scratch allocations;
                     // their bytes must be reclaimed alongside the campaign below.
                     try std.testing.expect(failing.deallocations > 0);
                 } else {
-                    try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 62));
+                    try std.testing.expectError(error.CorruptSave, load(db, &rows, 1, 63));
                     try std.testing.expectEqual(@as(usize, value.len), failing.freed_bytes);
                 }
             }

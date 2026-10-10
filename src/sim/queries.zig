@@ -6445,6 +6445,8 @@ pub fn afterAction(alloc: Alloc, gs: *GameState, id: types.BattleId) !?AfterActi
         if (r.score_delta < 0) "{c}" else "{g}", if (r.score_delta > 0) "+" else "", r.score_delta, r.score_after, try money(alloc, r.battle_loss_comp),
     }));
 
+    for (try @import("after_action.zig").artilleryLines(alloc, r)) |line| try fight.append(alloc, try table.plain(alloc, line));
+
     var field: std.ArrayListUnmanaged(table.Row) = .empty;
     for (r.hulls) |h| {
         const damage = if (h.destroyed)
@@ -6614,6 +6616,47 @@ pub fn battleReport(alloc: Alloc, gs: *GameState, id: types.BattleId) !?[]const 
             try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{text}));
     }
     return try out.toOwnedSlice(alloc);
+}
+
+test "artillery AAR panes and flat narrative escape captured names remain pure and propagate allocation failure" {
+    const reports = @import("../domain/battle_report.zig");
+    const artillery_battle = @import("artillery_battle.zig");
+    const capabilities = @import("artillery_operations.zig");
+    const contract = @import("../domain/contract.zig");
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try capabilities.fixtureForTest(&gs, true);
+    const f = gs.artillery_formations.get(id).?;
+    const c: contract.Contract = .{ .id = @enumFromInt(1), .assigned_company = f.placement.company, .kind = .recon_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = gs.seatPlanetKey().?, .terms = .{ .length_months = 6, .base_pay_month = 400_000 } };
+    var a = (try artillery_battle.snapshot(&gs, &c, .no_line_units)).?;
+    a.seats[0].name = "Captured {c}Name{/}";
+    const r: reports.BattleReport = .{ .id = @enumFromInt(1), .day = 0, .contract = c.id, .company = c.assigned_company, .kind = "recon raid", .enemy_key = "DC", .scenario = "conceded", .terrain = "", .weather = "", .outcome = .rout, .conceded = true, .artillery = a };
+    try gs.battle_reports.record(gs.allocator(), r);
+    // Live identity and condition change cannot rewrite captured historical data.
+    gs.person(a.seats[0].person).?.last_name = "Replacement";
+    try artillery.destroy(&gs, id);
+    const before = digest.stateHash(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const view = (try afterAction(al, &gs, r.id)).?;
+    const flat = (try battleReport(al, &gs, r.id)).?;
+    for (try @import("after_action.zig").artilleryLines(al, &r)) |line| {
+        var found_pane = false;
+        var found_flat = false;
+        for (view.fight) |shown| if (std.mem.eql(u8, line, try table.plainText(al, shown))) {
+            found_pane = true;
+        };
+        for (flat) |shown| if (std.mem.eql(u8, line, try table.plainText(al, shown))) {
+            found_flat = true;
+        };
+        try std.testing.expect(found_pane and found_flat);
+    }
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectError(error.OutOfMemory, afterAction(std.testing.failing_allocator, &gs, r.id));
+    try std.testing.expectError(error.OutOfMemory, battleReport(std.testing.failing_allocator, &gs, r.id));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
 }
 
 /// The last `n` log lines matching a filter, oldest first.

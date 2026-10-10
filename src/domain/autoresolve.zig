@@ -34,6 +34,27 @@ pub const CampaignMods = struct {
     has_salvage_lance: bool = false, // no power effect; raises post-battle yield
 };
 
+/// Present skill plus injury/fatigue penalties, less the matching specialist
+/// adjustment. Lower is better, saturated at zero. Source: ARCH section 7.
+pub fn effectiveCrewSkill(p: *const person_mod.Person, skill_value: u8, piloting: bool) u8 {
+    const raw = @as(u16, skill_value) + p.permanentPenalty() + p.fatiguePenalty();
+    const adjustment: u16 = @intFromBool(p.has(if (piloting) "piloting_specialist" else "gunnery_specialist"));
+    return @intCast(@min(std.math.maxInt(u8), raw -| adjustment));
+}
+
+test "effective crew skill applies present skill penalties and specialist consistently" {
+    var p: person_mod.Person = .{ .id = @enumFromInt(1), .first_name = "A", .last_name = "B", .role = .vehicle_crew };
+    defer p.deinit(std.testing.allocator);
+    try p.skills.put(std.testing.allocator, .gunnery_vee, 4);
+    try p.abilities.append(std.testing.allocator, "gunnery_specialist");
+    try std.testing.expectEqual(@as(u8, 3), effectiveCrewSkill(&p, p.skill(.gunnery_vee).?, false));
+    const element: Element = .{ .base_strength = 782, .avg_gunnery = effectiveCrewSkill(&p, p.skill(.gunnery_vee).?, false) };
+    const ordinary: Element = .{ .base_strength = 782, .avg_gunnery = 3 };
+    try std.testing.expectEqual(ordinary.effectivePower(.{}), element.effectivePower(.{}));
+    try p.skills.put(std.testing.allocator, .gunnery_vee, 0);
+    try std.testing.expectEqual(@as(u8, 0), effectiveCrewSkill(&p, p.skill(.gunnery_vee).?, false));
+}
+
 /// One resolvable element: a lance/flight/platoon aggregated for battle.
 pub const Element = struct {
     force: types.ForceId = .none,

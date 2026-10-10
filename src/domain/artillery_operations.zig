@@ -69,6 +69,31 @@ pub const SlotState = struct { condition: unit.PartCondition = .ok, rounds: u16 
 pub const Slots = [descriptors.len]SlotState;
 pub const Crew = [seats.len]types.PersonId;
 
+/// Canonical slot deterioration shared by service and battle. A missing or
+/// destroyed slot remains terminal; losing a bin also loses its loaded rounds.
+/// Source: operations design, Condition; combat design, Carrier damage.
+pub fn deteriorate(slot: *SlotState) u16 {
+    slot.condition = switch (slot.condition) {
+        .ok => .damaged,
+        .damaged => .destroyed,
+        .destroyed, .missing => slot.condition,
+    };
+    if (slot.condition != .destroyed and slot.condition != .missing) return 0;
+    const lost = slot.rounds;
+    slot.rounds = 0;
+    return lost;
+}
+
+test "slot deterioration preserves absent condition and records ammunition loss once" {
+    var slot: SlotState = .{ .rounds = long_tom_rounds_per_bin };
+    try std.testing.expectEqual(@as(u16, 0), deteriorate(&slot));
+    try std.testing.expectEqual(long_tom_rounds_per_bin, deteriorate(&slot));
+    try std.testing.expectEqual(@as(u16, 0), deteriorate(&slot));
+    slot = .{ .condition = .missing };
+    _ = deteriorate(&slot);
+    try std.testing.expectEqual(unit.PartCondition.missing, slot.condition);
+}
+
 /// Seat qualification requires an explicit skill; absent values never qualify.
 /// Source: operations design, Crew and personnel policy.
 pub fn seatSkill(seat: Seat) types.SkillType {

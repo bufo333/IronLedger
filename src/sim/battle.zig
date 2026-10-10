@@ -32,6 +32,10 @@ const operation_mod = @import("../domain/operation.zig");
 const readiness_m = @import("readiness.zig");
 const black_market = @import("black_market.zig");
 const hull_instance_for_pool = @import("../domain/hull_instance.zig");
+const battle_preparation = @import("battle_preparation.zig");
+const battle_casualties = @import("battle_casualties.zig");
+const battle_recovery = @import("battle_recovery.zig");
+const artillery_battle = @import("artillery_battle.zig");
 
 /// Salvage trucks (SVT-1) a company can work a battlefield: operational
 /// (fit crew, not parked or busy) SVT-1s only (ARCH §9.3 active capability).
@@ -116,20 +120,23 @@ pub fn effectiveRoe(gs: *GameState, c: *const contract_mod.Contract, company: ty
 /// battle_resolution phase, daily: schedule and resolve engagements for
 /// active combat-class contracts.
 pub fn runDaily(gs: *GameState) !void {
-    var it = gs.contracts.iterator();
-    while (it.next()) |entry| {
-        const c = entry.value_ptr;
+    var index: usize = 0;
+    while (index < gs.contracts.count()) : (index += 1) {
+        const id = gs.contracts.keys()[index];
+        const c = gs.contracts.getPtr(id).?;
         if (c.status != .active) continue;
         // Garrison work fights too (ARCH §8): the enemy probes the
         // perimeter — a contract with no rolled opposing force has nothing to probe with.
         if (c.kind.isGarrisonClass() and !c.hasOpfor()) continue;
         if (c.next_battle_day == null) {
-            c.next_battle_day = gs.clock.day_index + nextBattleGap(gs, c);
+            var scheduling = gs.*;
+            const next = std.math.add(u32, gs.clock.day_index, nextBattleGap(&scheduling, c)) catch return error.OutOfRange;
+            gs.rng = scheduling.rng;
+            c.next_battle_day = next;
             continue;
         }
         if (gs.clock.day_index >= c.next_battle_day.?) {
-            try resolveEngagement(gs, c);
-            c.next_battle_day = gs.clock.day_index + nextBattleGap(gs, c);
+            try resolvePreparedEngagement(gs, id, gs.scratch(), true);
         }
     }
 }
@@ -176,6 +183,8 @@ pub const Estimate = struct {
     mix: [4]u32 = .{ 0, 0, 0, 0 },
     hulls: u32 = 0,
     recon: bool = false,
+    /// Carrier ceiling only; enemy power also caps the actual reduction. Odds remain unsuppressed.
+    artillery: ?artillery_battle.Preview = null,
 };
 
 /// What a company would bring to a fight on this contract: its
@@ -197,6 +206,7 @@ pub fn estimatePower(gs: *GameState, alloc: std.mem.Allocator, c: *const contrac
         out.mix[@intFromEnum(d.weightClass())] += 1;
         out.hulls += 1;
     }
+    if (out.hulls > 0) out.artillery = artillery_battle.preview(gs, &as_if, side.mods.recon_quality, std.math.maxInt(i64));
     return out;
 }
 
@@ -322,10 +332,9 @@ fn addLancePower(gs: *GameState, c: *const contract_mod.Contract, lance: *const 
         condition_sum += u.conditionPct();
         quality_sum += @intFromEnum(u.quality);
         const crew_role = unit_mod.crewRoleFor(u.kind);
-        const gunnery_skill = pilot.skill(crew_role.primarySkill()) orelse 4;
-        const piloting_skill = (if (crew_role.pilotingSkill()) |s| pilot.skill(s) else null) orelse 5;
-        gunnery_sum += (gunnery_skill + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("gunnery_specialist"));
-        piloting_sum += (piloting_skill + pilot.permanentPenalty() + pilot.fatiguePenalty()) -| @intFromBool(pilot.has("piloting_specialist"));
+        gunnery_sum += autoresolve.effectiveCrewSkill(pilot, pilot.skill(crew_role.primarySkill()) orelse 4, false);
+        const piloting_value = (if (crew_role.pilotingSkill()) |skill| pilot.skill(skill) else null) orelse 5;
+        piloting_sum += autoresolve.effectiveCrewSkill(pilot, piloting_value, true);
         n += 1;
     }
     if (n == 0) return;
@@ -547,44 +556,11 @@ fn applyHits(
             tally.damage_value += @divTrunc(u.purchase_price, 2);
         }
 
-        // Crew casualties (AtB-style): a hard hit (8+) wounds the pilot on a
-        // follow-up 2d6 of 8+, a crippling one (11+) always; the worst roll
-        // kills unless a MASH lance is forward. MASH also raises the
-        // follow-up target on hard hits (tuning.battle.wound_*).
-        if (gs.person(u.pilot)) |p| {
-            if (p.status == .active) {
-                // Wound severity follows the hit: 8–9 light,
-                // 10–11 serious, 12 crippling (survivable only with MASH).
-                // Toughness: a step lighter, and a killing hit is survived.
-                const tough = p.has("toughness");
-                const raw_severity: u8 = if (severity >= tb.wound_crippling_severity) 3 else if (severity >= tb.wound_serious_severity) 2 else 1;
-                const wound_severity: u8 = @max(1, raw_severity -| @as(u8, @intFromBool(tough)));
-                if (severity >= tb.kill_severity and !player.mods.has_mash_lance and !tough) {
-                    // The seat empties with the pilot: the checklist
-                    // shows an open cockpit, not a dead man in it.
-                    rec.crew_name = try p.rankedName(gs.allocator());
-                    _ = try @import("personnel.zig").depart(gs, p.id, .kia, 0, "");
-                    tally.kia += 1;
-                    gs.stats.people_kia += 1;
-                    rec.crew.fate = .kia;
-                } else if (severity >= tb.cookoff_severity) {
-                    rec.crew.wound = try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
-                    if (rec.crew.wound != null) {
-                        tally.wounded += 1;
-                        rec.crew_name = try p.rankedName(gs.allocator());
-                    }
-                } else if (severity >= tb.slot_hit_severity) {
-                    const need: u8 = if (player.mods.has_mash_lance) tb.wound_target_mash else tb.wound_target;
-                    if (gs.rng.roll2d6(.battle) >= need) {
-                        rec.crew.wound = try medical.inflict(gs, u.pilot, .combat, wound_severity, "battle");
-                        if (rec.crew.wound != null) {
-                            tally.wounded += 1;
-                            rec.crew_name = try p.rankedName(gs.allocator());
-                        }
-                    }
-                }
-            }
-        }
+        const casualty = try battle_casualties.apply(gs, u.pilot, severity, player.mods.has_mash_lance);
+        rec.crew = casualty.outcome;
+        rec.crew_name = casualty.name;
+        tally.wounded += casualty.wounded;
+        tally.kia += casualty.kia;
         try hit_log.append(gs.scratch(), rec);
     }
     return tally;
@@ -614,29 +590,11 @@ fn recoverWrecks(
     roe: force_mod.Roe,
     trucks: i64,
     hit_log: *std.ArrayListUnmanaged(battle_report.HullHit),
+    combined_wrecks: i64,
 ) !FieldLoss {
-    const rt = tuning.loss.roe;
     var loss: FieldLoss = .{};
     const t = tuning.loss;
-    const has_dropship = lift.hasCrewedDropship(gs, c.assigned_company);
-    var wrecks_here: i64 = 0;
-    for (hit_log.items) |h| wrecks_here += @intFromBool(h.destroyed);
-    // Recovery task bonus: a dedicated recovery lance improves wreck retrieval. // TUNE
-    const task_recovery_bonus: i32 = if (operations_m.committedCombatOp(c)) |op|
-        operations_m.operationTaskMods(gs, c, op).recovery_bonus
-    else
-        0;
-    const situation: i32 = (if (player.mods.has_salvage_lance) t.recovery_salvage_lance else 0) //
-        + (if (trucks >= wrecks_here and trucks > 0) t.recovery_trucks else 0) //
-        + (if (has_dropship) t.recovery_dropship else 0) //
-        + (if (outcome == .rout) t.recovery_rout else 0) //
-        + scenario.recovery_mod + gs.diff().recovery_mod //
-        + task_recovery_bonus //
-        + switch (roe) {
-            .hold => rt.hold_recovery,
-            .standard => 0,
-            .cautious => rt.cautious_recovery,
-        };
+    const situation = battle_recovery.situation(gs, c, scenario, outcome, roe, player.mods.has_salvage_lance, trucks, combined_wrecks);
     for (hit_log.items) |*h| {
         if (!h.destroyed) continue;
         const u = gs.unit(h.unit) orelse continue;
@@ -650,17 +608,14 @@ fn recoverWrecks(
         loss.damage_value += u.purchase_price - @divTrunc(u.purchase_price, 2);
         const p = gs.person(u.pilot) orelse continue;
         if (!p.isOnBooks()) continue;
-        const piloting: i32 = (if (p.role.pilotingSkill()) |s| p.skill(s) else null) orelse 5;
-        const escape = @as(i32, gs.rng.roll2d6(.battle)) + person_mod.skillRollBonus(@intCast(piloting)) + gs.diff().recovery_mod + (if (outcome == .rout) t.recovery_rout else 0);
-        if (escape >= t.escape_target) continue;
+        const escape = battle_recovery.escapeRoll(gs, p.id, outcome) orelse continue;
+        if (escape.roll >= escape.target) continue;
         const pid = p.id;
-        _ = try @import("personnel.zig").depart(gs, pid, .mia, 0, "");
-        p.faction = c.enemy_key; // held by them
+        try battle_recovery.captureMissing(gs, pid, c);
         loss.missing += 1;
         // The name is already on record if this pilot was also hit.
         if (h.crew_name.len == 0) h.crew_name = try p.rankedName(gs.allocator());
         h.crew.fate = .missing;
-        try @import("contract_events.zig").queueMissing(gs, pid, c.assigned_company);
     }
     return loss;
 }
@@ -756,10 +711,11 @@ const FieldLoss = struct {
 /// company's rules of engagement, re-rolled once if a pilot spends Edge.
 /// Returns everything downstream needs to know about how it
 /// went, so no later phase re-derives the odds.
-/// Pool-path .battle draw order: scenario roll → opposed roll → (edge re-roll).
+/// Pool-path .battle draws: scenario → eligible artillery accuracy → opposed
+/// roll → (edge re-roll). Without eligible artillery the accuracy draw is absent.
 /// No variance draw on the pool path; force size is already reflected by
 /// drawOpforHulls (garrison via drawSize) and pool depletion/exclusion.
-fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const SideState, env: terrain_mod.Environment, enemy_bv_override: ?i64) Opening {
+fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const SideState, env: terrain_mod.Environment, enemy_bv_override: ?i64, artillery_result: *?battle_report.ArtilleryResult) Opening {
     // What kind of fight this is (AtB scenario table): it scales
     // the enemy, tilts the roll, weights the score and decides what a
     // held field is worth.
@@ -785,7 +741,7 @@ fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const S
         .avg_gunnery = enemy_skills[0],
         .avg_piloting = enemy_skills[1],
     };
-    const enemy_power = enemy_elem.effectivePower(.{});
+    const enemy_power = artillery_battle.fire(gs, artillery_result, player.mods.recon_quality, enemy_elem.effectivePower(.{}));
 
     // Task modifiers: aggregate effect of per-lance assignments (P4e).
     // Pure, deterministic, no new RNG draw.
@@ -883,6 +839,7 @@ fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const S
         .lost_fight = lost_fight,
         .enemy_loss_pct = enemy_loss_pct,
         .hits = hits,
+        .hit_pct = hit_pct,
         .edge_used_by = edge_used_by,
         .reserve_steadied = reserve_steadied,
     };
@@ -901,6 +858,7 @@ const Opening = struct {
     lost_fight: bool,
     enemy_loss_pct: u32,
     hits: u32,
+    hit_pct: u32,
     /// An id, not a pointer: prisoners are hired into `people` before
     /// the report is written, and that insertion can move every entry.
     edge_used_by: types.PersonId,
@@ -1145,7 +1103,327 @@ pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     return resolveEngagementWithResolutionScratch(gs, c, gs.scratch());
 }
 
+fn engagementFixture(gs: *GameState, real_pool: bool) !types.ContractId {
+    gs.clock.day_index = 1;
+    _ = try founding.createCommander(gs, "T", .LC, .line_officer);
+    const company = try @import("starter_company.zig").generateInto(gs, "Alpha");
+    if (real_pool) _ = try seedOpforHulls(gs, "DC", 8);
+    const id: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(gs.allocator(), id, .{
+        .id = id,
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = if (real_pool) "DC" else "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = company,
+        .monthly_net = 300_000,
+        .enemy_lances = if (real_pool) 2 else 0,
+    });
+    try gs.addStock(.{ .company = company }, "armor", 60);
+    for (part_mod.munition_keys) |key| try gs.addStock(.{ .company = company }, key, 40);
+    return id;
+}
+
+fn artilleryEngagementFixture(gs: *GameState, real_pool: bool) !types.ContractId {
+    const artillery = @import("artillery.zig");
+    const operations = @import("artillery_operations.zig");
+    const operating_crew = @import("artillery_crew.zig");
+    const rules = @import("../domain/artillery_operations.zig");
+    const id = try engagementFixture(gs, real_pool);
+    const c = gs.contracts.getPtr(id).?;
+    c.status = .offer;
+    c.planet_key = gs.seatPlanetKey().?;
+    const home = gs.seat();
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice() * 2;
+    const result = try artillery.buy(gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
+    _ = try artillery.attach(gs, .{ .formation = result.artillery_formation, .company = c.assigned_company });
+    for (rules.seats) |seat| {
+        const pid = try gs.hirePerson(@tagName(seat), "Crew", .vehicle_crew);
+        try gs.person(pid).?.skills.put(gs.allocator(), rules.seatSkill(seat), 4);
+        _ = try operating_crew.assign(gs, .{ .formation = result.artillery_formation, .person = pid, .seat = seat });
+    }
+    const tech = try gs.hirePerson("Carrier", "Mechanic", .tech_mechanic);
+    try gs.person(tech).?.skills.put(gs.allocator(), .tech_mechanic, 4);
+    _ = try operating_crew.assignTech(gs, .{ .formation = result.artillery_formation, .person = tech });
+    c.status = .active;
+    const f = gs.artillery_formations.getPtr(result.artillery_formation).?;
+    f.last_maintenance_day = gs.clock.day_index;
+    const site = operations.operationSite(gs, f).?;
+    for (rules.families) |family| {
+        try gs.addStock(site, rules.packageKey(family), rules.packagesPerLoad(family));
+        _ = try operations.reload(gs, .{ .formation = f.id, .family = family });
+    }
+    return id;
+}
+
+fn artilleryFailureFixture(gs: *GameState, real_pool: bool, no_fight: bool) !types.ContractId {
+    const id = try artilleryEngagementFixture(gs, real_pool);
+    if (no_fight) {
+        if (real_pool) {
+            gs.faction_rosters.getPtr("DC").?.clearRetainingCapacity();
+        } else {
+            for (gs.units.values()) |*u| u.status = .destroyed;
+        }
+    }
+    return id;
+}
+
+fn damagedArtilleryFailureFixture(gs: *GameState, strong_enemy: bool, complete_early: bool) !types.ContractId {
+    const id = try artilleryFailureFixture(gs, true, false);
+    gs.artillery_formations.values()[0].armor_pct = 10;
+    if (strong_enemy) {
+        _ = try seedOpforHulls(gs, "DC", 8);
+        gs.contracts.getPtr(id).?.enemy_lances = 4;
+        for (gs.faction_rosters.get("DC").?.items) |hull| gs.hull_instances.getPtr(hull).?.base_key = "AS7-D";
+        for (gs.units.values()) |*u| if (gs.force(u.force).?.echelon == .support_lance) {
+            u.status = .mothballed;
+        };
+    }
+    if (complete_early) {
+        const c = gs.contracts.getPtr(id).?;
+        c.objective = .attrition;
+        c.enemy_pool_bv = 1;
+        c.enemy_pool_remaining = 1;
+        c.end_day = gs.clock.day_index + 180;
+    }
+    return id;
+}
+
+test "carrier casualty held and lost field failures retry medical terminal and early completion effects" {
+    const digest = @import("digest.zig");
+    var seeds: [2]?u64 = @splat(null);
+    var physical: usize = 0;
+    var hits: usize = 0;
+    var casualties: usize = 0;
+    var held: usize = 0;
+    var wrecks: usize = 0;
+    for (&seeds, 0..) |*selected, path| for (1..513) |seed| {
+        var candidate = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer candidate.deinit();
+        const id = try damagedArtilleryFailureFixture(&candidate, path == 1, false);
+        try resolveEngagement(&candidate, candidate.contracts.getPtr(id).?);
+        const r = candidate.battle_reports.kept.items[0];
+        const a = r.artillery.?;
+        physical += @intFromBool(a.physical_participation);
+        hits += @intFromBool(a.severity != null);
+        held += @intFromBool(r.held_field);
+        wrecks += @intFromBool(a.newly_wrecked);
+        var casualty = false;
+        for (a.seats) |seat| casualty = casualty or !seat.outcome.untouched();
+        casualties += @intFromBool(casualty);
+        const terminal = a.damage == .scuttled or a.damage == .permanently_destroyed;
+        if (casualty and a.newly_wrecked and r.held_field == (path == 0) and (path == 0 or terminal)) {
+            selected.* = seed;
+            break;
+        }
+    };
+    if (seeds[0] == null or seeds[1] == null) std.debug.print("carrier sweep fixture physical={d} hits={d} casualties={d} held={d} wrecks={d} seeds={any}\n", .{ physical, hits, casualties, held, wrecks, seeds });
+    for (seeds, 0..) |selected, path| {
+        const seed = selected orelse return error.TestUnexpectedResult;
+        const complete_early = path == 0;
+        var reference = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer reference.deinit();
+        const id = try damagedArtilleryFailureFixture(&reference, path == 1, complete_early);
+        try resolveEngagement(&reference, reference.contracts.getPtr(id).?);
+        if (complete_early) try std.testing.expectEqual(contract_mod.ContractStatus.completed, reference.contracts.get(id).?.status);
+        try @import("artillery.zig").validate(&reference);
+        const expected = digest.stateHash(&reference);
+        var index: usize = 0;
+        while (true) : (index += 1) {
+            var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+            defer outer.deinit();
+            var gs = GameState.init(outer.allocator(), .{ .seed = seed });
+            _ = try damagedArtilleryFailureFixture(&gs, path == 1, complete_early);
+            const before = digest.stateHash(&gs);
+            var failure = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = index });
+            gs.arena.state = .{};
+            gs.arena.child_allocator = failure.allocator();
+            defer gs.deinit();
+            if (resolveEngagementWithResolutionScratch(&gs, gs.contracts.getPtr(id).?, failure.allocator())) |_| {
+                try std.testing.expectEqual(expected, digest.stateHash(&gs));
+                break;
+            } else |err| {
+                try std.testing.expectEqual(error.OutOfMemory, err);
+                try std.testing.expectEqual(before, digest.stateHash(&gs));
+                gs.arena.child_allocator = outer.allocator();
+                try resolveEngagement(&gs, gs.contracts.getPtr(id).?);
+                try std.testing.expectEqual(expected, digest.stateHash(&gs));
+            }
+        }
+    }
+}
+
+test "artillery fight concession and forfeit failures preserve complete state and retry matches uninterrupted resolution" {
+    const digest = @import("digest.zig");
+    for ([_]struct { real_pool: bool, no_fight: bool }{
+        .{ .real_pool = false, .no_fight = false },
+        .{ .real_pool = true, .no_fight = false },
+        .{ .real_pool = false, .no_fight = true },
+        .{ .real_pool = true, .no_fight = true },
+    }) |path| {
+        var reference = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+        defer reference.deinit();
+        const id = try artilleryFailureFixture(&reference, path.real_pool, path.no_fight);
+        try resolveEngagement(&reference, reference.contracts.getPtr(id).?);
+        const expected = digest.stateHash(&reference);
+        try @import("artillery.zig").validate(&reference);
+        var index: usize = 0;
+        while (true) : (index += 1) {
+            var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+            defer outer.deinit();
+            var gs = GameState.init(outer.allocator(), .{ .seed = 3007 });
+            _ = try artilleryFailureFixture(&gs, path.real_pool, path.no_fight);
+            const before = digest.stateHash(&gs);
+            var failure = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = index });
+            gs.arena.state = .{};
+            gs.arena.child_allocator = failure.allocator();
+            defer gs.deinit();
+            if (resolveEngagementWithResolutionScratch(&gs, gs.contracts.getPtr(id).?, failure.allocator())) |_| {
+                try std.testing.expectEqual(expected, digest.stateHash(&gs));
+                break;
+            } else |err| {
+                try std.testing.expectEqual(error.OutOfMemory, err);
+                try std.testing.expectEqual(before, digest.stateHash(&gs));
+                gs.arena.child_allocator = outer.allocator();
+                try resolveEngagement(&gs, gs.contracts.getPtr(id).?);
+                try std.testing.expectEqual(expected, digest.stateHash(&gs));
+            }
+        }
+    }
+}
+
+test "artillery concession and enemy forfeit retain attached snapshots without salvo draws or history" {
+    const artillery = @import("artillery.zig");
+    const combat = @import("../domain/artillery_combat.zig");
+    for ([_]bool{ false, true }) |forfeited| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+        defer gs.deinit();
+        const id = try artilleryEngagementFixture(&gs, forfeited);
+        const c = gs.contracts.getPtr(id).?;
+        if (forfeited) {
+            gs.faction_rosters.getPtr("DC").?.clearRetainingCapacity();
+        } else {
+            for (gs.units.values()) |*u| u.status = .destroyed;
+        }
+        try resolveEngagement(&gs, c);
+        const a = gs.battle_reports.kept.items[0].artillery.?;
+        try std.testing.expectEqual(if (forfeited) combat.NoFire.enemy_forfeit else combat.NoFire.no_line_units, a.no_fire);
+        try std.testing.expectEqual(@as(?u8, null), a.accuracy_roll);
+        try std.testing.expectEqual(@as(?u8, null), a.exposure_roll);
+        try std.testing.expectEqual(a.rounds_before, a.rounds_after);
+        try std.testing.expectEqual(@as(usize, 0), gs.hull_combat_records.items.len);
+        try artillery.validate(&gs);
+    }
+}
+
+test "late engagement outcome allocation leaves complete campaign unchanged" {
+    const digest = @import("digest.zig");
+    var index: usize = 0;
+    while (true) : (index += 1) {
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+        var gs = GameState.init(outer.allocator(), .{ .seed = 3007 });
+        const id = try engagementFixture(&gs, true);
+        const before = digest.stateHash(&gs);
+        var failure = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = index });
+        gs.arena.state = .{};
+        gs.arena.child_allocator = failure.allocator();
+        defer gs.deinit();
+        if (resolveEngagementWithResolutionScratch(&gs, gs.contracts.getPtr(id).?, failure.allocator())) |_| break else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+        }
+    }
+}
+
+test "non artillery engagement reference preserves every gameplay field and stream" {
+    const digest = @import("digest.zig");
+    for ([_]bool{ false, true }) |real_pool| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+        defer gs.deinit();
+        const id = try engagementFixture(&gs, real_pool);
+        try resolveEngagement(&gs, gs.contracts.getPtr(id).?);
+        try std.testing.expectEqual(if (real_pool) @as(u64, 15615413206384862793) else @as(u64, 7434715358146121194), digest.nonArtilleryReferenceHash(&gs));
+    }
+}
+
+test "daily engagement retries skip an earlier committed contract" {
+    const digest = @import("digest.zig");
+    var reference = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer reference.deinit();
+    const first = try engagementFixture(&reference, true);
+    const second: types.ContractId = @enumFromInt(2);
+    var other = reference.contracts.get(first).?;
+    other.id = second;
+    other.next_battle_day = 0;
+    reference.contracts.getPtr(first).?.next_battle_day = 0;
+    try reference.contracts.put(reference.allocator(), second, other);
+    const original = digest.stateHash(&reference);
+    try resolvePreparedEngagement(&reference, first, reference.scratch(), true);
+    const first_committed = digest.stateHash(&reference);
+    try runDaily(&reference);
+    const complete = digest.stateHash(&reference);
+    var index: usize = 0;
+    var failed_after_first = false;
+    while (true) : (index += 1) {
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+        var gs = GameState.init(outer.allocator(), .{ .seed = 3007 });
+        _ = try engagementFixture(&gs, true);
+        gs.contracts.getPtr(first).?.next_battle_day = 0;
+        try gs.contracts.put(gs.allocator(), second, other);
+        try std.testing.expectEqual(original, digest.stateHash(&gs));
+        gs.arena.state = .{};
+        var failure = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = index });
+        gs.arena.child_allocator = failure.allocator();
+        defer gs.deinit();
+        if (runDaily(&gs)) |_| {
+            try std.testing.expectEqual(complete, digest.stateHash(&gs));
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            const actual = digest.stateHash(&gs);
+            try std.testing.expect(actual == original or actual == first_committed);
+            if (actual == first_committed) failed_after_first = true;
+            gs.arena.child_allocator = outer.allocator();
+            try runDaily(&gs);
+            try std.testing.expectEqual(complete, digest.stateHash(&gs));
+            try std.testing.expectEqual(@as(u32, 1), gs.contracts.get(first).?.battles_fought);
+            try std.testing.expectEqual(@as(u32, 1), gs.contracts.get(second).?.battles_fought);
+        }
+    }
+    try std.testing.expect(failed_after_first);
+}
+
+test "initial contact schedule overflow leaves complete campaign unchanged" {
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    _ = try engagementFixture(&gs, false);
+    gs.clock.day_index = std.math.maxInt(u32);
+    const before = digest.stateHash(&gs);
+    try std.testing.expectError(error.OutOfRange, runDaily(&gs));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
 fn resolveEngagementWithResolutionScratch(gs: *GameState, c: *contract_mod.Contract, resolution_backing: std.mem.Allocator) !void {
+    return resolvePreparedEngagement(gs, c.id, resolution_backing, false);
+}
+
+fn resolvePreparedEngagement(gs: *GameState, id: types.ContractId, backing: std.mem.Allocator, daily: bool) !void {
+    var engagement = try battle_preparation.Engagement.init(gs, backing);
+    defer engagement.deinit();
+    const staged = &engagement.view;
+    const contract = staged.contracts.getPtr(id) orelse return error.UnknownContract;
+    try resolveStagedEngagement(staged, contract, backing);
+    if (daily) contract.next_battle_day = std.math.add(u32, staged.clock.day_index, nextBattleGap(staged, contract)) catch return error.OutOfRange;
+    var publication = try engagement.prepare(gs);
+    publication.commit(gs, staged);
+}
+
+fn resolveStagedEngagement(gs: *GameState, c: *contract_mod.Contract, resolution_backing: std.mem.Allocator) !void {
     try gs.battle_reports.prepareRecord(gs.allocator());
     var resolution_scratch = std.heap.ArenaAllocator.init(resolution_backing);
     defer resolution_scratch.deinit();
@@ -1240,7 +1518,8 @@ fn resolveEngagementWithResolutionScratch(gs: *GameState, c: *contract_mod.Contr
     populatePlayerSide(gs, c, env, &player);
     if (player.engaged.items.len == 0) return concede(gs, c);
 
-    const open = openingRoll(gs, c, &player, env, enemy_bv_override);
+    var artillery_result = try artillery_battle.snapshot(gs, c, .not_ready);
+    const open = openingRoll(gs, c, &player, env, enemy_bv_override, &artillery_result);
     const scenario = open.scenario;
     const enemy_power = open.enemy_power;
     const scenario_mod = open.scenario_mod;
@@ -1294,9 +1573,15 @@ fn resolveEngagementWithResolutionScratch(gs: *GameState, c: *contract_mod.Contr
     defer hit_log.deinit(gs.scratch());
     const tally = try applyHits(gs, &player, engaged, hits, &hit_log);
     var damage_value = tally.damage_value;
-    const destroyed = tally.destroyed;
-    const wounded = tally.wounded;
-    const kia = tally.kia;
+    const carrier_hit = try artillery_battle.applyExposure(gs, &artillery_result, open.hit_pct, player.mods.has_mash_lance);
+    const destroyed = tally.destroyed + carrier_hit.destroyed;
+    const wounded = tally.wounded + carrier_hit.wounded;
+    const kia = tally.kia + carrier_hit.kia;
+    var combined_wrecks: i64 = 0;
+    for (hit_log.items) |hit| combined_wrecks += @intFromBool(hit.destroyed);
+    if (artillery_result) |a| if (a.physical_participation and a.damage == .recoverable) {
+        combined_wrecks += 1;
+    };
 
     // Spoils: salvage rights over the enemy's wrecks — but only if you held
     // the field (retreating forces strip nothing) — prisoners if you can
@@ -1319,11 +1604,15 @@ fn resolveEngagementWithResolutionScratch(gs: *GameState, c: *contract_mod.Contr
     var lost_hulls: u32 = 0;
     var missing: u32 = 0;
     if (!held_field) {
-        const loss = try recoverWrecks(gs, c, &player, scenario, outcome, roe, trucks, &hit_log);
+        const loss = try recoverWrecks(gs, c, &player, scenario, outcome, roe, trucks, &hit_log, combined_wrecks);
         lost_hulls = loss.hulls;
         missing = loss.missing;
         damage_value += loss.damage_value;
     }
+    const carrier_loss = try artillery_battle.recover(gs, &artillery_result, c, scenario, outcome, roe, held_field, player.mods.has_salvage_lance, trucks, combined_wrecks);
+    lost_hulls += carrier_loss.lost;
+    missing += carrier_loss.missing;
+    if (artillery_result) |a| damage_value += a.compensation_basis;
     // The wrecks on offer and the part of the claim still to be
     // divided. Both stay empty unless the haul is worth a decision.
     var salvage_candidates: []const battle_report.SalvageCandidate = &.{};
@@ -1427,6 +1716,7 @@ fn resolveEngagementWithResolutionScratch(gs: *GameState, c: *contract_mod.Contr
     const morale_delta = after.morale_delta;
     const convoy_hit = after.convoy_hit;
     const kills_credited = after.kills_credited;
+    try artillery_battle.reward(gs, &artillery_result, score_delta);
 
     // Apply intent profile (deterministic post-roll modifiers; no new RNG draw;
     // docs/p4-operations-design.md §6 decision 3, rule 57).
@@ -1514,6 +1804,7 @@ fn resolveEngagementWithResolutionScratch(gs: *GameState, c: *contract_mod.Contr
         .operation_tempo = op_tempo,
         .operation_interventions = op_interventions,
         .tasks = task_results.items,
+        .artillery = artillery_result,
         .day = gs.clock.day_index,
         .contract = c.id,
         .company = c.assigned_company,
@@ -1615,7 +1906,7 @@ fn resolveEngagementWithResolutionScratch(gs: *GameState, c: *contract_mod.Contr
     // And a lost field asks whether the company goes back for what it
     // left. The two are exclusive: wrecks are only left behind on
     // a field that was lost.
-    if (lost_hulls > 0 or missing > 0) try @import("contract_events.zig").queueRecoveryPush(gs, c, report.id);
+    if (report.hullsLost() > 0 or missing > carrier_loss.missing) try @import("contract_events.zig").queueRecoveryPush(gs, c, report.id);
     // And a haul the claim cannot stretch over asks how to divide it.
     // Nothing has been taken yet; the trucks wait on the answer.
     if (salvage_unclaimed > 0) try @import("contract_events.zig").queueSalvage(gs, c, report.id);
@@ -1643,6 +1934,8 @@ fn resolveEngagementWithResolutionScratch(gs: *GameState, c: *contract_mod.Contr
         hit_log.items,
         resolution,
     );
+
+    try artillery_battle.recordHistory(gs, artillery_result, report.id, c.id);
 
     // P3f.2: a lost field leaves the drawn destroyed enemy hulls pool-removed
     // but .active and enemy-owned. Give each a terminal disposition: enemy
@@ -1715,6 +2008,7 @@ fn forfeit(gs: *GameState, c: *contract_mod.Contract) !void {
 
     const report: battle_report.BattleReport = .{
         .id = gs.nextBattleId(),
+        .artillery = try artillery_battle.snapshot(gs, c, .enemy_forfeit),
         .operation = op_template_name,
         .operation_intent = if (committed_op) |op| op.intent else null,
         .operation_tempo = if (committed_op) |op| op.tempo else null,
@@ -1816,6 +2110,7 @@ fn concede(gs: *GameState, c: *contract_mod.Contract) !void {
         "";
     const report: battle_report.BattleReport = .{
         .id = gs.nextBattleId(),
+        .artillery = try artillery_battle.snapshot(gs, c, .no_line_units),
         .operation = op_template_name,
         .operation_intent = concede_op_intent,
         .operation_tempo = concede_op_tempo,
@@ -4712,10 +5007,9 @@ test "pool draw atomicity: hull_combat_records and hull_instances are consistent
 
 test "pool draw atomicity: OpFor tail is all-or-nothing under ensureUnusedCapacity failure" {
     // Rule 69: atomicity tested with injected failure.
-    // The whole-command stateHash injection is infeasible: resolveEngagement
-    // commits prior mutations (score, AAR, transactions, etc.) before the tail
-    // reserve. This test directly calls writeHullCombatRecords with a failing
-    // allocator to prove the new OpFor tail writes are atomic under reserve failure.
+    // This focused tail test complements the complete engagement failure sweeps
+    // above. The prepared engagement now isolates prior score, AAR and posting
+    // mutations until every destination, including this history tail, is ready.
     const testing = std.testing;
     var gs = GameState.init(std.testing.allocator, .{ .seed = 9001 });
     defer gs.deinit();

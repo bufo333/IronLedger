@@ -39,7 +39,10 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
 |---|---|---|
 | Mobile Long Tom formation acquisition, HQ monthly offers and direct company attachment | `src/domain/artillery_formation.zig`, `src/sim/artillery.zig`; SQLite rows in `src/persist/artillery_store.zig`. Transport and vehicle accounting equivalences are project abstractions in `docs/p2-artillery-acquisition-design.md`, with no asserted MekHQ counterpart | P2f |
 | Individual Mobile Long Tom seats, readiness, sealed reload packages and condition | `src/domain/artillery_operations.zig`, `src/sim/artillery_crew.zig`, `src/sim/artillery_operations.zig`; project adaptations in `docs/p2-artillery-operations-design.md`, with no asserted external complement or capacity | P2g |
-| Artillery shared technician hours, maintenance, field repairs and depot queue adapters | `src/sim/artillery_service.zig` consumes existing maintenance/medical/HQ owners; `crew`/`personnel` own shared assignments and lifecycle; `field_supply`/`sites` own stock planning and movement. Existing query consumers retain typed identity; SQLite schema 62 lives in `src/persist/artillery_store.zig` | P2g |
+| Artillery shared technician hours, maintenance, field repairs and depot queue adapters | `src/sim/artillery_service.zig` consumes existing maintenance/medical/HQ owners; `crew`/`personnel` own shared assignments and lifecycle; `field_supply`/`sites` own stock planning and movement. Existing query consumers retain typed identity; Current-format operational SQLite rows live in `src/persist/artillery_store.zig` | P2g |
+| Artillery salvo suppression, carrier exposure/recovery, crew XP and terminal history | `src/domain/artillery_combat.zig`, `src/sim/artillery_battle.zig`; shared `battle_casualties`/`battle_recovery`; `after_action` and existing query panes. Numerical project policy: `docs/p2-artillery-battle-design.md`; no asserted external formula | P2h |
+| Per-engagement isolated preparation and publication | `src/sim/battle_preparation.zig`, `src/sim/battle_prepared_storage.zig`, `src/sim/battle.zig`; complete aftermath is staged and published atomically, including daily next-contact scheduling | P2h |
+| Normalized artillery battle-report persistence | `src/persist/artillery_battle_store.zig` codec inside store transaction; current schema 63 DDL and required presence marker owned by `src/persist/store.zig` | P2h |
 | Companies as concurrent deployable profit centers | `src/domain/force.zig`, per-company P&L in `src/econ/finance.zig` | 9 |
 | Brigade/Regional/Field HQ tiers with facility upgrade paths & staffing overhead | `src/domain/hq.zig` (`Hq.staffRequired`, `Project`); postings and autostaffing in `src/sim/hq_ops.zig` (`hqStaff`, `staffHqToRequirement`) | 9 |
 | Influence rings gating the contract market + beachhead expansion | `src/domain/hq.zig` (`influenceLy`) + `src/econ/market.zig` (`visibilityFor`) | 4/9 |
@@ -90,3 +93,10 @@ re-implemented in Zig. Paths below are under `MekHQ/src/mekhq/campaign/`.
   costs, contract payment multipliers, reputation, refit classes, maintenance
   target numbers. Our tables in `data/tables/` cite chapter names.
 - BattleTech TechManual — part/equipment catalog structure, tech ratings.
+
+P2h conceptual inspiration, checked 2026-10-09: the public MegaMek
+[ArtilleryTargetingControl API](https://megamek.org/megamek/megamek/client/bot/princess/ArtilleryTargetingControl.html)
+describes indirect firing plans, and
+[ArtilleryAttackAction API](https://megamek.org/megamek/megamek/common/actions/ArtilleryAttackAction.html)
+records attacks in flight. These support a distinct firing step as a concept;
+they supply no numerical counterpart to this project's company abstraction.

@@ -3,7 +3,7 @@
 Each formation owns one Mobile Long Tom carrier from the P2e catalogue, with a
 permanent formation ID and physical HullInstance ID. Its explicit artillery
 catalogue discriminator excludes it from ordinary Unit, crew, readiness, repair,
-supply, roster and combat paths. Sold formations and hull provenance remain history.
+supply, roster and combat paths. Sold and permanently destroyed formations and hull provenance remain history.
 
 These are project game abstractions, not external formation or logistics facts:
 regional and brigade HQs receive one player-only offer per calendar month;
@@ -33,7 +33,7 @@ is a game abstraction, not a sourced tractor or vehicle-bay specification.
 Own lift covers only matching vehicle bays; demand without those bays uses the
 existing charter policy. The current stock ship catalogue has no vehicle bays.
 
-Every player carrier incurs the existing active vehicle monthly carrying cost,
+Every carried player carrier incurs the existing active vehicle monthly carrying cost,
 including transit. The existing outfit-wide monthly posting and contract operating
 cost owner consume that total. Intact baseline-C resale uses the shared hull resale
 owner, and contributes once to liquidation-backed credit. Sale is only from an HQ
@@ -81,7 +81,7 @@ Commit installs the archive, removes active children/HQ, credits the unchanged
 HQ-sale proceeds owner and records one HQ-tagged log. The outfit receives the
 sale proceeds, including the disposed treasury, exactly once.
 
-The approved P2g boundary supports schema 62 stores and campaigns, as specified
+The current P2h boundary supports schema 63 stores and campaigns, as specified
 in [current-format persistence](p2-artillery-operations-design.md#current-format-persistence)
 and [contract rule 51](engineering-contract.md#51-save-format-support-is-explicit).
 Older formats, including schema 59 and 60, are refused intact; no legacy boards,
@@ -101,3 +101,12 @@ Existing typed history queries safely render archived names and retain original
 HQ filters. Archived HQs never appear in treasury/action lists. This is shared
 history integrity; P2i still owns dedicated artillery panels, parser verbs and TUI controls;
 P2g keeps existing personnel, assignment and shared bay views truthful.
+
+P2h [combat policy](p2-artillery-battle-design.md) appends terminal `destroyed`
+placement. It retains formation/hull IDs and acquisition facts, closes the current
+player ownership interval through the hull lifecycle owner, and opens no new
+interval. Destruction at day zero is valid. Terminal history frees the company
+attachment cap and contributes no lift, carrying, service, supply, manning,
+resale or liquidation credit. Active recoverable wrecks remain carried; repairs
+retain their loaded-round accounting. No artillery salvage, held-hull surrogate
+or enemy market listing is created.

@@ -37,7 +37,7 @@ pub fn techHours(gs: *GameState, f: *const dom.Formation) u32 {
 /// actual weekly charges require covered local service.
 pub fn weeklyConsumablesTotal(gs: *const GameState) types.CBills {
     var total: types.CBills = 0;
-    for (gs.artillery_formations.values()) |f| if (f.placement != .sold) {
+    for (gs.artillery_formations.values()) |f| if (artillery.isCarried(&f)) {
         total += @divTrunc(artillery.purchasePrice(), tuning.maintenance.consumables_divisor);
     };
     return total;
@@ -194,14 +194,8 @@ fn damageGear(gs: *GameState, f: *dom.Formation, intact_only: bool) !void {
     if (count == 0) return;
     const index = eligible[gs.rng.random(.maintenance).uintLessThan(u32, count)];
     const slot = &f.slots[index];
-    slot.condition = switch (slot.condition) {
-        .ok => .damaged,
-        .damaged => .destroyed,
-        else => slot.condition,
-    };
-    if (slot.condition == .destroyed and slot.rounds > 0) {
-        const lost = slot.rounds;
-        slot.rounds = 0;
+    const lost = rules.deteriorate(slot);
+    if (lost > 0) {
         try gs.log(.construction, .{}, "[artillery] formation {d} lost {d} rounds from destroyed {s}", .{ @intFromEnum(f.id), lost, @tagName(rules.descriptors[index].slot) });
     }
 }

@@ -71,6 +71,16 @@ existing personnel, assignment and shared bay views truthful as ordinary
 people and bay jobs gain artillery references. This compatibility boundary
 does not activate P2h or P2i.
 
+## P2h project combat policy
+
+[Artillery battle design](p2-artillery-battle-design.md) is the approved authority
+for P2h firing, temporary power attrition, exposure, casualties, recovery and
+terminal disposal, operating rewards and reports. For these bounded P2h policies,
+that complete project design replaces external-verification and no-invention
+requirements. Its numerical adaptations do not claim an external counterpart.
+P2e source facts, P2g operational policy, era gates and all battle-armor research
+requirements remain effective. P2i dedicated controls remain deferred.
+
 ## Ownership and acquisition
 
 Before P2b or P2e begins, the selected source-backed model must decide whether
@@ -162,10 +172,10 @@ separate implementation plan.
     market, force, transport, and command owners.
 3. `P2g`: Artillery crewing, maintenance and readiness, repair, ammunition,
     and supply behavior, persistence completion, and required focused coverage.
-4. `P2h`: Source-backed artillery battle effects through existing autoresolve
-    and battle owners, with deterministic RNG and AAR or report boundaries; no
-    UI controls. Its battle-armor portion remains deferred with P2b through
-    P2d.
+4. `P2h`: Project-designed artillery battle effects under
+    `docs/p2-artillery-battle-design.md`, with atomic engagement preparation,
+    deterministic RNG, typed persistent reports and truthful existing AAR panes.
+    Dedicated controls remain P2i; battle armor remains deferred with P2b-P2d.
 5. `P2i`: Artillery REPL, TUI, and query surfaces for already-delivered
     commands and reports, using the command and query boundary and both smoke
     scripts. Its battle-armor portion remains deferred with P2b through P2d.

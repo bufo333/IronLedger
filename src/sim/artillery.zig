@@ -17,6 +17,9 @@ const posture = @import("posture.zig");
 const sites = @import("sites.zig");
 const operations = @import("artillery_operations.zig");
 const operation_rules = @import("../domain/artillery_operations.zig");
+const battle_report = @import("../domain/battle_report.zig");
+const combat_rules = @import("../domain/artillery_combat.zig");
+const tuning = @import("../domain/tuning.zig").t;
 
 /// The sole approved carrier construction entry; static data validates this catalogue.
 pub fn carrier() *const catalogue.Entry {
@@ -80,7 +83,7 @@ pub fn syncMarkets(gs: *GameState) !void {
 
 fn owned(gs: *GameState, id: types.ArtilleryFormationId) commands.Error!*dom.Formation {
     const f = gs.artillery_formations.getPtr(id) orelse return error.NoSuchArtilleryFormation;
-    if (f.placement == .sold) return error.ArtilleryUnavailable;
+    if (!isCarried(f)) return error.ArtilleryUnavailable;
     return f;
 }
 
@@ -228,13 +231,39 @@ pub fn removeHqOffers(gs: *GameState, hq: types.HqId) void {
 /// Shared hull resale with actual quality, armor and the named chassis cap.
 pub fn saleValue(f: *const dom.Formation) types.CBills {
     const condition = if (f.slots[@intFromEnum(operation_rules.Slot.chassis)].condition == .ok) f.armor_pct else @min(f.armor_pct, operation_rules.damaged_chassis_sale_cap_pct);
-    return if (f.placement == .sold) 0 else market.intactHullSaleValue(f.paid_price, condition, f.quality);
+    return if (!isCarried(f)) 0 else market.intactHullSaleValue(f.paid_price, condition, f.quality);
+}
+
+/// Player placement eligibility for asset accounting, independent of readiness.
+/// Source: combat design, Terminal history. Sold and destroyed history carry no cost.
+pub fn isCarried(f: *const dom.Formation) bool {
+    return f.placement != .sold and f.placement != .destroyed;
+}
+
+/// Dispose of an irrecoverable or scuttled carrier through the physical hull's
+/// terminal lifecycle owner. Retains typed identities and closed provenance.
+/// Source: combat design, Recovery and terminal history. Caller owns engagement staging.
+pub fn destroy(gs: *GameState, id: types.ArtilleryFormationId) !void {
+    const f = gs.artillery_formations.getPtr(id) orelse return error.NoSuchArtilleryFormation;
+    if (!isCarried(f)) return error.ArtilleryUnavailable;
+    _ = gs.hull_instances.get(f.hull) orelse return error.CorruptSave;
+    gs.finalizeDestroyedWreck(f.hull);
+    f.placement = .destroyed;
+    f.armor_pct = 0;
+    f.slots[@intFromEnum(operation_rules.Slot.chassis)].condition = .destroyed;
+    for (&f.slots) |*slot| slot.rounds = 0;
+    f.crew = @splat(.none);
+    f.tech = .none;
+    var index: usize = 0;
+    while (index < gs.bay_jobs.items.len) {
+        if (gs.bay_jobs.items[index].artillery == id) _ = gs.bay_jobs.orderedRemove(index) else index += 1;
+    }
 }
 
 /// Each player carrier pays the vehicle carry owner once, including freight.
 pub fn monthlyCarry(gs: *const GameState) types.CBills {
     var total: types.CBills = 0;
-    for (gs.artillery_formations.values()) |f| if (f.placement != .sold) {
+    for (gs.artillery_formations.values()) |f| if (isCarried(&f)) {
         total += unit.monthlyCarryCost(.vehicle);
     };
     return total;
@@ -281,8 +310,8 @@ pub fn validate(gs: *GameState) error{CorruptSave}!void {
         if (f.id == .none or @intFromEnum(f.id) >= gs.next_artillery_formation_id or f.hull == .none or @intFromEnum(f.hull) >= gs.next_hull_instance_id) return error.CorruptSave;
         if (f.paid_price != purchasePrice() or f.acquisition_day > gs.clock.day_index) return error.CorruptSave;
         const h = gs.hull_instances.getPtr(f.hull) orelse return error.CorruptSave;
-        if (h.catalogue != .artillery or !std.mem.eql(u8, h.base_key, carrier().key) or h.intro_year != carrier().intro_year or h.status != .active or h.loadout.items.len != 0 or h.pre_campaign) return error.CorruptSave;
-        if (h.owner != (if (f.placement == .sold) hull_dom.HullOwner.market else hull_dom.HullOwner.player)) return error.CorruptSave;
+        if (h.catalogue != .artillery or !std.mem.eql(u8, h.base_key, carrier().key) or h.intro_year != carrier().intro_year or h.status != (if (f.placement == .destroyed) hull_dom.HullStatus.permanently_destroyed else hull_dom.HullStatus.active) or h.loadout.items.len != 0 or h.pre_campaign) return error.CorruptSave;
+        if (h.owner != (if (f.placement == .destroyed) hull_dom.HullOwner.destroyed else if (f.placement == .sold) hull_dom.HullOwner.market else hull_dom.HullOwner.player)) return error.CorruptSave;
         for (gs.artillery_formations.values()[0..i]) |earlier| if (earlier.hull == f.hull) return error.CorruptSave;
         try validatePlacement(gs, f);
         try validateHistory(gs, f);
@@ -305,7 +334,29 @@ pub fn validate(gs: *GameState) error{CorruptSave}!void {
             if (h.catalogue == .artillery and e.action != .repair) return error.CorruptSave;
         }
     }
-    for (gs.hull_combat_records.items) |e| try forbidConventionalReference(gs, e.hull_instance_id);
+    for (gs.hull_combat_records.items) |e| {
+        const h = gs.hull_instances.get(e.hull_instance_id) orelse return error.CorruptSave;
+        if (h.catalogue != .artillery) continue;
+        const r = gs.battle_reports.find(e.battle_id) orelse return error.CorruptSave;
+        const a = r.artillery orelse return error.CorruptSave;
+        if (!a.physical_participation or r.conceded or a.no_fire == .enemy_forfeit or a.hull != h.id or e.contract_id != r.contract or e.kills != 0 or e.hits_taken != @intFromBool(a.severity != null) or e.armor_lost != a.armor_before -| a.armor_after or e.destroyed != (a.newly_wrecked or a.damage == .permanently_destroyed or a.damage == .scuttled) or e.cause != a.cause) return error.CorruptSave;
+        var damaged: u8 = 0;
+        var destroyed: u8 = 0;
+        for (a.slots_before, a.slots_after) |before, after| {
+            if (before.condition == after.condition) continue;
+            damaged += @intFromBool(after.condition == .damaged);
+            destroyed += @intFromBool(after.condition == .destroyed);
+        }
+        if (e.slots_damaged != damaged or e.slots_destroyed != destroyed) return error.CorruptSave;
+        var count: usize = 0;
+        for (gs.hull_combat_records.items) |other| if (other.hull_instance_id == h.id and other.battle_id == e.battle_id) {
+            count += 1;
+        };
+        if (count != 1) return error.CorruptSave;
+    }
+    for (gs.battle_reports.kept.items) |r| if (r.artillery) |a| {
+        try validateResult(gs, &r, &a);
+    };
     for (gs.battle_reports.kept.items) |r| for (r.salvage.candidates) |c| try forbidConventionalReference(gs, c.hull_instance_id);
 }
 
@@ -752,7 +803,7 @@ fn validatePlacement(gs: *GameState, f: dom.Formation) error{CorruptSave}!void {
             const b = gs.hqs.getPtr(t.to_hq) orelse return error.CorruptSave;
             if (t.from_hq == t.to_hq or planet.find(a.planet_key) == null or planet.find(b.planet_key) == null or t.dispatch_day < f.acquisition_day or t.dispatch_day > gs.clock.day_index or t.eta_day <= t.dispatch_day or t.paid_cost < 0) return error.CorruptSave;
         },
-        .sold => {},
+        .sold, .destroyed => {},
     }
 }
 
@@ -771,8 +822,155 @@ fn validateHistory(gs: *const GameState, f: dom.Formation) error{CorruptSave}!vo
     }
     const initial = first orelse return error.CorruptSave;
     if (initial.from_day != f.acquisition_day or initial.acquisition_type != .purchase or !std.mem.eql(u8, initial.prior_owner_key, "market")) return error.CorruptSave;
+    if (f.placement == .destroyed) {
+        if (count != 1 or previous.?.isOpen() or f.armor_pct != 0 or f.tech != .none or operations.hasJob(gs, f.id) or f.slots[@intFromEnum(operation_rules.Slot.chassis)].condition != .destroyed) return error.CorruptSave;
+        for (f.crew) |id| if (id != .none) return error.CorruptSave;
+        for (f.slots) |slot| if (slot.rounds != 0) return error.CorruptSave;
+        return;
+    }
     if (!previous.?.isOpen()) return error.CorruptSave;
     if (f.placement == .sold) {
         if (count != 2 or previous.?.acquisition_type != .transfer or !std.mem.eql(u8, previous.?.prior_owner_key, "player")) return error.CorruptSave;
     } else if (count != 1) return error.CorruptSave;
+}
+
+fn validateResult(gs: *GameState, r: *const @import("../domain/battle_report.zig").BattleReport, a: *const @import("../domain/battle_report.zig").ArtilleryResult) error{CorruptSave}!void {
+    const combat = @import("../domain/artillery_combat.zig");
+    const f = gs.artillery_formations.getPtr(a.formation) orelse return error.CorruptSave;
+    if (a.formation == .none or @intFromEnum(a.formation) >= gs.next_artillery_formation_id or a.hull != f.hull or a.hull == .none or @intFromEnum(a.hull) >= gs.next_hull_instance_id or !std.mem.eql(u8, a.catalogue_key, carrier().key) or !std.mem.eql(u8, a.catalogue_name, carrier().name) or a.armor_before > dom.intact_condition_pct or a.armor_after > a.armor_before or a.compensation_basis < 0 or a.compensation_basis > f.paid_price) return error.CorruptSave;
+    try operation_rules.validateSlots(&a.slots_before);
+    try operation_rules.validateSlots(&a.slots_after);
+    if (!std.meta.eql(combat.loadedRounds(&a.slots_before), a.rounds_before) or !std.meta.eql(combat.loadedRounds(&a.slots_after), a.rounds_after)) return error.CorruptSave;
+    for (a.rounds_before, a.rounds_after, a.fired_rounds, a.lost_rounds) |before, after, fired, lost| {
+        if (@as(u32, after) + fired + lost != before) return error.CorruptSave;
+    }
+    const fired = a.fire != .not_fired;
+    if ((a.target != null) != fired or (a.accuracy_roll != null) != fired or (a.carrier_power != null) != fired or (a.no_fire == .none) != fired or a.fired_rounds[0] != @as(u16, @intFromBool(fired)) or a.fired_rounds[1] > 4) return error.CorruptSave;
+    if (r.conceded and a.no_fire != .no_line_units) return error.CorruptSave;
+    switch (a.no_fire) {
+        .none => {},
+        .not_present => if (a.physical_participation or a.readiness != .not_present) return error.CorruptSave,
+        .not_ready => if (!a.physical_participation or a.readiness == null) return error.CorruptSave,
+        .no_line_units => if (!r.conceded) return error.CorruptSave,
+        .enemy_forfeit => if (r.conceded or r.outcome != .victory or r.scenario.len != 0 or r.hulls.len != 0 or r.enemy_destroyed_bv != 0) return error.CorruptSave,
+        .zero_enemy_power => if (!a.physical_participation or a.readiness != null or a.enemy_power_before != 0) return error.CorruptSave,
+    }
+    if (fired) {
+        if (!a.physical_participation or a.readiness != null or a.target.? < combat.minimum_target or a.target.? > combat.maximum_target or a.accuracy_roll.? < combat.minimum_target or a.accuracy_roll.? > combat.maximum_target or a.carrier_power.? < 0 or a.enemy_power_before == null or a.enemy_power_after == null or a.enemy_power_before.? <= 0) return error.CorruptSave;
+        if ((a.fire == .hit) != (a.accuracy_roll.? >= a.target.?)) return error.CorruptSave;
+        if (a.suppressed_power != (if (a.fire == .hit) combat.suppressedPower(a.enemy_power_before.?, a.carrier_power.?) else 0)) return error.CorruptSave;
+    } else if (a.suppressed_power != 0) return error.CorruptSave;
+    if ((a.enemy_power_before != null) != (a.enemy_power_after != null)) return error.CorruptSave;
+    if (a.enemy_power_before) |power| if (power < 0 or a.enemy_power_after.? != power - a.suppressed_power or a.enemy_power_after.? != r.enemy_power) return error.CorruptSave;
+    const no_fight = r.conceded or a.no_fire == .enemy_forfeit;
+    try validateCapturedDamage(r, a, no_fight);
+    if (no_fight and (fired or a.severity != null or a.exposure_percent != null or a.damage != .not_exposed or a.recovery != null or a.compensation_basis != 0 or a.fired_rounds[1] != 0)) return error.CorruptSave;
+    if (!a.physical_participation and (a.damage != .not_exposed or a.exposure_percent != null or a.fired_rounds[1] != 0)) return error.CorruptSave;
+    if (a.exposure_percent) |pct| {
+        if (pct > combat.percent_scale or (a.exposure_roll != null) != (pct > 0)) return error.CorruptSave;
+        if (a.exposure_roll) |roll| if (roll >= combat.percent_scale or (a.severity != null) != (roll < pct)) return error.CorruptSave;
+    } else if (a.exposure_roll != null or a.severity != null) return error.CorruptSave;
+    if (a.severity) |severity| if (severity < combat.minimum_target or severity > combat.maximum_target or (a.struck_slot != null) != (severity >= @import("../domain/tuning.zig").t.battle.slot_hit_severity)) return error.CorruptSave;
+    if (a.severity == null and (a.struck_slot != null or a.struck_seat != null or a.newly_wrecked)) return error.CorruptSave;
+    var present: usize = 0;
+    for (a.seats, operation_rules.seats, 0..) |seat, identity, index| {
+        if (seat.seat != identity) return error.CorruptSave;
+        if (seat.person == .none) {
+            if (seat.name.len != 0 or seat.present or !seat.outcome.untouched() or seat.escape != null or seat.xp_participation) return error.CorruptSave;
+        } else {
+            if (@intFromEnum(seat.person) >= gs.next_person_id or gs.person(seat.person) == null or seat.name.len == 0) return error.CorruptSave;
+            for (a.seats[0..index]) |other| if (other.person == seat.person) return error.CorruptSave;
+        }
+        present += @intFromBool(seat.present);
+        if (seat.present and !a.physical_participation) return error.CorruptSave;
+        if (seat.xp_participation and (!fired or !seat.present or seat.outcome.fate == .kia)) return error.CorruptSave;
+        if (seat.escape != null and (!seat.present or r.held_field or (a.damage != .permanently_destroyed and a.damage != .scuttled) or seat.outcome.fate == .kia)) return error.CorruptSave;
+        if (seat.outcome.fate == .missing and (seat.escape == null or seat.escape.?.roll >= seat.escape.?.target)) return error.CorruptSave;
+        if (seat.outcome.wound) |w| if (w.severity < 1 or w.severity > 3 or a.struck_seat != identity) return error.CorruptSave;
+        if (seat.outcome.fate == .kia and a.struck_seat != identity) return error.CorruptSave;
+        if (!seat.outcome.untouched() and !seat.present) return error.CorruptSave;
+        if (seat.escape) |escape| {
+            if (escape.target != tuning.loss.escape_target or (seat.outcome.fate == .missing) != (escape.roll < escape.target)) return error.CorruptSave;
+        }
+    }
+    if (a.severity != null and (a.struck_seat != null) != (present > 0)) return error.CorruptSave;
+    if (a.struck_seat) |seat| if (!a.seats[@intFromEnum(seat)].present) return error.CorruptSave;
+    if (a.recovery != null and (r.held_field or (a.damage != .recovered and a.damage != .scuttled))) return error.CorruptSave;
+    if (a.recovery) |recovery_roll| if (recovery_roll.target != tuning.loss.recovery_target) return error.CorruptSave;
+    if (a.damage == .recovered and (a.recovery == null or a.recovery.?.roll < a.recovery.?.target)) return error.CorruptSave;
+    if (a.damage == .scuttled and (a.recovery == null or a.recovery.?.roll >= a.recovery.?.target or a.cause != .scrap)) return error.CorruptSave;
+    if (a.damage == .permanently_destroyed and a.cause != .ammo) return error.CorruptSave;
+    const terminal = a.damage == .permanently_destroyed or a.damage == .scuttled;
+    if (terminal or a.damage == .recoverable or a.damage == .recovered) {
+        if (a.armor_after != 0 or a.slots_after[@intFromEnum(operation_rules.Slot.chassis)].condition != .destroyed) return error.CorruptSave;
+    }
+    if (terminal) for (a.rounds_after) |rounds| if (rounds != 0) return error.CorruptSave;
+    if (a.compensation_basis != combat.damageValue(f.paid_price, a.severity orelse 0, a.newly_wrecked, terminal)) return error.CorruptSave;
+    var history: usize = 0;
+    for (gs.hull_combat_records.items) |entry| if (entry.hull_instance_id == a.hull and entry.battle_id == r.id) {
+        history += 1;
+    };
+    if (history != @intFromBool(a.physical_participation and !no_fight)) return error.CorruptSave;
+}
+
+/// Replay only captured ammunition and damage facts, never mutable live condition.
+/// Readiness and random choice are recorded inputs; the pure damage owner checks
+/// their deterministic consequence, including canonical spending and terminal loss.
+fn validateCapturedDamage(r: *const battle_report.BattleReport, a: *const battle_report.ArtilleryResult, no_fight: bool) error{CorruptSave}!void {
+    var slots = a.slots_before;
+    if (a.fire != .not_fired and combat_rules.spendRound(&slots, .long_tom) == null) return error.CorruptSave;
+    if (a.fired_rounds[1] > 0 and combat_rules.defensiveFire(&slots, combat_rules.exposure_divisor) != a.fired_rounds[1]) return error.CorruptSave;
+    const was_wrecked = a.armor_before == 0 and slots[@intFromEnum(operation_rules.Slot.chassis)].condition == .destroyed;
+    var armor = a.armor_before;
+    var expected_damage: combat_rules.DamageOutcome = .not_exposed;
+    var expected_cause: unit.WreckCause = .none;
+    var newly_wrecked = false;
+    if (a.physical_participation and !no_fight) {
+        if (a.exposure_percent == null) return error.CorruptSave;
+        expected_damage = if (was_wrecked) .recoverable else .unhit;
+        if (a.severity) |severity| {
+            const hit = combat_rules.carrierHit(armor, slots, severity, a.struck_slot);
+            armor = hit.armor_pct;
+            slots = hit.slots;
+            newly_wrecked = hit.wrecked and !was_wrecked;
+            expected_cause = hit.cause;
+            expected_damage = if (hit.terminal) .permanently_destroyed else if (hit.wrecked) .recoverable else .damaged;
+        }
+        if (expected_damage == .recoverable and !r.held_field) {
+            const recovery_roll = a.recovery orelse return error.CorruptSave;
+            expected_damage = if (recovery_roll.roll >= recovery_roll.target) .recovered else .scuttled;
+            if (expected_damage == .scuttled) expected_cause = .scrap;
+        } else if (a.recovery != null) return error.CorruptSave;
+        if (expected_damage == .permanently_destroyed or expected_damage == .scuttled) {
+            armor = 0;
+            slots[@intFromEnum(operation_rules.Slot.chassis)].condition = .destroyed;
+            for (&slots) |*slot| slot.rounds = 0;
+        }
+    }
+    if (a.damage != expected_damage or a.cause != expected_cause or a.newly_wrecked != newly_wrecked or a.armor_after != armor or !std.meta.eql(a.slots_after, slots)) return error.CorruptSave;
+}
+
+test "artillery reports reject invented armor slot and casualty changes without a hit" {
+    const battle_artillery = @import("artillery_battle.zig");
+    const reports = @import("../domain/battle_report.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const id = try operations.fixtureForTest(&gs, true);
+    const f = gs.artillery_formations.get(id).?;
+    const c: @import("../domain/contract.zig").Contract = .{ .id = @enumFromInt(1), .kind = .recon_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = gs.seatPlanetKey().?, .assigned_company = f.placement.company, .terms = .{ .length_months = 6, .base_pay_month = 400_000 } };
+    var a = (try battle_artillery.snapshot(&gs, &c, .not_ready)).?;
+    a.damage = .unhit;
+    a.exposure_percent = 0;
+    const r: reports.BattleReport = .{ .id = @enumFromInt(1), .day = 0, .contract = c.id, .company = c.assigned_company, .kind = "recon_raid", .enemy_key = "DC", .scenario = "", .terrain = "", .weather = "", .outcome = .victory, .held_field = true };
+    try battle_artillery.recordHistory(&gs, a, r.id, r.contract);
+    try validateResult(&gs, &r, &a);
+    var bad = a;
+    bad.armor_after -= 1;
+    try std.testing.expectError(error.CorruptSave, validateResult(&gs, &r, &bad));
+    bad = a;
+    bad.slots_after[@intFromEnum(operation_rules.Slot.main_gun)].condition = .damaged;
+    try std.testing.expectError(error.CorruptSave, validateResult(&gs, &r, &bad));
+    bad = a;
+    bad.seats[0].outcome.fate = .kia;
+    try std.testing.expectError(error.CorruptSave, validateResult(&gs, &r, &bad));
 }

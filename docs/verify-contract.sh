@@ -63,7 +63,7 @@ def layer_of(p):
         return 0  # frontends
     if p in ("src/sim/cli.zig", "src/persist/lobby.zig", "src/root.zig"):
         return 1  # application
-    if p in ("src/persist/store.zig", "src/persist/sqlite.zig", "src/persist/artillery_store.zig"):
+    if p in ("src/persist/store.zig", "src/persist/sqlite.zig", "src/persist/artillery_store.zig", "src/persist/artillery_battle_store.zig"):
         return 2  # persistence
     if p == "src/sim/queries.zig":
         return 3  # views
