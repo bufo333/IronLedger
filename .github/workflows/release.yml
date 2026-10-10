@@ -67,18 +67,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t metadata < <(python3 - "${{ matrix.zig_target }}" <<'PY'
+          read -r tarball shasum <<< "$(python3 - "${{ matrix.zig_target }}" <<'PY'
           import json
           import sys
           import urllib.request
           with urllib.request.urlopen("https://ziglang.org/download/index.json") as response:
               release = json.load(response)["0.16.0"][sys.argv[1]]
-          print(release["tarball"])
-          print(release["shasum"])
+          print(release["tarball"], release["shasum"])
           PY
-          )
-          curl --fail --location --silent --show-error "${metadata[0]}" --output "$RUNNER_TEMP/zig.tar.xz"
-          printf '%s  %s\n' "${metadata[1]}" "$RUNNER_TEMP/zig.tar.xz" | shasum -a 256 -c -
+          )"
+          curl --fail --location --silent --show-error "$tarball" --output "$RUNNER_TEMP/zig.tar.xz"
+          printf '%s  %s\n' "$shasum" "$RUNNER_TEMP/zig.tar.xz" | shasum -a 256 -c -
           mkdir -p "$RUNNER_TEMP/zig"
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
           printf '%s\n' "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"

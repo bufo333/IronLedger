@@ -75,12 +75,9 @@ test "paintPair picks the cube index for 256 colours" {
 test "CSI digit overflow saturates and produces .escape, not undefined behaviour" {
     // An overlong CSI digit string must not overflow; saturating arithmetic
     // yields a value outside all named cases, which maps to .escape (rule 64).
-    // The entire sequence fits in `pending`, so `fill` never reads `in_fd`.
-    var t: Term = .{
-        .in_fd = posix.STDIN_FILENO,
-        .orig = undefined, // not read in readKey
-        .out = undefined, // not read in readKey
-    };
+    // The entire sequence fits in `pending`, so `fill` never reads `in_fd`,
+    // and readKey never writes to `out`.
+    var t = Term.forTest(undefined);
     const seq = "\x1b[99999999999999999999~";
     @memcpy(t.pending[0..seq.len], seq);
     t.pending_len = seq.len;
@@ -193,6 +190,17 @@ pub const Term = struct {
     out: *std.Io.Writer,
     pending: [64]u8 = undefined,
     pending_len: usize = 0,
+
+    /// A Term for tests that never read the terminal: on POSIX `in_fd` is
+    /// -1, a descriptor that is never open, and `orig` is never restored;
+    /// on Windows the POSIX fields are void. `out` must outlive the Term.
+    pub fn forTest(out: *std.Io.Writer) Term {
+        return .{
+            .in_fd = if (native_os != .windows) -1 else {},
+            .orig = undefined,
+            .out = out,
+        };
+    }
 
     /// Enter raw mode + alternate screen. `out` must outlive the Term.
     pub fn init(out: *std.Io.Writer) !Term {

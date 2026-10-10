@@ -84,7 +84,7 @@ except OSError as e:
     exc_text = ""
 m = re.search(r"```layering\n(.*?)```", exc_text, re.S)
 if m is None:
-    print("docs/contract-exceptions.md has no ```layering block")
+    print("docs/contract-exceptions.md has no layering block")
 record = set(l.strip() for l in (m.group(1).splitlines() if m else []) if l.strip())
 
 fails = []

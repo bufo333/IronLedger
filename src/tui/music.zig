@@ -415,7 +415,7 @@ test "the playlist mixes every soundtrack once, shuffled, and a selection filter
     try std.testing.expectEqual(@as(usize, 2), p.setCount(1));
     // The name helper through a stub child.
     p.current = 3;
-    p.child = .{ .id = null, .thread_handle = {}, .stdin = null, .stdout = null, .stderr = null, .request_resource_usage_statistics = false };
+    p.child = .{ .id = null, .thread_handle = if (native_os == .windows) undefined else {}, .stdin = null, .stdout = null, .stderr = null, .request_resource_usage_statistics = false };
     try std.testing.expectEqualStrings("Raid", p.nowPlaying().?);
     try std.testing.expectEqualStrings("pirates", p.nowPlayingSet().?);
 }

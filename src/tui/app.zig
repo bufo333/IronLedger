@@ -5004,7 +5004,7 @@ pub fn clientForTest(gpa: std.mem.Allocator) !*ClientForTest {
     const c = try gpa.create(ClientForTest);
     errdefer gpa.destroy(c);
     c.sink = std.Io.Writer.Discarding.init(&.{});
-    c.term = .{ .in_fd = -1, .orig = undefined, .out = &c.sink.writer };
+    c.term = Term.forTest(&c.sink.writer);
     const store = try game.lobby.Lobby.open(":memory:");
     c.app = try App.init(gpa, std.testing.io, &c.term, store);
     try c.app.screen.resize(200, 50);
@@ -5381,7 +5381,7 @@ test "generateCampaign force-loads selected thumbnail before reading its bytes (
     // generateCampaign must still produce a non-empty emblem image.
     const gpa = std.testing.allocator;
     var sink = std.Io.Writer.Discarding.init(&.{});
-    var term: Term = .{ .in_fd = -1, .orig = undefined, .out = &sink.writer };
+    var term = Term.forTest(&sink.writer);
     const store = try game.lobby.Lobby.open(":memory:");
     defer store.close();
     var app = try App.init(gpa, std.testing.io, &term, store);
@@ -5422,7 +5422,7 @@ test "generateCampaign force-loads selected thumbnail before reading its bytes (
 test "outfit frame queues visible thumbnails instead of decoding them; the run loop decodes one per poll" {
     const gpa = std.testing.allocator;
     var sink = std.Io.Writer.Discarding.init(&.{});
-    var term: Term = .{ .in_fd = -1, .orig = undefined, .out = &sink.writer };
+    var term = Term.forTest(&sink.writer);
     const store = try game.lobby.Lobby.open(":memory:");
     defer store.close();
     var app = try App.init(gpa, std.testing.io, &term, store);
