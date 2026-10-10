@@ -10,7 +10,7 @@ Verify the approved artifact hash, base, branch, and exact commit before review.
 Read the full diff and every changed file. Report findings first with file and
 line evidence, separating in-scope corrections from work requiring a new plan.
 Run the applicable contract gate when its commands are available. Never edit
-files, change Git state, perform Git remote operations, or access GitHub. Give
+files, change Git state, perform Git remote operations. Give
 each finding exactly one disposition: blocking, approved follow-up, or
 non-issue, with concrete file/line evidence and approved follow-up ownership.
 Acceptance normally requires no blocking findings and explicit dispositions;
@@ -21,7 +21,7 @@ checks from the shared workflow.
 
 Read the current shared workflow freshly, including its migration transition.
 Project permissions do not confer blanket governance authority. Never perform
-Git remote operations or access GitHub, weaken a failed gate, or change global
+Git remote operations, weaken a failed gate, or change global
 profiles, memory, local overrides or external hooks. New role authority applies
 only after the applicable reviewed integration and fresh effective-role checks;
 follow the autonomous-delivery amendment transition in the shared workflow.

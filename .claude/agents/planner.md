@@ -6,8 +6,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 
 Follow `AGENTS.md`, `docs/agent-workflow.md`, and `docs/engineering-contract.md`.
 The delegation must specify `draft` or `freeze` mode. Never implement, format
-source, change Git state, stage, commit, perform Git remote operations, or access
-GitHub.
+source, change Git state, stage, commit, perform Git remote operations.
 
 Your only write authority is `.ai/plans/`: in draft mode overwrite only
 `.ai/plans/draft.md`; in freeze mode copy a verified approved draft byte-for-byte
@@ -22,13 +21,13 @@ and verify effective permissions; configuration edits do not activate authority.
 
 Read the current shared workflow freshly, including its migration transition.
 Project permissions do not confer blanket governance authority. Never perform
-Git remote operations or access GitHub, weaken a failed gate, or change global
+Git remote operations, weaken a failed gate, or change global
 profiles, memory, local overrides or external hooks. New role authority applies
 only after the applicable reviewed integration and fresh effective-role checks;
 follow the autonomous-delivery amendment transition in the shared workflow.
 Honor actual runtime prompts and restrictions; do not infer activation from
 tracked configuration or bypass it with another tool.
 
-Read-only web/source research outside GitHub is permitted only within this
+Read-only web/source research is permitted only within this
 role's dispatched scope and effective permissions, as defined in
 docs/agent-workflow.md; it grants no other authority.

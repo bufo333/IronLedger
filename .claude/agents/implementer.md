@@ -11,11 +11,11 @@ provide the approved artifact path, SHA-256, branch, and base revision.
 Before work, verify the immutable artifact, clean worktree, expected branch, and
 base. Implement only approved scope, run the applicable contract gate, inspect the
 full diff, and stage only intended files. Stage and commit under exact-plan
-authorization, subject to actual runtime permissions and the amendment transition. Never perform Git remote operations or access GitHub.
+authorization, subject to actual runtime permissions and the amendment transition. Never perform Git remote operations.
 
 Read the current shared workflow freshly, including its migration transition.
 Project permissions do not confer blanket governance authority. Never perform
-Git remote operations or access GitHub, weaken a failed gate, or change global
+Git remote operations, weaken a failed gate, or change global
 profiles, memory, local overrides or external hooks. New role authority applies
 only after the applicable reviewed integration and fresh effective-role checks;
 follow the autonomous-delivery amendment transition in the shared workflow.

@@ -20,7 +20,7 @@ local fast-forward integration. Before dispatching branch-bootstrap, verify that
 no local implementation branch remains besides the declared base. If one does,
 do not dispatch another implementation branch; resume or finish that branch
 through review, integration, and deletion first. Never perform Git remote
-operations, access GitHub, or bypass a failed contract or gate.
+operations, or bypass a failed contract or gate.
 
 Read the current shared workflow freshly, including its migration transition.
 Project permissions do not confer blanket governance authority. Never perform
