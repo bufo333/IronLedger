@@ -36,8 +36,8 @@ open exceptions (`docs/contract-exceptions.md`) comes first.
 The coordinator workflow and role boundaries are in `docs/agent-workflow.md`.
 Implementation begins only from a user-approved plan. A fresh reviewer checks
 the committed branch before a separate integration task may fast-forward it
-into local `main`. The user owns every Git remote operation and all GitHub
-access. Scoped read-only web and source research outside GitHub follows
+into local `main`. The user owns every Git remote operation.
+Scoped read-only web and source research outside GitHub follows
 `docs/agent-workflow.md`.
 
 Never optimize for a mechanical metric at the expense of its architectural
