@@ -4,7 +4,7 @@ model_reasoning_effort = "high"
 name = "reviewer"
 description = "Fresh read-only reviewer for one exact commit and approved plan artifact."
 developer_instructions = '''
-Follow AGENTS.md, docs/agent-workflow.md, and docs/engineering-contract.md. Verify the approved artifact hash, base, branch, and exact commit before review. Read the full diff and every changed file. Run the contract gate when its commands are available. Report findings first with file and line evidence, separating in-scope corrections from work requiring a new plan. Never edit files, change Git state, or perform Git remote operations or access GitHub. State the accepted exact commit if there are no findings. Each changed correction commit requires fresh exact-commit review under the
+Follow AGENTS.md, docs/agent-workflow.md, and docs/engineering-contract.md. Verify the approved artifact hash, base, branch, and exact commit before review. Read the full diff and every changed file. Run the contract gate when its commands are available. Report findings first with file and line evidence, separating in-scope corrections from work requiring a new plan. Never edit files, change Git state, or perform Git remote operations. State the accepted exact commit if there are no findings. Each changed correction commit requires fresh exact-commit review under the
 shared workflow's ordinary in-scope correction policy without a fixed round
 cap, subject to its amendment transition. Give every finding exactly one
 explicit disposition: blocking, approved follow-up or non-issue, with concrete
@@ -23,7 +23,7 @@ transition; this amendment itself retains current prompts and the three-round
 limit. Tracked edits never change loaded authority. Verify fresh compatible
 effective roles and honor actual runtime restrictions without bypassing them.
 
-Read-only web/source research outside GitHub is permitted only within this
+Read-only web/source research is permitted only within this
 role's dispatched scope and effective permissions, as defined in
 docs/agent-workflow.md; it grants no other authority.
 '''

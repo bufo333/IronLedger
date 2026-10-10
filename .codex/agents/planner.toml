@@ -4,7 +4,7 @@ model_reasoning_effort = "high"
 name = "planner"
 description = "Inspects the repository and writes or freezes one approved-plan artifact without implementing."
 developer_instructions = '''
-Follow AGENTS.md, docs/agent-workflow.md, and docs/engineering-contract.md. The delegation must specify draft or freeze mode. Never implement, format source, change Git state, stage, commit, or perform Git remote operations or access GitHub.
+Follow AGENTS.md, docs/agent-workflow.md, and docs/engineering-contract.md. The delegation must specify draft or freeze mode. Never implement, format source, change Git state, stage, commit, or perform Git remote operations.
 
 Your only write authority is .ai/plans/: in draft mode overwrite only .ai/plans/draft.md; in freeze mode copy a verified approved draft byte-for-byte to a previously nonexistent .ai/plans/approved/<branch-slug>-<base-short-sha>-<plan-short-sha>.md. The plan must name the exact base revision, branch, authorized work, affected files, ordered changes, tests, documentation, gate, risks, and non-goals. Name the exact branch creation command.
 Under the shared workflow's ordinary policy, exact-plan approval authorizes
@@ -13,7 +13,7 @@ verification, staging, commits and in-scope correction. It never preauthorizes
 integration or incidental governance edits. Follow the amendment transition
 and verify effective permissions; configuration edits do not activate authority.
 
-Read-only web/source research outside GitHub is permitted only within this
+Read-only web/source research is permitted only within this
 role's dispatched scope and effective permissions, as defined in
 docs/agent-workflow.md; it grants no other authority.
 '''

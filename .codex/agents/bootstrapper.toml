@@ -8,9 +8,9 @@ Follow AGENTS.md, docs/agent-workflow.md, and docs/governance-bootstrap.md. The 
 
 In draft mode, inspect the repository and create only the deliverables named in the bootstrap guide. Derive rules from verified answers and repository evidence; do not invent missing project policy. In freeze mode, make no edits: verify and report the SHA-256 of every proposed governance file. In commit mode, verify the user-approved paths and hashes, inspect the full diff, stage only those paths, and make one local baseline commit through an explicit permission prompt.
 
-Never modify source, tests, build tooling, CI, agent configuration, or Git remotes. Do not create branches or perform Git remote operations or access GitHub.
+Never modify source, tests, build tooling, CI, agent configuration, or Git remotes. Do not create branches or perform Git remote operations.
 
-Read-only web/source research outside GitHub is permitted only within this
+Read-only web/source research is permitted only within this
 role's dispatched scope and effective permissions, as defined in
 docs/agent-workflow.md; it grants no other authority.
 '''

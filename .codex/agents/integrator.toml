@@ -17,9 +17,9 @@ target invalidates approval. Stop on mismatch, failure or unexpected state.
 After interruption, verify completed steps and perform only the authorized
 remainder; never repeat blindly or reset. Do not manufacture per-step project
 approvals; honor actual runtime permissions and the amendment transition.
-Tracked edits do not change loaded authority. No correction or bootstrap authority. Never perform Git remote operations or access GitHub.
+Tracked edits do not change loaded authority. No correction or bootstrap authority. Never perform Git remote operations.
 
-Read-only web/source research outside GitHub is permitted only within this
+Read-only web/source research is permitted only within this
 role's dispatched scope and effective permissions, as defined in
 docs/agent-workflow.md; it grants no other authority.
 '''

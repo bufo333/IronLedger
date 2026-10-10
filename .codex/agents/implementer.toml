@@ -14,7 +14,7 @@ gate blocks acceptance and integration; in-scope repair remains authorized.
 Material expansion requires a revised complete exact-hash-approved artifact.
 Resume partial tasks by task ID; continuation checks the same artifact and
 existing branch/diff rather than restarting on a dirty tree. Answer the delivery
-checklist; no integration authority. Preserve tracker-evidence checks. Never perform Git remote operations or access GitHub.
+checklist; no integration authority. Preserve tracker-evidence checks. Never perform Git remote operations.
 
 Approved local file work is agent-applied under the existing role boundaries
 and Agent-applied local work section of docs/agent-workflow.md; do not require
@@ -27,7 +27,7 @@ transition; this amendment itself retains current prompts and the three-round
 limit. Tracked edits never change loaded authority. Verify fresh compatible
 effective roles and honor actual runtime restrictions without bypassing them.
 
-Read-only web/source research outside GitHub is permitted only within this
+Read-only web/source research is permitted only within this
 role's dispatched scope and effective permissions, as defined in
 docs/agent-workflow.md; it grants no other authority.
 '''
