@@ -13,8 +13,8 @@ jobs:
     name: music archive
     runs-on: ubuntu-24.04
     steps:
-      # actions/checkout@v4
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Package music ZIP
@@ -35,8 +35,8 @@ jobs:
           python3 scripts/package_release.py package-music --version "$version" --output "$release" --source-root .
           python3 scripts/package_release.py validate-music --archive "$release/iron-ledger-${version}-music.zip" --version "$version" --source-root .
           (cd "$release" && shasum -a 256 "iron-ledger-${version}-music.zip") > "$release/music.sha256"
-      # actions/upload-artifact@v4
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      # actions/upload-artifact@v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: music
           path: ${{ runner.temp }}/release/
@@ -60,8 +60,8 @@ jobs:
             label: windows-x64
             zig_target: x86_64-windows
     steps:
-      # actions/checkout@v4
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
 
@@ -197,8 +197,8 @@ jobs:
           pwsh -ExecutionPolicy Bypass -File docs/windows_smoke.ps1 (Join-Path $prefix 'bin/game.exe') (Join-Path $env:RUNNER_TEMP 'windows-package-smoke.db')
           (Get-FileHash -Algorithm SHA256 (Join-Path $release 'iron-ledger-1.0.0-windows-x64.zip')).Hash.ToLowerInvariant() + '  iron-ledger-1.0.0-windows-x64.zip' | Set-Content -NoNewline (Join-Path $release 'windows-x64.sha256')
 
-      # actions/upload-artifact@v4
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      # actions/upload-artifact@v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: core-${{ matrix.label }}
           path: ${{ runner.temp }}/release/
