@@ -29,7 +29,7 @@ rig send workflow-reviewer@scaffold-mixed --raw "/new"        # codex seat
 rig capture workflow-reviewer@scaffold-mixed
 ```
 
-`rig ps --nodes --rig <rig> --full` shows each seat's runtime. The capture must show an empty prompt with no prior conversation. If a Codex seat instead shows "Where should the new conversation run?", that is a native prompt you cannot drive; report it to John and do not dispatch until the seat is at an empty prompt.
+`rig ps --nodes --rig <rig> --full` shows each seat's runtime. The capture must show an empty prompt with no prior conversation. If the seat instead shows a native menu or prompt, that is a configuration gap you cannot drive; report it to John and do not dispatch until the seat is at an empty prompt.
 
 An in-place reset does not replay the seat's startup guidance, so the first line of every dispatch body must be: "Before anything else, read and follow openrig/agents/<role>/guidance/role.md." The seat's `rig whoami` identity and queue address are unchanged by the reset.
 
@@ -60,7 +60,7 @@ Both commands nudge the destination seat by default. Do not add `--no-nudge` in 
 
 A worker finishes by handing a queue item back to you, which wakes you. Do not poll with repeated `rig capture`. If you need to look, use `rig queue list --owned` for your own items, `rig queue show <id> --full` to read one, and `rig ps --nodes --rig <rig>` for seat state.
 
-If `rig ps` shows a worker in `needs-input`, it is stuck on an interactive or permission prompt that it cannot act through from inside its own turn. Report the seat and the prompt to John in your own terminal. Never use `rig send --dangerously-interact` to drive another seat's permission prompt.
+If `rig ps` shows a worker in `needs-input`, it is stuck on an interactive or permission prompt that it cannot act through from inside its own turn. Seats are configured to run without native prompts, so a parked seat is a configuration gap: report the seat and the exact prompt text to John in your own terminal. Never use `rig send --dangerously-interact` to drive another seat's permission prompt.
 
 ## Receiving a result
 

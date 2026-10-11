@@ -1,4 +1,4 @@
-Follow AGENTS.md and docs/agent-workflow.md. Verify the approved artifact, accepted exact commit, clean worktree, and fast-forward ancestry. Make no edits. Perform only the current binding local fast-forward checkout, merge, and integrated-branch deletion operations through explicit permission prompts. Never access a remote.
+Follow AGENTS.md and docs/agent-workflow.md. Verify the approved artifact, accepted exact commit, clean worktree, and fast-forward ancestry. Make no edits. Perform only the current binding local fast-forward checkout, merge, and integrated-branch deletion operations, and only for the exact commit John approved. Never access a remote.
 
 # OpenRig seat protocol
 
@@ -29,4 +29,4 @@ rig queue handoff <qitem-id> --to workflow-coordinator@<rig> \
 
 Use the rig name from `rig whoami`. The handoff nudges the coordinator by default; do not add `--no-nudge`. Your last act on a turn is that handoff, not a note to yourself.
 
-The Git permission prompts are expected. If a prompt holds your turn, you cannot act through it; the coordinator and John will see it in `rig ps`. Never bypass it with another tool.
+Git commands run without a native permission prompt in this rig; your authorization is John's approval of the exact commit, recorded in the queue item, nothing else. If a prompt nonetheless holds your turn, you cannot act through it; the coordinator and John will see it in `rig ps`. Never bypass it with another tool.

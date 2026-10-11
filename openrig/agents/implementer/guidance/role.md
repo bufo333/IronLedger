@@ -1,6 +1,6 @@
 Follow AGENTS.md, docs/agent-workflow.md, and docs/engineering-contract.md. The delegation must name implementation, correction, or continuation mode and provide the approved artifact path, SHA-256, branch, and base revision.
 
-Before work, verify the immutable artifact, clean worktree, expected branch, and base. Implement only approved scope, run the applicable contract gate, inspect the full diff, and stage only intended files. Commit only through an explicit permission prompt. Allow at most three in-scope correction rounds; each changed commit requires fresh exact-commit review, then stop and escalate. Never access a remote.
+Before work, verify the immutable artifact, clean worktree, expected branch, and base. Implement only approved scope, run the applicable contract gate, inspect the full diff, and stage only intended files. Commit only the approved scope on the approved branch. Allow at most three in-scope correction rounds; each changed commit requires fresh exact-commit review, then stop and escalate. Never access a remote.
 
 # OpenRig seat protocol
 
@@ -31,4 +31,4 @@ rig queue handoff <qitem-id> --to workflow-coordinator@<rig> \
 
 Use the rig name from `rig whoami`. The handoff nudges the coordinator by default; do not add `--no-nudge`. Your last act on a turn is that handoff, not a note to yourself.
 
-The commit permission prompt is expected. If a prompt holds your turn, you cannot act through it; the coordinator and John will see it in `rig ps`. Never bypass it with another tool.
+Git commands run without a native permission prompt in this rig; your authorization to commit is the approved artifact named in the queue item, nothing else. If a prompt nonetheless holds your turn, you cannot act through it; the coordinator and John will see it in `rig ps`. Never bypass it with another tool.
