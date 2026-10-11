@@ -68,7 +68,7 @@ A package has one primary invariant or subsystem outcome.
 - [ ] TUI command parity (ROADMAP "TUI command parity"): first a verb→key
   coverage matrix in docs/tui.md over every `cli.verbs` entry; then the F6 ship
   form offers HQ destinations, F2 `f` opens a name modal for `found`, and
-  `link`/`assignco` gain F7 keys. Artillery controls remain P2i.
+  `link`/`assignco` gain F7 keys.
 - [ ] Per-location armor data accuracy (lower priority, after P3f): pull the 8 front
   and 3 rear-torso armor values per mech from the MegaMek 3039u MTF files
   (https://github.com/MegaMek/mm-data/tree/main/data/mekfiles/meks/3039u) for

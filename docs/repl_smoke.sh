@@ -62,6 +62,8 @@ printf '%s\n' \
   'mech 3' \
   'mech 999' \
   'artillery' \
+  'artillery 999 trailing' \
+  'artillery 999' \
   'seat 999 badname 1' \
   'seat 999 commander 1' \
   'save' \
@@ -134,8 +136,9 @@ check 'advanced 3 day'
 check 'engagements'
 check 'usage: mech'
 check 'saved campaign'
-# P2i: artillery REPL surface — list, bad seat name, unknown formation id.
+# P2i: artillery REPL surface — list, bad seat name, unknown formation id, trailing token.
 check 'no artillery formations'
 check 'usage: seat'
 check 'no artillery formation has that id'
+check 'usage: artillery'
 echo "REPL SMOKE OK"

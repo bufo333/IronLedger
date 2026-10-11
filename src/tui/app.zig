@@ -152,6 +152,8 @@ const Modal = union(enum) {
     leaderboard,
     /// Detail sheet for one NPC merc company, entered from the leaderboard.
     leaderboard_detail: types.MercCompanyId,
+    /// Artillery formation detail (narrow terminals: no side pane).
+    arty_detail: types.ArtilleryFormationId,
 };
 
 const MechView = enum { summary, combat, maintenance, ownership };
@@ -391,8 +393,6 @@ pub const App = struct {
     /// Forces screen view: index into queries.toeViews (all, each company, unassigned).
     /// When forces_view == toeViews.len it selects the artillery panel.
     forces_view: usize = 0,
-    /// Artillery panel cursor: selected formation index in the list pane.
-    forces_arty_cursor: usize = 0,
     /// Settings form: the highlighted row.
     settings_cursor: usize = 0,
     /// Forces side pane on a company row: DAMAGE, READINESS or MANNING (r cycles).
@@ -1485,7 +1485,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail => try self.drawList(al),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -3300,6 +3300,7 @@ pub const App = struct {
                 return .{ .title = try listTitle(al, "EMBLEM", "use", "cancel", false), .right_title = try std.fmt.allocPrint(al, "pictures from {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}), .rows = rows.items, .n = rows.items.len, .w = layout.modal.emblem_w, .max_h = layout.modal.emblem_max_h };
             },
             .hull => |uid| return .{ .title = try listTitle(al, "HULL", null, "close", false), .rows = try q.hull(al, self.state(), uid), .read_only = true, .w = layout.modal.hull_w, .max_h = full_h },
+            .arty_detail => |fid| return .{ .title = try listTitle(al, "ARTILLERY DETAIL", null, "close", false), .rows = try q.artilleryDetailLines(al, self.state(), fid), .read_only = true, .w = layout.modal.hull_w, .max_h = full_h },
             .record => |pid| {
                 const g = self.state();
                 const pa = try q.personActions(al, g, pid);
@@ -4565,7 +4566,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail => try self.listKey(key),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {

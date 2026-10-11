@@ -401,10 +401,13 @@ fn printOffers(gs: *game.state.GameState, al: std.mem.Allocator) !void {
     std.debug.print("Contract board ({d} offers):\n", .{c.board.len});
     printTable(al, q.board_cols, c.board, "  ") catch |err| showError(err);
     std.debug.print("  (* = beachhead: premium pay, hardship costs, slow resupply · `candidates <offer#>` ranks the companies that could go)\n", .{});
-    const arty_offers = q.artilleryOffersLines(al, gs) catch return; // best-effort: REPL offers section is supplemental
-    if (arty_offers.len > 0) {
-        std.debug.print("Artillery offers ({d}):\n", .{arty_offers.len});
-        printLines(al, arty_offers, "  ") catch |err| showError(err);
+    const arty_rows = q.artilleryOfferRows(al, gs) catch |err| {
+        showError(err);
+        return;
+    };
+    if (arty_rows.len > 0) {
+        std.debug.print("Artillery offers ({d}):\n", .{arty_rows.len});
+        for (arty_rows) |r| std.debug.print("  {s}\n", .{q.stripMarks(al, r.text) catch r.text});
     }
 }
 
@@ -634,10 +637,29 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                     std.debug.print("usage: artillery [<formation-id>]\n", .{});
                     continue;
                 });
-                printLines(al, q.artilleryDetailLines(al, gs, fid) catch &.{}, "") catch |err| showError(err);
+                if (tokens.next() != null) {
+                    std.debug.print("usage: artillery [<formation-id>]\n", .{});
+                    continue;
+                }
+                const detail = q.artilleryDetailLines(al, gs, fid) catch |err| {
+                    showError(err);
+                    continue;
+                };
+                if (detail.len == 0) {
+                    std.debug.print("no artillery formation has that id\n", .{});
+                } else {
+                    printLines(al, detail, "") catch |err| showError(err);
+                }
             } else {
-                const lines = q.artilleryListLines(al, gs) catch &.{};
-                if (lines.len == 0) std.debug.print("no artillery formations.\n", .{}) else printLines(al, lines, "") catch |err| showError(err);
+                const rows = q.artilleryFormationRows(al, gs) catch |err| {
+                    showError(err);
+                    continue;
+                };
+                if (rows.len == 0) {
+                    std.debug.print("no artillery formations.\n", .{});
+                } else {
+                    for (rows) |r| std.debug.print("{s}\n", .{q.stripMarks(al, r.text) catch r.text});
+                }
             }
         } else if (std.mem.eql(u8, verb, "candidates")) {
             const raw = std.fmt.parseInt(u32, tokens.next() orelse "0", 10) catch {
@@ -875,7 +897,13 @@ fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r
         .found_hq, .link, .assign_company => printHqs(gs, al) catch |err| showError(err),
         .auto_assign => |co| printLines(al, q.companyRoster(al, gs, co) catch &.{}, "") catch |err| showError(err),
         .autostaff => |hq| printLines(al, q.hqRoster(al, gs, hq) catch &.{}, "") catch |err| showError(err),
-        .buy_artillery => printLines(al, q.artilleryListLines(al, gs) catch &.{}, "") catch |err| showError(err),
+        .buy_artillery => {
+            const frows = q.artilleryFormationRows(al, gs) catch |err| {
+                showError(err);
+                return;
+            };
+            for (frows) |frow| std.debug.print("{s}\n", .{q.stripMarks(al, frow.text) catch frow.text});
+        },
         else => {},
     }
 }

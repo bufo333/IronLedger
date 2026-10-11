@@ -698,6 +698,14 @@ and the TUI:
   a `LeaderboardRow.id` the Desk Reports hub uses to open the detail sheet)
 - `mercCompanyDetail(id)` (read-only lines: identity, lifecycle, treasury,
   fieldable BV, hull roster, linked rival standing)
+- `artilleryFormationRows` (typed `ArtilleryFormationRow` list: `.id` +
+  `.text` with quality, hull id, placement, per-formation carry cost;
+  used by the Forces artillery panel and the REPL `artillery` list view)
+- `artilleryDetailLines(id)` (detail lines for one formation: header with
+  hull id, readiness, crew, tech, magazines, upkeep; used by the Forces
+  detail pane and the `arty_detail` modal on narrow terminals)
+- `artilleryOfferRows` (typed `ArtilleryOfferRow` list: `.id` + `.text`;
+  used by the Market artillery-offers pane and the `buyarty` REPL verb)
 
 Every query is pure and allocator-parameterized so the TUI can rebuild its
 view model each frame from an arena.

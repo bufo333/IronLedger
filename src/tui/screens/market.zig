@@ -43,16 +43,18 @@ pub fn draw(self: *App) anyerror!void {
         try self.tableOrNote(inner3, try q.tableOf(al, q.demand_cols, view.demand), 2, self.focus == 2, "{g}nothing damaged{/}");
         const pol = try q.stockPolicies(al, g, hq_id);
         const remaining_h = side_h - dem_h;
-        const keep_h: u16 = @divTrunc(remaining_h, 2);
+        const keep_h: u16 = layout.half.of(remaining_h);
         const arty_h: u16 = remaining_h - keep_h;
         const inner4 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h, .w = b.w - cw, .h = keep_h }, .{ .title = try std.fmt.allocPrint(al, "KEEP STOCKED · {s} · checked daily", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.paneFocused(3), .right_title = try app.keys.paneTitle(al, &legend, 3) });
         try self.tableOrNote(inner4, try q.tableOf(al, q.stock_policy_cols, pol), 3, self.focus == 3, "{d}none — keep a catalogue row stocked to add a line here{/}");
-        const arty_offers = try q.artilleryOffersLines(al, g);
+        const arty_offer_rows = try q.artilleryOfferRows(al, g);
         const c4 = self.cur(4);
-        App.clampIdx(c4, arty_offers.len);
+        App.clampIdx(c4, arty_offer_rows.len);
         const inner5 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h + keep_h, .w = b.w - cw, .h = arty_h }, .{ .title = try std.fmt.allocPrint(al, "ARTILLERY OFFERS · {s}", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.paneFocused(4), .right_title = try app.keys.paneTitle(al, &legend, 4) });
-        const arty_cursor: ?usize = if (self.focus == 4 and arty_offers.len > 0) c4.* else null;
-        self.screen.lines(inner5, arty_offers, App.firstRow(c4.*, inner5.h), arty_cursor);
+        const arty_cursor: ?usize = if (self.focus == 4 and arty_offer_rows.len > 0) c4.* else null;
+        var arty_texts = try al.alloc([]const u8, arty_offer_rows.len);
+        for (arty_offer_rows, 0..) |r, i| arty_texts[i] = r.text;
+        self.screen.lines(inner5, arty_texts, App.firstRow(c4.*, inner5.h), arty_cursor);
     }
 }
 
@@ -70,7 +72,7 @@ pub fn move(self: *App, delta: i32) anyerror!void {
         1 => self.moveCursor(1, delta, view.catalog.len),
         2 => self.moveCursor(2, delta, view.demand.len),
         3 => self.moveCursor(3, delta, (try q.stockPolicies(al, g, @enumFromInt(try self.hqSelId(g)))).len),
-        else => self.moveCursor(4, delta, (try q.artilleryOffersLines(al, g)).len),
+        else => self.moveCursor(4, delta, (try q.artilleryOfferRows(al, g)).len),
     }
 }
 
@@ -212,13 +214,13 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             }
         },
         .buy_arty => {
-            const offer_ids = try q.artilleryOfferIds(al, g);
-            if (offer_ids.len == 0) {
+            const offer_rows = try q.artilleryOfferRows(al, g);
+            if (offer_rows.len == 0) {
                 self.say(.dim, "no artillery offers available", .{});
                 return true;
             }
             const c4 = self.cur(4).*;
-            const offer_id = offer_ids[@min(c4, offer_ids.len - 1)];
+            const offer_id = offer_rows[@min(c4, offer_rows.len - 1)].id;
             const cmd: game.commands.Command = .{ .buy_artillery = .{ .hq = hq_id, .offer = offer_id } };
             const res = self.execResult(cmd) orelse return true;
             self.say(.good, "{s}", .{try q.resultText(self.a(), g, cmd, res)});

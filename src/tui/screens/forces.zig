@@ -19,21 +19,22 @@ pub fn draw(self: *App) anyerror!void {
     // forces_view may be views.len when the artillery panel is selected.
     if (self.forces_view > views.len) self.forces_view = views.len;
     if (self.forces_view == views.len) {
-        // Artillery panel
-        const arty_lines = try q.artilleryListLines(al, g);
-        App.clampIdx(&self.forces_arty_cursor, arty_lines.len);
+        // Artillery panel: use cur(0) as the single shared selection cursor.
+        const arty_rows = try q.artilleryFormationRows(al, g);
+        App.clampIdx(self.cur(0), arty_rows.len);
         const lw: u16 = if (layout.wide(b.w)) layout.list.of(b.w) else b.w;
         const total_views = views.len + 1;
-        self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, try std.fmt.allocPrint(al, "ARTILLERY ({d}/{d}) · {s}", .{ total_views, total_views, try app.keys.paneTitle(al, &legend, 0) }), arty_lines, 0, self.paneFocused(0), true);
+        var list_texts = try al.alloc([]const u8, arty_rows.len);
+        for (arty_rows, 0..) |r, i| list_texts[i] = r.text;
+        self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, try std.fmt.allocPrint(al, "ARTILLERY ({d}/{d}) · {s}", .{ total_views, total_views, try app.keys.paneTitle(al, &legend, 0) }), list_texts, 0, self.paneFocused(0), true);
         if (lw < b.w) {
-            const fkeys = g.artillery_formations.keys();
-            if (self.forces_arty_cursor < fkeys.len) {
-                const fid = fkeys[self.forces_arty_cursor];
-                const detail = try q.artilleryDetailLines(al, g, fid);
-                self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = b.h }, "ARTILLERY DETAIL", detail, 1, false, false);
+            const cur_val = self.cur(0).*;
+            if (cur_val < arty_rows.len) {
+                const detail = try q.artilleryDetailLines(al, g, arty_rows[cur_val].id);
+                self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = b.h }, "ARTILLERY DETAIL", detail, 1, self.paneFocused(1), false);
             } else {
                 const empty = [_][]const u8{"{d}no artillery formations{/}"};
-                self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = b.h }, "ARTILLERY DETAIL", &empty, 1, false, false);
+                self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = b.h }, "ARTILLERY DETAIL", &empty, 1, self.paneFocused(1), false);
             }
         }
         return;
@@ -87,12 +88,10 @@ pub fn move(self: *App, delta: i32) anyerror!void {
     const g = self.state();
     const views = try q.toeViews(al, g);
     if (self.forces_view == views.len) {
-        // Artillery panel: move the arty cursor
-        const arty_lines = try q.artilleryListLines(al, g);
-        const len = arty_lines.len;
-        if (len == 0) return;
-        const cur = &self.forces_arty_cursor;
-        if (delta > 0) cur.* = @min(cur.* + 1, len - 1) else if (cur.* > 0) cur.* -= 1;
+        // Artillery panel: only move the list cursor when focus is on the list pane.
+        if (self.focus != 0) return;
+        const arty_rows = try q.artilleryFormationRows(al, g);
+        self.moveCursor(0, delta, arty_rows.len);
         return;
     }
     if (self.focus == 0) {
@@ -143,8 +142,8 @@ pub const legend = app.keys.entries(Action, &bindings);
 
 fn handleArty(self: *App, action: Action, al: std.mem.Allocator, g: *app.GameState) anyerror!bool {
     const views = try q.toeViews(al, g);
-    const fkeys = g.artillery_formations.keys();
-    const cur = self.forces_arty_cursor;
+    const arty_rows = try q.artilleryFormationRows(al, g);
+    const cur = self.cur(0).*;
     var buf: [64]u8 = undefined;
     switch (action) {
         .next_view => {
@@ -155,70 +154,83 @@ fn handleArty(self: *App, action: Action, al: std.mem.Allocator, g: *app.GameSta
             self.forces_view = (self.forces_view + views.len) % (views.len + 1);
             self.cur(0).* = 0;
         },
+        .assign => {
+            // Enter on narrow: open the detail modal for the selected formation.
+            if (self.narrow() and cur < arty_rows.len) {
+                self.modal = .{ .arty_detail = arty_rows[cur].id };
+            }
+        },
         .arty_attach => {
-            if (cur >= fkeys.len) {
+            if (cur >= arty_rows.len) {
                 self.say(.dim, "no artillery formation selected", .{});
                 return true;
             }
-            const fid = @intFromEnum(fkeys[cur]);
-            self.input.set(std.fmt.bufPrint(&buf, "attacharty {d} co:", .{fid}) catch "attacharty ");
+            const row = arty_rows[cur];
+            const fid = @intFromEnum(row.id);
+            // Check placement: if already attached to a company, prefill detach instead.
+            const f = g.artillery_formations.getPtr(row.id);
+            if (f != null and f.?.placement == .company) {
+                self.input.set(std.fmt.bufPrint(&buf, "detacharty {d}", .{fid}) catch "detacharty ");
+            } else {
+                self.input.set(std.fmt.bufPrint(&buf, "attacharty {d} co:", .{fid}) catch "attacharty ");
+            }
             self.modal = .{ .input = .command };
         },
         .arty_seat => {
-            if (cur >= fkeys.len) {
+            if (cur >= arty_rows.len) {
                 self.say(.dim, "no artillery formation selected", .{});
                 return true;
             }
-            const fid = @intFromEnum(fkeys[cur]);
+            const fid = @intFromEnum(arty_rows[cur].id);
             self.input.set(std.fmt.bufPrint(&buf, "seat {d} ", .{fid}) catch "seat ");
             self.modal = .{ .input = .command };
         },
         .arty_tech => {
-            if (cur >= fkeys.len) {
+            if (cur >= arty_rows.len) {
                 self.say(.dim, "no artillery formation selected", .{});
                 return true;
             }
-            const fid = @intFromEnum(fkeys[cur]);
+            const fid = @intFromEnum(arty_rows[cur].id);
             self.input.set(std.fmt.bufPrint(&buf, "artytech {d} ", .{fid}) catch "artytech ");
             self.modal = .{ .input = .command };
         },
         .arty_reload => {
-            if (cur >= fkeys.len) {
+            if (cur >= arty_rows.len) {
                 self.say(.dim, "no artillery formation selected", .{});
                 return true;
             }
-            const fid = @intFromEnum(fkeys[cur]);
+            const fid = @intFromEnum(arty_rows[cur].id);
             self.input.set(std.fmt.bufPrint(&buf, "reloadarty {d} ", .{fid}) catch "reloadarty ");
             self.modal = .{ .input = .command };
         },
         .arty_repair => {
-            if (cur >= fkeys.len) {
+            if (cur >= arty_rows.len) {
                 self.say(.dim, "no artillery formation selected", .{});
                 return true;
             }
-            const fid = @intFromEnum(fkeys[cur]);
-            const res = self.execResult(.{ .repair_artillery = @enumFromInt(fid) }) orelse return true;
-            self.say(.good, "formation #{d} queued for depot repair at {s}", .{ fid, try q.hqName(self.a(), g, res.hq) });
+            const cmd = app.game.commands.Command{ .repair_artillery = arty_rows[cur].id };
+            const res = self.execResult(cmd) orelse return true;
+            self.say(.good, "{s}", .{try q.resultText(self.a(), g, cmd, res)});
         },
         .arty_ship => {
-            if (cur >= fkeys.len) {
+            if (cur >= arty_rows.len) {
                 self.say(.dim, "no artillery formation selected", .{});
                 return true;
             }
-            const fid = @intFromEnum(fkeys[cur]);
+            const fid = @intFromEnum(arty_rows[cur].id);
             self.input.set(std.fmt.bufPrint(&buf, "shiparty {d} hq:", .{fid}) catch "shiparty ");
             self.modal = .{ .input = .command };
         },
         .arty_sell => {
-            if (cur >= fkeys.len) {
+            if (cur >= arty_rows.len) {
                 self.say(.dim, "no artillery formation selected", .{});
                 return true;
             }
-            const fid = @intFromEnum(fkeys[cur]);
+            const fid = @intFromEnum(arty_rows[cur].id);
             self.input.set(std.fmt.bufPrint(&buf, "sellarty {d}", .{fid}) catch "sellarty ");
             self.modal = .{ .input = .command };
         },
-        else => {}, // TOE-specific actions do not apply in the artillery panel
+        else => {}, // TO&E-specific actions do not apply in the artillery panel
     }
     return true;
 }
@@ -422,6 +434,79 @@ fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
 
 test "the forces bindings are well formed" {
     try app.keys.expectWellFormed(Action, &bindings);
+}
+
+fn navToArty(c: *app.ClientForTest) !void {
+    // [ from view 0 wraps to view views.len (artillery panel).
+    // Compute expected index first, then navigate.
+    const al = c.app.frame.allocator();
+    const views = try q.toeViews(al, c.app.state());
+    c.app.forces_view = 0;
+    try app.pressForTest(c, .{ .char = '[' });
+    try std.testing.expectEqual(views.len, c.app.forces_view);
+}
+
+test "artillery panel: empty state draws without crash" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try toTab(c, .forces);
+    try navToArty(c);
+    // cur(0) must be 0 and modal must be none
+    try std.testing.expectEqual(@as(usize, 0), c.app.cur(0).*);
+    try std.testing.expect(c.app.modal == .none);
+}
+
+fn buyTestFormation(c: *app.ClientForTest) !bool {
+    // Fund the seat HQ via a large loan, then buy the first available offer.
+    const al = c.app.frame.allocator();
+    const hq_rows = try q.hqList(al, c.app.state());
+    if (hq_rows.len == 0) return false;
+    const hq_id = hq_rows[0].id;
+    _ = try c.app.exec(.{ .take_loan = .{ .principal = 50_000_000, .term_months = 1 } });
+    const offer_rows = try q.artilleryOfferRows(al, c.app.state());
+    if (offer_rows.len == 0) return false;
+    _ = try c.app.exec(.{ .buy_artillery = .{ .hq = hq_id, .offer = offer_rows[0].id } });
+    return true;
+}
+
+test "artillery panel: with a formation, cursor moves and detail pane focuses" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    if (!try buyTestFormation(c)) return;
+    try toTab(c, .forces);
+    try navToArty(c);
+    // One formation: down stays at 0
+    try app.pressForTest(c, .down);
+    try std.testing.expectEqual(@as(usize, 0), c.app.cur(0).*);
+    // Tab focuses detail pane (pane 1) on wide terminal
+    try app.pressForTest(c, .tab);
+    try std.testing.expectEqual(@as(u8, 1), c.app.focus);
+    // Tab back to list pane
+    try app.pressForTest(c, .tab);
+    try std.testing.expectEqual(@as(u8, 0), c.app.focus);
+}
+
+test "artillery panel: narrow Enter with no formations is a no-op" {
+    // When there are no formations Enter must not crash and must leave modal == .none.
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try c.app.screen.resize(79, 24);
+    try toTab(c, .forces);
+    try navToArty(c);
+    try app.pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .none);
+}
+
+test "arty_detail modal is wired into drawList and listKey dispatch" {
+    // Compile-time coverage: arty_detail must appear in both dispatch lists so
+    // that drawing and key-handling work once a formation is selected.
+    // The compile error from adding arty_detail to Modal without updating the
+    // dispatch lists in app.zig would surface here as a build failure.
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    c.app.modal = .{ .arty_detail = @enumFromInt(1) };
+    try app.pressForTest(c, .escape);
+    try std.testing.expect(c.app.modal == .none);
 }
 
 test "+ opens the raise-a-company name prompt and Esc leaves it" {
