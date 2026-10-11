@@ -614,3 +614,16 @@ test "accidents replace shared conventional and artillery references with one lo
     try std.testing.expectEqual(replacement, gs.artillery_formations.get(id).?.tech);
     try std.testing.expectEqual(maintenance.techWeeklyHoursFor(&gs, gs.person(replacement).?, gs.unit(vehicle).?) + techHours(&gs, gs.artillery_formations.getPtr(id).?), maintenance.techWeeklyLoadHours(&gs, replacement));
 }
+
+/// Test fixture: raise the mek_bay to level 2, destroy the chassis slot, and
+/// stock one chassis spare — satisfies all preconditions for repair_artillery.
+pub fn prepareRepairableForTest(gs: *GameState, fid: types.ArtilleryFormationId, hq_id: types.HqId) !void {
+    const hq = gs.hqs.getPtr(hq_id) orelse return error.UnknownHq;
+    for (hq.facilities.items) |*fac| {
+        if (fac.kind == .mek_bay) fac.level = 2;
+    }
+    const f = gs.artillery_formations.getPtr(fid) orelse return error.NoSuchArtilleryFormation;
+    f.slots[@intFromEnum(rules.Slot.chassis)].condition = .destroyed;
+    const component = part.componentForSlotClass("chassis.structure", .heavy);
+    try gs.addStock(.{ .hq = hq_id }, component, 1);
+}

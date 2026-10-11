@@ -326,12 +326,32 @@ test "market: B on artillery-offers pane buys when funded" {
     for (offer_rows_after) |r| try std.testing.expect(r.id != offer_id_before);
     // Status bar reports the purchase
     try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "Mobile Long Tom") != null);
-    // Narrow resize: if more offers remain they stay rendered after shrink.
-    if (offer_rows_after.len > 0) {
-        try c.app.screen.resize(80, 24);
-        const rem_text = offer_rows_after[0].text;
-        try std.testing.expect(screenHasText(&c.app.screen, if (rem_text.len > 10) rem_text[0..10] else rem_text));
-    }
+    // Populate offers for the next month by advancing past January (31 days).
+    try std.testing.expect(try c.app.exec(.{ .advance_days = 28 }));
+    var offers_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer offers_arena.deinit();
+    const refreshed_offers = try q.artilleryOfferRows(offers_arena.allocator(), c.app.state());
+    try std.testing.expect(refreshed_offers.len > 0);
+    const refreshed_offer_text = refreshed_offers[0].text;
+    const offer_check = if (refreshed_offer_text.len > 10) refreshed_offer_text[0..10] else refreshed_offer_text;
+    // Navigate to artillery-offers pane (pane 4) at wide viewport; verify offer is rendered.
+    // Focus is still 4 from the earlier buy; Tab × 5 cycles back to 4 (4→0→1→2→3→4).
+    try app.pressForTest(c, .tab);
+    try app.pressForTest(c, .tab);
+    try app.pressForTest(c, .tab);
+    try app.pressForTest(c, .tab);
+    try app.pressForTest(c, .tab);
+    try std.testing.expectEqual(@as(u8, 4), c.app.focus);
+    try std.testing.expect(screenHasText(&c.app.screen, offer_check));
+    // Narrow resize: artillery-offers pane is wide-only (market.zig:39); narrow_panes=2
+    // clamps focus to 1 on next pressForTest → drawGame → clampFocus.
+    try c.app.screen.resize(80, 24);
+    try app.pressForTest(c, .down);
+    try std.testing.expectEqual(@as(u8, 1), c.app.focus);
+    // Wide resize: offers pane renders again.
+    try c.app.screen.resize(200, 50);
+    try app.pressForTest(c, .down);
+    try std.testing.expect(screenHasText(&c.app.screen, offer_check));
 }
 
 test "market: B on artillery-offers pane with no offers says so without crash" {

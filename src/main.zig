@@ -109,6 +109,15 @@ fn printLines(al: std.mem.Allocator, lines: []const []const u8, indent: []const 
     for (lines) |l| std.debug.print("{s}{s}\n", .{ indent, try q.stripMarks(al, l) });
 }
 
+fn writeArtilleryId(al: std.mem.Allocator, gs: *game.state.GameState, fid: game.types.ArtilleryFormationId, out: *std.Io.Writer) !void {
+    const detail = try q.artilleryDetailLines(al, gs, fid);
+    if (detail.len == 0) {
+        try out.print("{s}\n", .{game.cli.errorText(error.NoSuchArtilleryFormation)});
+    } else {
+        for (detail) |line| try out.print("{s}\n", .{try q.stripMarks(al, line)});
+    }
+}
+
 /// Print a query's table, markup stripped.
 fn printTable(al: std.mem.Allocator, cols: []const game.table.Col, rows: anytype, indent: []const u8) !void {
     const t = try q.tableOf(al, cols, rows);
@@ -643,15 +652,10 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                     std.debug.print("usage: artillery [<formation-id>]\n", .{});
                 },
                 .id => |fid| {
-                    const detail = q.artilleryDetailLines(al, gs, fid) catch |err| {
-                        showError(err);
-                        continue;
-                    };
-                    if (detail.len == 0) {
-                        std.debug.print("{s}\n", .{game.cli.errorText(error.NoSuchArtilleryFormation)});
-                    } else {
-                        printLines(al, detail, "") catch |err| showError(err);
-                    }
+                    var stderr_buf: [64]u8 = undefined;
+                    const locked = std.debug.lockStderr(&stderr_buf);
+                    defer std.debug.unlockStderr();
+                    writeArtilleryId(al, gs, fid, &locked.file_writer.interface) catch |err| showError(err);
                 },
                 .none => {
                     const rows = q.artilleryFormationRows(al, gs) catch |err| {
@@ -962,11 +966,10 @@ test "artillery REPL: unknown id dispatch → canonical refusal text" {
     defer session.close();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    // Production path at :645-654: empty detail → errorText(NoSuchArtilleryFormation).
-    const detail = try q.artilleryDetailLines(arena.allocator(), session.state(), arg.id);
-    try std.testing.expectEqual(@as(usize, 0), detail.len);
-    // :650-651: the branch that handles empty detail emits this exact string.
-    try std.testing.expectEqualStrings("no artillery formation has that id", game.cli.errorText(error.NoSuchArtilleryFormation));
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try writeArtilleryId(arena.allocator(), session.state(), arg.id, &w);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "no artillery formation has that id") != null);
 }
 
 test "artillery REPL: valid id with formation → non-empty detail" {
@@ -980,6 +983,8 @@ test "artillery REPL: valid id with formation → non-empty detail" {
     try std.testing.expect(arg == .id);
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const detail = try q.artilleryDetailLines(arena.allocator(), session.state(), arg.id);
-    try std.testing.expect(detail.len > 0);
+    var buf: [4096]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    try writeArtilleryId(arena.allocator(), session.state(), arg.id, &w);
+    try std.testing.expect(w.buffered().len > 0);
 }

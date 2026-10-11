@@ -574,20 +574,28 @@ test "artillery panel: with a formation, cursor, controls and detail" {
     try std.testing.expect(c.app.modal == .none);
     try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "qualified local mechanic") != null);
     try std.testing.expectEqual(hash_before_repair, game.digest.stateHash(c.app.state()));
+    // Wide viewport for scroll test: 120×24 → body.h=21, inner.h=19 (< 21 detail lines).
+    try c.app.screen.resize(120, 24);
     // Tab focuses detail pane (pane 1) on wide terminal
     try app.pressForTest(c, .tab);
     try std.testing.expectEqual(@as(u8, 1), c.app.focus);
     // j/k on detail pane moves cur(1)
     try app.pressForTest(c, .down);
     try std.testing.expectEqual(@as(usize, 1), c.app.cur(1).*);
-    // 'j' clamped to end of detail view
-    const detail_lines = try q.artilleryDetailLines(al, c.app.state(), bought_id);
+    // Fetch detail lines with a durable allocator (frame arena is reset by each pressForTest).
+    var det_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer det_arena.deinit();
+    const detail_lines = try q.artilleryDetailLines(det_arena.allocator(), c.app.state(), bought_id);
     try std.testing.expect(detail_lines.len > 0);
+    // Initial viewport (cur=1, inner.h=19) does not show the last detail line.
+    const last_detail = detail_lines[detail_lines.len - 1];
+    const last_snippet = if (last_detail.len > 8) last_detail[0..8] else last_detail;
+    try std.testing.expect(!screenHasText(&c.app.screen, last_snippet));
+    // Scroll past the end; cursor clamps at detail_lines.len - 1.
     for (0..detail_lines.len + 5) |_| try app.pressForTest(c, .down);
     try std.testing.expectEqual(detail_lines.len - 1, c.app.cur(1).*);
-    // The last detail line is rendered (200x50 gives enough rows for the full pane).
-    const last_detail = detail_lines[detail_lines.len - 1];
-    try std.testing.expect(screenHasText(&c.app.screen, if (last_detail.len > 8) last_detail[0..8] else last_detail));
+    // After scrolling to the last line, it is rendered on screen.
+    try std.testing.expect(screenHasText(&c.app.screen, last_snippet));
     // Narrow resize: focus clamps from 1 to 0 (narrow_panes = 1)
     try c.app.screen.resize(80, 24);
     try app.pressForTest(c, .down);
@@ -690,20 +698,17 @@ test "artillery panel: arty_repair key with repairable formation shows success f
     const tech_id = hire_res.?.hired;
     try std.testing.expect(tech_id != .none);
     try std.testing.expect(try c.app.exec(.{ .assign_artillery_tech = .{ .formation = fid, .person = tech_id } }));
-    // Raise bay level to meet fab_min_bay for chassis repair (level 2 required).
-    for (c.app.state().hqs.getPtr(hq_id).?.facilities.items) |*fac| {
-        if (fac.kind == .mek_bay) fac.level = 2;
-    }
-    // Damage the chassis slot and add the spare part to stock.
-    c.app.state().artillery_formations.getPtr(fid).?.slots[@intFromEnum(game.artillery_operation_rules.Slot.chassis)].condition = .destroyed;
-    try c.app.state().addStock(.{ .hq = hq_id }, game.artillery_operation_rules.descriptor(.chassis).spare_key, 1);
+    try game.artillery_service.prepareRepairableForTest(c.app.state(), fid, hq_id);
     // Navigate to the artillery panel.
     try toTab(c, .forces);
     try navToArty(c);
     // Press 'v': repair command succeeds; modal stays .none and msg shows depot repair queued.
     try app.pressForTest(c, .{ .char = 'v' });
     try std.testing.expect(c.app.modal == .none);
-    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "depot repair queued") != null);
+    var result_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer result_arena.deinit();
+    const expected_msg = try q.resultText(result_arena.allocator(), c.app.state(), .{ .repair_artillery = fid }, game.commands.Result{ .artillery_formation = fid, .artillery_site = .{ .hq = hq_id } });
+    try std.testing.expectEqualStrings(expected_msg, c.app.msg.slice());
 }
 
 test "artillery panel: narrow Enter with no formations is a no-op" {
