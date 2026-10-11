@@ -40,6 +40,9 @@ const medical = @import("medical.zig");
 const black_market = @import("black_market.zig");
 const artillery = @import("artillery.zig");
 const artillery_service = @import("artillery_service.zig");
+const artillery_crew_q = @import("artillery_crew.zig");
+const artillery_ops_q = @import("artillery_operations.zig");
+const artillery_rules_q = @import("../domain/artillery_operations.zig");
 const hq_operations = @import("hq_ops.zig");
 const personnel_owner = @import("personnel.zig");
 
@@ -7407,8 +7410,120 @@ pub fn resultText(
         .strip_unit => return "stripped for parts — see Supply for the crates",
         .confirm_orders => return "battle orders given — the contact warning is cleared",
         .emergency_resupply => return try std.fmt.allocPrint(alloc, "emergency resupply: {d}t delivered to the field stores", .{result.tons_moved}),
+        .buy_artillery => return try std.fmt.allocPrint(alloc, "bought Mobile Long Tom #{d} — see `artillery`", .{@intFromEnum(result.artillery_formation)}),
+        .attach_artillery => |req| return try std.fmt.allocPrint(alloc, "artillery #{d} attached to {s}", .{ @intFromEnum(req.formation), try forceName(alloc, gs, req.company) }),
+        .detach_artillery => |fid| return try std.fmt.allocPrint(alloc, "artillery #{d} detached to HQ pool", .{@intFromEnum(fid)}),
+        .transfer_artillery => return if (result.in_transit)
+            try std.fmt.allocPrint(alloc, "artillery #{d} in transit — {d} days, {s}", .{ @intFromEnum(result.artillery_formation), result.artillery_eta_day -| gs.clock.day_index, try money(alloc, result.artillery_freight_cost) })
+        else
+            try std.fmt.allocPrint(alloc, "artillery #{d} transferred", .{@intFromEnum(result.artillery_formation)}),
+        .sell_artillery => |fid| return try std.fmt.allocPrint(alloc, "artillery #{d} sold", .{@intFromEnum(fid)}),
+        .assign_artillery_crew => return try std.fmt.allocPrint(alloc, "artillery #{d} — {s} seated", .{ @intFromEnum(result.artillery_formation), try personName(alloc, gs, result.artillery_person) }),
+        .unassign_artillery_crew => return try std.fmt.allocPrint(alloc, "artillery #{d} — seat cleared", .{@intFromEnum(result.artillery_formation)}),
+        .assign_artillery_tech => return try std.fmt.allocPrint(alloc, "artillery #{d} — tech {s} assigned", .{ @intFromEnum(result.artillery_formation), try personName(alloc, gs, result.artillery_person) }),
+        .unassign_artillery_tech => return try std.fmt.allocPrint(alloc, "artillery #{d} — tech cleared", .{@intFromEnum(result.artillery_formation)}),
+        .reload_artillery => return try std.fmt.allocPrint(alloc, "artillery #{d} — {d} package(s) loaded", .{ @intFromEnum(result.artillery_formation), result.artillery_packages }),
+        .repair_artillery => return try std.fmt.allocPrint(alloc, "artillery #{d} — depot repair queued at {s}", .{ @intFromEnum(result.artillery_formation), if (result.artillery_site) |s| try hqName(alloc, gs, s.hq) else "—" }),
         else => return "done.",
     }
+}
+
+/// One-line placement description for a formation.
+fn artilleryPlacementText(alloc: Alloc, gs: *GameState, f: *const @import("../domain/artillery_formation.zig").Formation) ![]const u8 {
+    return switch (f.placement) {
+        .hq_pool => |hq| try std.fmt.allocPrint(alloc, "HQ pool · {s}", .{try hqName(alloc, gs, hq)}),
+        .company => |co| try std.fmt.allocPrint(alloc, "attached · {s}", .{try forceName(alloc, gs, co)}),
+        .freight => |fr| try std.fmt.allocPrint(alloc, "in transit → {s} (eta d{d})", .{ try hqName(alloc, gs, fr.to_hq), fr.eta_day }),
+        .sold => "sold",
+        .destroyed => "destroyed",
+    };
+}
+
+/// List view: one row per formation for the REPL `artillery` verb and TUI pane.
+pub fn artilleryListLines(alloc: Alloc, gs: *GameState) ![][]const u8 {
+    var lines: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (gs.artillery_formations.values()) |*f| {
+        const placement = try artilleryPlacementText(alloc, gs, f);
+        const crew_filled: u32 = blk: {
+            var n: u32 = 0;
+            for (f.crew) |id| if (id != .none) {
+                n += 1;
+            };
+            break :blk n;
+        };
+        const tech_text = if (f.tech != .none) try personName(alloc, gs, f.tech) else "—";
+        var lt_rounds: u32 = 0;
+        var mg_rounds: u32 = 0;
+        for (artillery_rules_q.descriptors, f.slots) |d, s| {
+            if (d.family == .long_tom) lt_rounds += s.rounds;
+            if (d.family == .machine_gun) mg_rounds += s.rounds;
+        }
+        const ready = if (artillery_ops_q.operationalReadiness(gs, f)) "ready" else "not ready";
+        const has_job = if (artillery_ops_q.hasJob(gs, f.id)) " [bay job]" else "";
+        const line = try std.fmt.allocPrint(alloc, "#{d}  {s}  armor {d}%  crew {d}/4  tech {s}  LT {d}rds  MG {d}rds  {s}{s}", .{
+            @intFromEnum(f.id), placement, f.armor_pct, crew_filled, tech_text, lt_rounds, mg_rounds, ready, has_job,
+        });
+        try lines.append(alloc, line);
+    }
+    return lines.toOwnedSlice(alloc);
+}
+
+/// Detail view: full formation state for the REPL `artillery <id>` verb and TUI pane.
+pub fn artilleryDetailLines(alloc: Alloc, gs: *GameState, id: types.ArtilleryFormationId) ![][]const u8 {
+    const f = gs.artillery_formations.getPtr(id) orelse return &[_][]const u8{};
+    var lines: std.ArrayListUnmanaged([]const u8) = .empty;
+    const placement = try artilleryPlacementText(alloc, gs, f);
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "Artillery #{d}  ·  {s}  ·  armor {d}%  quality {s}", .{
+        @intFromEnum(id), placement, f.armor_pct, @tagName(f.quality),
+    }));
+    for (artillery_rules_q.seats, f.crew) |seat, pid| {
+        const occupant = if (pid != .none) try personName(alloc, gs, pid) else "—";
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "  {s:<12} {s}", .{ @tagName(seat), occupant }));
+    }
+    const tech_text = if (f.tech != .none) try personName(alloc, gs, f.tech) else "—";
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  tech         {s}", .{tech_text}));
+    for (artillery_rules_q.descriptors, f.slots) |d, s| {
+        const cond = @tagName(s.condition);
+        if (d.capacity_rounds > 0) {
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "  {s:<20} {s}  {d}/{d} rounds", .{ @tagName(d.slot), cond, s.rounds, d.capacity_rounds }));
+        } else {
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "  {s:<20} {s}", .{ @tagName(d.slot), cond }));
+        }
+    }
+    const block = artillery_ops_q.readinessBlock(gs, f);
+    const readiness_text = if (block) |b| try std.fmt.allocPrint(alloc, "not ready: {s}", .{@tagName(b)}) else "ready";
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  readiness: {s}", .{readiness_text}));
+    if (artillery_ops_q.hasJob(gs, id)) try lines.append(alloc, "  bay job in progress");
+    const repair_quote = artillery_service.repairQuote(gs, f) catch null; // best-effort: repair quote is advisory detail
+    if (repair_quote) |q| try lines.append(alloc, try std.fmt.allocPrint(alloc, "  repair: {d} days, {s}", .{ q.duration_days, try money(alloc, q.labor) }));
+    const sale_val = artillery.saleValue(f);
+    const carry = artillery.monthlyCarry(gs);
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  sale value {s}  ·  monthly carry {s}", .{ try money(alloc, sale_val), try money(alloc, carry) }));
+    return lines.toOwnedSlice(alloc);
+}
+
+/// Offers view: one row per available offer for the REPL `offers` view and TUI market pane.
+pub fn artilleryOffersLines(alloc: Alloc, gs: *GameState) ![][]const u8 {
+    var lines: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (gs.artillery_offers.items) |o| {
+        if (!o.available) continue;
+        const hq_text = try hqName(alloc, gs, o.hq);
+        const price = try money(alloc, artillery.purchasePrice());
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "offer #{d}  {s}  {d}-{d:0>2}  Mobile Long Tom  {s}", .{
+            @intFromEnum(o.id), hq_text, o.year, o.month, price,
+        }));
+    }
+    return lines.toOwnedSlice(alloc);
+}
+
+/// IDs of available artillery offers, in the same order as artilleryOffersLines.
+pub fn artilleryOfferIds(alloc: Alloc, gs: *GameState) ![]types.ArtilleryOfferId {
+    var ids: std.ArrayListUnmanaged(types.ArtilleryOfferId) = .empty;
+    for (gs.artillery_offers.items) |o| {
+        if (!o.available) continue;
+        try ids.append(alloc, o.id);
+    }
+    return ids.toOwnedSlice(alloc);
 }
 
 /// Strict parser for the REPL's `hall` view-verb filter (rule 10): one optional
@@ -9689,4 +9804,143 @@ test "mixed HQ bay labels preserve typed facility rows and escape dynamic labels
     try std.testing.expectError(error.OutOfMemory, bays(std.testing.failing_allocator, &gs, home));
     try std.testing.expectError(error.OutOfMemory, hqDetailView(std.testing.failing_allocator, &gs, home));
     try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "artilleryListLines: one row per formation with placement, crew, readiness; empty on no formations" {
+    const operations = @import("artillery_operations.zig");
+    const cmds = @import("commands.zig");
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // No formations → empty list
+    try std.testing.expectEqual(@as(usize, 0), (try artilleryListLines(a, &gs)).len);
+    const id = try operations.fixtureForTest(&gs, false);
+    const lines = try artilleryListLines(a, &gs);
+    try std.testing.expectEqual(@as(usize, 1), lines.len);
+    // Row must name the formation id
+    try std.testing.expect(std.mem.indexOf(u8, lines[0], "#1") != null);
+    // Row must contain a placement indicator
+    try std.testing.expect(std.mem.indexOf(u8, lines[0], "HQ pool") != null or std.mem.indexOf(u8, lines[0], "attached") != null);
+    // Sell → sold placement
+    _ = try cmds.execute(&gs, .{ .sell_artillery = id });
+    const sold_lines = try artilleryListLines(a, &gs);
+    try std.testing.expectEqual(@as(usize, 1), sold_lines.len);
+    try std.testing.expect(std.mem.indexOf(u8, sold_lines[0], "sold") != null);
+    // State must not change
+    const before = digest.stateHash(&gs);
+    _ = try artilleryListLines(a, &gs);
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "artilleryDetailLines: empty for unknown id; full slot list for known id" {
+    const operations = @import("artillery_operations.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const bad_id: types.ArtilleryFormationId = @enumFromInt(999);
+    // Unknown id → empty slice (no crash, rule 31/47 pattern)
+    try std.testing.expectEqual(@as(usize, 0), (try artilleryDetailLines(a, &gs, bad_id)).len);
+    const id = try operations.fixtureForTest(&gs, false);
+    const lines = try artilleryDetailLines(a, &gs, id);
+    // Must have header + 4 crew + tech + slots + readiness = at least 10 lines
+    try std.testing.expect(lines.len >= 10);
+    // Header names the formation
+    try std.testing.expect(std.mem.indexOf(u8, lines[0], "#1") != null);
+    // Slot lines present: chassis must appear
+    var found_chassis = false;
+    for (lines) |line| if (std.mem.indexOf(u8, line, "chassis") != null) {
+        found_chassis = true;
+    };
+    try std.testing.expect(found_chassis);
+    // Name escaping: hostile name in tech person must not corrupt lines
+    const f = gs.artillery_formations.getPtr(id).?;
+    gs.person(f.tech).?.first_name = "{g}Evil\x1b";
+    const safe_lines = try artilleryDetailLines(a, &gs, id);
+    for (safe_lines) |line| {
+        try std.testing.expect(std.mem.indexOf(u8, line, "\x1b") == null);
+    }
+}
+
+test "artilleryOffersLines: one row per available offer; consumed offer excluded" {
+    const cmds = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .quartermaster);
+    const home = gs.seat();
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice() * 4;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Before sync no offers
+    const before_lines = try artilleryOffersLines(a, &gs);
+    _ = before_lines; // may be empty or have synced
+    // Sync to populate offers
+    try artillery.syncMarkets(&gs);
+    const offer_lines = try artilleryOffersLines(a, &gs);
+    if (offer_lines.len > 0) {
+        // Each line names "Mobile Long Tom"
+        try std.testing.expect(std.mem.indexOf(u8, offer_lines[0], "Mobile Long Tom") != null);
+        // Buying the offer removes it from the list
+        const offer_id = gs.artillery_offers.items[0].id;
+        _ = try cmds.execute(&gs, .{ .buy_artillery = .{ .hq = home, .offer = offer_id } });
+        const after_lines = try artilleryOffersLines(a, &gs);
+        try std.testing.expectEqual(offer_lines.len - 1, after_lines.len);
+    }
+}
+
+test "resultText artillery commands produce canonical sentences with escaped names" {
+    const cmds = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    _ = try @import("founding.zig").createCommander(&gs, "{g}Boss\x1b", .LC, .quartermaster);
+    const home = gs.seat();
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice() * 4;
+    try artillery.syncMarkets(&gs);
+    // buy_artillery
+    const buy_cmd: cmds.Command = .{ .buy_artillery = .{ .hq = home, .offer = gs.artillery_offers.items[0].id } };
+    const buy_result = try cmds.execute(&gs, buy_cmd);
+    const buy_text = try resultText(a, &gs, buy_cmd, buy_result);
+    try std.testing.expect(std.mem.indexOf(u8, buy_text, "Mobile Long Tom #") != null);
+    const fid = buy_result.artillery_formation;
+    // attach_artillery
+    const co = try gs.createForce("Alpha", .company, .none);
+    const attach_cmd: cmds.Command = .{ .attach_artillery = .{ .formation = fid, .company = co } };
+    const attach_result = try cmds.execute(&gs, attach_cmd);
+    const attach_text = try resultText(a, &gs, attach_cmd, attach_result);
+    try std.testing.expect(std.mem.indexOf(u8, attach_text, "attached") != null);
+    // detach_artillery
+    const detach_cmd: cmds.Command = .{ .detach_artillery = fid };
+    const detach_result = try cmds.execute(&gs, detach_cmd);
+    const detach_text = try resultText(a, &gs, detach_cmd, detach_result);
+    try std.testing.expect(std.mem.indexOf(u8, detach_text, "detached") != null);
+    // assign_artillery_tech
+    const tech_id = try gs.hirePerson("Local", "Mech", .tech_mechanic);
+    try gs.person(tech_id).?.skills.put(gs.allocator(), .tech_mechanic, 4);
+    const tech_cmd: cmds.Command = .{ .assign_artillery_tech = .{ .formation = fid, .person = tech_id } };
+    const tech_result = try cmds.execute(&gs, tech_cmd);
+    const tech_text = try resultText(a, &gs, tech_cmd, tech_result);
+    try std.testing.expect(std.mem.indexOf(u8, tech_text, "tech") != null);
+    // unassign_artillery_tech
+    const untech_cmd: cmds.Command = .{ .unassign_artillery_tech = fid };
+    const untech_result = try cmds.execute(&gs, untech_cmd);
+    const untech_text = try resultText(a, &gs, untech_cmd, untech_result);
+    try std.testing.expect(std.mem.indexOf(u8, untech_text, "cleared") != null);
+    // sell_artillery
+    const sell_cmd: cmds.Command = .{ .sell_artillery = fid };
+    const sell_result = try cmds.execute(&gs, sell_cmd);
+    const sell_text = try resultText(a, &gs, sell_cmd, sell_result);
+    try std.testing.expect(std.mem.indexOf(u8, sell_text, "sold") != null);
+    // hostile name in person does not leak markup — synthesise result directly (no buy needed)
+    const evil_tech = try gs.hirePerson("{g}Evil\x1b", "Mech2", .tech_mechanic);
+    const fake_result = cmds.Result{ .artillery_formation = fid, .artillery_person = evil_tech };
+    const tech2_text = try resultText(a, &gs, .{ .assign_artillery_tech = .{ .formation = fid, .person = evil_tech } }, fake_result);
+    try std.testing.expect(std.mem.indexOf(u8, tech2_text, "\x1b") == null);
 }

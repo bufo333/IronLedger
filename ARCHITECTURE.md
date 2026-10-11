@@ -225,7 +225,12 @@ cheap, copyable, and impossible to mix up.
   [Artillery operations policy](docs/p2-artillery-operations-design.md) and
   [combat policy](docs/p2-artillery-battle-design.md) own those project adaptations. Existing personnel,
   assignment and shared bay views consume typed owners. Dedicated artillery
-  panels, parser verbs and TUI controls remain P2i.
+  panels, parser verbs and TUI controls shipped in P2i: `artilleryListLines`,
+  `artilleryDetailLines`, `artilleryOffersLines`, and `artilleryOfferIds` in
+  `queries.zig`; nine REPL verbs (`buyarty`, `attacharty`, `detacharty`,
+  `shiparty`, `sellarty`, `seat`, `artytech`, `reloadarty`, `repairarty`) in
+  `cli.zig`; an artillery panel as the last F3 Forces view (`]`/`[` wraps to
+  it); and an ARTILLERY OFFERS pane on F10 Market (`B` to buy).
   [Artillery acquisition policy](docs/p2-artillery-acquisition-design.md) defines
   the monthly local offers and declared transport/accounting abstractions.
 - **Part** — static part definition (catalog) plus fungible quantities in site

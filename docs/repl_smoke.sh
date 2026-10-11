@@ -61,6 +61,9 @@ printf '%s\n' \
   'intervene 999 999 notakind' \
   'mech 3' \
   'mech 999' \
+  'artillery' \
+  'seat 999 badname 1' \
+  'seat 999 commander 1' \
   'save' \
   'quit' > "$work/input"
 # A watchdog kills a hung REPL (macOS has no `timeout`); the exit status
@@ -131,4 +134,8 @@ check 'advanced 3 day'
 check 'engagements'
 check 'usage: mech'
 check 'saved campaign'
+# P2i: artillery REPL surface — list, bad seat name, unknown formation id.
+check 'no artillery formations'
+check 'usage: seat'
+check 'no artillery formation has that id'
 echo "REPL SMOKE OK"

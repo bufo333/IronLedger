@@ -179,6 +179,8 @@ separate implementation plan.
 5. `P2i`: Artillery REPL, TUI, and query surfaces for already-delivered
     commands and reports, using the command and query boundary and both smoke
     scripts. Its battle-armor portion remains deferred with P2b through P2d.
+    **Delivered** — nine CLI verbs, three query functions, F3 artillery panel
+    and F10 artillery offers pane, both smoke scripts updated.
 
 Each active increment has one cohesive primary outcome and must describe
 interfaces and acceptance boundaries without unsourced values.

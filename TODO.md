@@ -32,7 +32,7 @@ A package has one primary invariant or subsystem outcome.
   operational persistence, and truthful existing personnel/shared-bay views.
 - [x] P2h artillery battle effects: atomic engagements, firing/ammunition,
   carrier casualties/recovery/disposal, persistent reports and existing AAR panes.
-- [ ] P2i artillery REPL/TUI/query surfaces: dedicated controls and panels;
+- [x] P2i artillery REPL/TUI/query surfaces: dedicated controls and panels;
   battle-armor UI remains deferred with P2b-P2d.
 - [ ] NPC world-contract design: shared world conflicts and typed opposing forces
   (faction, pirate, or named merc company); player offers, NPC commitments,

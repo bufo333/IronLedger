@@ -150,14 +150,14 @@ no room.
 |---|---|---|
 | F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs · Reports (Campaign summary · Readiness · Battles · Merc companies leaderboard — Enter drills into a per-company detail sheet) |
 | F2 | Map | Star map · World |
-| F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool |
+| F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool · Artillery panel (last `]` view) |
 | F4 | Contracts | Board · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log |
 | F5 | Ledger | Treasuries · P&L · Ledger |
 | F6 | Supply | Sites · Demand · Order form · Shop |
 | F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall |
 | F8 | Lab | Budget/plan (wide) · Spatial mech diagram: 8 per-location crit boxes (HD / CT / LT / RT / LA / RA / LL / RL) · Selected-slot detail |
 | F9 | People | Personnel (pinned header, role filter) · Person-detail modal (Enter or `r` opens it: file, skills, status, assignment and eligible actions) · Open seats |
-| F10 | Market | Boards · Order catalog · Demand |
+| F10 | Market | Boards · Order catalog · Demand · Keep stocked · Artillery offers (wide) |
 
 ## Keys
 
@@ -209,7 +209,7 @@ filters to the active context (see the Keys description above).
 
 | Key | Pane | Does |
 |---|---|---|
-| `[ ]` | any | previous / next TO&E view: all forces, each company, unassigned hulls, the hangar |
+| `[ ]` | any | previous / next TO&E view: all forces, each company, unassigned hulls, the hangar, artillery |
 | `r` | any | cycle the side pane: readiness, manning, damage |
 | `Enter` | TO&E | assign people to the hull under the cursor (narrow: its detail) |
 | `a` | any | seat a pilot, crew or tech on the hull under the cursor |
@@ -229,6 +229,13 @@ filters to the active context (see the Keys description above).
 | `X` | any | disband the company under the cursor |
 | `b` | any | fabricate the structural parts the company's home HQ lacks |
 | `h` | any | open the hull's lifecycle: combat history, maintenance log and ownership chain |
+| `e` | any | attach or detach the artillery carrier (artillery panel) |
+| `f` | any | assign an artillery crew seat (artillery panel) |
+| `g` | any | assign or clear the artillery mechanic (artillery panel) |
+| `i` | any | reload artillery magazines (artillery panel) |
+| `v` | any | queue an artillery depot repair (artillery panel) |
+| `s` | any | transfer artillery to another HQ (artillery panel) |
+| `p` | any | sell the artillery carrier (artillery panel) |
 
 ### F4 Contracts
 
@@ -328,6 +335,7 @@ filters to the active context (see the Keys description above).
 | `b` | catalog | fabricate the structural component under the cursor at this HQ's bay |
 | `K` | catalog | keep the catalogue part under the cursor stocked at this HQ |
 | `x` | keep stocked | remove the keep-stocked line under the cursor |
+| `B` | artillery offers | buy the artillery offer under the cursor (delivers to the selected HQ) |
 
 ### Welcome
 

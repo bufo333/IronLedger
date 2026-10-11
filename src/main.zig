@@ -401,6 +401,11 @@ fn printOffers(gs: *game.state.GameState, al: std.mem.Allocator) !void {
     std.debug.print("Contract board ({d} offers):\n", .{c.board.len});
     printTable(al, q.board_cols, c.board, "  ") catch |err| showError(err);
     std.debug.print("  (* = beachhead: premium pay, hardship costs, slow resupply · `candidates <offer#>` ranks the companies that could go)\n", .{});
+    const arty_offers = q.artilleryOffersLines(al, gs) catch return; // best-effort: REPL offers section is supplemental
+    if (arty_offers.len > 0) {
+        std.debug.print("Artillery offers ({d}):\n", .{arty_offers.len});
+        printLines(al, arty_offers, "  ") catch |err| showError(err);
+    }
 }
 
 fn printToe(gs: *game.state.GameState, al: std.mem.Allocator) !void {
@@ -517,6 +522,7 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
             \\views:    status | toe | hqs | offers | contracts | roster [co:<id>|hq:<id>] | medbay | hall [filter]
             \\          checklist | inbox | battles [id] | log [n] [filter] | pnl | ledger | treasuries | units | parts | orders | sop | candidates <offer#>
             \\          shop | supplies | demand | bays | projects | staff | lab <unit> | readiness | rating | summary | manning co:<id>
+            \\          artillery [<formation-id>]   (artillery list or formation detail)
             \\          mech <unit id>   (hull lifecycle: combat history, maintenance log, ownership chain)
             \\          briefing <contract id>   (battle orders before contact: `confirm`, `rush`, `roe`, `role`)
             \\turn:     day [n] [force]   (the checklist gates it)
@@ -622,6 +628,17 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
             printHqs(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "offers")) {
             printOffers(gs, al) catch |err| showError(err);
+        } else if (std.mem.eql(u8, verb, "artillery")) {
+            if (tokens.next()) |id_tok| {
+                const fid: game.types.ArtilleryFormationId = @enumFromInt(std.fmt.parseInt(u32, id_tok, 10) catch {
+                    std.debug.print("usage: artillery [<formation-id>]\n", .{});
+                    continue;
+                });
+                printLines(al, q.artilleryDetailLines(al, gs, fid) catch &.{}, "") catch |err| showError(err);
+            } else {
+                const lines = q.artilleryListLines(al, gs) catch &.{};
+                if (lines.len == 0) std.debug.print("no artillery formations.\n", .{}) else printLines(al, lines, "") catch |err| showError(err);
+            }
         } else if (std.mem.eql(u8, verb, "candidates")) {
             const raw = std.fmt.parseInt(u32, tokens.next() orelse "0", 10) catch {
                 std.debug.print("usage: candidates <offer-id>\n", .{});
@@ -858,6 +875,7 @@ fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r
         .found_hq, .link, .assign_company => printHqs(gs, al) catch |err| showError(err),
         .auto_assign => |co| printLines(al, q.companyRoster(al, gs, co) catch &.{}, "") catch |err| showError(err),
         .autostaff => |hq| printLines(al, q.hqRoster(al, gs, hq) catch &.{}, "") catch |err| showError(err),
+        .buy_artillery => printLines(al, q.artilleryListLines(al, gs) catch &.{}, "") catch |err| showError(err),
         else => {},
     }
 }

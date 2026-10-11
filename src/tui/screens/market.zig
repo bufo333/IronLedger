@@ -37,12 +37,22 @@ pub fn draw(self: *App) anyerror!void {
     const inner2 = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = cw, .h = b.h - top_h }, .{ .title = try std.fmt.allocPrint(al, "ORDER CATALOG · delivered to {s}", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.paneFocused(1), .right_title = try app.keys.paneTitle(al, &legend, 1) });
     try self.tableOrNote(inner2, try q.tableOf(al, q.catalog_cols, view.catalog), 1, self.focus == 1, "{d}nothing in the catalog under this filter{/}");
     if (cw < b.w) {
-        const dem_h: u16 = layout.list.of(b.h - top_h);
+        const side_h = b.h - top_h;
+        const dem_h: u16 = layout.list.of(side_h);
         const inner3 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h, .w = b.w - cw, .h = dem_h }, .{ .title = "DEMAND · damaged slots", .focused = self.paneFocused(2), .right_title = try app.keys.paneTitle(al, &legend, 2) });
         try self.tableOrNote(inner3, try q.tableOf(al, q.demand_cols, view.demand), 2, self.focus == 2, "{g}nothing damaged{/}");
         const pol = try q.stockPolicies(al, g, hq_id);
-        const inner4 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h, .w = b.w - cw, .h = b.h - top_h - dem_h }, .{ .title = try std.fmt.allocPrint(al, "KEEP STOCKED · {s} · checked daily", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.paneFocused(3), .right_title = try app.keys.paneTitle(al, &legend, 3) });
+        const remaining_h = side_h - dem_h;
+        const keep_h: u16 = @divTrunc(remaining_h, 2);
+        const arty_h: u16 = remaining_h - keep_h;
+        const inner4 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h, .w = b.w - cw, .h = keep_h }, .{ .title = try std.fmt.allocPrint(al, "KEEP STOCKED · {s} · checked daily", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.paneFocused(3), .right_title = try app.keys.paneTitle(al, &legend, 3) });
         try self.tableOrNote(inner4, try q.tableOf(al, q.stock_policy_cols, pol), 3, self.focus == 3, "{d}none — keep a catalogue row stocked to add a line here{/}");
+        const arty_offers = try q.artilleryOffersLines(al, g);
+        const c4 = self.cur(4);
+        App.clampIdx(c4, arty_offers.len);
+        const inner5 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h + keep_h, .w = b.w - cw, .h = arty_h }, .{ .title = try std.fmt.allocPrint(al, "ARTILLERY OFFERS · {s}", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.paneFocused(4), .right_title = try app.keys.paneTitle(al, &legend, 4) });
+        const arty_cursor: ?usize = if (self.focus == 4 and arty_offers.len > 0) c4.* else null;
+        self.screen.lines(inner5, arty_offers, App.firstRow(c4.*, inner5.h), arty_cursor);
     }
 }
 
@@ -59,11 +69,12 @@ pub fn move(self: *App, delta: i32) anyerror!void {
         0 => self.moveCursor(0, delta, board_rows.len),
         1 => self.moveCursor(1, delta, view.catalog.len),
         2 => self.moveCursor(2, delta, view.demand.len),
-        else => self.moveCursor(3, delta, (try q.stockPolicies(al, g, @enumFromInt(try self.hqSelId(g)))).len),
+        3 => self.moveCursor(3, delta, (try q.stockPolicies(al, g, @enumFromInt(try self.hqSelId(g)))).len),
+        else => self.moveCursor(4, delta, (try q.artilleryOffersLines(al, g)).len),
     }
 }
 
-const Action = enum { prev_hq, next_hq, filter_next, filter_prev, buy, order, cover_shortfall, edit_keep, fabricate, keep, remove_keep };
+const Action = enum { prev_hq, next_hq, filter_next, filter_prev, buy, order, cover_shortfall, edit_keep, fabricate, keep, remove_keep, buy_arty };
 
 pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('['), .action = .prev_hq, .label = "market board", .group = .navigate, .shown = "[ ]", .title = 0, .help = "previous / next HQ or deployed-company market board" },
@@ -77,6 +88,7 @@ pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('b'), .action = .fabricate, .label = "fabricate", .group = .act, .pane = 1, .help = "fabricate the structural component under the cursor at this HQ's bay" },
     .{ .match = app.keys.Match.char('K'), .action = .keep, .label = "keep stocked", .group = .act, .pane = 1, .help = "keep the catalogue part under the cursor stocked at this HQ" },
     .{ .match = app.keys.Match.char('x'), .action = .remove_keep, .label = "remove", .group = .act, .pane = 3, .help = "remove the keep-stocked line under the cursor" },
+    .{ .match = app.keys.Match.char('B'), .action = .buy_arty, .label = "buy artillery", .group = .act, .pane = 4, .help = "buy the artillery offer under the cursor (delivers to the selected HQ)" },
 };
 pub const legend = app.keys.entries(Action, &bindings);
 
@@ -198,6 +210,18 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
                 }
                 self.cur(0).* = 0;
             }
+        },
+        .buy_arty => {
+            const offer_ids = try q.artilleryOfferIds(al, g);
+            if (offer_ids.len == 0) {
+                self.say(.dim, "no artillery offers available", .{});
+                return true;
+            }
+            const c4 = self.cur(4).*;
+            const offer_id = offer_ids[@min(c4, offer_ids.len - 1)];
+            const cmd: game.commands.Command = .{ .buy_artillery = .{ .hq = hq_id, .offer = offer_id } };
+            const res = self.execResult(cmd) orelse return true;
+            self.say(.good, "{s}", .{try q.resultText(self.a(), g, cmd, res)});
         },
     }
     return true;

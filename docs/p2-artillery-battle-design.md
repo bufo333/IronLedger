@@ -4,8 +4,8 @@ This is the approved IRON LEDGER P2h project design. P2e catalogue facts,
 calculated BV and construction price retain their pinned source owners; P2g
 operations retain their existing policy. The combat coefficients below are
 project adaptations with no asserted MegaMek or MekHQ numerical counterpart.
-Battle armor remains deferred beyond 3025, and P2i owns dedicated artillery
-panels, parser verbs and TUI controls.
+Battle armor remains deferred beyond 3025. P2i (delivered) owns dedicated
+artillery panels, parser verbs and TUI controls.
 
 ## Research distinction
 

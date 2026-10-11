@@ -16,12 +16,34 @@ pub fn draw(self: *App) anyerror!void {
     const g = self.state();
     const b = self.body();
     const views = try q.toeViews(al, g);
+    // forces_view may be views.len when the artillery panel is selected.
+    if (self.forces_view > views.len) self.forces_view = views.len;
+    if (self.forces_view == views.len) {
+        // Artillery panel
+        const arty_lines = try q.artilleryListLines(al, g);
+        App.clampIdx(&self.forces_arty_cursor, arty_lines.len);
+        const lw: u16 = if (layout.wide(b.w)) layout.list.of(b.w) else b.w;
+        const total_views = views.len + 1;
+        self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, try std.fmt.allocPrint(al, "ARTILLERY ({d}/{d}) · {s}", .{ total_views, total_views, try app.keys.paneTitle(al, &legend, 0) }), arty_lines, 0, self.paneFocused(0), true);
+        if (lw < b.w) {
+            const fkeys = g.artillery_formations.keys();
+            if (self.forces_arty_cursor < fkeys.len) {
+                const fid = fkeys[self.forces_arty_cursor];
+                const detail = try q.artilleryDetailLines(al, g, fid);
+                self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = b.h }, "ARTILLERY DETAIL", detail, 1, false, false);
+            } else {
+                const empty = [_][]const u8{"{d}no artillery formations{/}"};
+                self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = b.h }, "ARTILLERY DETAIL", &empty, 1, false, false);
+            }
+        }
+        return;
+    }
     App.clampIdx(&self.forces_view, views.len);
     const rows = try q.toeFiltered(al, g, views[self.forces_view].filter);
     var texts: std.ArrayListUnmanaged([]const u8) = .empty;
     for (rows) |r| try texts.append(al, r.text);
     const lw: u16 = if (layout.wide(b.w)) layout.list.of(b.w) else b.w;
-    self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, try std.fmt.allocPrint(al, "TO&E · {{a}}{s}{{/}} ({d}/{d}) · {s}", .{ views[self.forces_view].label, self.forces_view + 1, views.len, try app.keys.paneTitle(al, &legend, 0) }), texts.items, 0, self.paneFocused(0), true);
+    self.listPane(.{ .x = b.x, .y = b.y, .w = lw, .h = b.h }, try std.fmt.allocPrint(al, "TO&E · {{a}}{s}{{/}} ({d}/{d}) · {s}", .{ views[self.forces_view].label, self.forces_view + 1, views.len + 1, try app.keys.paneTitle(al, &legend, 0) }), texts.items, 0, self.paneFocused(0), true);
     if (lw < b.w) {
         const c = self.cur(0).*;
         const detail_h: u16 = layout.major.of(b.h);
@@ -63,6 +85,16 @@ pub fn draw(self: *App) anyerror!void {
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
     const g = self.state();
+    const views = try q.toeViews(al, g);
+    if (self.forces_view == views.len) {
+        // Artillery panel: move the arty cursor
+        const arty_lines = try q.artilleryListLines(al, g);
+        const len = arty_lines.len;
+        if (len == 0) return;
+        const cur = &self.forces_arty_cursor;
+        if (delta > 0) cur.* = @min(cur.* + 1, len - 1) else if (cur.* > 0) cur.* -= 1;
+        return;
+    }
     if (self.focus == 0) {
         const rows = try self.toeRows();
         self.moveCursor(0, delta, rows.len);
@@ -72,10 +104,10 @@ pub fn move(self: *App, delta: i32) anyerror!void {
     }
 }
 
-const Action = enum { prev_view, next_view, assign, seat, unassign, lance, transfer, crew, auto_assign, train_one, train_all, cycle_pane, order, depot, spares_recall, mothball, air_wing, raise, sell, disband, fabricate, mech };
+const Action = enum { prev_view, next_view, assign, seat, unassign, lance, transfer, crew, auto_assign, train_one, train_all, cycle_pane, order, depot, spares_recall, mothball, air_wing, raise, sell, disband, fabricate, mech, arty_attach, arty_seat, arty_tech, arty_reload, arty_repair, arty_ship, arty_sell };
 
 pub const bindings = [_]app.keys.Binding(Action){
-    .{ .match = app.keys.Match.char('['), .action = .prev_view, .label = "switch view", .group = .navigate, .shown = "[ ]", .title = 0, .help = "previous / next TO&E view: all forces, each company, unassigned hulls, the hangar" },
+    .{ .match = app.keys.Match.char('['), .action = .prev_view, .label = "switch view", .group = .navigate, .shown = "[ ]", .title = 0, .help = "previous / next TO&E view: all forces, each company, unassigned hulls, the hangar, artillery" },
     .{ .match = app.keys.Match.char(']'), .action = .next_view, .label = "next view", .group = .navigate, .show_footer = false, .show_help = false },
     .{ .match = app.keys.Match.char('r'), .action = .cycle_pane, .label = "cycle pane", .group = .navigate, .title = 1, .help = "cycle the side pane: readiness, manning, damage" },
     .{ .match = .{ .key = .enter }, .action = .assign, .label = "assign", .group = .act, .pane = 0, .help = "assign people to the hull under the cursor (narrow: its detail)" },
@@ -98,13 +130,108 @@ pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('X'), .action = .disband, .label = "disband", .group = .money, .help = "disband the company under the cursor" },
     .{ .match = app.keys.Match.char('b'), .action = .fabricate, .label = "fabricate", .group = .money, .help = "fabricate the structural parts the company's home HQ lacks" },
     .{ .match = app.keys.Match.char('h'), .action = .mech, .label = "mech record", .group = .act, .help = "open the hull's lifecycle: combat history, maintenance log and ownership chain" },
+    // Artillery panel keys (active on the artillery view)
+    .{ .match = app.keys.Match.char('e'), .action = .arty_attach, .label = "attach / detach", .group = .act, .help = "attach or detach the artillery carrier (artillery panel)" },
+    .{ .match = app.keys.Match.char('f'), .action = .arty_seat, .label = "seat crew", .group = .act, .help = "assign an artillery crew seat (artillery panel)" },
+    .{ .match = app.keys.Match.char('g'), .action = .arty_tech, .label = "assign tech", .group = .act, .help = "assign or clear the artillery mechanic (artillery panel)" },
+    .{ .match = app.keys.Match.char('i'), .action = .arty_reload, .label = "reload", .group = .act, .help = "reload artillery magazines (artillery panel)" },
+    .{ .match = app.keys.Match.char('v'), .action = .arty_repair, .label = "repair", .group = .act, .help = "queue an artillery depot repair (artillery panel)" },
+    .{ .match = app.keys.Match.char('s'), .action = .arty_ship, .label = "ship to HQ", .group = .act, .help = "transfer artillery to another HQ (artillery panel)" },
+    .{ .match = app.keys.Match.char('p'), .action = .arty_sell, .label = "sell arty", .group = .money, .help = "sell the artillery carrier (artillery panel)" },
 };
 pub const legend = app.keys.entries(Action, &bindings);
+
+fn handleArty(self: *App, action: Action, al: std.mem.Allocator, g: *app.GameState) anyerror!bool {
+    const views = try q.toeViews(al, g);
+    const fkeys = g.artillery_formations.keys();
+    const cur = self.forces_arty_cursor;
+    var buf: [64]u8 = undefined;
+    switch (action) {
+        .next_view => {
+            self.forces_view = (self.forces_view + 1) % (views.len + 1);
+            self.cur(0).* = 0;
+        },
+        .prev_view => {
+            self.forces_view = (self.forces_view + views.len) % (views.len + 1);
+            self.cur(0).* = 0;
+        },
+        .arty_attach => {
+            if (cur >= fkeys.len) {
+                self.say(.dim, "no artillery formation selected", .{});
+                return true;
+            }
+            const fid = @intFromEnum(fkeys[cur]);
+            self.input.set(std.fmt.bufPrint(&buf, "attacharty {d} co:", .{fid}) catch "attacharty ");
+            self.modal = .{ .input = .command };
+        },
+        .arty_seat => {
+            if (cur >= fkeys.len) {
+                self.say(.dim, "no artillery formation selected", .{});
+                return true;
+            }
+            const fid = @intFromEnum(fkeys[cur]);
+            self.input.set(std.fmt.bufPrint(&buf, "seat {d} ", .{fid}) catch "seat ");
+            self.modal = .{ .input = .command };
+        },
+        .arty_tech => {
+            if (cur >= fkeys.len) {
+                self.say(.dim, "no artillery formation selected", .{});
+                return true;
+            }
+            const fid = @intFromEnum(fkeys[cur]);
+            self.input.set(std.fmt.bufPrint(&buf, "artytech {d} ", .{fid}) catch "artytech ");
+            self.modal = .{ .input = .command };
+        },
+        .arty_reload => {
+            if (cur >= fkeys.len) {
+                self.say(.dim, "no artillery formation selected", .{});
+                return true;
+            }
+            const fid = @intFromEnum(fkeys[cur]);
+            self.input.set(std.fmt.bufPrint(&buf, "reloadarty {d} ", .{fid}) catch "reloadarty ");
+            self.modal = .{ .input = .command };
+        },
+        .arty_repair => {
+            if (cur >= fkeys.len) {
+                self.say(.dim, "no artillery formation selected", .{});
+                return true;
+            }
+            const fid = @intFromEnum(fkeys[cur]);
+            const res = self.execResult(.{ .repair_artillery = @enumFromInt(fid) }) orelse return true;
+            self.say(.good, "formation #{d} queued for depot repair at {s}", .{ fid, try q.hqName(self.a(), g, res.hq) });
+        },
+        .arty_ship => {
+            if (cur >= fkeys.len) {
+                self.say(.dim, "no artillery formation selected", .{});
+                return true;
+            }
+            const fid = @intFromEnum(fkeys[cur]);
+            self.input.set(std.fmt.bufPrint(&buf, "shiparty {d} hq:", .{fid}) catch "shiparty ");
+            self.modal = .{ .input = .command };
+        },
+        .arty_sell => {
+            if (cur >= fkeys.len) {
+                self.say(.dim, "no artillery formation selected", .{});
+                return true;
+            }
+            const fid = @intFromEnum(fkeys[cur]);
+            self.input.set(std.fmt.bufPrint(&buf, "sellarty {d}", .{fid}) catch "sellarty ");
+            self.modal = .{ .input = .command };
+        },
+        else => {}, // TOE-specific actions do not apply in the artillery panel
+    }
+    return true;
+}
 
 pub fn handle(self: *App, k: app.Key) anyerror!bool {
     const hit = app.keys.lookup(Action, &bindings, self.focus, k) orelse return false;
     const al = self.a();
     const g = self.state();
+    // Dispatch to artillery handlers when the artillery panel is active.
+    {
+        const views = try q.toeViews(al, g);
+        if (self.forces_view == views.len) return try handleArty(self, hit.action, al, g);
+    }
     const rows = try self.toeRows();
     const c = self.cur(0).*;
     const row: ?q.ToeRow = if (c < rows.len) rows[c] else null;
@@ -199,12 +326,12 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
         },
         .next_view => {
             const views = try q.toeViews(al, g);
-            self.forces_view = (self.forces_view + 1) % views.len;
+            self.forces_view = (self.forces_view + 1) % (views.len + 1);
             self.cur(0).* = 0;
         },
         .prev_view => {
             const views = try q.toeViews(al, g);
-            self.forces_view = (self.forces_view + views.len - 1) % views.len;
+            self.forces_view = (self.forces_view + views.len) % (views.len + 1);
             self.cur(0).* = 0;
         },
         .fabricate => if (row) |r| {
@@ -283,6 +410,8 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
                 self.say(.dim, "no lifecycle record for this hull", .{});
             }
         },
+        // Artillery panel actions — only reachable via handleArty; never reached here.
+        .arty_attach, .arty_seat, .arty_tech, .arty_reload, .arty_repair, .arty_ship, .arty_sell => {},
     }
     return true;
 }

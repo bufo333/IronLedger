@@ -10,6 +10,7 @@ const std = @import("std");
 const person_mod = @import("../domain/person.zig");
 const force_mod = @import("../domain/force.zig");
 const operation_mod = @import("../domain/operation.zig");
+const artillery_rules = @import("../domain/artillery_operations.zig");
 const game = @import("../root.zig");
 const types = game.types;
 const Command = game.commands.Command;
@@ -606,6 +607,63 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         const oid: types.OperationId = @enumFromInt(try num(u32, tokens.next()));
         return .{ .consolidate_operation = .{ .contract = cid, .operation = oid } };
     }
+    if (eq(u8, verb, "buyarty")) {
+        // buyarty <offer-id> hq:N
+        const offer: types.ArtilleryOfferId = @enumFromInt(try num(u32, tokens.next()));
+        const site = try parseSite(try need(tokens.next()));
+        if (site != .hq) return error.BadSite;
+        return .{ .buy_artillery = .{ .offer = offer, .hq = site.hq } };
+    }
+    if (eq(u8, verb, "attacharty")) {
+        // attacharty <formation-id> co:N
+        const fid: types.ArtilleryFormationId = @enumFromInt(try num(u32, tokens.next()));
+        const site = try parseSite(try need(tokens.next()));
+        if (site != .company) return error.BadSite;
+        return .{ .attach_artillery = .{ .formation = fid, .company = site.company } };
+    }
+    if (eq(u8, verb, "detacharty")) {
+        // detacharty <formation-id>
+        return .{ .detach_artillery = @enumFromInt(try num(u32, tokens.next())) };
+    }
+    if (eq(u8, verb, "shiparty")) {
+        // shiparty <formation-id> hq:N
+        const fid: types.ArtilleryFormationId = @enumFromInt(try num(u32, tokens.next()));
+        const site = try parseSite(try need(tokens.next()));
+        if (site != .hq) return error.BadSite;
+        return .{ .transfer_artillery = .{ .formation = fid, .to_hq = site.hq } };
+    }
+    if (eq(u8, verb, "sellarty")) {
+        // sellarty <formation-id>
+        return .{ .sell_artillery = @enumFromInt(try num(u32, tokens.next())) };
+    }
+    if (eq(u8, verb, "seat")) {
+        // seat <formation-id> <commander|gunner|driver|loader> <person|clear>
+        const fid: types.ArtilleryFormationId = @enumFromInt(try num(u32, tokens.next()));
+        const seat_str = try need(tokens.next());
+        const seat = std.meta.stringToEnum(artillery_rules.Seat, seat_str) orelse return error.BadArguments;
+        const target = try need(tokens.next());
+        if (eq(u8, target, "clear")) return .{ .unassign_artillery_crew = .{ .formation = fid, .seat = seat } };
+        const pid: types.PersonId = @enumFromInt(std.fmt.parseInt(u32, target, 10) catch return error.BadNumber);
+        return .{ .assign_artillery_crew = .{ .formation = fid, .seat = seat, .person = pid } };
+    }
+    if (eq(u8, verb, "artytech")) {
+        // artytech <formation-id> <person|clear>
+        const fid: types.ArtilleryFormationId = @enumFromInt(try num(u32, tokens.next()));
+        const target = try need(tokens.next());
+        if (eq(u8, target, "clear")) return .{ .unassign_artillery_tech = fid };
+        const pid: types.PersonId = @enumFromInt(std.fmt.parseInt(u32, target, 10) catch return error.BadNumber);
+        return .{ .assign_artillery_tech = .{ .formation = fid, .person = pid } };
+    }
+    if (eq(u8, verb, "reloadarty")) {
+        // reloadarty <formation-id> <long_tom|machine_gun>
+        const fid: types.ArtilleryFormationId = @enumFromInt(try num(u32, tokens.next()));
+        const family = std.meta.stringToEnum(artillery_rules.Family, try need(tokens.next())) orelse return error.BadArguments;
+        return .{ .reload_artillery = .{ .formation = fid, .family = family } };
+    }
+    if (eq(u8, verb, "repairarty")) {
+        // repairarty <formation-id>
+        return .{ .repair_artillery = @enumFromInt(try num(u32, tokens.next())) };
+    }
     return null;
 }
 
@@ -868,6 +926,15 @@ pub const verbs = [_][]const u8{
     "refit",
     "wing",
     "start",
+    "buyarty",
+    "attacharty",
+    "detacharty",
+    "shiparty",
+    "sellarty",
+    "seat",
+    "artytech",
+    "reloadarty",
+    "repairarty",
 };
 
 /// One-line usage for a verb (null: not a command verb).
@@ -958,6 +1025,15 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "refit", "refit <unit> remove <slot>|install <loc> <part>|clear|commit" },
         .{ "wing", "wing co:N" },
         .{ "start", "start <LC|DC|FS|CC|FWL> <profession> <name> [year 3000–3060]" },
+        .{ "buyarty", "buyarty <offer-id> hq:N" },
+        .{ "attacharty", "attacharty <formation-id> co:N" },
+        .{ "detacharty", "detacharty <formation-id>" },
+        .{ "shiparty", "shiparty <formation-id> hq:N" },
+        .{ "sellarty", "sellarty <formation-id>" },
+        .{ "seat", "seat <formation-id> commander|gunner|driver|loader <person-id|clear>" },
+        .{ "artytech", "artytech <formation-id> <person-id|clear>" },
+        .{ "reloadarty", "reloadarty <formation-id> long_tom|machine_gun" },
+        .{ "repairarty", "repairarty <formation-id>" },
     };
     for (table) |row| if (std.mem.eql(u8, row[0], verb)) return row[1];
     return null;
@@ -1192,4 +1268,49 @@ test "unsupported old formats share a truthful refusal distinct from corruption 
     const sentence = "that save uses an older unsupported development format; start a new campaign in a new save file";
     for ([_]anyerror{ error.SaveOlderThanGame, error.StoreOlderThanGame }) |err| try std.testing.expectEqualStrings(sentence, errorText(err));
     for ([_]anyerror{ error.CorruptSave, error.CorruptStore, error.StoreNewerThanGame, error.SaveNewerThanGame, error.StoreReadOnly }) |err| try std.testing.expect(!std.mem.eql(u8, sentence, errorText(err)));
+}
+
+test "artillery verbs parse their commands and enforce closed choices" {
+    const t = std.testing;
+    // buyarty
+    try t.expectEqual(
+        types.ArtilleryOfferId,
+        @TypeOf((try parseLine("buyarty 3 hq:1")).?.buy_artillery.offer),
+    );
+    try t.expectEqual(@as(u32, 3), @intFromEnum((try parseLine("buyarty 3 hq:1")).?.buy_artillery.offer));
+    try t.expectEqual(@as(u32, 1), @intFromEnum((try parseLine("buyarty 3 hq:1")).?.buy_artillery.hq));
+    try t.expectError(error.BadSite, parseLine("buyarty 3 co:1"));
+    // attacharty
+    try t.expectEqual(@as(u32, 2), @intFromEnum((try parseLine("attacharty 2 co:1")).?.attach_artillery.formation));
+    try t.expectError(error.BadSite, parseLine("attacharty 2 hq:1"));
+    // detacharty
+    try t.expectEqual(@as(u32, 5), @intFromEnum((try parseLine("detacharty 5")).?.detach_artillery));
+    try t.expectError(error.BadArguments, parseLine("detacharty"));
+    // shiparty
+    try t.expectEqual(@as(u32, 7), @intFromEnum((try parseLine("shiparty 7 hq:2")).?.transfer_artillery.formation));
+    try t.expectEqual(@as(u32, 2), @intFromEnum((try parseLine("shiparty 7 hq:2")).?.transfer_artillery.to_hq));
+    try t.expectError(error.BadSite, parseLine("shiparty 7 co:1"));
+    // sellarty
+    try t.expectEqual(@as(u32, 4), @intFromEnum((try parseLine("sellarty 4")).?.sell_artillery));
+    // seat: assign and clear paths
+    try t.expect((try parseLine("seat 1 commander 10")).? == .assign_artillery_crew);
+    try t.expectEqual(artillery_rules.Seat.commander, (try parseLine("seat 1 commander 10")).?.assign_artillery_crew.seat);
+    try t.expectEqual(@as(u32, 10), @intFromEnum((try parseLine("seat 1 commander 10")).?.assign_artillery_crew.person));
+    try t.expect((try parseLine("seat 1 gunner clear")).? == .unassign_artillery_crew);
+    try t.expectEqual(artillery_rules.Seat.gunner, (try parseLine("seat 1 gunner clear")).?.unassign_artillery_crew.seat);
+    try t.expectError(error.BadArguments, parseLine("seat 1 pilot 10")); // unknown seat name
+    // artytech: assign and clear paths
+    try t.expect((try parseLine("artytech 2 5")).? == .assign_artillery_tech);
+    try t.expectEqual(@as(u32, 5), @intFromEnum((try parseLine("artytech 2 5")).?.assign_artillery_tech.person));
+    try t.expect((try parseLine("artytech 2 clear")).? == .unassign_artillery_tech);
+    // reloadarty: both families, unknown refused
+    try t.expectEqual(artillery_rules.Family.long_tom, (try parseLine("reloadarty 3 long_tom")).?.reload_artillery.family);
+    try t.expectEqual(artillery_rules.Family.machine_gun, (try parseLine("reloadarty 3 machine_gun")).?.reload_artillery.family);
+    try t.expectError(error.BadArguments, parseLine("reloadarty 3 lrm"));
+    // repairarty
+    try t.expectEqual(@as(u32, 6), @intFromEnum((try parseLine("repairarty 6")).?.repair_artillery));
+    // trailing tokens refused
+    try t.expectError(error.BadArguments, parseLine("detacharty 5 extra"));
+    try t.expectError(error.BadArguments, parseLine("sellarty 4 extra"));
+    try t.expectError(error.BadArguments, parseLine("repairarty 6 extra"));
 }
