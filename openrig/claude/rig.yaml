@@ -1,0 +1,16 @@
+version: "0.2"
+name: scaffold-claude
+managed_blocks: {claude-code: CLAUDE.local.md}
+pods:
+  - id: workflow
+    label: Shared workflow
+    members:
+      - {id: coordinator, agent_ref: "local:../agents/coordinator", profile: default, runtime: claude-code, cwd: "../..", model: claude-sonnet-4-6, restore_policy: relaunch_fresh}
+      - {id: bootstrapper, agent_ref: "local:../agents/bootstrapper", profile: default, runtime: claude-code, cwd: "../..", model: claude-sonnet-4-6, restore_policy: relaunch_fresh}
+      - {id: planner, agent_ref: "local:../agents/planner", profile: default, runtime: claude-code, cwd: "../..", model: claude-opus-4-8, restore_policy: relaunch_fresh}
+      - {id: branch-bootstrap, agent_ref: "local:../agents/branch-bootstrap", profile: default, runtime: claude-code, cwd: "../..", model: haiku, restore_policy: relaunch_fresh}
+      - {id: implementer, agent_ref: "local:../agents/implementer", profile: default, runtime: claude-code, cwd: "../..", model: claude-sonnet-4-6, restore_policy: relaunch_fresh}
+      - {id: reviewer, agent_ref: "local:../agents/reviewer", profile: default, runtime: claude-code, cwd: "../..", model: claude-opus-4-8, restore_policy: relaunch_fresh}
+      - {id: integrator, agent_ref: "local:../agents/integrator", profile: default, runtime: claude-code, cwd: "../..", model: haiku, restore_policy: relaunch_fresh}
+    edges: []
+edges: []

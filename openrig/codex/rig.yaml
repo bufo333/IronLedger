@@ -1,0 +1,57 @@
+version: "0.2"
+name: scaffold-codex
+pods:
+  - id: workflow
+    label: Shared workflow
+    members:
+      - id: coordinator
+        agent_ref: "local:../agents/coordinator"
+        profile: default
+        runtime: codex
+        cwd: "../.."
+        model: "openai/gpt-5.6-terra"
+        restore_policy: relaunch_fresh
+      - id: bootstrapper
+        agent_ref: "local:../agents/bootstrapper"
+        profile: default
+        runtime: codex
+        cwd: "../.."
+        model: "openai/gpt-6.1-sol"
+        restore_policy: relaunch_fresh
+      - id: planner
+        agent_ref: "local:../agents/planner"
+        profile: default
+        runtime: codex
+        cwd: "../.."
+        model: "openai/gpt-6.1-sol"
+        restore_policy: relaunch_fresh
+      - id: branch-bootstrap
+        agent_ref: "local:../agents/branch-bootstrap"
+        profile: default
+        runtime: codex
+        cwd: "../.."
+        model: "openai/gpt-5.6-luna"
+        restore_policy: relaunch_fresh
+      - id: implementer
+        agent_ref: "local:../agents/implementer"
+        profile: default
+        runtime: codex
+        cwd: "../.."
+        model: "openai/gpt-5.6-terra"
+        restore_policy: relaunch_fresh
+      - id: reviewer
+        agent_ref: "local:../agents/reviewer"
+        profile: default
+        runtime: codex
+        cwd: "../.."
+        model: "openai/gpt-6.1-sol"
+        restore_policy: relaunch_fresh
+      - id: integrator
+        agent_ref: "local:../agents/integrator"
+        profile: default
+        runtime: codex
+        cwd: "../.."
+        model: "openai/gpt-6-luna"
+        restore_policy: relaunch_fresh
+    edges: []
+edges: []

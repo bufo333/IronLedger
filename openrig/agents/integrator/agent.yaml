@@ -1,0 +1,9 @@
+version: "1.0"
+name: integrator
+resources: {}
+profiles:
+  default:
+    uses: {skills: [], guidance: [], subagents: [], plugins: [], runtime_resources: []}
+startup:
+  files: [{path: guidance/role.md, delivery_hint: send_text, required: true, applies_on: [fresh_start, restore]}]
+  actions: []
