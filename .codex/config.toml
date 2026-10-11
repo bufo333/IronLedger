@@ -1,8 +1,6 @@
 model = "gpt-6.1-sol"
 model_reasoning_effort = "medium"
 
-[features]
-worktrees = false
 
 developer_instructions = '''
 Follow AGENTS.md, docs/agent-workflow.md, and docs/engineering-contract.md. When
@@ -15,8 +13,11 @@ restrictions. Scoped read-only web/source research outside GitHub follows
 docs/agent-workflow.md within the delegated role and effective permissions; it
 grants no other authority. Ordinary exact-plan approval authorizes bounded local
 work and continuous coordinator handoffs; integration requires approval of the
-exact accepted commit and sequence under docs/agent-workflow.md. Follow its
-autonomous-delivery amendment transition, verify fresh effective roles before
-using prospective authority, and honor actual runtime permission requirements.
-Tracked configuration does not change loaded instructions.
+exact accepted commit and sequence under docs/agent-workflow.md. Completion
+work the approved outcome needs is in scope; a bounded material gap takes an
+approved amendment. Honor actual runtime permission requirements. Tracked
+configuration does not change loaded instructions.
 '''
+
+[features]
+worktrees = false
