@@ -272,3 +272,45 @@ test "brackets step from an HQ board to an active company's local board" {
         .hq => return error.ExpectedCompanyMarketBoard,
     }
 }
+
+test "market: B on artillery-offers pane buys when funded" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    const al = c.app.frame.allocator();
+    const gs = c.app.state();
+    const hq_rows = try q.hqList(al, gs);
+    if (hq_rows.len == 0) return;
+    const home = hq_rows[0].id;
+    // HQ founding_funds = 1M; purchasePrice ≈ 1.78M; loan 800K tops it up via courier.
+    if (!try c.app.exec(.{ .take_loan = .{ .principal = 800_000, .term_months = 12 } })) return;
+    if (!try c.app.exec(.{ .transfer = .{ .from = .outfit, .to = .{ .hq = home }, .amount = 800_000 } })) return;
+    _ = try c.app.exec(.{ .advance_days = 4 }); // courier arrives
+    const before_count = gs.artillery_formations.count();
+    try toTab(c, .market);
+    c.app.focus = 4; // artillery-offers pane
+    try app.pressForTest(c, .{ .char = 'B' });
+    // A formation was created
+    try std.testing.expectEqual(before_count + 1, gs.artillery_formations.count());
+}
+
+test "market: B on artillery-offers pane with no offers says so without crash" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    const al = c.app.frame.allocator();
+    const gs = c.app.state();
+    const hq_rows = try q.hqList(al, gs);
+    if (hq_rows.len == 0) return;
+    const home = hq_rows[0].id;
+    // Fund the HQ and consume the offer so none remain when 'B' is pressed.
+    if (!try c.app.exec(.{ .take_loan = .{ .principal = 800_000, .term_months = 12 } })) return;
+    if (!try c.app.exec(.{ .transfer = .{ .from = .outfit, .to = .{ .hq = home }, .amount = 800_000 } })) return;
+    _ = try c.app.exec(.{ .advance_days = 4 });
+    const offer_rows = try q.artilleryOfferRows(al, c.app.state());
+    if (offer_rows.len == 0) return;
+    _ = try c.app.exec(.{ .buy_artillery = .{ .hq = home, .offer = offer_rows[0].id } });
+    try toTab(c, .market);
+    c.app.focus = 4;
+    try app.pressForTest(c, .{ .char = 'B' });
+    // Did not crash and no modal was opened
+    try std.testing.expect(c.app.modal == .none);
+}

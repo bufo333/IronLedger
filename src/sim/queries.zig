@@ -7443,6 +7443,7 @@ fn artilleryPlacementText(alloc: Alloc, gs: *GameState, f: *const @import("../do
 pub const ArtilleryFormationRow = struct {
     id: types.ArtilleryFormationId,
     text: []const u8,
+    attached: bool,
 };
 
 /// Typed offer row: one per available offer, carrying its identity for purchase commands.
@@ -7475,7 +7476,7 @@ pub fn artilleryFormationRows(alloc: Alloc, gs: *GameState) ![]ArtilleryFormatio
         const line = try std.fmt.allocPrint(alloc, "#{d}  hull #{d}  quality {s}  {s}  armor {d}%  crew {d}/4  tech {s}  LT {d}rds  MG {d}rds  {s}{s}", .{
             @intFromEnum(f.id), @intFromEnum(f.hull), @tagName(f.quality), placement, f.armor_pct, crew_filled, tech_text, lt_rounds, mg_rounds, ready, has_job,
         });
-        try rows.append(alloc, .{ .id = f.id, .text = line });
+        try rows.append(alloc, .{ .id = f.id, .text = line, .attached = f.placement == .company });
     }
     return rows.toOwnedSlice(alloc);
 }
@@ -9980,6 +9981,27 @@ test "resultText artillery commands: all arms produce canonical sentences with e
     const fake_result = cmds.Result{ .artillery_formation = fid, .artillery_person = evil_tech };
     const tech2_text = try resultText(a, &gs, .{ .assign_artillery_tech = .{ .formation = fid, .person = evil_tech } }, fake_result);
     try std.testing.expect(std.mem.indexOf(u8, tech2_text, "\x1b") == null);
-    // hint-versus-command refusal: artilleryOfferRows with no offers → empty, not a crash
+    // hint-versus-command refusal (rule 34): view shows empty offers (eligibility hint);
+    // command must still refuse canonically.
     try std.testing.expectEqual(@as(usize, 0), (try artilleryOfferRows(a, &gs)).len);
+    const before_refused = @import("digest.zig").stateHash(&gs);
+    try std.testing.expectError(error.ArtilleryUnavailable, cmds.execute(&gs, .{ .buy_artillery = .{ .hq = home, .offer = gs.artillery_offers.items[0].id } }));
+    try std.testing.expectEqual(before_refused, @import("digest.zig").stateHash(&gs));
+}
+
+test "artillery query views propagate OutOfMemory" {
+    const cmds = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "Test", .LC, .quartermaster);
+    const home = gs.seat();
+    gs.hqs.getPtr(home).?.funds = @import("artillery.zig").purchasePrice() * 2;
+    try @import("artillery.zig").syncMarkets(&gs);
+    // artilleryOfferRows with an available offer must propagate OOM
+    try std.testing.expectError(error.OutOfMemory, artilleryOfferRows(std.testing.failing_allocator, &gs));
+    // buy the offer so we have a formation for the next tests
+    const buy_result = try cmds.execute(&gs, .{ .buy_artillery = .{ .hq = home, .offer = gs.artillery_offers.items[0].id } });
+    const fid = buy_result.artillery_formation;
+    try std.testing.expectError(error.OutOfMemory, artilleryFormationRows(std.testing.failing_allocator, &gs));
+    try std.testing.expectError(error.OutOfMemory, artilleryDetailLines(std.testing.failing_allocator, &gs, fid));
 }

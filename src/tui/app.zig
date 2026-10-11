@@ -3300,7 +3300,7 @@ pub const App = struct {
                 return .{ .title = try listTitle(al, "EMBLEM", "use", "cancel", false), .right_title = try std.fmt.allocPrint(al, "pictures from {s}", .{try std.mem.join(al, ", ", self.asset_roots.logos)}), .rows = rows.items, .n = rows.items.len, .w = layout.modal.emblem_w, .max_h = layout.modal.emblem_max_h };
             },
             .hull => |uid| return .{ .title = try listTitle(al, "HULL", null, "close", false), .rows = try q.hull(al, self.state(), uid), .read_only = true, .w = layout.modal.hull_w, .max_h = full_h },
-            .arty_detail => |fid| return .{ .title = try listTitle(al, "ARTILLERY DETAIL", null, "close", false), .rows = try q.artilleryDetailLines(al, self.state(), fid), .read_only = true, .w = layout.modal.hull_w, .max_h = full_h },
+            .arty_detail => |fid| return .{ .title = try listTitle(al, "ARTILLERY DETAIL", null, "close", false), .rows = try q.artilleryDetailLines(al, self.state(), fid), .read_only = true, .scroll = true, .w = layout.modal.hull_w, .max_h = full_h },
             .record => |pid| {
                 const g = self.state();
                 const pa = try q.personActions(al, g, pid);

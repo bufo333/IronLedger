@@ -407,7 +407,13 @@ fn printOffers(gs: *game.state.GameState, al: std.mem.Allocator) !void {
     };
     if (arty_rows.len > 0) {
         std.debug.print("Artillery offers ({d}):\n", .{arty_rows.len});
-        for (arty_rows) |r| std.debug.print("  {s}\n", .{q.stripMarks(al, r.text) catch r.text});
+        for (arty_rows) |r| {
+            const text = q.stripMarks(al, r.text) catch |err| {
+                showError(err);
+                continue;
+            };
+            std.debug.print("  {s}\n", .{text});
+        }
     }
 }
 
@@ -646,7 +652,7 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                     continue;
                 };
                 if (detail.len == 0) {
-                    std.debug.print("no artillery formation has that id\n", .{});
+                    std.debug.print("{s}\n", .{game.cli.errorText(error.NoSuchArtilleryFormation)});
                 } else {
                     printLines(al, detail, "") catch |err| showError(err);
                 }
@@ -658,7 +664,13 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                 if (rows.len == 0) {
                     std.debug.print("no artillery formations.\n", .{});
                 } else {
-                    for (rows) |r| std.debug.print("{s}\n", .{q.stripMarks(al, r.text) catch r.text});
+                    for (rows) |r| {
+                        const text = q.stripMarks(al, r.text) catch |err| {
+                            showError(err);
+                            continue;
+                        };
+                        std.debug.print("{s}\n", .{text});
+                    }
                 }
             }
         } else if (std.mem.eql(u8, verb, "candidates")) {
@@ -902,7 +914,13 @@ fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r
                 showError(err);
                 return;
             };
-            for (frows) |frow| std.debug.print("{s}\n", .{q.stripMarks(al, frow.text) catch frow.text});
+            for (frows) |frow| {
+                const plain = q.stripMarks(al, frow.text) catch |err| {
+                    showError(err);
+                    continue;
+                };
+                std.debug.print("{s}\n", .{plain});
+            }
         },
         else => {},
     }

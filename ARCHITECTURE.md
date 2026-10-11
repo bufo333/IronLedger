@@ -225,8 +225,8 @@ cheap, copyable, and impossible to mix up.
   [Artillery operations policy](docs/p2-artillery-operations-design.md) and
   [combat policy](docs/p2-artillery-battle-design.md) own those project adaptations. Existing personnel,
   assignment and shared bay views consume typed owners. Dedicated artillery
-  panels, parser verbs and TUI controls shipped in P2i: `artilleryListLines`,
-  `artilleryDetailLines`, `artilleryOffersLines`, and `artilleryOfferIds` in
+  panels, parser verbs and TUI controls shipped in P2i: `artilleryFormationRows`,
+  `artilleryDetailLines`, and `artilleryOfferRows` in
   `queries.zig`; nine REPL verbs (`buyarty`, `attacharty`, `detacharty`,
   `shiparty`, `sellarty`, `seat`, `artytech`, `reloadarty`, `repairarty`) in
   `cli.zig`; an artillery panel as the last F3 Forces view (`]`/`[` wraps to

@@ -223,8 +223,8 @@ assert "all forces" in plain()[-30000:], plain()[-3000:]
 send("[", 0.6)                 # wraps to the artillery panel (new last view)
 assert "ARTILLERY" in plain()[-30000:], plain()[-3000:]
 # Artillery panel: no formations, actions produce "no formation selected" not a crash.
-send("A", 0.3)                 # arty_attach with no formation
-assert "no artillery formation selected" in plain()[-30000:] or "ARTILLERY" in plain()[-30000:], plain()[-3000:]
+send("e", 0.3)                 # arty_attach with no formation
+assert "no artillery formation selected" in plain()[-30000:], plain()[-3000:]
 send("[", 0.6)                 # one more back: the hangar ranking
 assert "hangar: cost vs contribution" in plain()[-30000:] and "cost index" in plain()[-30000:], plain()[-3000:]
 send("]", 0.6)                 # hangar → artillery panel

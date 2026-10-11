@@ -37,6 +37,22 @@ printf '%s\n' \
   'strip 3' \
   'roe co:1 cautious' \
   'loan 500000' \
+  'artillery' \
+  'loan 1500000 36' \
+  'transfer outfit hq:1 1900000' \
+  'day 4 force' \
+  'offers' \
+  'buyarty 1 hq:1' \
+  'artillery' \
+  'artillery 1' \
+  'attacharty 1 co:1' \
+  'detacharty 1' \
+  'seat 1 gunner clear' \
+  'artytech 1 clear' \
+  'reloadarty 1 long_tom' \
+  'repairarty 1' \
+  'shiparty 1 hq:1' \
+  'sellarty 1' \
   'candidates 9' \
   'accept 9 1' \
   'day 3 force' \
@@ -141,4 +157,14 @@ check 'no artillery formations'
 check 'usage: seat'
 check 'no artillery formation has that id'
 check 'usage: artillery'
+# P2i artillery arc: nine verbs exercised with funded HQ
+check 'Mobile Long Tom'
+check 'bought Mobile Long Tom #'
+check 'attached to'
+check 'detached to HQ pool'
+check 'seat cleared'
+check 'tech cleared'
+check 'qualified local mechanic'
+check 'required home HQ pool'
+check '#1 sold'
 echo "REPL SMOKE OK"

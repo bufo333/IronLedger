@@ -31,7 +31,7 @@ pub fn draw(self: *App) anyerror!void {
             const cur_val = self.cur(0).*;
             if (cur_val < arty_rows.len) {
                 const detail = try q.artilleryDetailLines(al, g, arty_rows[cur_val].id);
-                self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = b.h }, "ARTILLERY DETAIL", detail, 1, self.paneFocused(1), false);
+                self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = b.h }, "ARTILLERY DETAIL", detail, 1, self.paneFocused(1), true);
             } else {
                 const empty = [_][]const u8{"{d}no artillery formations{/}"};
                 self.listPane(.{ .x = b.x + lw, .y = b.y, .w = b.w - lw, .h = b.h }, "ARTILLERY DETAIL", &empty, 1, self.paneFocused(1), false);
@@ -88,7 +88,16 @@ pub fn move(self: *App, delta: i32) anyerror!void {
     const g = self.state();
     const views = try q.toeViews(al, g);
     if (self.forces_view == views.len) {
-        // Artillery panel: only move the list cursor when focus is on the list pane.
+        if (self.focus == 1) {
+            // Detail pane: scroll through the formation's detail lines.
+            const arty_rows = try q.artilleryFormationRows(al, g);
+            const cur_val = self.cur(0).*;
+            if (cur_val < arty_rows.len) {
+                const detail = try q.artilleryDetailLines(al, g, arty_rows[cur_val].id);
+                self.moveCursor(1, delta, detail.len);
+            }
+            return;
+        }
         if (self.focus != 0) return;
         const arty_rows = try q.artilleryFormationRows(al, g);
         self.moveCursor(0, delta, arty_rows.len);
@@ -167,9 +176,7 @@ fn handleArty(self: *App, action: Action, al: std.mem.Allocator, g: *app.GameSta
             }
             const row = arty_rows[cur];
             const fid = @intFromEnum(row.id);
-            // Check placement: if already attached to a company, prefill detach instead.
-            const f = g.artillery_formations.getPtr(row.id);
-            if (f != null and f.?.placement == .company) {
+            if (row.attached) {
                 self.input.set(std.fmt.bufPrint(&buf, "detacharty {d}", .{fid}) catch "detacharty ");
             } else {
                 self.input.set(std.fmt.bufPrint(&buf, "attacharty {d} co:", .{fid}) catch "attacharty ");
@@ -457,33 +464,143 @@ test "artillery panel: empty state draws without crash" {
 }
 
 fn buyTestFormation(c: *app.ClientForTest) !bool {
-    // Fund the seat HQ via a large loan, then buy the first available offer.
     const al = c.app.frame.allocator();
-    const hq_rows = try q.hqList(al, c.app.state());
+    const gs = c.app.state();
+    const hq_rows = try q.hqList(al, gs);
     if (hq_rows.len == 0) return false;
     const hq_id = hq_rows[0].id;
-    _ = try c.app.exec(.{ .take_loan = .{ .principal = 50_000_000, .term_months = 1 } });
-    const offer_rows = try q.artilleryOfferRows(al, c.app.state());
+    const offer_rows = try q.artilleryOfferRows(al, gs);
     if (offer_rows.len == 0) return false;
-    _ = try c.app.exec(.{ .buy_artillery = .{ .hq = hq_id, .offer = offer_rows[0].id } });
-    return true;
+    const offer_id = offer_rows[0].id;
+    // HQ founding_funds = 1M; purchasePrice ≈ 1.78M; loan 800K tops it up via courier.
+    if (!try c.app.exec(.{ .take_loan = .{ .principal = 800_000, .term_months = 12 } })) return false;
+    if (!try c.app.exec(.{ .transfer = .{ .from = .outfit, .to = .{ .hq = hq_id }, .amount = 800_000 } })) return false;
+    _ = try c.app.exec(.{ .advance_days = 4 }); // same_world_days = 3; courier arrives
+    return try c.app.exec(.{ .buy_artillery = .{ .hq = hq_id, .offer = offer_id } });
 }
 
-test "artillery panel: with a formation, cursor moves and detail pane focuses" {
+test "artillery panel: with a formation, cursor, controls and detail" {
     const c = try app.clientForTest(std.testing.allocator);
     defer app.deinitForTest(c, std.testing.allocator);
-    if (!try buyTestFormation(c)) return;
+    const ok = try buyTestFormation(c);
+    try std.testing.expect(ok);
+    const al = c.app.frame.allocator();
+    // One formation exists and row identity is typed
+    const rows = try q.artilleryFormationRows(al, c.app.state());
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    const bought_id = rows[0].id;
     try toTab(c, .forces);
     try navToArty(c);
-    // One formation: down stays at 0
+    // Cursor 0 targets the bought formation
+    try std.testing.expectEqual(bought_id, (try q.artilleryFormationRows(al, c.app.state()))[c.app.cur(0).*].id);
+    // Down clamps at 0 (only one row)
     try app.pressForTest(c, .down);
     try std.testing.expectEqual(@as(usize, 0), c.app.cur(0).*);
+    // 'e' (arty_attach) prefills attacharty for an unattached formation
+    try app.pressForTest(c, .{ .char = 'e' });
+    try std.testing.expect(c.app.modal == .input);
+    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "attacharty") != null);
+    try app.pressForTest(c, .escape);
+    // 'f' (arty_seat) prefills seat command
+    try app.pressForTest(c, .{ .char = 'f' });
+    try std.testing.expect(c.app.modal == .input);
+    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "seat") != null);
+    try app.pressForTest(c, .escape);
+    // 'g' (arty_tech) prefills artytech command
+    try app.pressForTest(c, .{ .char = 'g' });
+    try std.testing.expect(c.app.modal == .input);
+    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "artytech") != null);
+    try app.pressForTest(c, .escape);
+    // 'i' (arty_reload) prefills reloadarty command
+    try app.pressForTest(c, .{ .char = 'i' });
+    try std.testing.expect(c.app.modal == .input);
+    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "reloadarty") != null);
+    try app.pressForTest(c, .escape);
+    // 's' (arty_ship) prefills shiparty command
+    try app.pressForTest(c, .{ .char = 's' });
+    try std.testing.expect(c.app.modal == .input);
+    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "shiparty") != null);
+    try app.pressForTest(c, .escape);
+    // 'p' (arty_sell) prefills sellarty command
+    try app.pressForTest(c, .{ .char = 'p' });
+    try std.testing.expect(c.app.modal == .input);
+    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "sellarty") != null);
+    try app.pressForTest(c, .escape);
+    // 'v' (arty_repair) executes directly: NothingToRepair on a fresh formation, modal stays .none
+    try app.pressForTest(c, .{ .char = 'v' });
+    try std.testing.expect(c.app.modal == .none);
     // Tab focuses detail pane (pane 1) on wide terminal
     try app.pressForTest(c, .tab);
     try std.testing.expectEqual(@as(u8, 1), c.app.focus);
+    // j/k on detail pane moves cur(1)
+    try app.pressForTest(c, .down);
+    // detail lines exist (populated, not empty)
+    const detail = try q.artilleryDetailLines(al, c.app.state(), bought_id);
+    try std.testing.expect(detail.len > 0);
     // Tab back to list pane
     try app.pressForTest(c, .tab);
     try std.testing.expectEqual(@as(u8, 0), c.app.focus);
+}
+
+test "artillery panel: two formations, cursor targets correct row" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    const al = c.app.frame.allocator();
+    const hq_rows = try q.hqList(al, c.app.state());
+    if (hq_rows.len == 0) return;
+    const home = hq_rows[0].id;
+    // Two buys need ~2.56M above 1M starting HQ funds; requires 'Mech liquidation credit.
+    // Silently skip if credit is insufficient (non-deterministic campaign seed).
+    if (!try c.app.exec(.{ .take_loan = .{ .principal = 2_600_000, .term_months = 48 } })) return;
+    if (!try c.app.exec(.{ .transfer = .{ .from = .outfit, .to = .{ .hq = home }, .amount = 2_600_000 } })) return;
+    if (!try c.app.exec(.{ .advance_days = 4 })) return; // courier arrives (same_world_days = 3)
+    const offer_rows_1 = try q.artilleryOfferRows(al, c.app.state());
+    if (offer_rows_1.len == 0) return;
+    if (!try c.app.exec(.{ .buy_artillery = .{ .hq = home, .offer = offer_rows_1[0].id } })) return;
+    if (!try c.app.exec(.{ .advance_days = 26 })) return; // advance to month 2 for new offer
+    const offer_rows_2 = try q.artilleryOfferRows(al, c.app.state());
+    if (offer_rows_2.len == 0) return;
+    if (!try c.app.exec(.{ .buy_artillery = .{ .hq = home, .offer = offer_rows_2[0].id } })) return;
+    const rows = try q.artilleryFormationRows(al, c.app.state());
+    try std.testing.expectEqual(@as(usize, 2), rows.len);
+    const id0 = rows[0].id;
+    const id1 = rows[1].id;
+    try toTab(c, .forces);
+    try navToArty(c);
+    // Cursor starts at 0 — targets first formation
+    try std.testing.expectEqual(@as(usize, 0), c.app.cur(0).*);
+    var buf: [64]u8 = undefined;
+    try app.pressForTest(c, .{ .char = 'e' });
+    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), std.fmt.bufPrint(&buf, "attacharty {d}", .{@intFromEnum(id0)}) catch "") != null);
+    try app.pressForTest(c, .escape);
+    // Down moves to row 1
+    try app.pressForTest(c, .down);
+    try std.testing.expectEqual(@as(usize, 1), c.app.cur(0).*);
+    try app.pressForTest(c, .{ .char = 'e' });
+    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), std.fmt.bufPrint(&buf, "attacharty {d}", .{@intFromEnum(id1)}) catch "") != null);
+    try app.pressForTest(c, .escape);
+    // Down clamps at row 1 (last row)
+    try app.pressForTest(c, .down);
+    try std.testing.expectEqual(@as(usize, 1), c.app.cur(0).*);
+}
+
+test "artillery panel: narrow Enter with a formation opens arty_detail modal" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    const ok = try buyTestFormation(c);
+    try std.testing.expect(ok);
+    const al = c.app.frame.allocator();
+    const rows = try q.artilleryFormationRows(al, c.app.state());
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    try c.app.screen.resize(79, 24);
+    try toTab(c, .forces);
+    try navToArty(c);
+    try app.pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .arty_detail);
+    try std.testing.expectEqual(rows[0].id, c.app.modal.arty_detail);
+    // The detail lines are populated (not empty)
+    const detail = try q.artilleryDetailLines(al, c.app.state(), rows[0].id);
+    try std.testing.expect(detail.len > 0);
 }
 
 test "artillery panel: narrow Enter with no formations is a no-op" {

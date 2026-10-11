@@ -698,8 +698,8 @@ and the TUI:
   a `LeaderboardRow.id` the Desk Reports hub uses to open the detail sheet)
 - `mercCompanyDetail(id)` (read-only lines: identity, lifecycle, treasury,
   fieldable BV, hull roster, linked rival standing)
-- `artilleryFormationRows` (typed `ArtilleryFormationRow` list: `.id` +
-  `.text` with quality, hull id, placement, per-formation carry cost;
+- `artilleryFormationRows` (typed `ArtilleryFormationRow` list: `.id`, `.text`
+  with quality, hull id, placement, crew and readiness, and `.attached` bool;
   used by the Forces artillery panel and the REPL `artillery` list view)
 - `artilleryDetailLines(id)` (detail lines for one formation: header with
   hull id, readiness, crew, tech, magazines, upkeep; used by the Forces
