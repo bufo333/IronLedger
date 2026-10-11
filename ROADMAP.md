@@ -1869,6 +1869,263 @@ validated framework rather than adding a second story system.
 choices affect force readiness, money, people, contracts, worlds and future
 opportunities without leaving the mercenary-command fantasy.
 
+## Product completion P5 — The desk is a game
+
+Begins after P2i. P5 adds no fidelity for its own sake: the simulation is deep
+enough. Every P5 item answers three questions before it is scheduled: what
+decision does the player make with it, how often, and what happens if they get
+it wrong. An item without a good answer is cut or deferred. P5 does not add
+pilot-level or hex-map combat, and it creates no parallel command, event,
+battle, report or currency path; every item consumes the existing owners
+(contract rules 3, 7, 20–24). New balance values are labelled `// TUNE`.
+
+The player loop after P5:
+
+```text
+ambition → negotiate a contract against rivals → deploy
+→ turn = the next thing that needs the commander
+→ operation: intel, tempo, tasks, intent → staged battle with interventions
+→ situations with actors whose memory outlasts the contract
+→ payday with runway → grow reach, or go home and rest
+→ world, rivals, people and employer remember → the next contract is different
+```
+
+**Order.** P5a, P5b and the P5c slice ship first, as separate branches, into
+one playable vertical slice on a single garrison arc. A playtest gate follows:
+John plays the slice before P5d is dispatched. If the slice is not fun, P5d
+onward is redesigned here before it is scheduled. `TODO.md` owns the delivery
+order.
+
+### P5a — Time: the turn is the next stop
+
+The daily tick is the simulation unit and does not change; `tick.advance`
+already loops day by day and stops on an unread after-action, an unanswered
+battle decision or a contact window. P5a changes the player's unit of time to
+"until something needs the commander".
+
+- P5a.1 Add an advance-until-stop command with a day cap (`// TUNE`, 90 days
+  initially). It is a new command beside `advance_days`, whose semantics do not
+  change. One owner in `checklist.zig`, beside `turnHold` and
+  `contactOpenedToday`, decides what stops time; `tick.advance` consults it
+  after each day and `commands.Result.stopped` names the reason.
+- P5a.2 Stops inside a contract: the existing holds; the contact window; an
+  operation becoming available or an arc beat landing; an inbox decision with
+  options arriving; the day before any unanswered decision would default;
+  payday; contract end, arrival on world or an employer notice. Battle orders
+  are confirmed at contact before an engagement resolves; skipping them is no
+  longer a silent default.
+- P5a.3 Stops at home: payday and the board refresh; a company or shipment
+  arriving; a queued construction project or a structural bay job finishing; a
+  rare hull listed inside the rings; a personnel event (retirement, resignation,
+  recovery); any inbox item.
+- P5a.4 Everything else is a notice. Notices accumulate in the existing digest
+  and the stop screen shows them as "since you last looked". No bay completion,
+  delivery or routine recovery stops time on its own.
+- P5a.5 The stop screen names the reason and opens the relevant screen, as the
+  client already opens an after-action report. When nothing is coming it says
+  so in one sentence: no contract, nothing building, next stop is payday on
+  the date shown.
+- P5a.6 `n` in the TUI binds to advance-until-stop. One day and one week remain
+  explicit keys; the REPL verb takes an optional cap.
+- P5a.7 An auto advance never crosses a decision deadline. The cautious default
+  happens only when the player explicitly advances past it; the test proves a
+  90-day advance with an open decision stops the day before its deadline.
+
+**Acceptance:** a quiet garrison month is four to six stops, a home month
+between contracts is one or two, and no decision defaults during an auto
+advance.
+
+### P5b — The battle you can touch
+
+The autoresolver stays hands-off at the pilot level; it gains pauses at the
+command level.
+
+- P5b.1 A battle resolves in named phases: contact, decisive, pursuit or
+  withdrawal. Each phase is a deterministic slice of the existing battle model
+  under one seed; no second engine, no re-rolled outcome.
+- P5b.2 Between phases the turn pauses on a phase report with recomputed odds
+  under the current orders. The interventions are the existing ones: commit a
+  reserve-tasked lance, change ROE, call air cover, tactical withdrawal, and
+  the P4f command-capacity interventions. Each names its cost and the lance,
+  asset, stock or capacity it needs, and refuses with the reason when it is
+  missing.
+- P5b.3 The after-action report narrates the phases and names each
+  intervention and what it changed; the operation record and campaign log keep
+  the same. Integrated command may lock interventions the employer reserves.
+- P5b.4 Fixed-seed tests prove a phase-two reserve commit produces a different
+  outcome from standing pat, and that a phase-one withdrawal preserves hulls at
+  the cost of the field. Refusal tests cover an uncrewed reserve, spent
+  capacity and a locked intervention.
+
+**Acceptance:** a battle is three or four decisions with the player's hulls at
+stake, and a player can lose a mek because they held when they should have
+pulled back.
+
+### P5c — Situations, not events
+
+The contract event decks (`contract_events.zig`) apply flat stat deltas that
+nothing reads back. P5c replaces them with situations owned by persistent
+actors (P4i), so a choice is remembered.
+
+- P5c.1 A situation is owned by an actor archetype: liaison, governor,
+  quartermaster, smuggler, militia leader, enemy officer or rival commander.
+  Fewer situations per month than today's events, higher stakes, and every
+  option costs something concrete and named; no option is free.
+- P5c.2 Options set typed flags on the actor relationship and the world state,
+  not only stat deltas. Later situations, salvage disputes, local pricing,
+  intelligence quality, recruitment and the finale read those flags through
+  the existing relationship and world-state owners. No new currency.
+- P5c.3 Callbacks: an actor met again on a later contract opens with a
+  situation that cites what the player did, and the log line says why it came
+  up.
+- P5c.4 Slice content: three situations on the garrison arc with at least one
+  callback inside the same contract. Full content expansion is data, after the
+  playtest gate; the event decks are retired deck by deck as their situations
+  land, never both firing for the same beat.
+
+**Acceptance:** the same contract played twice with opposite choices produces
+different situations, prices and a different finale, and the player can read
+why.
+
+### P5d — Rivals and pressure
+
+P5d owns the NPC merc-company work previously listed in `TODO.md` under its
+own names. The scope of each item is unchanged; P5d adds one rule to each so
+the player sees it. Nothing pushes back today, and expansion and money cannot
+matter until something does.
+
+- P5d.1 NPC world-contract design: shared world conflicts and typed opposing
+  forces (faction, pirate or named merc company); player offers, NPC
+  commitments, location and transit, pay, readiness, withdrawal, breach and
+  completion. Added rule: NPC companies bid on the same offers the player
+  sees. An offer can leave the board because a rival took it; the board says
+  who and at what price, and a lost bid names its cause: rating, standing,
+  price or speed.
+- P5d.2 NPC merc-company identity: unique company names across the campaign;
+  assign each unused logo once before creating any logo-less company, then
+  leave `logo_key` empty and continue with collision-free generated names. NPC
+  logo display remains deferred.
+- P5d.3 NPC merc-company lifecycle visibility and hull disposition: log every
+  merc company founding and dissolution as a campaign-log event; an enemy hull
+  cored on a pool-path battle leaves the losing company's roster when the
+  battle's disposition resolves (the cause of the stale active hulls seen in
+  play is unverified; a regression test comes first); a replacement company
+  holds a roster row from spawn so `mercCompanyInsolvent` always has one to
+  judge. Player financing is out of scope.
+- P5d.4 NPC merc-company economy: owner-approved new-campaign target of 12
+  companies with 16 active mechs and 50M C-bills; shared mech-market
+  replacement, player-equivalent operating costs, 12-month understrength
+  runway, contract income, and liquidation only after no-cash, understrength
+  and no active contract. Added rule: a rival based on the same world can
+  recruit a discontented person from the player's roster through the existing
+  retention rules; the departure names the rival.
+- P5d.5 NPC contract and battle parity: committed companies fight their real
+  roster, choose doctrine-based withdrawals, concede or breach when unable to
+  field, and never produce zero-vs-zero victories. Added rule: a rival met as
+  opposing force is named in the briefing and the after-action report, and its
+  standing moves.
+- P5d.6 Employer patience: breaches and refused integrated-command mandates
+  lower a house's willingness to post to the outfit. A house can drop the
+  outfit from its board for a period; the Contracts screen shows the reason
+  and the date it lifts.
+- P5d.7 Runway on the Desk: months of cash at the current burn, derived from
+  the ledger's authoritative totals. Below a `// TUNE` threshold it shows red
+  and the stop screen says so.
+
+**Acceptance:** the player can lose a contract they wanted, lose a pilot to a
+competitor, be dropped by an employer, and see insolvency coming three months
+out.
+
+### P5e — People as a cast
+
+- P5e.1 Officer arcs (P4h.6) become active: a distinguished officer makes
+  proposals (promotion, a specific hull, a lance of their own, leave); a failing
+  one asks to be relieved or resigns. Proposals arrive as situations in the
+  inbox and resolve through the personnel system.
+- P5e.2 One bounded want per person at a time, from a short typed set, read by
+  the existing retention and morale owners. Granting a want costs something
+  real; refusing it is remembered.
+- P5e.3 A named death or capture produces a situation for the commander and a
+  reaction from the lance through the existing morale and relationship owners.
+- P5e.4 The hiring hall shows people, not stat rows: each recruit carries one
+  strength, one flaw and one want, and the record says where they came from.
+
+**Acceptance:** the player knows three people on the roster by name and would
+change a plan to keep one of them alive.
+
+### P5f — Negotiation as play
+
+- P5f.1 The one-round `negotiate` verb becomes a bounded haggle with the
+  employer actor over pay, salvage, command rights, transport, support and
+  advance. The command office and faction standing set the room; rounds are
+  limited and each round can harden the employer.
+- P5f.2 Rival bids (P5d.1) set the clock: a contested offer closes sooner, and
+  the board says so.
+- P5f.3 Signed terms show the consequences they imply: salvage rights change
+  what the recovery task may keep; command rights change which intents are
+  legal.
+
+**Acceptance:** two players signing the same offer end up with different
+contracts, and a bad negotiation is felt at the finale.
+
+### P5g — Reach, not capacity
+
+Expansion today buys capacity that nothing demands. P5g makes an HQ something
+the player wants and something that can be taken.
+
+- P5g.1 HQ tier and facility levels gate access: which employers post to the
+  outfit, the contract tier visible on the board, and which markets list rare
+  hulls. Capacity growth stays but is no longer the reason to build.
+- P5g.2 Founding a field HQ is a charter from the local house with
+  obligations: a garrison expectation, a tithe or a right of first refusal.
+  Breaking it is a standing hit the charter screen shows before the player
+  signs.
+- P5g.3 Home and field HQs are raidable. Pirates or a hostile rival can strike
+  a lightly garrisoned base; the depot company and the reserve fight it with
+  the P5b battle. The raid warning is a stop (P5a) with the same contact
+  window as a contract engagement.
+- P5g.4 Forward-depot stocking, as designed in its own section below,
+  unchanged, delivered here because a contested, raidable field HQ is the first
+  thing that makes a stocked shelf matter.
+
+**Acceptance:** the player builds because something they want is locked behind
+it, and defends what they built because it can be taken.
+
+### P5h — Ambition and ending
+
+- P5h.1 The new-campaign wizard offers one ambition from a short set: clear the
+  founding debt, reach regiment strength, land a long-term house contract, or
+  settle a named grudge. Its milestones show on the Desk.
+- P5h.2 Each ambition has a final contract or finale and a scored campaign
+  summary. The campaign can continue afterward, but it has an ending.
+- P5h.3 Contract history, the campaign summary and filtered logs extend as
+  P4h.7 describes, with the ambition's milestones added.
+
+**Acceptance:** a new player can answer "what am I trying to do" after the
+first stop.
+
+### P5i — Desk, TUI and data
+
+- P5i.1 Desk quarterly P&L report: outfit-wide calendar-quarter index and
+  drill-down modal using the ledger's authoritative income, expense and net
+  totals, shown beside the runway number (P5d.7).
+- P5i.2 TUI command parity, as designed in its own section below: coverage
+  matrix first, then the F6 ship form's HQ destinations, the F2 found modal and
+  the F7 `link` and `assignco` keys. The P5a stop screen and the P5b phase
+  report are rows in the matrix.
+- P5i.3 Per-location armor data accuracy, lowest priority: the 8 front and 3
+  rear-torso armor values per mech from the MegaMek 3039u MTF files
+  (https://github.com/MegaMek/mm-data/tree/main/data/mekfiles/meks/3039u)
+  for all 64 `data/chassis.zon` mechs, cross-checked against ammo-slot
+  placement; stored per location on the P3c hull instance, so it needs schema
+  and domain changes. Re-encode, not copy, the GPL source (as 12B.9). Design
+  here first.
+
+**Deferred, unchanged:** P2b–P2d battle armor pending the era decision;
+Distribution and packaging, not scheduled; Stage 13 graphical client, icebox.
+No open item is cut; P5 changes their order and, for the NPC chain, requires
+that the player sees it.
+
 ## Forward-depot stocking — field HQ logistics
 
 A founded HQ opens with facilities and nothing on the shelf (`founding.prepareHq`).
@@ -1902,7 +2159,7 @@ HQ but nothing stocks one. This section is the design for the other direction.
 
 Delivery updates `ARCHITECTURE.md` §9.5 and `docs/tui.md` in the same change.
 No new tunable; existing freight, throughput and treasury owners are consumed,
-not duplicated. `TODO.md` owns the order.
+not duplicated. `TODO.md` owns the order. Scheduled as P5g.4.
 
 ## TUI command parity — every verb a key and a modal
 
@@ -1929,7 +2186,7 @@ cost shown; `link` and `assignco` have no key.
   for `link`).
 
 Each verb row closed updates `docs/tui.md`'s key tables through the generated
-reference (rule 39); the matrix is the tracker, `TODO.md` the order.
+reference (rule 39); the matrix is the tracker, `TODO.md` the order. Scheduled as P5i.2.
 
 ## Distribution and packaging — not scheduled
 
