@@ -526,14 +526,29 @@ test "artillery panel: with a formation, cursor, controls and detail" {
     try std.testing.expect(c.app.modal == .input);
     try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "sellarty") != null);
     try app.pressForTest(c, .escape);
-    // 'v' (arty_repair) executes directly: NothingToRepair on a fresh formation, modal stays .none
+    // 'e' after attaching should prefill "detacharty N"
+    const toe_rows = try q.toeFiltered(al, c.app.state(), .all);
+    var co: ?game.types.ForceId = null;
+    for (toe_rows) |r| if (r.is_company) {
+        co = r.force;
+        break;
+    };
+    try std.testing.expect(co != null);
+    try std.testing.expect(try c.app.exec(.{ .attach_artillery = .{ .formation = bought_id, .company = co.? } }));
+    try app.pressForTest(c, .{ .char = 'e' });
+    try std.testing.expect(c.app.modal == .input);
+    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "detacharty") != null);
+    try app.pressForTest(c, .escape);
+    // 'v' (arty_repair) executes directly: no qualified local mechanic assigned, modal stays .none
     try app.pressForTest(c, .{ .char = 'v' });
     try std.testing.expect(c.app.modal == .none);
+    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "qualified local mechanic") != null);
     // Tab focuses detail pane (pane 1) on wide terminal
     try app.pressForTest(c, .tab);
     try std.testing.expectEqual(@as(u8, 1), c.app.focus);
     // j/k on detail pane moves cur(1)
     try app.pressForTest(c, .down);
+    try std.testing.expectEqual(@as(usize, 1), c.app.cur(1).*);
     // detail lines exist (populated, not empty)
     const detail = try q.artilleryDetailLines(al, c.app.state(), bought_id);
     try std.testing.expect(detail.len > 0);
@@ -547,20 +562,19 @@ test "artillery panel: two formations, cursor targets correct row" {
     defer app.deinitForTest(c, std.testing.allocator);
     const al = c.app.frame.allocator();
     const hq_rows = try q.hqList(al, c.app.state());
-    if (hq_rows.len == 0) return;
+    try std.testing.expect(hq_rows.len > 0);
     const home = hq_rows[0].id;
-    // Two buys need ~2.56M above 1M starting HQ funds; requires 'Mech liquidation credit.
-    // Silently skip if credit is insufficient (non-deterministic campaign seed).
-    if (!try c.app.exec(.{ .take_loan = .{ .principal = 2_600_000, .term_months = 48 } })) return;
-    if (!try c.app.exec(.{ .transfer = .{ .from = .outfit, .to = .{ .hq = home }, .amount = 2_600_000 } })) return;
-    if (!try c.app.exec(.{ .advance_days = 4 })) return; // courier arrives (same_world_days = 3)
+    // Direct fund injection bypasses loan limits and non-deterministic campaign seed.
+    c.app.state().hqs.getPtr(home).?.funds = 5_000_000;
+    try std.testing.expect(try c.app.exec(.{ .advance_days = 4 })); // courier arrives (same_world_days = 3)
     const offer_rows_1 = try q.artilleryOfferRows(al, c.app.state());
-    if (offer_rows_1.len == 0) return;
-    if (!try c.app.exec(.{ .buy_artillery = .{ .hq = home, .offer = offer_rows_1[0].id } })) return;
-    if (!try c.app.exec(.{ .advance_days = 26 })) return; // advance to month 2 for new offer
+    try std.testing.expect(offer_rows_1.len > 0);
+    try std.testing.expect(try c.app.exec(.{ .buy_artillery = .{ .hq = home, .offer = offer_rows_1[0].id } }));
+    c.app.state().hqs.getPtr(home).?.funds = 5_000_000; // replenish for second buy
+    try std.testing.expect(try c.app.exec(.{ .advance_days = 28 })); // advance past Jan (31 days) into month 2
     const offer_rows_2 = try q.artilleryOfferRows(al, c.app.state());
-    if (offer_rows_2.len == 0) return;
-    if (!try c.app.exec(.{ .buy_artillery = .{ .hq = home, .offer = offer_rows_2[0].id } })) return;
+    try std.testing.expect(offer_rows_2.len > 0);
+    try std.testing.expect(try c.app.exec(.{ .buy_artillery = .{ .hq = home, .offer = offer_rows_2[0].id } }));
     const rows = try q.artilleryFormationRows(al, c.app.state());
     try std.testing.expectEqual(@as(usize, 2), rows.len);
     const id0 = rows[0].id;
@@ -601,6 +615,13 @@ test "artillery panel: narrow Enter with a formation opens arty_detail modal" {
     // The detail lines are populated (not empty)
     const detail = try q.artilleryDetailLines(al, c.app.state(), rows[0].id);
     try std.testing.expect(detail.len > 0);
+    // Scroll down inside the detail modal (R3 fix: read_only+scroll moves modal_cursor)
+    try app.pressForTest(c, .down);
+    try std.testing.expect(c.app.modal == .arty_detail);
+    try std.testing.expect(c.app.modal_cursor > 0);
+    // End key also scrolls without closing
+    try app.pressForTest(c, .end);
+    try std.testing.expect(c.app.modal == .arty_detail);
 }
 
 test "artillery panel: narrow Enter with no formations is a no-op" {

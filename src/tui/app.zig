@@ -3899,6 +3899,35 @@ pub const App = struct {
         if (try self.listExtra(key)) return;
         const v = try self.listView(self.a());
         if (v.read_only) {
+            if (v.scroll) {
+                if (keys.lookup(ListAction, &list_bindings, 0, key)) |lhit| switch (lhit.action) {
+                    .down => {
+                        self.modal_cursor +|= 1;
+                        return;
+                    },
+                    .up => {
+                        self.modal_cursor -|= 1;
+                        return;
+                    },
+                    .page_down => {
+                        self.modal_cursor +|= 10;
+                        return;
+                    },
+                    .page_up => {
+                        self.modal_cursor -|= 10;
+                        return;
+                    },
+                    .top => {
+                        self.modal_cursor = 0;
+                        return;
+                    },
+                    .bottom => {
+                        self.modal_cursor = std.math.maxInt(usize) / 2;
+                        return;
+                    },
+                    else => {},
+                };
+            }
             const hit = keys.lookup(SheetAction, &sheet_bindings, 0, key) orelse return;
             switch (hit.action) {
                 .scroll_left => if (v.table != null) {

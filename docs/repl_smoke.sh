@@ -47,9 +47,13 @@ printf '%s\n' \
   'artillery 1' \
   'attacharty 1 co:1' \
   'detacharty 1' \
+  'seat 1 commander 1' \
   'seat 1 gunner clear' \
+  'artytech 1 1' \
   'artytech 1 clear' \
+  'reloadarty 1 badname' \
   'reloadarty 1 long_tom' \
+  'repairarty badid' \
   'repairarty 1' \
   'shiparty 1 hq:1' \
   'sellarty 1' \
@@ -164,6 +168,9 @@ check 'attached to'
 check 'detached to HQ pool'
 check 'seat cleared'
 check 'tech cleared'
+check 'lacks the artillery seat'
+check 'usage: reloadarty'
+check 'usage: repairarty'
 check 'qualified local mechanic'
 check 'required home HQ pool'
 check '#1 sold'

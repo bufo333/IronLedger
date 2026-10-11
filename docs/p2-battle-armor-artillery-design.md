@@ -79,7 +79,7 @@ terminal disposal, operating rewards and reports. For these bounded P2h policies
 that complete project design replaces external-verification and no-invention
 requirements. Its numerical adaptations do not claim an external counterpart.
 P2e source facts, P2g operational policy, era gates and all battle-armor research
-requirements remain effective. P2i dedicated controls remain deferred.
+requirements remain effective. P2i dedicated controls are delivered.
 
 ## Ownership and acquisition
 

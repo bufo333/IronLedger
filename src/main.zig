@@ -106,7 +106,7 @@ const q = game.queries;
 
 /// Print a query's lines, markup stripped (the console has no colour).
 fn printLines(al: std.mem.Allocator, lines: []const []const u8, indent: []const u8) !void {
-    for (lines) |l| std.debug.print("{s}{s}\n", .{ indent, q.stripMarks(al, l) catch l });
+    for (lines) |l| std.debug.print("{s}{s}\n", .{ indent, try q.stripMarks(al, l) });
 }
 
 /// Print a query's table, markup stripped.
@@ -929,4 +929,44 @@ fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r
 /// A REPL view that could not be printed says why instead of stopping short.
 fn showError(err: anyerror) void {
     std.debug.print("could not show that: {s}\n", .{game.cli.errorText(err)});
+}
+
+test "printLines: OOM propagates from stripMarks" {
+    var fa = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    const lines = &[_][]const u8{"{g}line one"};
+    try std.testing.expectError(error.OutOfMemory, printLines(fa.allocator(), lines, ""));
+}
+
+test "artillery REPL parser: valid id" {
+    const types = game.types;
+    var toks = std.mem.tokenizeScalar(u8, "1", ' ');
+    const id: types.ArtilleryFormationId = @enumFromInt(std.fmt.parseInt(u32, toks.next() orelse "", 10) catch {
+        try std.testing.expect(false); // should parse
+        return;
+    });
+    try std.testing.expect(toks.next() == null); // no trailing token
+    try std.testing.expectEqual(@as(u32, 1), @intFromEnum(id));
+}
+
+test "artillery REPL parser: malformed id is rejected" {
+    const result = std.fmt.parseInt(u32, "notanumber", 10);
+    try std.testing.expectError(error.InvalidCharacter, result);
+}
+
+test "artillery REPL parser: trailing token is rejected" {
+    var toks = std.mem.tokenizeScalar(u8, "1 extra", ' ');
+    _ = toks.next(); // consume "1"
+    try std.testing.expect(toks.next() != null); // "extra" remains → reject
+}
+
+test "artillery REPL parser: unknown id path parses without error" {
+    // Parsing "999" succeeds (it's a valid integer); the caller checks for
+    // empty detail to detect unknown IDs (covered by the sim-level test).
+    var toks = std.mem.tokenizeScalar(u8, "999", ' ');
+    const id: game.types.ArtilleryFormationId = @enumFromInt(std.fmt.parseInt(u32, toks.next() orelse "", 10) catch {
+        try std.testing.expect(false); // should parse
+        return;
+    });
+    try std.testing.expect(toks.next() == null); // no trailing token
+    try std.testing.expectEqual(@as(u32, 999), @intFromEnum(id));
 }

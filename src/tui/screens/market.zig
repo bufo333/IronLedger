@@ -277,40 +277,48 @@ test "market: B on artillery-offers pane buys when funded" {
     const c = try app.clientForTest(std.testing.allocator);
     defer app.deinitForTest(c, std.testing.allocator);
     const al = c.app.frame.allocator();
-    const gs = c.app.state();
-    const hq_rows = try q.hqList(al, gs);
-    if (hq_rows.len == 0) return;
+    const hq_rows = try q.hqList(al, c.app.state());
+    try std.testing.expect(hq_rows.len > 0);
     const home = hq_rows[0].id;
-    // HQ founding_funds = 1M; purchasePrice ≈ 1.78M; loan 800K tops it up via courier.
-    if (!try c.app.exec(.{ .take_loan = .{ .principal = 800_000, .term_months = 12 } })) return;
-    if (!try c.app.exec(.{ .transfer = .{ .from = .outfit, .to = .{ .hq = home }, .amount = 800_000 } })) return;
-    _ = try c.app.exec(.{ .advance_days = 4 }); // courier arrives
-    const before_count = gs.artillery_formations.count();
+    // Direct fund injection avoids non-deterministic loan and courier timing.
+    c.app.state().hqs.getPtr(home).?.funds = 5_000_000;
+    try std.testing.expect(try c.app.exec(.{ .advance_days = 4 })); // courier arrives
+    const offer_rows_before = try q.artilleryOfferRows(al, c.app.state());
+    try std.testing.expect(offer_rows_before.len > 0);
+    const offer_id_before = offer_rows_before[0].id;
+    const before_count = c.app.state().artillery_formations.count();
     try toTab(c, .market);
     c.app.focus = 4; // artillery-offers pane
     try app.pressForTest(c, .{ .char = 'B' });
     // A formation was created
-    try std.testing.expectEqual(before_count + 1, gs.artillery_formations.count());
+    try std.testing.expectEqual(before_count + 1, c.app.state().artillery_formations.count());
+    // The offer was consumed
+    const offer_rows_after = try q.artilleryOfferRows(al, c.app.state());
+    try std.testing.expectEqual(offer_rows_before.len - 1, offer_rows_after.len);
+    // The consumed offer ID no longer appears
+    for (offer_rows_after) |r| try std.testing.expect(r.id != offer_id_before);
+    // Status bar reports the purchase
+    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "Mobile Long Tom") != null);
 }
 
 test "market: B on artillery-offers pane with no offers says so without crash" {
     const c = try app.clientForTest(std.testing.allocator);
     defer app.deinitForTest(c, std.testing.allocator);
     const al = c.app.frame.allocator();
-    const gs = c.app.state();
-    const hq_rows = try q.hqList(al, gs);
-    if (hq_rows.len == 0) return;
+    const hq_rows = try q.hqList(al, c.app.state());
+    try std.testing.expect(hq_rows.len > 0);
     const home = hq_rows[0].id;
-    // Fund the HQ and consume the offer so none remain when 'B' is pressed.
-    if (!try c.app.exec(.{ .take_loan = .{ .principal = 800_000, .term_months = 12 } })) return;
-    if (!try c.app.exec(.{ .transfer = .{ .from = .outfit, .to = .{ .hq = home }, .amount = 800_000 } })) return;
-    _ = try c.app.exec(.{ .advance_days = 4 });
+    // Direct fund injection; consume the offer so none remain when 'B' is pressed.
+    c.app.state().hqs.getPtr(home).?.funds = 5_000_000;
+    try std.testing.expect(try c.app.exec(.{ .advance_days = 4 }));
     const offer_rows = try q.artilleryOfferRows(al, c.app.state());
-    if (offer_rows.len == 0) return;
-    _ = try c.app.exec(.{ .buy_artillery = .{ .hq = home, .offer = offer_rows[0].id } });
+    try std.testing.expect(offer_rows.len > 0);
+    try std.testing.expect(try c.app.exec(.{ .buy_artillery = .{ .hq = home, .offer = offer_rows[0].id } }));
     try toTab(c, .market);
     c.app.focus = 4;
     try app.pressForTest(c, .{ .char = 'B' });
     // Did not crash and no modal was opened
     try std.testing.expect(c.app.modal == .none);
+    // Status bar says no offers
+    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "no artillery offers") != null);
 }

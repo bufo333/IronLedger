@@ -9839,20 +9839,63 @@ test "artilleryFormationRows: typed identity, placement, quality, hull id; empty
     try std.testing.expect(std.mem.indexOf(u8, rows[0].text, "quality") != null);
     // Row text must contain a placement indicator
     try std.testing.expect(std.mem.indexOf(u8, rows[0].text, "HQ pool") != null or std.mem.indexOf(u8, rows[0].text, "attached") != null);
-    // Sell → sold placement; carry must be 0 for sold formation
+    // Buy a second formation (two-carrier fixture) to verify only the sold one gets carry=0.
+    // fixtureForTest already created the only commander; buy the second formation directly.
+    const home = gs.seat();
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice() * 4;
+    // Advance past January (31 days) to get a month-2 offer from syncMarkets.
+    _ = try cmds.execute(&gs, .{ .advance_days = 32 });
+    const month2_offers = try artilleryOfferRows(a, &gs);
+    try std.testing.expect(month2_offers.len > 0);
+    const id2_result = try cmds.execute(&gs, .{ .buy_artillery = .{ .hq = home, .offer = month2_offers[0].id } });
+    const id2 = id2_result.artillery_formation;
+    // Both active formations must have non-zero carry; check formation 1's carry line.
+    const active_detail = try artilleryDetailLines(a, &gs, id);
+    var found_active_carry = false;
+    for (active_detail) |line| {
+        if (std.mem.indexOf(u8, line, "monthly carry") != null) {
+            // Carry value follows "monthly carry "; it must not be "0" for an active unit.
+            const idx = std.mem.indexOf(u8, line, "monthly carry ").?;
+            const carry_text = line[idx + "monthly carry ".len ..];
+            try std.testing.expect(!std.mem.startsWith(u8, carry_text, "0"));
+            found_active_carry = true;
+        }
+    }
+    try std.testing.expect(found_active_carry);
+    // Sell formation 1 → carry becomes 0; formation 2 stays non-zero.
     _ = try cmds.execute(&gs, .{ .sell_artillery = id });
     const sold_rows = try artilleryFormationRows(a, &gs);
-    try std.testing.expectEqual(@as(usize, 1), sold_rows.len);
-    try std.testing.expect(std.mem.indexOf(u8, sold_rows[0].text, "sold") != null);
-    // Detail must show carry = 0 for sold formation
+    try std.testing.expectEqual(@as(usize, 2), sold_rows.len);
+    var sold_found = false;
+    for (sold_rows) |r| if (r.id == id) {
+        sold_found = true;
+        try std.testing.expect(std.mem.indexOf(u8, r.text, "sold") != null);
+    };
+    try std.testing.expect(sold_found);
+    // Detail for the sold formation must show carry = 0 (check for "monthly carry 0").
     const sold_detail = try artilleryDetailLines(a, &gs, id);
     var found_zero_carry = false;
     for (sold_detail) |line| {
-        if (std.mem.indexOf(u8, line, "monthly carry") != null and std.mem.indexOf(u8, line, "0") != null) {
+        if (std.mem.indexOf(u8, line, "monthly carry") != null) {
+            const idx = std.mem.indexOf(u8, line, "monthly carry ").?;
+            const carry_text = line[idx + "monthly carry ".len ..];
+            try std.testing.expect(std.mem.startsWith(u8, carry_text, "0"));
             found_zero_carry = true;
         }
     }
     try std.testing.expect(found_zero_carry);
+    // Formation 2 (still active) must still have non-zero carry.
+    const active2_detail = try artilleryDetailLines(a, &gs, id2);
+    var found_active2_carry = false;
+    for (active2_detail) |line| {
+        if (std.mem.indexOf(u8, line, "monthly carry") != null) {
+            const idx = std.mem.indexOf(u8, line, "monthly carry ").?;
+            const carry_text = line[idx + "monthly carry ".len ..];
+            try std.testing.expect(!std.mem.startsWith(u8, carry_text, "0"));
+            found_active2_carry = true;
+        }
+    }
+    try std.testing.expect(found_active2_carry);
     // State must not change
     const before = digest.stateHash(&gs);
     _ = try artilleryFormationRows(a, &gs);
@@ -9885,9 +9928,15 @@ test "artilleryDetailLines: empty for unknown id; full slot list for known id" {
     const f = gs.artillery_formations.getPtr(id).?;
     gs.person(f.tech).?.first_name = "{g}Evil\x1b";
     const safe_lines = try artilleryDetailLines(a, &gs, id);
+    var found_literal_tag = false;
     for (safe_lines) |line| {
         try std.testing.expect(std.mem.indexOf(u8, line, "\x1b") == null);
+        // The hostile {g} must survive as literal text in plain-text rendering,
+        // not be silently consumed as trusted markup.
+        const stripped = try stripMarks(a, line);
+        if (std.mem.indexOf(u8, stripped, "{g}") != null) found_literal_tag = true;
     }
+    try std.testing.expect(found_literal_tag);
 }
 
 test "artilleryOfferRows: typed identity, unconditional sync, consumed offer excluded" {
@@ -9981,6 +10030,8 @@ test "resultText artillery commands: all arms produce canonical sentences with e
     const fake_result = cmds.Result{ .artillery_formation = fid, .artillery_person = evil_tech };
     const tech2_text = try resultText(a, &gs, .{ .assign_artillery_tech = .{ .formation = fid, .person = evil_tech } }, fake_result);
     try std.testing.expect(std.mem.indexOf(u8, tech2_text, "\x1b") == null);
+    // The hostile {g} tag must appear as literal text, not be treated as markup.
+    try std.testing.expect(std.mem.indexOf(u8, tech2_text, "{g}") != null);
     // hint-versus-command refusal (rule 34): view shows empty offers (eligibility hint);
     // command must still refuse canonically.
     try std.testing.expectEqual(@as(usize, 0), (try artilleryOfferRows(a, &gs)).len);
