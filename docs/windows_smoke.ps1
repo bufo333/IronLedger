@@ -54,7 +54,7 @@ try {
     if ($process.ExitCode -ne 0) {
         throw "game.exe exited with status $($process.ExitCode):`n$output"
     }
-    foreach ($landmark in @('done.', 'CAMPAIGN SUMMARY')) {
+    foreach ($landmark in @('done.', 'RATING BY YEAR')) {
         if (-not $output.Contains($landmark)) {
             throw "Windows smoke missing '$landmark':`n$output"
         }

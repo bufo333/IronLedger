@@ -94,7 +94,7 @@ zig_files = []
 for d, _, fs in os.walk("src"):
     for f in sorted(fs):
         if f.endswith(".zig"):
-            zig_files.append(os.path.join(d, f))
+            zig_files.append(os.path.join(d, f).replace("\\", "/"))
 zig_files.sort()
 
 for p in zig_files:
@@ -119,7 +119,7 @@ for p in zig_files:
         if target == "game":
             resolved = "src/root.zig"
         elif target.endswith(".zig"):
-            resolved = os.path.normpath(os.path.join(os.path.dirname(p), target))
+            resolved = os.path.normpath(os.path.join(os.path.dirname(p), target)).replace("\\", "/")
         else:
             continue  # data/*.zon or a build-system module, not a layer edge
         line_no = text.count("\n", 0, mm.start())
@@ -244,11 +244,11 @@ while queue:
     f = queue.popleft()
     if f in seen or not os.path.exists(f): continue
     seen.add(f)
-    for imp in re.findall(r'@import\("([^"]+\.zig)"\)', open(f).read()):
-        queue.append(os.path.normpath(os.path.join(os.path.dirname(f), imp)))
+    for imp in re.findall(r'@import\("([^"]+\.zig)"\)', open(f, encoding="utf-8").read()):
+        queue.append(os.path.normpath(os.path.join(os.path.dirname(f), imp)).replace("\\", "/"))
 for dirpath, _, files in os.walk("src"):
     for name in sorted(files):
-        p = os.path.join(dirpath, name)
+        p = os.path.join(dirpath, name).replace("\\", "/")
         if name.endswith(".zig") and p not in seen: print(p)
 PY
 )"

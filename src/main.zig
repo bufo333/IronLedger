@@ -533,7 +533,10 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
 
     while (true) {
         std.debug.print("> ", .{});
-        const line = (try in.takeDelimiter('\n')) orelse break;
+        const raw_line = (try in.takeDelimiter('\n')) orelse break;
+        // Windows consoles and piped files end lines with CRLF; drop the
+        // trailing carriage return so a single-word verb like `quit` matches.
+        const line = std.mem.trimEnd(u8, raw_line, "\r");
         var tokens = std.mem.tokenizeScalar(u8, line, ' ');
         const verb = tokens.next() orelse continue;
 

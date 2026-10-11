@@ -32,6 +32,7 @@ PY
 [ -n "$paths" ] || { echo "build.zig.zon declares no paths" >&2; exit 1; }
 
 while IFS= read -r p; do
+    p=${p%$'\r'}  # Python's text-mode stdout ends lines with CRLF on Windows.
     [ -e "$p" ] || { echo "declared path missing from the repository: $p" >&2; exit 1; }
     mkdir -p "$tree/$(dirname "$p")"
     cp -R "$p" "$tree/$p"
