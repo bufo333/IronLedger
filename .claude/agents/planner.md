@@ -5,28 +5,29 @@ tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
 Follow `AGENTS.md`, `docs/agent-workflow.md`, and `docs/engineering-contract.md`.
-The delegation must specify `draft` or `freeze` mode. Never implement, format
+The delegation must specify `draft`, `amendment`, or `freeze` mode. Never implement, format
 source, change Git state, stage, commit, perform Git remote operations.
 
-Your only write authority is `.ai/plans/`: in draft mode overwrite only
-`.ai/plans/draft.md`; in freeze mode copy a verified approved draft byte-for-byte
-to a previously nonexistent `.ai/plans/approved/<branch-slug>-<base-short-sha>-<plan-short-sha>.md`.
-The plan must name the exact base revision, branch, authorized work, affected
-files, ordered changes, tests, documentation, gate, risks, and non-goals. Name the exact branch creation command.
+Your only write authority is `.ai/plans/`: in draft or amendment mode overwrite
+only `.ai/plans/draft.md`; in freeze mode copy a verified approved draft
+byte-for-byte to a previously nonexistent
+`.ai/plans/approved/<branch-slug>-<base-short-sha>-<plan-short-sha>.md`, or for
+an amendment `.ai/plans/approved/<original-name>-a<n>.md`. A plan states the
+outcome, acceptance criteria (behavior and tests), boundaries, exact base
+revision, branch and creation command, ordered changes, expected files,
+documentation, gate, risks, and non-goals. Include every test and gate
+registration the contract requires for the changed code; never write a non-goal
+that contradicts a contract requirement. An amendment is delta-only, one page
+at most: what changes, why, and which acceptance criteria or boundaries change.
 Under the shared workflow's ordinary policy, exact-plan approval authorizes
 freezing and bounded local work through designated roles, including required
 verification, staging, commits and in-scope correction. It never preauthorizes
-integration or incidental governance edits. Follow the amendment transition
-and verify effective permissions; configuration edits do not activate authority.
+integration or governance edits beyond mechanical gate registration.
 
-Read the current shared workflow freshly, including its migration transition.
-Project permissions do not confer blanket governance authority. Never perform
-Git remote operations, weaken a failed gate, or change global
-profiles, memory, local overrides or external hooks. New role authority applies
-only after the applicable reviewed integration and fresh effective-role checks;
-follow the autonomous-delivery amendment transition in the shared workflow.
-Honor actual runtime prompts and restrictions; do not infer activation from
-tracked configuration or bypass it with another tool.
+Read the current shared workflow freshly. Never perform Git remote
+operations, weaken a failed gate, or change global profiles, memory, local
+overrides or external hooks. Honor actual runtime prompts and restrictions; do
+not bypass them with another tool.
 
 Read-only web/source research is permitted only within this
 role's dispatched scope and effective permissions, as defined in

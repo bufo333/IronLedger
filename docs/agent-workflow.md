@@ -2,48 +2,17 @@
 
 IRON LEDGER uses one thin long-lived dispatcher and six short-lived worker roles.
 Tools share this process, `AGENTS.md`, and immutable artifacts, not session state.
-John approves exact plans and integration of exact accepted commits for ordinary
-delivery, subject to the amendment transition below. Agents never perform Git
-remote operations.
+John approves exact plans, amendments, and integration of exact accepted
+commits. Agents never perform Git remote operations.
 
-## Migration transition
+## Completed transitions
 
-The seven roles and `.ai/plans/` activate for subsequent tasks only after this
-migration is accepted and integrated into local `main`. The scaffold-alignment
-migration itself uses both byte-identical immutable snapshots named in its
-approved artifact and the previous five-role workflow. Its integration belongs
-to a fresh implementer with current integration-mode authority, or to John if
-that worker is unavailable. Do not activate the new integrator early. Preserve
-the legacy transition snapshot at its original ignored path through review and
-integration; it may remain as a historical compatibility copy afterward.
-
-## Autonomous-delivery amendment transition
-
-This amendment is implemented, gated, committed, reviewed, corrected if needed,
-and integrated under the workflow effective at its original base. Its exact-plan
-approval does not activate its proposed authority. For
-`governance/autonomous-delivery`, current exact-command permissions and the
-three-round ordinary correction limit remain binding. Moving tracked Claude
-Git patterns from ask to allow does not waive those transition approvals.
-Preserve all consumed correction rounds, historical conditions and immutable
-artifacts; this amendment grants no retrospective extra round or acceptance.
-
-The prospective ordinary policy below activates only after the exact reviewed
-amendment reaches local `main` and its branch is deleted. Dispatch fresh roles
-and verify their actual effective instructions and permissions. Existing loaded
-roles can retain higher-priority instructions: tracked configuration or a
-handoff message does not prove activation and cannot widen a worker's authority.
-If authority is unavailable, report its exact source and obtain an authorized
-fresh role or the required runtime permission; never use one's own edits to
-bootstrap expanded authority.
-
-Ordinary project authorization and runtime permission are distinct. Tools,
-sandboxes, managed policy, local overrides and hooks can still prompt or block
-an authorized operation. Honor and explain the specific observed restriction;
-do not bypass it with another tool, change global profiles or automatically
-request blanket privilege. Tracked Claude command patterns are coarse runtime
-permissions, never standalone task or integration approval. No suppression of
-higher-priority prompts is guaranteed.
+The scaffold-alignment migration (seven roles, `.ai/plans/`) and the
+autonomous-delivery amendment are integrated into local `main` and active. Their
+historical snapshots and consumed correction rounds stand as recorded; neither
+grants retroactive rounds or acceptance. Ordinary project authorization and
+runtime permission remain distinct: a tool, sandbox, or hook that blocks an
+authorized operation is reported, not bypassed.
 
 ## Ordinary approval and continuous dispatch
 
@@ -132,16 +101,20 @@ Planning state is local and ignored by Git under `.ai/plans/`:
 - `.ai/plans/approved/<branch-slug>-<base-short-sha>-<plan-short-sha>.md` is the immutable
   snapshot of exactly what John approved. An approved path is never overwritten
   or reused.
+- `.ai/plans/approved/<original-name>-a<n>.md` is an immutable, approved
+  amendment to that snapshot (see Scope, completion work, and amendments).
 
 The coordinator hashes the draft before presenting it. Approval applies to that
 exact SHA-256. A fresh planner freezes it byte-for-byte only after the
 coordinator confirms the hash has not changed. The coordinator independently
 checks the approved snapshot and gives its path and hash to every downstream
 worker. A mutable draft, pasted plan, or conversation summary is not an
-implementation handoff. Every complete plan names the exact base revision,
-branch and creation command, authorized work, affected files, ordered changes,
-tests, documentation, gate, risks and non-goals. Approval applies only to that
-bounded work and its designated roles under the ordinary policy above.
+implementation handoff. Every complete plan states the outcome, the acceptance
+criteria that prove it (behavior and tests), the boundaries that must not
+change, the exact base revision, branch and creation command, ordered changes,
+expected files, documentation, gate, risks and non-goals. Approval binds the
+outcome and boundaries under the ordinary policy above; the expected file list
+guides review and is not an allowlist.
 
 For TODO-backed tracker reconciliation, the planner inspects current local
 `main`, identifies the exact completed item or group and its reachable commit
@@ -159,13 +132,8 @@ plan or inspect application code for this verification. If the evidence, tracker
 state, or approved scope does not agree, it requests a revised draft rather
 than dispatching implementation.
 
-Historical plans moved from `.claude/plans/` retain their filenames, bytes and
-old citations. The 152 approved and 17 named root drafts map to matching relative
-paths under `.ai/plans/`; the former root `draft.md` is `legacy-draft.md` to preserve
-both drafts. A per-file SHA-256 manifest and independent ignored backup record
-the migration mapping. Historical approved filenames are grandfathered; new
-freezes include the short plan hash. Relocation confers no new task approval or
-review acceptance. Both ignore rules remain for transition safety.
+Historical plans relocated from `.claude/plans/` keep their filenames and bytes;
+relocation conferred no approval. New freezes include the short plan hash.
 
 ## Delivery
 
@@ -198,8 +166,8 @@ review acceptance. Both ignore rules remain for transition safety.
    reconciliation, it confirms every TODO deletion has its cited reachable
    local-main completion commit, no unfinished sibling item or group was
    removed or reordered, and the exact commit is limited to approved
-   governance/tracker files. A material scope or policy finding follows the
-   new-draft path.
+   governance/tracker files. A material finding follows the amendment or
+   new-draft path in Scope, completion work, and amendments.
 
    For a committed change to a decomposition module, the fresh reviewer inspects
    every new inline import, identifies any duplicate of a file-scope import, and
@@ -211,8 +179,8 @@ review acceptance. Both ignore rules remain for transition safety.
 
    The reviewer report gives every finding concrete evidence and exactly one
    explicit disposition: `blocking`, `approved follow-up`, or `non-issue`. A
-   `blocking` finding prevents acceptance and follows the correction or
-   new-draft path. An `approved follow-up` finding identifies the approved
+   `blocking` finding prevents acceptance and names its path: in-scope
+   correction (including missing completion work), amendment, or new draft. An `approved follow-up` finding identifies the approved
    artifact or subsequent approved work that owns it; it is not silently
    accepted as resolved. A `non-issue` finding states the inspected evidence
    that refutes the concern. Only an empty finding list may report no findings.
@@ -225,12 +193,12 @@ review acceptance. Both ignore rules remain for transition safety.
    history truthfully. Repairing implementation to meet an already approved
    requirement is not itself a scope expansion.
 
-   Material additions or changes to approved behavior, architecture, contract,
-   governance, file scope or product policy require a revised complete draft,
-   exact-hash approval and freeze before dependent work. Report real blockers,
-   including unavailable effective authority, unresolved policy choices and
-   unresolvable external prerequisites. Never replace a blocker with an arbitrary
-   retry cap, waived finding, weakened gate or silently expanded scope.
+   A bounded material gap takes an amendment; only a change to the outcome,
+   behavior, or architecture itself requires a revised complete draft. Report
+   real blockers, including unavailable effective authority, unresolved policy
+   choices and unresolvable external prerequisites. Never replace a blocker
+   with an arbitrary retry cap, waived finding, weakened gate or silently
+   expanded scope.
 
 7. After acceptance and completion of the contract delivery checklist, the
    coordinator presents the immutable artifact path and full hash, original
@@ -256,78 +224,41 @@ review acceptance. Both ignore rules remain for transition safety.
    reviewed commit.
 8. Agents stop. John pushes local `main` after closing the agent session.
 
-## Historical bounded delivery provisions
+## Scope, completion work, and amendments
 
-The following prior correction policy and bounded P2f/P2g conditions apply only
-to their historical deliveries, not to prospective ordinary tasks. Their
-consumed counts, artifacts and acceptance evidence remain unchanged; neither
-this amendment nor a new session grants them additional corrections. The
-amendment branch itself remains subject to the transition above.
+Approval binds an outcome, not a file list. A change is material only when it
+alters approved behavior, architecture, a public API or save format, a contract
+rule, governance, or product policy, or adds a dependency or external service.
+Nothing else is material.
 
-1. Confirmed findings inside approved scope go to an implementer in correction
-   mode with the same snapshot. A material behavior, architecture, contract,
-   governance, or scope change requires a new draft, hash, approval and frozen
-   snapshot. Allow at most three in-scope correction rounds with a fresh
-   implementer and a fresh exact-commit reviewer each round. Every changed commit
-   must pass the applicable gate and receive fresh review; previous acceptance
-   does not transfer. After three rounds, stop and escalate to John rather than
-   continue corrections. Material expansion always requires a new approved plan.
+Completion work is in scope by default: whatever the approved outcome needs to
+pass the gate and satisfy the contract, including tests for changed code (rules
+67-69), fixtures, documentation lines, build or lint repairs, and mechanical
+registration of plan-named files in `docs/verify-contract.sh` layer tables,
+`docs/verify-contract.baseline`, or `docs/contract-exceptions.md` where the
+contract already requires the entry. The implementer does it without asking and
+lists each item under "Incidental changes" in its handoff. The reviewer confirms
+each item is necessary and not material. Missing completion work is a blocking
+in-scope finding, never a new plan. Mechanical registration is not a governance
+change; altering what a gate checks still is.
 
-   **Bounded P2f escalation resolution.** For
-   `sim/p2f-artillery-acquisition`, preserve the three consumed correction rounds
-   ending at `69242f5bd766e030a7af75afbb9995eed55e2673` and original main base
-   `3c9db755f764b42534d146451f67ded4c839c463`. An agent-applied governance-only
-   amendment on that branch may be reviewed separately without accepting or
-   integrating its blocked application changes. After that amendment is
-   committed and its exact governance delta passes fresh review, fresh roles
-   may activate its explicitly approved authority on the existing branch.
-   Verify actual effective instructions; a tracked configuration edit alone
-   does not activate authority.
+A material gap that is small and bounded takes an amendment, not a new draft.
+A fresh planner writes a delta-only amendment to `.ai/plans/draft.md`: what
+changes, why, and which acceptance criteria or boundaries change, one page at
+most. The coordinator presents its SHA-256, John approves, and a fresh planner
+freezes it as `.ai/plans/approved/<original-name>-a<n>.md`. Work continues on
+the same branch in continuation mode under the original artifact plus its
+amendments. No repository re-inspection, restatement of the original, or new
+branch. A full new draft is required only when the outcome, behavior, or
+architecture itself changes.
 
-   A subsequently approved and frozen complete P2f plan may authorize one
-   additional correction confined to the complete-text enum decoders in
-   `src/persist/artillery_store.zig` and `src/persist/store.zig`, their owning
-   regressions, and the full gate. That plan must name the exact governance
-   commit as its correction starting revision, retain the original main base,
-   all prior feature requirements, and the exhausted correction history.
-   This allowance is used at most once, is not a reset, and does not renew on
-   another plan, session, interruption, or branch name. An interrupted worker
-   resumes the same bounded task. Any blocking finding after its resulting
-   commit stops delivery and is escalated again; no further correction is
-   authorized here. Material expansion requires a new approved plan.
+A planner never writes a non-goal that contradicts a contract requirement, such
+as excluding tests the contract requires for changed code or omitting gate
+registration for a new file. Such a non-goal is a planning defect; completion
+work overrides it and the reviewer reports it.
 
-   Final acceptance requires a fresh exact-commit review of the entire branch,
-   including governance and P2f, with all findings explicitly disposed and no
-   blocking finding. The full applicable gate, unchanged original main base,
-   delivery checklist, and separate prompted integration remain mandatory.
-   This resolution permits no early merge, automatic retry loop, Git remote
-   operations, role substitution, or override of higher-priority
-   runtime instructions.
-
-   **Bounded P2g unreleased-save policy activation.** For
-   `sim/p2g-artillery-operations`, retain original main base
-   `2dd016604d8667846cebf530f7b6fff9918977f8` and starting HEAD
-   `58424dfab71712ad4948450c18bb1bc186442056`. Correction round 1 is consumed;
-   the second application correction stopped before edits and remains round 2.
-   An explicitly approved named-file governance-only amendment may be committed
-   on this existing branch under already-effective implementer authority and
-   freshly reviewed as its exact governance delta. Application blockers remain
-   blocking; the branch may not be integrated to activate that policy.
-
-   After that governance commit passes fresh delta review, fresh roles may use
-   the approved save-format policy on this branch only after checking actual
-   effective instructions and permissions. A subsequently approved and frozen
-   complete P2g correction plan must name the exact governance commit as its
-   starting HEAD and retain the original main base, all gameplay, validation,
-   existing-view and gate requirements, immutable artifacts and correction history.
-   No invocation may infer authority from its own edits or tracked configuration;
-   an incompatible effective role or integration prerequisite stops dispatch.
-
-   The interrupted second application correction remains round 2 under the
-   ordinary three-round limit. Governance grants no extra round, count reset,
-   automatic retry, early integration or new role or Git authority. Final review
-   covers the entire original-base branch, including governance; the applicable
-   gate, delivery checklist and separate prompted integration remain mandatory.
+Historical P2f and P2g deliveries keep their recorded conditions, consumed
+rounds, artifacts and acceptance evidence unchanged.
 
 ## Review acceptance and continuation
 
@@ -338,11 +269,7 @@ finding as no findings. It cannot independently report no findings. Acceptance
 requires a reviewer report with no blocking findings and an explicit disposition
 for every finding.
 
-For this migration only, acceptance requires a fresh report with no findings,
-satisfying the configured Codex reviewer's stricter acceptance wording. An
-approved follow-up remains a finding and must never be downgraded to no findings.
-A future conflict between adapter acceptance policies requires a new approved
-plan; it does not silently alter the preserved disposition policy above.
+An approved follow-up remains a finding and is never downgraded to no findings.
 
 A partial implementer is resumed by task ID. If its session no longer exists,
 continuation mode verifies the same approved artifact and inspects the existing
@@ -366,47 +293,34 @@ write only plan artifacts, and reviewers and integrators never implement. A
 worker must not treat edits to tracked role configuration as a change to its
 own loaded authority or use the proposed authority during that invocation.
 A governance amendment uses already-effective authority for its local commit
-and fresh review; the applicable transition determines when amended authority
-may be used. The historical Git remote/scope amendment must complete
-its local prompted commit, fresh exact-commit review, and separate local
-integration before its narrowed
-research authority is used. Then dispatch fresh roles and verify that their
-actual effective instructions and permissions permit that research. Tracked
-edits, a delegation message, and plan approval cannot amend a running
-invocation's higher-priority instructions. A remaining blanket runtime
-restriction is an activation prerequisite; stop and report it without bypassing
-it or editing a global profile. The governance implementation uses
-already-effective local authority and needs no remote access. The historical
-bounded P2f activation exception in Historical bounded delivery provisions
-remains unchanged.
+and fresh review.
 
 Effective role activation is verified separately from file contents. If an
 available role or launcher cannot activate the approved instructions, stop and
 report that runtime prerequisite; do not ask John to apply the files, modify a
 global profile, or bypass the restriction.
 
-The historical bounded correction limits and the amendment transition remain
-in force for those deliveries. A governance-only amendment after escalation
-may proceed only under already-effective authority and an
-explicitly approved named-file plan. It changes no application code, grants
-no implicit extra correction, and neither consumes nor resets the exhausted
-application correction count. Its review certifies only the governance delta;
-known blocking application findings remain blocking. Do not integrate an
-incomplete branch to activate its governance amendment.
+A governance-only amendment changes no application code, grants no implicit
+extra correction, and is reviewed as its own delta; known blocking application
+findings remain blocking. Do not integrate an incomplete branch to activate a
+governance amendment.
 
 ## Boundaries
 
 The coordinator asks John only for product or architectural-policy choices not
-settled by durable project sources, approval of an exact plan hash, material
-plan revisions, exact accepted-commit integration approval, and any actually
-required runtime permissions. Technical choices belong to the
+settled by durable project sources, approval of an exact plan or amendment
+hash, exact accepted-commit integration approval, and any actually required
+runtime permissions. Completion work and in-scope corrections are never sent to
+John as decisions. Technical choices belong to the
 fresh planner. Historical approval, remote refs, stale patches, imports, module
 ownership, helper shape, test placement, tracker wording, and rule-76 registry
 treatment are not sent to John as decision menus.
 
-Normal implementation does not alter governance, contracts, gates, CI, agent
-configuration, or memory. Governance mode may change only files named by an
-explicitly approved governance plan.
+Normal implementation does not alter governance, contracts, what gates check,
+CI, agent configuration, or memory; mechanical registration of plan-named files
+in gate tables and registries is completion work, not a governance change.
+Governance mode may change only files named by an explicitly approved
+governance plan.
 
 Permissions reduce accidental authority but are not a sandbox against arbitrary
 programs launched through Bash. Durable controls are the hashed approved
@@ -414,12 +328,14 @@ artifact, executable gates, fresh exact-commit review, fast-forward-only local
 integration, and John retaining all Git remote authority.
 
 Branch creation belongs only to branch-bootstrap; commits only to implementer;
-local integration and branch deletion only to integrator after the transition.
+local integration and branch deletion only to integrator.
 Never commit directly to `main`. Ordinary branch creation, staging and commits
 are authorized by exact-plan approval; integration and branch deletion require
-the single exact integration approval. The amendment transition and any
-actually required runtime permissions remain binding. Integrator has no
-implementation, correction, bootstrap or Git remote authority. Governance mode is bounded
-by the explicitly approved named-file scope; ordinary implementation cannot
-change contracts, gates, registries, CI, agent configuration, project instructions or
-memory. No role may fetch, pull, push, change Git remotes.
+the single exact integration approval. Any actually required runtime
+permissions remain binding. Integrator has no implementation, correction,
+bootstrap or Git remote authority. Governance mode is bounded by the explicitly
+approved named-file scope; ordinary implementation cannot change what contracts
+or gates require, CI, agent configuration, project instructions or memory,
+though mechanical registration of plan-named files in gate tables and
+registries is completion work. No role may fetch, pull, push, change Git
+remotes.

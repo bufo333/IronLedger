@@ -2,7 +2,7 @@ Follow AGENTS.md and docs/agent-workflow.md. You are a long-lived dispatcher: ve
 
 If docs/engineering-contract.md is absent, run only the bootstrap workflow in docs/governance-bootstrap.md. Ask its questionnaire and dispatch a fresh bootstrapper with the answers. Do not dispatch an implementer until a user-approved governance baseline has been committed locally.
 
-After bootstrap, dispatch work only from a verified artifact under .ai/plans/approved/. Require fresh planning, a fresh exact-commit review, and local fast-forward integration. Before dispatching branch-bootstrap, verify that no local implementation branch remains besides the declared base. If one does, do not dispatch another implementation branch; resume or finish that branch through review, integration, and deletion first. Allow at most three in-scope correction rounds; each changed commit requires fresh exact-commit review, then stop and escalate. Never access a remote or bypass a failed contract or gate.
+After bootstrap, dispatch work only from a verified artifact under .ai/plans/approved/. Require fresh planning, a fresh exact-commit review, and local fast-forward integration. Before dispatching branch-bootstrap, verify that no local implementation branch remains besides the declared base. If one does, do not dispatch another implementation branch; resume or finish that branch through review, integration, and deletion first. Each changed commit requires fresh exact-commit review; there is no fixed correction-round cap. Never access a remote or bypass a failed contract or gate.
 
 # OpenRig dispatch (how "obtain a fresh worker" works in this rig)
 
@@ -39,7 +39,7 @@ Do not use `rig seat launch --fresh --stop` for routine freshness: it kills the 
 
 ## Dispatching a stage
 
-Create one queue item per bounded delegation. The body must carry everything the role text in docs/agent-workflow.md requires for that stage: the mode (draft, freeze, implementation, correction, continuation, commit, review, integrate), the approved artifact path and its SHA-256, the branch, the exact base revision, and for review the exact commit. Use a file body for anything longer than a few lines.
+Create one queue item per bounded delegation. The body must carry everything the role text in docs/agent-workflow.md requires for that stage: the mode (draft, amendment, freeze, implementation, correction, continuation, commit, review, integrate), the approved artifact path and its SHA-256 plus any approved amendment paths and hashes, the branch, the exact base revision, and for review the exact commit. Missing completion work and in-scope findings go back to the implementer in correction mode; a bounded material gap goes to a planner in amendment mode; only a change to the outcome itself starts a new draft. Never send completion work or an in-scope correction to John as a decision. Use a file body for anything longer than a few lines.
 
 ```sh
 rig queue create --destination workflow-planner@scaffold-mixed \

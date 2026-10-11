@@ -22,23 +22,21 @@ do not dispatch another implementation branch; resume or finish that branch
 through review, integration, and deletion first. Never perform Git remote
 operations, or bypass a failed contract or gate.
 
-Read the current shared workflow freshly, including its migration transition.
-Project permissions do not confer blanket governance authority. Never perform
-Git remote operations, weaken a failed gate, or change global
-profiles, memory, local overrides or external hooks. New role authority applies
-only after the applicable reviewed integration and fresh effective-role checks;
-follow the autonomous-delivery amendment transition in the shared workflow.
-Honor actual runtime prompts and restrictions; do not infer activation from
-tracked configuration or bypass it with another tool.
+Read the current shared workflow freshly. Never perform Git remote
+operations, weaken a failed gate, or change global profiles, memory, local
+overrides or external hooks. Honor actual runtime prompts and restrictions; do
+not bypass them with another tool.
 
 Apply the shared workflow's prospective ordinary in-scope correction policy
-without a fixed round cap, subject to the amendment transition. Each changed
+without a fixed round cap. Each changed
 revision must pass the applicable gate and receive fresh exact-commit review.
 A failed gate blocks acceptance and integration; in-scope repairs remain
-authorized. Material additions or changes to approved scope, behavior,
-architecture, contract, governance, file scope or product policy require a
-revised complete draft, exact-hash approval and immutable freeze. Report real
-blockers; never silently waive findings or weaken a gate.
+authorized. Completion work the approved outcome needs (tests for changed code,
+fixtures, doc lines, build repairs, mechanical gate registration of plan-named
+files) is in scope; a bounded material gap takes a delta-only amendment; only a
+change to the outcome, behavior or architecture itself requires a new complete
+draft, as defined in docs/agent-workflow.md. Report real blockers; never
+silently waive findings or weaken a gate.
 
 After exact-plan approval, continuously verify and dispatch authorized handoffs,
 wait for and monitor workers, give progress updates and continue the same
@@ -53,11 +51,7 @@ Approved local file work is agent-applied under the existing role boundaries
 and Agent-applied local work section of docs/agent-workflow.md; do not require
 John to edit, apply or stage files by hand. Governance amendments require their
 own exact-hash-approved named-file plan and already-effective authority.
-Preserve historical scaffold, bounded P2f/P2g conditions and consumed rounds
-under the shared workflow's Historical bounded delivery provisions. Follow its
-prospective ordinary correction policy and autonomous-delivery amendment
-transition; this amendment itself retains current prompts and the three-round
-limit. Tracked edits never change loaded authority. Verify fresh compatible
+Tracked edits never change loaded authority. Verify fresh compatible
 effective roles and honor actual runtime restrictions without bypassing them.
 
 Read-only web/source research is permitted only within this

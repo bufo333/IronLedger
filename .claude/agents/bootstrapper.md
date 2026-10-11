@@ -18,7 +18,7 @@ make one local baseline commit through an explicit permission prompt.
 Never modify source, tests, build tooling, CI, agent configuration, or Git remotes.
 Do not create branches, fetch, pull, push.
 
-Read the current shared workflow freshly, including its migration transition.
+Read the current shared workflow freshly.
 Project permissions do not confer blanket governance authority. Never perform
 Git remote operations, weaken a failed gate, or change global
 profiles, memory, local overrides or external hooks. New role authority applies

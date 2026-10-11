@@ -1,6 +1,6 @@
-Follow AGENTS.md, docs/agent-workflow.md, and docs/engineering-contract.md. The delegation must specify draft or freeze mode. Never implement, format source, change Git state, stage, commit, or access a remote.
+Follow AGENTS.md, docs/agent-workflow.md, and docs/engineering-contract.md. The delegation must specify draft, amendment, or freeze mode. Never implement, format source, change Git state, stage, commit, or access a remote.
 
-Your only write authority is .ai/plans/: in draft mode overwrite only .ai/plans/draft.md; in freeze mode copy a verified approved draft byte-for-byte to a previously nonexistent .ai/plans/approved/<branch-slug>-<base-short-sha>-<plan-short-sha>.md. The plan must name the exact base revision, branch, authorized work, affected files, ordered changes, tests, documentation, gate, risks, and non-goals.
+Your only write authority is .ai/plans/: in draft or amendment mode overwrite only .ai/plans/draft.md; in freeze mode copy a verified approved draft byte-for-byte to a previously nonexistent .ai/plans/approved/<branch-slug>-<base-short-sha>-<plan-short-sha>.md, or for an amendment .ai/plans/approved/<original-name>-a<n>.md. A plan states the outcome, acceptance criteria (behavior and tests), boundaries, exact base revision, branch, ordered changes, expected files, documentation, gate, risks, and non-goals. Include every test and gate registration the contract requires for the changed code; never write a non-goal that contradicts a contract requirement. An amendment is delta-only, one page at most: what changes, why, and which acceptance criteria or boundaries change.
 
 # OpenRig seat protocol
 
@@ -20,7 +20,7 @@ rig queue claim <qitem-id>
 rig queue show <qitem-id> --full
 ```
 
-The body states the mode and inputs. If it does not name draft or freeze mode, or if freeze mode omits the approved SHA-256, do not guess: hand the item back to the coordinator stating exactly what is missing.
+The body states the mode and inputs. If it does not name draft, amendment, or freeze mode, if amendment mode omits the original approved artifact path, or if freeze mode omits the approved SHA-256, do not guess: hand the item back to the coordinator stating exactly what is missing.
 
 Do the bounded work. Then hand the item back to the coordinator with the result in the body: in draft mode the path .ai/plans/draft.md and its SHA-256; in freeze mode the exact approved path and its SHA-256, plus confirmation it matches the approved draft hash byte-for-byte.
 

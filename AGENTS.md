@@ -1,17 +1,13 @@
 # Shared project guide
 
-## Authority and migration transition
+## Authority
 
 `ARCHITECTURE.md` is the architectural authority. The sole normative contract is
 `docs/engineering-contract.md`; `docs/agent-workflow.md` owns role boundaries and
 local delivery. `CLAUDE.md` is the Claude entry point to this shared guide.
 
-The seven-role workflow and `.ai/plans/` apply to subsequent tasks after the
-scaffold-alignment migration is accepted and integrated into local `main`.
-This migration itself retains its dual immutable snapshots and the previous
-five-role integration authority until integration completes. Its integrator is
-the current workflow's implementer in integration mode, or John if no authorized
-worker is available; the new integrator must not activate early.
+The seven-role workflow and `.ai/plans/` are active; the scaffold-alignment
+migration is integrated.
 
 ## Project
 
@@ -45,17 +41,21 @@ purpose. Do not use formatting, inline imports, aliases, compressed code,
 test relocation, comment deletion, or similar techniques to remain below a
 size threshold.
 
-If the approved change would cross a contract threshold or require an
+If the approved change would cross a contract threshold or require a new
 exception, stop before continuing. Report the conflict and present the
-architecturally correct options.
+architecturally correct options. Completion work the approved outcome needs to
+pass the gate and the contract (tests, fixtures, doc lines, mechanical gate
+registration of plan-named files) is part of the plan, not a conflict; see
+`docs/agent-workflow.md`.
 
 Never invent or infer names, values, URLs, citations, quotations, schema facts,
 or external behavior. Verify them from a source read during the current task,
 or mark them unverified and stop.
 
-Do not modify contracts, gates, exception registries, project instructions,
-agent configuration, memory, CI policy, or repository protections without
-explicit approval.
+Do not change what contracts or gates require, project instructions, agent
+configuration, memory, CI policy, or repository protections without explicit
+approval. Registering a plan-named file in a gate table or registry entry the
+contract already requires is completion work.
 
 ### Stop conditions
 
@@ -67,8 +67,9 @@ explicit approval.
 - Never introduce a name, value, URL, quotation, citation, schema fact, or
   external claim unless it was verified from a source read during the
   current task. If it cannot be verified, stop and label it unverified.
-- Work comes only from a plan John explicitly approved and dispatched. Never
-  select the next item or start another branch.
+- Work comes only from a plan John explicitly approved and dispatched, plus
+  the completion work its outcome needs. Never select the next item or start
+  another branch.
 
 ## Commands
 
@@ -120,10 +121,7 @@ git branch -d <branch>
 - Branch creation belongs to the `branch-bootstrap` agent and commits to the
   implementer, authorized by the exact approved plan. Fast-forward merge and
   branch deletion belong to the integrator under one approval of the exact
-  accepted commit and local checkout/merge/delete sequence. The ordinary
-  approval policy and autonomous-delivery amendment transition in
-  `docs/agent-workflow.md` govern activation; current command prompts and the
-  correction limit remain binding for the amendment itself. Honor actually
+  accepted commit and local checkout/merge/delete sequence. Honor actually
   required runtime permissions; tracked edits do not widen loaded authority.
 - The reviewer must be a fresh invocation that did not plan or implement the
   branch.

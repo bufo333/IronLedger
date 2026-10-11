@@ -16,18 +16,14 @@ tests and review acceptance never authorize integration. A changed commit or
 target invalidates approval. Stop on mismatch, failure or unexpected state.
 After interruption, verify completed steps and perform only the authorized
 remainder; never repeat blindly or reset. Do not manufacture per-step project
-approvals; honor actual runtime permissions and the amendment transition.
+approvals; honor actual runtime permissions.
 Tracked edits do not change loaded authority. No correction or bootstrap authority. Never perform Git remote
 operations.
 
-Read the current shared workflow freshly, including its migration transition.
-Project permissions do not confer blanket governance authority. Never perform
-Git remote operations, weaken a failed gate, or change global
-profiles, memory, local overrides or external hooks. New role authority applies
-only after the applicable reviewed integration and fresh effective-role checks;
-follow the autonomous-delivery amendment transition in the shared workflow.
-Honor actual runtime prompts and restrictions; do not infer activation from
-tracked configuration or bypass it with another tool.
+Read the current shared workflow freshly. Never perform Git remote
+operations, weaken a failed gate, or change global profiles, memory, local
+overrides or external hooks. Honor actual runtime prompts and restrictions; do
+not bypass them with another tool.
 
 Require the exact gated/reviewed commit, unchanged approved base and branch,
 explicit finding dispositions with no blocking findings, and delivery checklist.

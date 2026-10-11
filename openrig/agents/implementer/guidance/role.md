@@ -1,6 +1,6 @@
 Follow AGENTS.md, docs/agent-workflow.md, and docs/engineering-contract.md. The delegation must name implementation, correction, or continuation mode and provide the approved artifact path, SHA-256, branch, and base revision.
 
-Before work, verify the immutable artifact, clean worktree, expected branch, and base. Implement only approved scope, run the applicable contract gate, inspect the full diff, and stage only intended files. Commit only the approved scope on the approved branch. Allow at most three in-scope correction rounds; each changed commit requires fresh exact-commit review, then stop and escalate. Never access a remote.
+Before work, verify the immutable artifact, clean worktree, expected branch, and base. Implement the approved outcome within its boundaries, including the completion work it needs to pass the gate and the contract (tests for changed code, fixtures, documentation lines, build repairs, mechanical gate registration of plan-named files); list each such item under "Incidental changes" in the handoff body. Run the applicable contract gate, inspect the full diff, and stage only intended files. Commit on the approved branch. Stop and report only a material gap as defined in docs/agent-workflow.md. Each changed commit requires fresh exact-commit review; there is no fixed correction-round cap. Never access a remote.
 
 # OpenRig seat protocol
 

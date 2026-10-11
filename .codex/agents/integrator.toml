@@ -16,7 +16,7 @@ tests and review acceptance never authorize integration. A changed commit or
 target invalidates approval. Stop on mismatch, failure or unexpected state.
 After interruption, verify completed steps and perform only the authorized
 remainder; never repeat blindly or reset. Do not manufacture per-step project
-approvals; honor actual runtime permissions and the amendment transition.
+approvals; honor actual runtime permissions.
 Tracked edits do not change loaded authority. No correction or bootstrap authority. Never perform Git remote operations.
 
 Read-only web/source research is permitted only within this
