@@ -21,15 +21,21 @@ Substitute the rig name `rig whoami` reports if it differs.
 
 ## Obtaining a fresh worker
 
-Seats persist between tasks: a worker seat keeps its conversation after it hands an item back. The workflow requires a fresh agent for every stage, so relaunch the destination seat before each dispatch. Fresh launch is the only continuity mode you may use; never resume, fork, or restore a worker.
+Seats persist between tasks: a worker seat keeps its conversation after it hands an item back. The workflow requires a fresh agent for every stage, so reset the destination seat's conversation before each dispatch. Do it in place, inside the seat's existing process and tmux session, so the terminal tiles attached to that seat survive:
 
 ```sh
-rig seat launch workflow-reviewer@scaffold-mixed --fresh --stop \
-  --reason "fresh exact-commit review of <sha>"
-rig ps --nodes --rig scaffold-mixed
+rig send workflow-implementer@scaffold-mixed --raw "/clear"   # claude-code seat
+rig send workflow-reviewer@scaffold-mixed --raw "/new"        # codex seat
+rig capture workflow-reviewer@scaffold-mixed
 ```
 
-`--stop` ends the current occupant; the daemon launches a blank one and replays its role guidance. Run `rig ps --nodes` until the seat shows as running again, then create or hand off the queue item. If the seat shows `needs-input` or the launch reports `attention_required`, report it to John instead of dispatching. Do this for every worker seat (bootstrapper, planner, branch-bootstrap, implementer, reviewer, integrator); it is mandatory for the reviewer, since a reviewer that saw the previous commit or the plan is not the independent exact-commit review the workflow requires. Never relaunch your own seat.
+`rig ps --nodes --rig <rig> --full` shows each seat's runtime. The capture must show an empty prompt with no prior conversation. If a Codex seat instead shows "Where should the new conversation run?", that is a native prompt you cannot drive; report it to John and do not dispatch until the seat is at an empty prompt.
+
+An in-place reset does not replay the seat's startup guidance, so the first line of every dispatch body must be: "Before anything else, read and follow openrig/agents/<role>/guidance/role.md." The seat's `rig whoami` identity and queue address are unchanged by the reset.
+
+Do this for every worker seat (bootstrapper, planner, branch-bootstrap, implementer, reviewer, integrator); it is mandatory for the reviewer, since a reviewer that saw the previous commit or the plan is not the independent exact-commit review the workflow requires. Never reset your own seat.
+
+Do not use `rig seat launch --fresh --stop` for routine freshness: it kills the seat's tmux session, which drops every terminal tile attached to it. Reserve it for a seat whose process is wedged, and tell John first, since the tile must be reopened afterwards. If a launch reports `attention_required` because the new pane could not yet be identified, wait about thirty seconds and run `rig seat status <seat>`; `Session: running`, `Startup: ready`, and `Continuity outcome: fresh` means it is usable.
 
 ## Dispatching a stage
 
@@ -76,4 +82,4 @@ John reads your terminal. Present the draft hash, the exact commit for integrati
 
 ## Freshness
 
-Role separation is enforced by the seats themselves: the reviewer seat never plans or implements. Freshness is enforced by you: a queue item alone is not a fresh review; the relaunch in "Obtaining a fresh worker" is. If a relaunch is refused or fails, do not dispatch to that seat; say so to John and ask for the seat to be restarted rather than working around it.
+Role separation is enforced by the seats themselves: the reviewer seat never plans or implements. Freshness is enforced by you: a queue item alone is not a fresh review; the reset in "Obtaining a fresh worker" is. If a reset does not leave the seat at an empty prompt, do not dispatch to that seat; say so to John and ask for the seat to be restarted rather than working around it.
