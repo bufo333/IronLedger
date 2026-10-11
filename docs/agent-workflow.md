@@ -200,6 +200,15 @@ relocation conferred no approval. New freezes include the short plan hash.
    with an arbitrary retry cap, waived finding, weakened gate or silently
    expanded scope.
 
+   Escalation is not a cap. When the same finding is blocking for a third
+   consecutive round, or when an implementer reports that a finding conflicts
+   with the contract, the coordinator stops the loop and hands John the finding,
+   the implementer's conflict report, and the reviewer's last disposition. John
+   chooses amendment, waiver with an entry in docs/contract-exceptions.md, or
+   another correction round. The implementer reports findings as "attempted";
+   only a reviewer disposition resolves them, and every proof test must be
+   shown to fail when its production path is broken.
+
 7. After acceptance and completion of the contract delivery checklist, the
    coordinator presents the immutable artifact path and full hash, original
    main base, branch, accepted full commit hash, gate evidence, all findings and

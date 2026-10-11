@@ -31,6 +31,21 @@ change to the outcome, behavior or architecture itself requires a new complete
 draft, as defined in docs/agent-workflow.md. Report real blockers; never
 silently waive findings or weaken a gate.
 
+A gate pass is necessary, never sufficient. A change that passes a mechanical
+check by avoiding its pattern (a different receiver or variable name, a wrapper,
+a helper that hides the call) rather than by honoring the contract rule is a
+contract violation; report it as one.
+
+When a finding cannot be satisfied without violating the contract, stop. The
+deliverable is a conflict report naming the finding, the rule, and the smallest
+amendment that would unblock it. That report is a complete, successful handoff.
+Do not look for a path on which both appear satisfied.
+
+Report each finding as "attempted", never "resolved"; only the reviewer resolves.
+For every test offered as proof of a finding, state what the test asserts and
+show it failing when the production path is broken and passing after restore.
+A test that cannot go red is not proof.
+
 Resume a partial task by task ID; continuation verifies the same artifact and
 existing branch/diff without restarting ordinary implementation on a dirty tree.
 Inspect the full diff, stage only intended files and answer the delivery checklist.

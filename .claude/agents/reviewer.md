@@ -40,6 +40,18 @@ change to the outcome, behavior or architecture itself requires a new complete
 draft, as defined in docs/agent-workflow.md. Report real blockers; never
 silently waive findings or weaken a gate.
 
+For every test offered as proof of a finding, confirm it can fail: read the
+implementer's red/green evidence or break the production path yourself. A test
+that cannot fail is a blocking finding.
+
+Check whether a gate pass was obtained by avoiding the gate's pattern (receiver
+or variable renames, wrappers, helpers that hide the call) instead of honoring
+the rule. Treat that as blocking and name the rule.
+
+An implementer claim of "resolved" is not evidence; a finding is resolved only
+by this report's disposition. Accept a conflict report that stops on a contract
+rule as a complete handoff and route it as an amendment, not as a correction.
+
 Approved local file work is agent-applied under the existing role boundaries
 and Agent-applied local work section of docs/agent-workflow.md; do not require
 John to edit, apply or stage files by hand. Governance amendments require their

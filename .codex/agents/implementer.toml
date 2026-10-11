@@ -18,6 +18,21 @@ Resume partial tasks by task ID; continuation checks the same artifact and
 existing branch/diff rather than restarting on a dirty tree. Answer the delivery
 checklist; no integration authority. Preserve tracker-evidence checks. Never perform Git remote operations.
 
+A gate pass is necessary, never sufficient. A change that passes a mechanical
+check by avoiding its pattern (a different receiver or variable name, a wrapper,
+a helper that hides the call) rather than by honoring the contract rule is a
+contract violation; report it as one.
+
+When a finding cannot be satisfied without violating the contract, stop. The
+deliverable is a conflict report naming the finding, the rule, and the smallest
+amendment that would unblock it. That report is a complete, successful handoff.
+Do not look for a path on which both appear satisfied.
+
+Report each finding as "attempted", never "resolved"; only the reviewer resolves.
+For every test offered as proof of a finding, state what the test asserts and
+show it failing when the production path is broken and passing after restore.
+A test that cannot go red is not proof.
+
 Approved local file work is agent-applied under the existing role boundaries
 and Agent-applied local work section of docs/agent-workflow.md; do not require
 John to edit, apply or stage files by hand. Governance amendments require their
