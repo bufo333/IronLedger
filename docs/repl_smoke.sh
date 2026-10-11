@@ -33,6 +33,8 @@ printf '%s\n' \
   'stockpolicy hq:1 ammo_lrm 4 8' \
   'autoadmit off' \
   'hire mekwarrior Grayson Carlyle' \
+  'hire vehicle_crew Ace Pilot' \
+  'hire tech_mechanic Local Mech' \
   'fabricate comp_arm 1' \
   'strip 3' \
   'roe co:1 cautious' \
@@ -46,13 +48,16 @@ printf '%s\n' \
   'artillery' \
   'artillery 1' \
   'attacharty 1 co:1' \
+  'seat 1 commander 198' \
   'detacharty 1' \
-  'seat 1 commander 1' \
   'seat 1 gunner clear' \
   'artytech 1 1' \
+  'artytech 1 199' \
   'artytech 1 clear' \
   'reloadarty 1 badname' \
+  'artytech 1 199' \
   'reloadarty 1 long_tom' \
+  'artytech 1 clear' \
   'repairarty badid' \
   'repairarty 1' \
   'shiparty 1 hq:1' \
@@ -165,13 +170,15 @@ check 'usage: artillery'
 check 'Mobile Long Tom'
 check 'bought Mobile Long Tom #'
 check 'attached to'
+check 'seated'
 check 'detached to HQ pool'
 check 'seat cleared'
 check 'tech cleared'
 check 'lacks the artillery seat'
 check 'usage: reloadarty'
+check 'not enough of that part in stock'
 check 'usage: repairarty'
-check 'qualified local mechanic'
+check 'refused: the artillery carrier needs'
 check 'required home HQ pool'
 check '#1 sold'
 echo "REPL SMOKE OK"

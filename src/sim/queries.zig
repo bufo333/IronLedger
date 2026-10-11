@@ -9850,14 +9850,14 @@ test "artilleryFormationRows: typed identity, placement, quality, hull id; empty
     const id2_result = try cmds.execute(&gs, .{ .buy_artillery = .{ .hq = home, .offer = month2_offers[0].id } });
     const id2 = id2_result.artillery_formation;
     // Both active formations must have non-zero carry; check formation 1's carry line.
+    const per_carry_text = try money(a, unit_mod.monthlyCarryCost(.vehicle));
     const active_detail = try artilleryDetailLines(a, &gs, id);
     var found_active_carry = false;
     for (active_detail) |line| {
         if (std.mem.indexOf(u8, line, "monthly carry") != null) {
-            // Carry value follows "monthly carry "; it must not be "0" for an active unit.
             const idx = std.mem.indexOf(u8, line, "monthly carry ").?;
             const carry_text = line[idx + "monthly carry ".len ..];
-            try std.testing.expect(!std.mem.startsWith(u8, carry_text, "0"));
+            try std.testing.expectEqualStrings(per_carry_text, carry_text);
             found_active_carry = true;
         }
     }
@@ -9891,11 +9891,25 @@ test "artilleryFormationRows: typed identity, placement, quality, hull id; empty
         if (std.mem.indexOf(u8, line, "monthly carry") != null) {
             const idx = std.mem.indexOf(u8, line, "monthly carry ").?;
             const carry_text = line[idx + "monthly carry ".len ..];
-            try std.testing.expect(!std.mem.startsWith(u8, carry_text, "0"));
+            try std.testing.expectEqualStrings(per_carry_text, carry_text);
             found_active2_carry = true;
         }
     }
     try std.testing.expect(found_active2_carry);
+    // Destroyed formation must have carry = 0.
+    const arty_dom = @import("artillery.zig");
+    try arty_dom.destroy(&gs, id2);
+    const destroyed_detail = try artilleryDetailLines(a, &gs, id2);
+    var found_destroyed_carry = false;
+    for (destroyed_detail) |line| {
+        if (std.mem.indexOf(u8, line, "monthly carry") != null) {
+            const idx = std.mem.indexOf(u8, line, "monthly carry ").?;
+            const carry_text = line[idx + "monthly carry ".len ..];
+            try std.testing.expectEqualStrings("0", carry_text);
+            found_destroyed_carry = true;
+        }
+    }
+    try std.testing.expect(found_destroyed_carry);
     // State must not change
     const before = digest.stateHash(&gs);
     _ = try artilleryFormationRows(a, &gs);
@@ -10017,21 +10031,40 @@ test "resultText artillery commands: all arms produce canonical sentences with e
     const untech_result = try cmds.execute(&gs, untech_cmd);
     const untech_text = try resultText(a, &gs, untech_cmd, untech_result);
     try std.testing.expect(std.mem.indexOf(u8, untech_text, "cleared") != null);
-    // transfer_artillery: synthesise result for the text path
+    // transfer_artillery not-in-transit
     const transfer_text = try resultText(a, &gs, .{ .transfer_artillery = .{ .formation = fid, .to_hq = home } }, cmds.Result{ .artillery_formation = fid, .in_transit = false });
-    try std.testing.expect(std.mem.indexOf(u8, transfer_text, "artillery") != null);
+    try std.testing.expect(std.mem.indexOf(u8, transfer_text, "transferred") != null);
+    // transfer_artillery in-transit
+    const transfer_transit_text = try resultText(a, &gs, .{ .transfer_artillery = .{ .formation = fid, .to_hq = home } }, cmds.Result{ .artillery_formation = fid, .in_transit = true, .artillery_eta_day = gs.clock.day_index + 7, .artillery_freight_cost = 50_000 });
+    try std.testing.expect(std.mem.indexOf(u8, transfer_transit_text, "in transit") != null);
     // sell_artillery
     const sell_cmd: cmds.Command = .{ .sell_artillery = fid };
     const sell_result = try cmds.execute(&gs, sell_cmd);
     const sell_text = try resultText(a, &gs, sell_cmd, sell_result);
     try std.testing.expect(std.mem.indexOf(u8, sell_text, "sold") != null);
+    // hostile company name escaping: forceName must escape markup in company name
+    gs.forces.getPtr(co).?.name = "{g}Evil Company\x1b";
+    const evil_attach_text = try resultText(a, &gs, attach_cmd, attach_result);
+    try std.testing.expect(std.mem.indexOf(u8, evil_attach_text, "\x1b") == null);
+    const stripped_evil_attach = try stripMarks(a, evil_attach_text);
+    try std.testing.expect(std.mem.indexOf(u8, stripped_evil_attach, "{g}") != null);
+    // repair_artillery with non-null site
+    const repair_site_text = try resultText(a, &gs, .{ .repair_artillery = fid }, cmds.Result{ .artillery_formation = fid, .artillery_site = .{ .hq = home } });
+    try std.testing.expect(std.mem.indexOf(u8, repair_site_text, "depot repair queued at") != null);
+    // hostile HQ name escaping: hqName must escape markup in HQ name
+    gs.hqs.getPtr(home).?.name = "{g}Evil HQ\x1b";
+    const evil_hq_repair_text = try resultText(a, &gs, .{ .repair_artillery = fid }, cmds.Result{ .artillery_formation = fid, .artillery_site = .{ .hq = home } });
+    try std.testing.expect(std.mem.indexOf(u8, evil_hq_repair_text, "\x1b") == null);
+    const stripped_evil_hq = try stripMarks(a, evil_hq_repair_text);
+    try std.testing.expect(std.mem.indexOf(u8, stripped_evil_hq, "{g}") != null);
     // hostile name in person does not leak markup — synthesise result directly (no buy needed)
     const evil_tech = try gs.hirePerson("{g}Evil\x1b", "Mech2", .tech_mechanic);
     const fake_result = cmds.Result{ .artillery_formation = fid, .artillery_person = evil_tech };
     const tech2_text = try resultText(a, &gs, .{ .assign_artillery_tech = .{ .formation = fid, .person = evil_tech } }, fake_result);
     try std.testing.expect(std.mem.indexOf(u8, tech2_text, "\x1b") == null);
-    // The hostile {g} tag must appear as literal text, not be treated as markup.
-    try std.testing.expect(std.mem.indexOf(u8, tech2_text, "{g}") != null);
+    // The hostile {g} tag must appear as literal text in stripped output, not as markup.
+    const stripped_tech2 = try stripMarks(a, tech2_text);
+    try std.testing.expect(std.mem.indexOf(u8, stripped_tech2, "{g}") != null);
     // hint-versus-command refusal (rule 34): view shows empty offers (eligibility hint);
     // command must still refuse canonically.
     try std.testing.expectEqual(@as(usize, 0), (try artilleryOfferRows(a, &gs)).len);

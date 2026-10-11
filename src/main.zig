@@ -638,40 +638,38 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
         } else if (std.mem.eql(u8, verb, "offers")) {
             printOffers(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "artillery")) {
-            if (tokens.next()) |id_tok| {
-                const fid: game.types.ArtilleryFormationId = @enumFromInt(std.fmt.parseInt(u32, id_tok, 10) catch {
+            switch (parseArtilleryArg(&tokens)) {
+                .usage => {
                     std.debug.print("usage: artillery [<formation-id>]\n", .{});
-                    continue;
-                });
-                if (tokens.next() != null) {
-                    std.debug.print("usage: artillery [<formation-id>]\n", .{});
-                    continue;
-                }
-                const detail = q.artilleryDetailLines(al, gs, fid) catch |err| {
-                    showError(err);
-                    continue;
-                };
-                if (detail.len == 0) {
-                    std.debug.print("{s}\n", .{game.cli.errorText(error.NoSuchArtilleryFormation)});
-                } else {
-                    printLines(al, detail, "") catch |err| showError(err);
-                }
-            } else {
-                const rows = q.artilleryFormationRows(al, gs) catch |err| {
-                    showError(err);
-                    continue;
-                };
-                if (rows.len == 0) {
-                    std.debug.print("no artillery formations.\n", .{});
-                } else {
-                    for (rows) |r| {
-                        const text = q.stripMarks(al, r.text) catch |err| {
-                            showError(err);
-                            continue;
-                        };
-                        std.debug.print("{s}\n", .{text});
+                },
+                .id => |fid| {
+                    const detail = q.artilleryDetailLines(al, gs, fid) catch |err| {
+                        showError(err);
+                        continue;
+                    };
+                    if (detail.len == 0) {
+                        std.debug.print("{s}\n", .{game.cli.errorText(error.NoSuchArtilleryFormation)});
+                    } else {
+                        printLines(al, detail, "") catch |err| showError(err);
                     }
-                }
+                },
+                .none => {
+                    const rows = q.artilleryFormationRows(al, gs) catch |err| {
+                        showError(err);
+                        continue;
+                    };
+                    if (rows.len == 0) {
+                        std.debug.print("no artillery formations.\n", .{});
+                    } else {
+                        for (rows) |r| {
+                            const text = q.stripMarks(al, r.text) catch |err| {
+                                showError(err);
+                                continue;
+                            };
+                            std.debug.print("{s}\n", .{text});
+                        }
+                    }
+                },
             }
         } else if (std.mem.eql(u8, verb, "candidates")) {
             const raw = std.fmt.parseInt(u32, tokens.next() orelse "0", 10) catch {
@@ -926,6 +924,15 @@ fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r
     }
 }
 
+const ArtilleryArg = union(enum) { none, id: game.types.ArtilleryFormationId, usage };
+
+fn parseArtilleryArg(toks: *std.mem.TokenIterator(u8, .scalar)) ArtilleryArg {
+    const id_tok = toks.next() orelse return .none;
+    const id_int = std.fmt.parseInt(u32, id_tok, 10) catch return .usage;
+    if (toks.next() != null) return .usage;
+    return .{ .id = @enumFromInt(id_int) };
+}
+
 /// A REPL view that could not be printed says why instead of stopping short.
 fn showError(err: anyerror) void {
     std.debug.print("could not show that: {s}\n", .{game.cli.errorText(err)});
@@ -937,36 +944,39 @@ test "printLines: OOM propagates from stripMarks" {
     try std.testing.expectError(error.OutOfMemory, printLines(fa.allocator(), lines, ""));
 }
 
-test "artillery REPL parser: valid id" {
-    const types = game.types;
-    var toks = std.mem.tokenizeScalar(u8, "1", ' ');
-    const id: types.ArtilleryFormationId = @enumFromInt(std.fmt.parseInt(u32, toks.next() orelse "", 10) catch {
-        try std.testing.expect(false); // should parse
-        return;
-    });
-    try std.testing.expect(toks.next() == null); // no trailing token
-    try std.testing.expectEqual(@as(u32, 1), @intFromEnum(id));
+test "artillery REPL: malformed id → usage" {
+    var toks = std.mem.tokenizeScalar(u8, "notanumber", ' ');
+    try std.testing.expect(parseArtilleryArg(&toks) == .usage);
 }
 
-test "artillery REPL parser: malformed id is rejected" {
-    const result = std.fmt.parseInt(u32, "notanumber", 10);
-    try std.testing.expectError(error.InvalidCharacter, result);
-}
-
-test "artillery REPL parser: trailing token is rejected" {
+test "artillery REPL: trailing token → usage" {
     var toks = std.mem.tokenizeScalar(u8, "1 extra", ' ');
-    _ = toks.next(); // consume "1"
-    try std.testing.expect(toks.next() != null); // "extra" remains → reject
+    try std.testing.expect(parseArtilleryArg(&toks) == .usage);
 }
 
-test "artillery REPL parser: unknown id path parses without error" {
-    // Parsing "999" succeeds (it's a valid integer); the caller checks for
-    // empty detail to detect unknown IDs (covered by the sim-level test).
+test "artillery REPL: unknown id → empty detail" {
     var toks = std.mem.tokenizeScalar(u8, "999", ' ');
-    const id: game.types.ArtilleryFormationId = @enumFromInt(std.fmt.parseInt(u32, toks.next() orelse "", 10) catch {
-        try std.testing.expect(false); // should parse
-        return;
-    });
-    try std.testing.expect(toks.next() == null); // no trailing token
-    try std.testing.expectEqual(@as(u32, 999), @intFromEnum(id));
+    const arg = parseArtilleryArg(&toks);
+    try std.testing.expect(arg == .id);
+    var session = try game.lobby.Session.fresh(std.testing.allocator, 0);
+    defer session.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const detail = try q.artilleryDetailLines(arena.allocator(), session.state(), arg.id);
+    try std.testing.expectEqual(@as(usize, 0), detail.len);
+}
+
+test "artillery REPL: valid id with formation → non-empty detail" {
+    var session = try game.lobby.Session.fresh(std.testing.allocator, 0);
+    defer session.close();
+    const fid = try game.artillery_operations.fixtureForTest(session.state(), false);
+    var id_buf: [16]u8 = undefined;
+    const id_str = std.fmt.bufPrint(&id_buf, "{d}", .{@intFromEnum(fid)}) catch unreachable;
+    var toks = std.mem.tokenizeScalar(u8, id_str, ' ');
+    const arg = parseArtilleryArg(&toks);
+    try std.testing.expect(arg == .id);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const detail = try q.artilleryDetailLines(arena.allocator(), session.state(), arg.id);
+    try std.testing.expect(detail.len > 0);
 }
