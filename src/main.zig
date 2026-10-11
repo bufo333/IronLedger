@@ -954,7 +954,7 @@ test "artillery REPL: trailing token → usage" {
     try std.testing.expect(parseArtilleryArg(&toks) == .usage);
 }
 
-test "artillery REPL: unknown id → empty detail" {
+test "artillery REPL: unknown id dispatch → canonical refusal text" {
     var toks = std.mem.tokenizeScalar(u8, "999", ' ');
     const arg = parseArtilleryArg(&toks);
     try std.testing.expect(arg == .id);
@@ -962,8 +962,11 @@ test "artillery REPL: unknown id → empty detail" {
     defer session.close();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
+    // Production path at :645-654: empty detail → errorText(NoSuchArtilleryFormation).
     const detail = try q.artilleryDetailLines(arena.allocator(), session.state(), arg.id);
     try std.testing.expectEqual(@as(usize, 0), detail.len);
+    // :650-651: the branch that handles empty detail emits this exact string.
+    try std.testing.expectEqualStrings("no artillery formation has that id", game.cli.errorText(error.NoSuchArtilleryFormation));
 }
 
 test "artillery REPL: valid id with formation → non-empty detail" {

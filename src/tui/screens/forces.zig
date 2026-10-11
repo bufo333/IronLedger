@@ -435,6 +435,24 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
     return true;
 }
 
+fn screenHasText(screen: *const app.Screen, needle: []const u8) bool {
+    if (needle.len == 0) return false;
+    for (0..screen.rows) |y| {
+        if (screen.cols < needle.len) continue;
+        for (0..screen.cols - needle.len) |x| {
+            var matched = true;
+            for (needle, 0..) |ch, i| {
+                if (screen.get(@intCast(x + i), @intCast(y)).ch != ch) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) return true;
+        }
+    }
+    return false;
+}
+
 fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
     try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
 }
@@ -567,6 +585,9 @@ test "artillery panel: with a formation, cursor, controls and detail" {
     try std.testing.expect(detail_lines.len > 0);
     for (0..detail_lines.len + 5) |_| try app.pressForTest(c, .down);
     try std.testing.expectEqual(detail_lines.len - 1, c.app.cur(1).*);
+    // The last detail line is rendered (200x50 gives enough rows for the full pane).
+    const last_detail = detail_lines[detail_lines.len - 1];
+    try std.testing.expect(screenHasText(&c.app.screen, if (last_detail.len > 8) last_detail[0..8] else last_detail));
     // Narrow resize: focus clamps from 1 to 0 (narrow_panes = 1)
     try c.app.screen.resize(80, 24);
     try app.pressForTest(c, .down);
@@ -602,12 +623,17 @@ test "artillery panel: two formations, cursor targets correct row" {
     try app.pressForTest(c, .{ .char = 'e' });
     try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), std.fmt.bufPrint(&buf, "attacharty {d}", .{@intFromEnum(id0)}) catch "") != null);
     try app.pressForTest(c, .escape);
+    // Rendered selection agrees with activated identity: detail pane shows id0's formation.
+    var id_buf: [32]u8 = undefined;
+    try std.testing.expect(screenHasText(&c.app.screen, std.fmt.bufPrint(&id_buf, "Artillery #{d}", .{@intFromEnum(id0)}) catch ""));
     // Down moves to row 1
     try app.pressForTest(c, .down);
     try std.testing.expectEqual(@as(usize, 1), c.app.cur(0).*);
     try app.pressForTest(c, .{ .char = 'e' });
     try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), std.fmt.bufPrint(&buf, "attacharty {d}", .{@intFromEnum(id1)}) catch "") != null);
     try app.pressForTest(c, .escape);
+    // Rendered selection agrees with activated identity: detail pane shows id1's formation.
+    try std.testing.expect(screenHasText(&c.app.screen, std.fmt.bufPrint(&id_buf, "Artillery #{d}", .{@intFromEnum(id1)}) catch ""));
     // Down clamps at row 1 (last row)
     try app.pressForTest(c, .down);
     try std.testing.expectEqual(@as(usize, 1), c.app.cur(0).*);
@@ -621,14 +647,17 @@ test "artillery panel: narrow Enter with a formation opens arty_detail modal" {
     const al = c.app.frame.allocator();
     const rows = try q.artilleryFormationRows(al, c.app.state());
     try std.testing.expectEqual(@as(usize, 1), rows.len);
-    try c.app.screen.resize(79, 24);
+    try c.app.screen.resize(80, 24); // narrow (<120 cols) and at the minimum renderable size
     try toTab(c, .forces);
     try navToArty(c);
     try app.pressForTest(c, .enter);
     try std.testing.expect(c.app.modal == .arty_detail);
-    try std.testing.expectEqual(rows[0].id, c.app.modal.arty_detail);
-    // The detail lines are populated (not empty)
-    const detail = try q.artilleryDetailLines(al, c.app.state(), rows[0].id);
+    // Capture the formation ID from the modal (rows is freed by pressForTest frame reset).
+    const modal_fid = c.app.modal.arty_detail;
+    // Fetch detail lines from a durable allocator (al is a frame arena reset by pressForTest).
+    var det_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer det_arena.deinit();
+    const detail = try q.artilleryDetailLines(det_arena.allocator(), c.app.state(), modal_fid);
     try std.testing.expect(detail.len > 0);
     // Scroll down inside the detail modal: read_only retains the modal, scroll advances the cursor
     try app.pressForTest(c, .down);
@@ -637,6 +666,9 @@ test "artillery panel: narrow Enter with a formation opens arty_detail modal" {
     // End key also scrolls without closing
     try app.pressForTest(c, .end);
     try std.testing.expect(c.app.modal == .arty_detail);
+    // After End the viewport scrolls to the bottom rows. The modal title "DETAIL" is always
+    // in the pane border — verify it is rendered, proving the modal content was drawn.
+    try std.testing.expect(screenHasText(&c.app.screen, "DETAIL"));
 }
 
 test "artillery panel: narrow Enter with no formations is a no-op" {

@@ -3034,7 +3034,7 @@ pub const App = struct {
         n: usize = 0,
         /// Rows of `rows` before the first pickable one.
         offset: usize = 0,
-        /// A sheet: no cursor, any key closes (←/→ still scroll a table).
+        /// A sheet: no cursor. Any key closes (←/→ scroll a table) unless scroll=true, which retains the sheet for vertical and page/Home/End scroll keys.
         read_only: bool = false,
         /// The cursor is a scroll offset over `rows` (long logs), not a pick.
         scroll: bool = false,

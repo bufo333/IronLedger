@@ -233,6 +233,24 @@ fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
     try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
 }
 
+fn screenHasText(screen: *const app.Screen, needle: []const u8) bool {
+    if (needle.len == 0) return false;
+    for (0..screen.rows) |y| {
+        if (screen.cols < needle.len) continue;
+        for (0..screen.cols - needle.len) |x| {
+            var matched = true;
+            for (needle, 0..) |ch, i| {
+                if (screen.get(@intCast(x + i), @intCast(y)).ch != ch) {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) return true;
+        }
+    }
+    return false;
+}
+
 test "the market bindings are well formed" {
     try app.keys.expectWellFormed(Action, &bindings);
 }
@@ -293,7 +311,11 @@ test "market: B on artillery-offers pane buys when funded" {
     try app.pressForTest(c, .tab);
     try app.pressForTest(c, .tab);
     try std.testing.expectEqual(@as(u8, 4), c.app.focus);
-    try std.testing.expect((try q.artilleryOfferRows(al, c.app.state())).len > 0);
+    const visible_offers = try q.artilleryOfferRows(al, c.app.state());
+    try std.testing.expect(visible_offers.len > 0);
+    // The offer text is rendered on screen (plain text, no markup).
+    const offer_text = visible_offers[0].text;
+    try std.testing.expect(screenHasText(&c.app.screen, if (offer_text.len > 10) offer_text[0..10] else offer_text));
     try app.pressForTest(c, .{ .char = 'B' });
     // A formation was created
     try std.testing.expectEqual(before_count + 1, (try q.artilleryFormationRows(al, c.app.state())).len);
@@ -304,6 +326,12 @@ test "market: B on artillery-offers pane buys when funded" {
     for (offer_rows_after) |r| try std.testing.expect(r.id != offer_id_before);
     // Status bar reports the purchase
     try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "Mobile Long Tom") != null);
+    // Narrow resize: if more offers remain they stay rendered after shrink.
+    if (offer_rows_after.len > 0) {
+        try c.app.screen.resize(80, 24);
+        const rem_text = offer_rows_after[0].text;
+        try std.testing.expect(screenHasText(&c.app.screen, if (rem_text.len > 10) rem_text[0..10] else rem_text));
+    }
 }
 
 test "market: B on artillery-offers pane with no offers says so without crash" {
