@@ -666,9 +666,44 @@ test "artillery panel: narrow Enter with a formation opens arty_detail modal" {
     // End key also scrolls without closing
     try app.pressForTest(c, .end);
     try std.testing.expect(c.app.modal == .arty_detail);
-    // After End the viewport scrolls to the bottom rows. The modal title "DETAIL" is always
-    // in the pane border — verify it is rendered, proving the modal content was drawn.
-    try std.testing.expect(screenHasText(&c.app.screen, "DETAIL"));
+    // After End the viewport scrolls to show the last detail lines; verify the bottom line is rendered.
+    const last = detail[detail.len - 1];
+    try std.testing.expect(screenHasText(&c.app.screen, if (last.len > 8) last[0..8] else last));
+}
+
+test "artillery panel: arty_repair key with repairable formation shows success feedback" {
+    // Exercises the success path of handleArty(.arty_repair) — the 'v' key path
+    // at forces.zig:213–221 that calls execResult(.repair_artillery) and shows resultText.
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    const ok = try buyTestFormation(c);
+    try std.testing.expect(ok);
+    const al = c.app.frame.allocator();
+    const rows = try q.artilleryFormationRows(al, c.app.state());
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    const fid = rows[0].id;
+    const hq_rows = try q.hqList(al, c.app.state());
+    const hq_id = hq_rows[0].id;
+    // Hire a tech mechanic and assign them to the formation.
+    const hire_res = c.app.execResult(.{ .hire = .{ .first = "Local", .last = "Mechanic", .role = .tech_mechanic } });
+    try std.testing.expect(hire_res != null);
+    const tech_id = hire_res.?.hired;
+    try std.testing.expect(tech_id != .none);
+    try std.testing.expect(try c.app.exec(.{ .assign_artillery_tech = .{ .formation = fid, .person = tech_id } }));
+    // Raise bay level to meet fab_min_bay for chassis repair (level 2 required).
+    for (c.app.state().hqs.getPtr(hq_id).?.facilities.items) |*fac| {
+        if (fac.kind == .mek_bay) fac.level = 2;
+    }
+    // Damage the chassis slot and add the spare part to stock.
+    c.app.state().artillery_formations.getPtr(fid).?.slots[@intFromEnum(game.artillery_operation_rules.Slot.chassis)].condition = .destroyed;
+    try c.app.state().addStock(.{ .hq = hq_id }, game.artillery_operation_rules.descriptor(.chassis).spare_key, 1);
+    // Navigate to the artillery panel.
+    try toTab(c, .forces);
+    try navToArty(c);
+    // Press 'v': repair command succeeds; modal stays .none and msg shows depot repair queued.
+    try app.pressForTest(c, .{ .char = 'v' });
+    try std.testing.expect(c.app.modal == .none);
+    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "depot repair queued") != null);
 }
 
 test "artillery panel: narrow Enter with no formations is a no-op" {
