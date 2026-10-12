@@ -721,6 +721,60 @@ test "combat-ineffective past the grace window is breach" {
     try std.testing.expectEqual(contract_mod.ContractStatus.breached, c.status);
 }
 
+test "breachNoticeServed: only on the day the grace window opens, while the contract runs; advanceStop agrees" {
+    const checklist = @import("checklist.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 52 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .DC, .chief_engineer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .recon_raid,
+        .employer_key = "DC",
+        .enemy_key = "LC",
+        .planet_key = "dyev",
+        .terms = .{ .length_months = 3, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .start_day = 0,
+        .end_day = 90,
+    });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    onAccept(&gs, c);
+    gs.clock.day_index = 5;
+    var wrecked: u32 = 0;
+    for (gs.units.values()) |*u| if (u.kind == .mek and wrecked < 12) {
+        u.status = .destroyed;
+        wrecked += 1;
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const watch = try checklist.watchDay(arena.allocator(), &gs);
+
+    try std.testing.expect(!breachNoticeServed(c, 5));
+    try checkEffectiveness(&gs);
+    // The day `checkEffectiveness` opens the window, and no other.
+    try std.testing.expect(breachNoticeServed(c, 5));
+    try std.testing.expect(!breachNoticeServed(c, 4));
+    try std.testing.expect(!breachNoticeServed(c, 6));
+    // Consumer: the stop owner names the notice and its contract that day.
+    const stop = checklist.advanceStop(&gs, &watch) orelse return error.TestExpectedStop;
+    try std.testing.expectEqual(checklist.StopReason.employer_notice, stop.reason);
+    try std.testing.expectEqual(c.id, stop.contract);
+    // The window stays open the next day; the notice is not served again.
+    gs.clock.day_index = 6;
+    try checkEffectiveness(&gs);
+    try std.testing.expectEqual(@as(?u32, 5), c.ineffective_since);
+    try std.testing.expect(!breachNoticeServed(c, 6));
+    if (checklist.advanceStop(&gs, &watch)) |s| try std.testing.expect(s.reason != .employer_notice);
+    // A contract no longer running serves nothing.
+    gs.clock.day_index = 5;
+    c.status = .breached;
+    try std.testing.expect(!breachNoticeServed(c, 5));
+    if (checklist.advanceStop(&gs, &watch)) |s| try std.testing.expect(s.reason != .employer_notice);
+}
+
 test "standing rises with the employer and falls with the enemy on completion, drops on breach, drifts home" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1221 });
     defer gs.deinit();

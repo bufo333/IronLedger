@@ -858,10 +858,11 @@ pub fn advance(gs: *GameState, days: u32) Error!Result {
             result.stopped = .bankrupt;
             return result;
         }
+        // An error here after a committed day keeps the earlier days, and
+        // zero days returns `Bankrupt` after the committed bankruptcy:
+        // docs/contract-exceptions.md, "Advance commits partial days".
         switch (try settleSolvency(gs)) {
             .solvent => {},
-            // Zero days returns the error after the committed bankruptcy:
-            // docs/contract-exceptions.md, "Advance commits partial days".
             .bankrupt => {
                 if (result.days_advanced == 0) return Error.Bankrupt;
                 result.stopped = .bankrupt;
@@ -922,7 +923,9 @@ fn stoppedFor(reason: @import("checklist.zig").StopReason) @FieldType(Result, "s
 /// tomorrow stops with zero days; an outfit that folds before the first day
 /// succeeds with zero days and `.bankrupt`, its bankruptcy committed.
 /// An error from a day's tick leaves the earlier days and that day's earlier
-/// phases committed: docs/contract-exceptions.md, "Advance commits partial days".
+/// phases committed, and an error from the solvency check or the watch
+/// between days leaves the earlier days committed and nothing of the next:
+/// docs/contract-exceptions.md, "Advance commits partial days".
 pub fn advanceUntilStop(gs: *GameState, cap: u32) Error!Result {
     const checklist = @import("checklist.zig");
     var result: Result = .{};
@@ -1690,6 +1693,105 @@ test "advance_until_stop: an error inside day k returns with days 1..k-1 committ
     // Days 1 and 2 ran; day 3's clock moved before its arrivals failed.
     try std.testing.expectEqual(@as(u32, 3), gs.clock.day_index);
     try std.testing.expect(gs.artillery_formations.get(@enumFromInt(1)).?.placement == .freight);
+}
+
+test "advance_until_stop: an allocation failure between days leaves exactly the earlier days committed" {
+    // docs/contract-exceptions.md, "Advance commits partial days": once day 1
+    // commits, the solvency check and the watch for day 2 can still fail.
+    // Each failure there returns `OutOfMemory` with day 1 committed and
+    // nothing of day 2. Two fixtures reach both: an outfit that day 1's
+    // weekly repair bill overdraws, inside its credit, with a wreck to value
+    // (`treasury.isInsolvent` allocates); and a solvent outfit, whose
+    // `checklist.watchDay` allocates for the depot job day 1 queued.
+    const digest = @import("digest.zig");
+    const Case = enum { overdrawn, solvent };
+    const Fixture = struct {
+        // Day 1 of the command is day 7, the weekly service.
+        const start_day: u32 = 6;
+
+        fn build(gs: *GameState, case: Case) !void {
+            _ = try @import("founding.zig").createCommander(gs, "T", .LC, .paymaster);
+            const uid = try gs.addUnit("LCT-1V");
+            try @import("crew.zig").assignSlot(gs, uid, .tech, try gs.hirePerson("Wren", "Fix", .tech_mek));
+            const u = gs.unit(uid).?;
+            // A field repair that bills labour, and wrecked structure that
+            // goes to the depot with its components on hand.
+            for (u.slots.items) |*s| if (s.class != .structure) {
+                s.condition = .damaged;
+                try gs.addStock(sites.siteForForce(gs, u.force), s.part_key, 1);
+                break;
+            };
+            for (u.slots.items) |*s| if (s.class == .structure) {
+                s.condition = .destroyed;
+                break;
+            };
+            var needs: [hq_ops.max_depot_needs]hq_ops.DepotNeed = undefined;
+            for (hq_ops.depotNeedsBuf(u, &needs)) |n| try gs.addStock(.{ .hq = gs.homeHqFor(u.force) }, n.component, 1);
+            gs.unit(try gs.addUnit("SHD-2H")).?.status = .destroyed;
+            for (0..start_day) |_| try advanceDay(gs);
+            gs.funds = switch (case) {
+                .overdrawn => 0,
+                .solvent => 1_000_000,
+            };
+        }
+
+        /// Routes every campaign and scratch allocation through `failing`.
+        /// Its resizes are refused, so an arena that outgrows its block
+        /// allocates a new one and the sweep reaches that failure too.
+        fn failFrom(gs: *GameState, failing: *std.testing.FailingAllocator) void {
+            gs.arena.state.used_list = null;
+            gs.arena.state.free_list = null;
+            gs.arena.child_allocator = failing.allocator();
+        }
+    };
+    for (std.enums.values(Case)) |case| {
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+
+        // The reference: exactly day 1, which stops nowhere.
+        var ref = GameState.init(outer.allocator(), .{ .seed = 909 });
+        try Fixture.build(&ref, case);
+        var counting = std.testing.FailingAllocator.init(outer.allocator(), .{ .resize_fail_index = 0 });
+        Fixture.failFrom(&ref, &counting);
+        const day_one = try advanceUntilStop(&ref, 1);
+        ref.arena.child_allocator = outer.allocator();
+        try std.testing.expectEqual(.cap_reached, day_one.stopped);
+        try std.testing.expectEqual(@as(usize, 1), ref.bay_jobs.items.len);
+        const after_day_one = digest.stateHash(&ref);
+        // Allocations through day 1; the sweep starts after them.
+        const day_one_allocs = counting.alloc_index;
+        switch (case) {
+            .overdrawn => {
+                try std.testing.expect(ref.funds + treasury.inboundToOutfit(&ref) < 0);
+                try std.testing.expect(!try treasury.isInsolvent(ref.scratch(), &ref));
+            },
+            .solvent => try std.testing.expect(ref.funds + treasury.inboundToOutfit(&ref) >= 0),
+        }
+
+        var between: usize = 0;
+        var fail_index = day_one_allocs;
+        while (true) : (fail_index += 1) {
+            var gs = GameState.init(outer.allocator(), .{ .seed = 909 });
+            try Fixture.build(&gs, case);
+            var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index, .resize_fail_index = 0 });
+            Fixture.failFrom(&gs, &failing);
+            const result = advanceUntilStop(&gs, 2);
+            gs.arena.child_allocator = outer.allocator();
+            if (result) |r| {
+                // Overdrawn, the solvency check stops the command after day 1.
+                if (case == .overdrawn) try std.testing.expectEqual(.insolvent, r.stopped);
+                break;
+            } else |err| try std.testing.expect(err == error.OutOfMemory);
+            // A failure inside day 2's tick is the `advanceDay` boundary.
+            if (gs.clock.day_index != Fixture.start_day + 1) break;
+            try std.testing.expectEqual(after_day_one, digest.stateHash(&gs));
+            between += 1;
+        }
+        // Overdrawn, the check is all that runs between the days. Solvent,
+        // it returns before allocating, the stop owner and the watch arena's
+        // reset cannot fail, and every failure surfaces from `watchDay`.
+        try std.testing.expect(between > 0);
+    }
 }
 
 test "stop cadence regression: a home month is one or two stops; each garrison month one to four" {

@@ -1428,6 +1428,20 @@ test "seat returns .none before any HQ, the only HQ when one exists, and the fir
     try std.testing.expectEqual(id1, gs.seat());
 }
 
+test "landsBy: a courier lands on its ETA; the watch the day before sees that landing" {
+    const courier: FundCourier = .{ .to = .outfit, .amount = 1_000, .sent_day = 0, .eta_day = 5 };
+    // Consumer: `tick.runTravel` credits the courier on the first day
+    // `landsBy(today)` holds — its ETA, or any day after it.
+    try std.testing.expect(!courier.landsBy(4));
+    try std.testing.expect(courier.landsBy(5));
+    try std.testing.expect(courier.landsBy(6));
+    // Consumer: `checklist.watchDay` asks `landsBy(today + 1)` before the
+    // tick, so it predicts the landing on the day before the ETA and no earlier.
+    const watch_day: u32 = 4;
+    try std.testing.expect(courier.landsBy(watch_day + 1) and !courier.landsBy(watch_day));
+    try std.testing.expect(!courier.landsBy((watch_day - 1) + 1));
+}
+
 test "hiring assigns role-appropriate regular skills" {
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();

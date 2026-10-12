@@ -1544,3 +1544,91 @@ test "advanceStop: on one day the earlier StopReason wins" {
     try gs.event_queue.push(gs.allocator(), .{ .day = gs.clock.day_index, .kind = .off_contract_request, .options = &.{.{ .label = "ok", .effects = &.{} }}, .deadline_day = gs.clock.day_index + 5 });
     try std.testing.expectEqual(@as(?StopReason, .decision_due), reasonOf(advanceStop(&gs, &watch)));
 }
+
+/// A hull of `rarity`, already numbered, that the board releases tomorrow.
+fn hullReleased(gs: *GameState, rarity: types.Rarity) !void {
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "AS7-D", .rarity = rarity, .price = 1, .hq = gs.seat(), .listed_day = gs.clock.day_index, .available_after = gs.clock.day_index + 1, .expires_day = 400 });
+    gs.next_listing_id += 1;
+}
+
+fn projectLands(gs: *GameState) !void {
+    try gs.hqs.getPtr(gs.seat()).?.projects.append(gs.allocator(), .{ .kind = .facility_upgrade, .facility = .warehouse, .target_level = 2, .started_day = 0, .paperwork_done_day = 0, .construction_done_day = gs.clock.day_index + 1, .cost = 0 });
+}
+
+test "advance_until_stop: a rare hull released to an HQ board stops the command; a common one does not" {
+    const S = struct {
+        fn rare(gs: *GameState) !void {
+            try atHome(gs);
+            try hullReleased(gs, .rare);
+        }
+        fn common(gs: *GameState) !void {
+            try atHome(gs);
+            try hullReleased(gs, .common);
+        }
+    };
+    try std.testing.expectEqual(@as(?StopReason, .listing), try ownerAgreesWithCommand(8122, S.rare));
+    try std.testing.expectEqual(@as(?StopReason, null), try ownerAgreesWithCommand(8122, S.common));
+}
+
+test "advance_until_stop: on one day the command reports the earlier StopReason" {
+    const S = struct {
+        /// A courier, a project and a rare hull all land in the one tick.
+        fn together(gs: *GameState) !void {
+            try atHome(gs);
+            try courierLands(gs);
+            try projectLands(gs);
+            try hullReleased(gs, .rare);
+        }
+        /// The same day, with a decision whose deadline is the day after.
+        fn withDecision(gs: *GameState) !void {
+            try together(gs);
+            try gs.event_queue.push(gs.allocator(), .{ .day = gs.clock.day_index, .kind = .off_contract_request, .options = &.{.{ .label = "ok", .effects = &.{} }}, .deadline_day = gs.clock.day_index + 2 });
+        }
+        fn withoutCourier(gs: *GameState) !void {
+            try atHome(gs);
+            try projectLands(gs);
+            try hullReleased(gs, .rare);
+        }
+    };
+    try std.testing.expectEqual(@as(?StopReason, .arrival), try ownerAgreesWithCommand(8123, S.together));
+    try std.testing.expectEqual(@as(?StopReason, .decision_due), try ownerAgreesWithCommand(8123, S.withDecision));
+    try std.testing.expectEqual(@as(?StopReason, .project), try ownerAgreesWithCommand(8123, S.withoutCourier));
+}
+
+test "advance_until_stop: an artillery depot rebuild that finishes in the tick stops; one sent back does not" {
+    const commands = @import("commands.zig");
+    const S = struct {
+        /// Between contracts on day 1: a detached formation's wrecked
+        /// chassis on the home bay through `repair_artillery`, due tomorrow.
+        fn rebuildDue(gs: *GameState) !void {
+            const id = try @import("artillery_operations.zig").fixtureForTest(gs, false);
+            const hq = gs.hqs.getPtr(gs.seat()).?;
+            hq.staff_assigned = hq.staffRequired().total();
+            try @import("artillery_service.zig").prepareRepairableForTest(gs, id, gs.seat());
+            try @import("tick.zig").advanceDay(gs);
+            _ = try commands.execute(gs, .{ .repair_artillery = id });
+            const job = &gs.bay_jobs.items[gs.bay_jobs.items.len - 1];
+            job.started_day = gs.clock.day_index;
+            job.done_day = gs.clock.day_index + 1;
+        }
+    };
+    _ = try ownerAgreesWithCommand(8124, S.rebuildDue);
+    // The repair roll decides the outcome; walk seeds until both happen.
+    var finished = false;
+    var sent_back = false;
+    var seed: u64 = 8300;
+    while (!(finished and sent_back) and seed < 8500) : (seed += 1) {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer gs.deinit();
+        try S.rebuildDue(&gs);
+        const r = try commands.execute(&gs, .{ .advance_until_stop = 1 });
+        if (gs.bay_jobs.items.len == 0) {
+            finished = true;
+            try std.testing.expectEqual(.bay_job, r.stopped);
+        } else {
+            sent_back = true;
+            try std.testing.expect(r.stopped != .bay_job);
+        }
+    }
+    try std.testing.expect(finished and sent_back);
+}

@@ -321,6 +321,32 @@ test "effectPhrase: representative variants and sign handling" {
     try std.testing.expectEqualStrings("supplies −1,500 C", try effectPhrase(a, .{ .supply_loss = 1_500 }));
 }
 
+test "defaultsBy: the default applies on the deadline; the day-before stop asks about tomorrow" {
+    const ev: Event = .{
+        .day = 0,
+        .kind = .off_contract_request,
+        .options = &.{ .{ .label = "accept" }, .{ .label = "decline" } },
+        .default_choice = 1,
+        .deadline_day = 10,
+    };
+    // Consumer: `contract_events.expireDue` applies the default on the first
+    // day `defaultsBy(today)` holds — the deadline, and any day after it.
+    try std.testing.expect(!ev.defaultsBy(9));
+    try std.testing.expect(ev.defaultsBy(10));
+    try std.testing.expect(ev.defaultsBy(11));
+    // Consumer: `checklist.decisionDefaultsBy` asks `defaultsBy(today + 1)`,
+    // so the stop lands exactly one day before that default, never earlier.
+    const stop_day: u32 = 9;
+    try std.testing.expect(ev.defaultsBy(stop_day + 1) and !ev.defaultsBy(stop_day));
+    try std.testing.expect(!ev.defaultsBy((stop_day - 1) + 1));
+    // An answered event, or one with no options, never defaults.
+    var answered = ev;
+    answered.chosen = 0;
+    try std.testing.expect(!answered.defaultsBy(10));
+    const auto: Event = .{ .day = 0, .kind = .off_contract_request, .deadline_day = 10 };
+    try std.testing.expect(!auto.defaultsBy(10));
+}
+
 test "events carry options with typed effects" {
     const ev: Event = .{
         .day = 3,

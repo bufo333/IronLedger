@@ -39,11 +39,12 @@ A package has one primary invariant or subsystem outcome.
   `checklist.zig`; stops inside and outside a contract as listed; notices batch
   into the digest; the stop screen names the reason and opens the screen; `n`
   binds to it; an auto advance never crosses a decision deadline.
-- [ ] Phase-atomic daily tick (rule 17): `tick.advanceDay` prepares each phase's
-  fallible work before it mutates, so an allocation or invariant error inside a
-  day leaves that day unchanged; `advance` and `advance_until_stop` then return
-  errors only with the campaign unchanged, `advance`'s zero-day bankruptcy
-  included. Closes docs/contract-exceptions.md "Advance commits partial days".
+- [ ] Phase-atomic daily tick (rule 17): `advance` and `advance_until_stop`
+  return an error only with the campaign exactly as before the command,
+  `advance`'s zero-day bankruptcy included: each phase prepares before it
+  mutates, and the command restores earlier days and phases when a later day or
+  the preparation between days fails (preparing each phase alone does not).
+  Closes docs/contract-exceptions.md "Advance commits partial days".
 - [ ] P5b the battle you can touch (ROADMAP P5b): phased autoresolve (contact,
   decisive, pursuit or withdrawal) under one seed; a pause between phases with
   recomputed odds and the existing interventions (reserve commit, ROE, air

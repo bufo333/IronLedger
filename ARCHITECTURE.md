@@ -358,8 +358,9 @@ player advances past it with `advance_days`. Money stops share
 `tick.settleSolvency` with `advance`: an outfit that folds before the
 first day is a typed `.bankrupt` success for `advance_until_stop` and the
 `Bankrupt` error for `advance`, both after the bankruptcy commits. An
-error inside a day leaves the earlier days committed
-(docs/contract-exceptions.md, "Advance commits partial days").
+error inside a day, or in the solvency check or watch between days, leaves
+the earlier days committed (docs/contract-exceptions.md, "Advance commits
+partial days").
 
 Before an engagement there is no hold, only a **stop**. When a scheduled
 engagement comes within `tuning.battle.contact_warning_days`, a multi-day
