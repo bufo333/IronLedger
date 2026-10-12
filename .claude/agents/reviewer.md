@@ -40,9 +40,10 @@ change to the outcome, behavior or architecture itself requires a new complete
 draft, as defined in docs/agent-workflow.md. Report real blockers; never
 silently waive findings or weaken a gate.
 
-For every test offered as proof of a finding, confirm it can fail: read the
-implementer's red/green evidence or break the production path yourself. A test
-that cannot fail is a blocking finding.
+The reviewer assesses source and the implementer's required evidence read-only
+under [Test evidence](../../docs/agent-workflow.md#test-evidence) and contract
+rules 67-71. Missing or inadequate required evidence is an in-scope correction;
+never edit or deliberately break production code to produce it.
 
 Check whether a gate pass was obtained by avoiding the gate's pattern (receiver
 or variable renames, wrappers, helpers that hide the call) instead of honoring

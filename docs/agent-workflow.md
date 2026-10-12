@@ -116,6 +116,11 @@ expected files, documentation, gate, risks and non-goals. Approval binds the
 outcome and boundaries under the ordinary policy above; the expected file list
 guides review and is not an allowlist.
 
+Acceptance criteria identify the behaviors, boundaries, and failures to prove,
+existing adequate coverage, and remaining gaps under contract rules 67-71.
+A new test name or block is not automatically required for each criterion;
+the evidence must be concrete enough to assess coverage.
+
 For TODO-backed tracker reconciliation, the planner inspects current local
 `main`, identifies the exact completed item or group and its reachable commit
 evidence, and drafts only the corresponding deletion or wording repair. The
@@ -177,6 +182,14 @@ relocation conferred no approval. New freezes include the short plan hash.
    lines, the review records whether it remains cohesive and legible or needs
    decomposition by responsibility.
 
+   Ask whether added coverage repeats an existing protection. Overlap alone is
+   advisory, not a required deletion or a blocker. Keep optional suggestions
+   separate from the findings list; never reclassify an actual contract, gate,
+   scope, or correctness violation as advice. A formal finding about test
+   structure or duplication names the violated existing requirement and
+   concrete evidence. Every formal finding retains its mandatory disposition
+   and routing below.
+
    The reviewer report gives every finding concrete evidence and exactly one
    explicit disposition: `blocking`, `approved follow-up`, or `non-issue`. A
    `blocking` finding prevents acceptance and names its path: in-scope
@@ -206,8 +219,8 @@ relocation conferred no approval. New freezes include the short plan hash.
    the implementer's conflict report, and the reviewer's last disposition. John
    chooses amendment, waiver with an entry in docs/contract-exceptions.md, or
    another correction round. The implementer reports findings as "attempted";
-   only a reviewer disposition resolves them, and every proof test must be
-   shown to fail when its production path is broken.
+   only a reviewer disposition resolves them. Required testing evidence follows
+   [Test evidence](#test-evidence).
 
 7. After acceptance and completion of the contract delivery checklist, the
    coordinator presents the immutable artifact path and full hash, original
@@ -233,6 +246,27 @@ relocation conferred no approval. New freezes include the short plan hash.
    reviewed commit.
 8. Agents stop. John pushes local `main` after closing the agent session.
 
+### Test evidence
+
+- Apply the contract's coverage policy (rules 67-71) and retain rule-68
+  fail-first regression evidence. The implementer records the assertion,
+  failing reason, and passing result; existing or extended tests count.
+- Outside regression reproduction, a deliberate mutation demonstration is
+  required only to resolve a concrete concern that the claimed test would miss
+  the intended failure. The requester identifies the incorrect behavior and
+  why the existing assertions or evidence may not detect it. A new behavior or
+  a review finding alone is not an automatic mutation-testing trigger.
+- The implementer supplies any required targeted red/green evidence, restores
+  the production code, and runs the applicable gate on the final revision.
+  The reviewer evaluates source and evidence read-only; it never edits or
+  deliberately breaks production code. Missing or inadequate required evidence
+  is an in-scope correction. A test shown not to detect its claimed failure
+  does not satisfy that coverage requirement.
+- Record sensitivity evidence once in the handoff and reuse it while the
+  relevant production path, assertions, and fixture are unchanged. Changes
+  affecting the claim require renewed evidence; final gate and fresh review
+  obligations still apply to every changed revision.
+
 ## Scope, completion work, and amendments
 
 Approval binds an outcome, not a file list. A change is material only when it
@@ -241,15 +275,18 @@ rule, governance, or product policy, or adds a dependency or external service.
 Nothing else is material.
 
 Completion work is in scope by default: whatever the approved outcome needs to
-pass the gate and satisfy the contract, including tests for changed code (rules
-67-69), fixtures, documentation lines, build or lint repairs, and mechanical
+pass the gate and satisfy the contract, including necessary coverage under
+rules 67-71 (existing adequate tests count), fixtures, documentation lines,
+build or lint repairs, and mechanical
 registration of plan-named files in `docs/verify-contract.sh` layer tables,
 `docs/verify-contract.baseline`, or `docs/contract-exceptions.md` where the
 contract already requires the entry. The implementer does it without asking and
 lists each item under "Incidental changes" in its handoff. The reviewer confirms
 each item is necessary and not material. Missing completion work is a blocking
-in-scope finding, never a new plan. Mechanical registration is not a governance
-change; altering what a gate checks still is.
+in-scope finding, never a new plan. A missing-coverage finding identifies the
+concrete uncovered failure and applicable requirement; missing required
+coverage remains blocking. Mechanical registration is not a governance change;
+altering what a gate checks still is.
 
 A material gap that is small and bounded takes an amendment, not a new draft.
 A fresh planner writes a delta-only amendment to `.ai/plans/draft.md`: what

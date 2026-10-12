@@ -740,15 +740,38 @@ declared explicitly.
 
 ### 67. Every rule module carries focused tests
 
-Every public rule function has an in-file test. The test asserts the owning
-rule and at least one consumer agree, not merely that each returns a value.
+Tests protect distinct observable behaviors, boundaries, and failure modes.
+Existing adequate coverage satisfies this requirement. Choose the simplest
+suitable testing layer while respecting the import and mutation boundaries.
+Use focused owner tests for rule decisions and consumer tests where wiring,
+translation, or orchestration introduces a distinct risk. Separate owner and
+consumer tests are required only when they protect distinct risks. A consumer
+test can satisfy both needs when it exercises the owning rule and asserts the
+relevant result; merely executing a path is not sufficient coverage.
+
+A public function, short accessor, predicate, label, enum, or internal layout
+does not require a dedicated test solely because it exists. It still needs
+coverage when it carries a distinct behavior, boundary, or compatibility
+obligation. Prefer reusing adequate coverage over adding a second test
+solely to repeat it at another layer or to close an already-covered finding.
+Overlap alone is a review suggestion, not a contract violation.
+
+Determinism and correctness are different claims. Repeating the same result
+is not evidence that the result is correct. Preserve the pinned digest and
+save/load evolution requirements of rule 53 and use assertions that establish
+the expected rule outcomes. Specific test obligations elsewhere in this
+contract remain required.
+
 Frontend modules test row identity, key dispatch, empty states, narrow layout,
 and cursor/focus clamping where applicable.
 
 ### 68. Bug fixes begin with the regression
 
-A bug fix first adds a test reproducing the failure in the owning module. The
-test must fail for the reported reason before the implementation changes.
+A bug fix first reproduces the reported failure with a new, extended, or
+existing test at the simplest suitable layer under rule 67. Before changing
+the implementation, show that the test fails for the reported reason. After
+the fix, show it passing. An existing test that already reproduces the failure
+satisfies this requirement; a new test block is not required.
 
 ### 69. Atomicity is tested at failure boundaries
 
@@ -783,6 +806,13 @@ Persistence tests cover:
 - unsupported-format refusal without persistent mutation;
 - RNG upgrades and new-stream initialization fixtures only when upgrades are supported;
 - save, load, and continued deterministic evolution.
+
+Prefer tables and shared fixtures when they make these cases clearer and
+reduce repeated setup. Separate tests remain appropriate when setup,
+assertions, or diagnostics differ. Preserve distinct required cases, case
+isolation, and identifiable failures. One representative case for a category
+does not waive obligations for individual fields, counters, relationships, or
+format boundaries elsewhere in this contract.
 
 ### 71. Locality tests are asymmetric
 
@@ -823,7 +853,9 @@ built to catch lazily analyzed frontend code.
 
 **Reviewer checks**
 
-- Which test fails if the changed rule is duplicated?
+- Which distinct incorrect behavior does each claimed test detect?
+- Does existing coverage already detect it?
+- Which concrete uncovered failure justifies any requested additional coverage?
 - Which test fails if an allocation occurs one step later?
 - Does the locality fixture contain two unequal sites?
 - Does a new source file appear in the reachability check?
@@ -1074,7 +1106,9 @@ documented and bounded as above.
 
 Every branch answers before integration:
 
-1. Which rule functions changed, and how many files changed for each?
+1. Which rule functions changed, and how many files changed for each? Which
+   changed behaviors, boundaries, and failure modes are protected by existing
+   or new coverage?
 2. What is the first mutation in each changed compound operation, and how is
    failure atomicity guaranteed after it?
 3. Which allocations and container capacities are prepared before commit?
@@ -1096,8 +1130,10 @@ Every branch answers before integration:
 12. Do new and edited comments state present truth only, with no history,
     conversation, work status, or roadmap chronology, and cite durable
     authorities (rules 82–84)?
-13. Which regression test fails on the old behavior?
-14. Which test proves refusal or injected failure leaves state unchanged?
+13. When fixing a bug, which existing, extended, or new regression test
+    reproduces the reported failure, with fail-before/pass-after evidence?
+14. Which applicable existing or new refusal and failure-injection coverage
+    under rule 69 proves complete state equality after failure?
 15. Are the full gate, both smokes when required, contract script, clean
     package build, and relevant target builds green?
 16. For each changed function over approximately 100 lines, does it remain
