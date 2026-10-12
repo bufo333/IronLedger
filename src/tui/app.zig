@@ -2879,9 +2879,11 @@ pub const App = struct {
 
     /// Advance day by day until a stop condition fires, or the cap is hit.
     /// cap == 0 uses the tuning default. Handles all stop reasons: opens the
-    /// relevant screen for contact/hold, shows a status-bar sentence for the rest.
+    /// relevant screen for contact/hold, routes to the relevant screen for each
+    /// stop reason, and shows a log-span digest and stop description.
     fn advanceUntilStop(self: *App, cap: u32) !void {
         const g = self.state();
+        const start_day = (try q.status(self.a(), g)).day;
         const res = self.execResult(.{ .advance_until_stop = cap }) orelse {
             try self.handleGameOver();
             return;
@@ -2895,16 +2897,21 @@ pub const App = struct {
             self.say(.amber, "day {d} · {s} — {s}", .{ st.day, st.date, game.cli.advanceStopText(.insolvent) });
             return;
         }
+        // Collect log entries added during this advance for the digest.
+        var span_count: u32 = 0;
+        for (g.event_log.items) |entry| {
+            if (entry.day > start_day) span_count += 1;
+        }
         // Turn holds: open the blocking screen.
         switch (q.turnHold(g)) {
             .after_action => |id| {
-                self.say(.crit, "day {d} · {s} — contact: the after-action is on your desk", .{ st.day, st.date });
+                self.say(.crit, "day {d} · {s} — after-action on your desk", .{ st.day, st.date });
                 self.battles_from_list = false;
                 self.openModal(.{ .after_action = id });
                 return;
             },
             .decision => |id| {
-                self.say(.crit, "day {d} · {s} — a battle decision is waiting on your desk", .{ st.day, st.date });
+                self.say(.crit, "day {d} · {s} — battle decision on your desk", .{ st.day, st.date });
                 self.openModal(.{ .decision = id });
                 return;
             },
@@ -2916,12 +2923,59 @@ pub const App = struct {
             self.openOrders(res.contact);
             return;
         }
-        // All other stop reasons: show a descriptive sentence in the status bar.
         const stop_text = game.cli.advanceStopText(res.stopped);
-        if (stop_text.len > 0) {
-            self.say(.good, "day {d} · {s} — {s}", .{ st.day, st.date, stop_text });
-        } else {
-            self.say(.good, "day {d} · {s}", .{ st.day, st.date });
+        // Quiet cap_reached with no active contract: announce the next payday.
+        if (res.stopped == .cap_reached) {
+            var d = q.currentDate(g);
+            var days_left: u32 = 0;
+            while (!d.isPayday()) {
+                d = d.next();
+                days_left += 1;
+            }
+            var date_buf: [10]u8 = undefined;
+            self.say(.good, "day {d} · {s} — payday in {d} day{s} ({s}){s}", .{
+                st.day, st.date, days_left, if (days_left == 1) "" else "s", d.text(&date_buf),
+                if (span_count > 0) try std.fmt.allocPrint(self.a(), " · {d} event{s}", .{ span_count, if (span_count == 1) "" else "s" }) else "",
+            });
+            return;
+        }
+        // Typed screen routing for each stop reason, with span digest.
+        const suffix = if (span_count > 0)
+            try std.fmt.allocPrint(self.a(), " · {d} event{s} since day {d}", .{ span_count, if (span_count == 1) "" else "s", start_day })
+        else
+            @as([]const u8, "");
+        switch (res.stopped) {
+            .payday, .decision_due => {
+                self.switchTab(.desk);
+                self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
+            },
+            .contract_end => {
+                self.switchTab(.contracts);
+                self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
+            },
+            .arrival => {
+                self.switchTab(.supply);
+                self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
+            },
+            .bay_job, .project => {
+                self.switchTab(.hq);
+                self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
+            },
+            .listing => {
+                self.switchTab(.market);
+                self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
+            },
+            .personnel => {
+                self.switchTab(.people);
+                self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
+            },
+            else => {
+                if (stop_text.len > 0) {
+                    self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
+                } else {
+                    self.say(.good, "day {d} · {s}{s}", .{ st.day, st.date, suffix });
+                }
+            },
         }
     }
 
@@ -4555,7 +4609,7 @@ pub const App = struct {
     }
     const EndTurnAction = enum { day, week, jump, cancel };
     pub const end_turn_bindings = [_]keys.Binding(EndTurnAction){
-        .{ .match = keys.Match.char('n'), .action = .day, .label = "end the turn anyway", .group = .act },
+        .{ .match = keys.Match.char('n'), .action = .day, .label = "advance until the next stop (bypasses this modal)", .group = .act },
         .{ .match = keys.Match.char('y'), .action = .day, .label = "a day", .group = .act, .show_footer = false, .show_help = false },
         .{ .match = keys.Match.char('N'), .action = .week, .label = "end 7 turns", .group = .act },
         .{ .match = .{ .chars = .{ '1', '9' } }, .action = .jump, .label = "go to that warning", .group = .navigate },

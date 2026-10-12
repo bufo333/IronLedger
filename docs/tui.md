@@ -526,7 +526,7 @@ filters to the active context (see the Keys description above).
 
 | Key | Does |
 |---|---|
-| `n` | end the turn anyway |
+| `n` | advance until the next stop (bypasses this modal) |
 | `N` | end 7 turns |
 | `1-9` | go to that warning |
 | `Esc` | not yet |
@@ -664,10 +664,10 @@ orders, and the next advance goes ahead; `advance` refuses with
 modal, campaign saved as it ended) once nothing could.
 
 Modals: **End turn** (the checklist rows that prompt, with jump targets;
-`n` ends the advance asked for — a day, a week from `N`, or `:day n` —
-and `N` a week; it opens for every advance while a row prompts, and
-`:day n force` skips it; Desk notes such as a hull waiting on a pilot in
-the medbay or restless crew stay on the Desk) ·
+opens for `.` (one day) and `N` (seven days) advances while a row prompts,
+and `:day n force` skips it; Desk notes such as a hull waiting on a pilot in
+the medbay or restless crew stay on the Desk; `n` bypasses this modal and
+runs advance-until-stop instead) ·
 **Decision** (options with effects, default marked) ·
 **Battle orders** (the situation and odds; ←/→ step the ROE and each
 lance's role with the odds recomputed, Enter buys the emergency resupply,

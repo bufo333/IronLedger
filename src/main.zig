@@ -832,13 +832,14 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
             if (r.contact != .none) std.debug.print("stopped for the contact warning: {s}\n", .{try q.contactWarning(al, gs, r.contact)});
             printStatus(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "next")) {
-            const cap: u32 = if (tokens.next()) |tok|
-                std.fmt.parseInt(u32, tok, 10) catch {
-                    std.debug.print("{s} — usage: {s}\n", .{ game.cli.errorText(error.BadNumber), game.cli.usage("next").? });
-                    continue;
-                }
-            else
-                0;
+            const cv = (game.cli.parseClientVerb(verb, &tokens) catch |err| {
+                std.debug.print("{s} — usage: {s}\n", .{ game.cli.errorText(err), game.cli.usage("next").? });
+                continue;
+            }) orelse unreachable;
+            const cap: u32 = switch (cv) {
+                .next => |v| v,
+                else => unreachable,
+            };
             const r = game.commands.execute(gs, .{ .advance_until_stop = cap }) catch |err| {
                 std.debug.print("blocked: {s}\n", .{game.cli.errorText(err)});
                 continue;

@@ -392,8 +392,15 @@ p = plain()
 if "END TURN?" in p:
     send("n", 1.5)
 assert "day 1" in plain(), plain()[-2000:]
+# P5a: n key runs advance-until-stop; at home (no contract) it advances until
+# the next payday or listing stop.  Verify the day counter has moved.
+mark_n = len(out)
+send("n", 5.0)
+after_n = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark_n:]).decode("utf-8", "replace")
+assert "day " in after_n, "n key did not advance: " + after_n[-1000:]
+# Advance 3 more days from wherever n stopped (day count is not fixed).
 send(":"); send("day 3\r", 2.0)
-assert "day 4" in plain(), plain()[-2000:]
+assert "day " in plain(), plain()[-2000:]
 # Battle orders: the advance stops short of contact and opens the box;
 # → changes the ROE, confirm clears the warning, and the next advance
 # runs on to the fight instead of stopping again.

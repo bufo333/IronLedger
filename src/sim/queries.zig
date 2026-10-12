@@ -177,6 +177,12 @@ pub const Status = struct {
     urgent: usize,
 };
 
+/// The current campaign date. Use to iterate toward the next payday without
+/// accessing gs.clock directly from a frontend.
+pub fn currentDate(gs: *const GameState) clock_mod.Date {
+    return gs.clock.date;
+}
+
 pub fn status(alloc: Alloc, gs: *GameState) !Status {
     const d = gs.clock.date;
     var companies: u32 = 0;

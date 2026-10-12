@@ -36,9 +36,9 @@ A package has one primary invariant or subsystem outcome.
   battle-armor UI remains deferred with P2b-P2d.
 - [x] P5a time, the turn is the next stop (ROADMAP P5a): advance-until-stop
   command with a day cap beside the unchanged `advance_days`; one stop owner in
-  `checklist.zig`; stops inside and outside a contract as listed; the stop
-  reason appears in the status bar and the relevant screen opens; `n` binds to
-  it; an auto advance never crosses a decision deadline.
+  `checklist.zig`; stops inside and outside a contract as listed; notices batch
+  into the digest; the stop screen names the reason and opens the screen; `n`
+  binds to it; an auto advance never crosses a decision deadline.
 - [ ] P5b the battle you can touch (ROADMAP P5b): phased autoresolve (contact,
   decisive, pursuit or withdrawal) under one seed; a pause between phases with
   recomputed odds and the existing interventions (reserve commit, ROE, air

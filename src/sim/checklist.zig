@@ -193,6 +193,55 @@ pub const StopReason = enum {
     personnel,
 };
 
+/// Returns true when advancing to `next_day` would reach or cross an
+/// unanswered decision's deadline, defaulting it without the player's input.
+/// Call before each `advanceDay` in `advanceUntilStop` (rule 3, rule 7).
+pub fn preAdvanceDeadlineStop(gs: *GameState, next_day: u32) bool {
+    for (gs.event_queue.pending.items) |*ev| {
+        if (!ev.needsDecision()) continue;
+        if (ev.deadline_day > 0 and ev.deadline_day <= next_day) return true;
+    }
+    return false;
+}
+
+/// Returns a stop reason for arrivals and completions that land on `next_day`.
+/// These signals are consumed during `advanceDay` and cannot be detected
+/// post-advance; call before each `advanceDay` in `advanceUntilStop`, advance,
+/// then use the saved reason if nothing higher-priority fired post-advance.
+pub fn preAdvanceArrivalStop(gs: *GameState, next_day: u32) ?StopReason {
+    {
+        var it = gs.forces.iterator();
+        while (it.next()) |e| {
+            if (e.value_ptr.return_eta_day) |eta| if (eta == next_day) return .arrival;
+        }
+    }
+    for (gs.unit_transfers.items) |t| {
+        if (t.eta_day == next_day) return .arrival;
+    }
+    for (gs.fund_couriers.items) |fc| {
+        if (fc.eta_day == next_day) return .arrival;
+    }
+    for (gs.bay_jobs.items) |j| {
+        if (j.done_day) |d| if (d == next_day) return .bay_job;
+    }
+    {
+        var it = gs.hqs.iterator();
+        while (it.next()) |e| {
+            for (e.value_ptr.projects.items) |p| {
+                if (p.construction_done_day == next_day) return .project;
+            }
+        }
+    }
+    {
+        var it = gs.people.iterator();
+        while (it.next()) |e| {
+            const p = e.value_ptr;
+            if (p.status == .wounded) if (p.wound_heal_day) |d| if (d == next_day) return .personnel;
+        }
+    }
+    return null;
+}
+
 pub fn advanceStopOwner(gs: *GameState, day: u32) ?StopReason {
     // A turn hold is the highest priority: the turn cannot move past it.
     if (turnHold(gs) != null) return .hold;
@@ -215,37 +264,13 @@ pub fn advanceStopOwner(gs: *GameState, day: u32) ?StopReason {
             if (c.arrive_day) |d| if (d == day) return .contract_end;
         }
     }
-    // Company returning home today.
-    {
-        var it = gs.forces.iterator();
-        while (it.next()) |e| {
-            if (e.value_ptr.return_eta_day) |eta| if (eta == day) return .arrival;
-        }
+    // Part order delivered today (order stays in the list after delivery).
+    for (gs.part_orders.items) |o| {
+        if (o.status == .delivered) if (o.eta_day) |d| if (d == day) return .arrival;
     }
-    // Unit transfer arriving today.
-    for (gs.unit_transfers.items) |t| {
-        if (t.eta_day == day) return .arrival;
-    }
-    // Bay job (depot repair, fabrication, refit) completing today.
-    for (gs.bay_jobs.items) |j| {
-        if (j.done_day) |d| if (d == day) return .bay_job;
-    }
-    // HQ construction project completing today.
-    {
-        var it = gs.hqs.iterator();
-        while (it.next()) |e| {
-            for (e.value_ptr.projects.items) |p| {
-                if (p.construction_done_day == day) return .project;
-            }
-        }
-    }
-    // Rare hull newly listed on any HQ board today (not a staple, not black market).
+    // Rare hull (uncommon or rarer) newly listed on any HQ board today.
     for (gs.market_listings.items) |l| {
-        if (l.listed_day == day and l.kind == .unit and !l.staple and !l.black_market) return .listing;
-    }
-    // Personnel event (notice given, etc.) newly queued today.
-    for (gs.event_queue.pending.items) |ev| {
-        if (ev.day == day and ev.kind == .notice_given) return .personnel;
+        if (l.listed_day == day and l.kind == .unit and l.rarity != .common and !l.staple and !l.black_market) return .listing;
     }
     return null;
 }
@@ -1062,4 +1087,67 @@ test "turnHold owns the turn-gate; advance_days is refused while a report is unr
     // Acknowledge the report: the hold clears.
     gs.battle_reports.kept.items[0].acknowledged = true;
     try std.testing.expectEqual(@as(?Hold, null), turnHold(&gs));
+}
+
+test "advanceStopOwner: payday, decision, and pre-advance deadline guard agree with the stop owner" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8100 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const commands = @import("commands.zig");
+    // Advance past day 0 so initial listings (listed_day == 0) no longer fire.
+    try @import("tick.zig").advanceDay(&gs);
+    // Day 1, no decision planted yet: no payday, no decision_due.
+    try std.testing.expect(advanceStopOwner(&gs, gs.clock.day_index) == null);
+    // Plant a decision arriving today.
+    try gs.event_queue.push(gs.allocator(), .{
+        .day = gs.clock.day_index,
+        .kind = .off_contract_request,
+        .options = &.{
+            .{ .label = "accept", .effects = &.{} },
+            .{ .label = "decline", .effects = &.{} },
+        },
+        .default_choice = 1,
+        .deadline_day = gs.clock.day_index + 5,
+    });
+    // Arrives today → decision_due.
+    try std.testing.expectEqual(StopReason.decision_due, advanceStopOwner(&gs, gs.clock.day_index).?);
+    // Pre-advance deadline gate: does not fire for next_day = deadline - 1.
+    try std.testing.expect(!preAdvanceDeadlineStop(&gs, gs.clock.day_index + 4));
+    // Pre-advance deadline gate: fires on the deadline day itself.
+    try std.testing.expect(preAdvanceDeadlineStop(&gs, gs.clock.day_index + 5));
+    // Resolve the decision: no more decision_due.
+    const ev = gs.event_queue.pending.items[0];
+    _ = try commands.execute(&gs, .{ .resolve_decision = .{ .event = ev.id, .choice = ev.default_choice } });
+    try std.testing.expect(advanceStopOwner(&gs, gs.clock.day_index) == null);
+}
+
+test "advanceStopOwner: payday fires on the first of each month" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8101 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    // Advance 31 days to Feb 1 (payday).
+    for (0..31) |_| try @import("tick.zig").advanceDay(&gs);
+    try std.testing.expect(gs.clock.date.isPayday());
+    try std.testing.expectEqual(StopReason.payday, advanceStopOwner(&gs, gs.clock.day_index).?);
+}
+
+test "preAdvanceArrivalStop: detects company return, fund courier, and personnel recovery" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8102 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const co = try gs.createForce("Alpha", .company, .none);
+    const day = gs.clock.day_index;
+    // No arrivals yet.
+    try std.testing.expect(preAdvanceArrivalStop(&gs, day + 1) == null);
+    // Plant a returning company.
+    gs.force(co).?.return_eta_day = day + 1;
+    try std.testing.expectEqual(StopReason.arrival, preAdvanceArrivalStop(&gs, day + 1).?);
+    try std.testing.expect(preAdvanceArrivalStop(&gs, day + 2) == null);
+    gs.force(co).?.return_eta_day = null;
+    // Plant a wounded person recovering on day+1.
+    const pid = try gs.hirePerson("Hurt", "Pilot", .mekwarrior);
+    gs.person(pid).?.status = .wounded;
+    gs.person(pid).?.wound_heal_day = day + 1;
+    try std.testing.expectEqual(StopReason.personnel, preAdvanceArrivalStop(&gs, day + 1).?);
+    try std.testing.expect(preAdvanceArrivalStop(&gs, day + 2) == null);
 }

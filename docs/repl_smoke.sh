@@ -43,6 +43,8 @@ printf '%s\n' \
   'loan 1500000 36' \
   'transfer outfit hq:1 1900000' \
   'day 4 force' \
+  'next 1' \
+  'next 1 trailing' \
   'offers' \
   'buyarty 1 hq:1' \
   'artillery' \
@@ -157,6 +159,9 @@ check 'under contract:'
 check 'readiest co.'
 check 'skull'
 check 'advanced 3 day'
+# P5a: `next` (cap 1) advances; trailing token is refused via parseClientVerb.
+check 'advance limit reached'
+check 'those arguments do not fit the verb — usage: next'
 # P3c.6: mech <unit id> prints the lifecycle summary; unknown id prints the usage line.
 check 'engagements'
 check 'usage: mech'

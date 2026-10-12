@@ -329,8 +329,8 @@ for a broader set of events: payday (salaries, board refresh), a decision
 arriving or nearing its deadline, a contract milestone, an arrival, a
 completed bay job or construction project, a rare hull listing, and a
 personnel event. `checklist.advanceStopOwner` is the single source of
-truth for this stop set — both `advance_until_stop` (P5a, the `n` key)
-and the checklist screen consult it, so a stop condition cannot be enforced
+truth for this stop set — `advance_until_stop` (P5a, the `n` key) consults
+it, so a stop condition cannot be enforced
 in one place and reported in another (rule 3, rule 7). The priority order
 is: hold → contact → decision → payday → contract_end → arrival → bay_job
 → project → listing → personnel. Changing the stop set shifts the
