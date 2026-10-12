@@ -178,7 +178,8 @@ filters to the active context (see the Keys description above).
 | `j/k ↑/↓` | move the cursor (PgUp/PgDn ten rows) |
 | `← →` | scroll a wide table's columns (◀ 2 · 3 ▶ = hidden); pan the star map |
 | `:` | the command line: every CLI verb works (day, transfer, order, accept, …) |
-| `n` | end the turn (the checklist opens first) |
+| `n` | advance to the next stop |
+| `.` | end the turn (the checklist opens first) |
 | `N` | end 7 turns (the checklist opens first) |
 | `M` | music on/off |
 | `?` | help |

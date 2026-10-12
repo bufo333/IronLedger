@@ -173,6 +173,83 @@ pub fn turnHold(gs: *GameState) ?Hold {
     return null;
 }
 
+/// Why advance-until-stop must hand control back to the commander on day
+/// `day` (which equals `gs.clock.day_index` after the tick for that day).
+/// Returns the first reason that applies, in priority order; null when
+/// nothing demands the commander's attention yet.
+/// One owner: the command and both frontends share this single source of
+/// truth so a stop condition cannot be enforced in one place and reported
+/// in another (rule 3, rule 7).
+pub const StopReason = enum {
+    hold,
+    contact,
+    decision_due,
+    payday,
+    contract_end,
+    arrival,
+    bay_job,
+    project,
+    listing,
+    personnel,
+};
+
+pub fn advanceStopOwner(gs: *GameState, day: u32) ?StopReason {
+    // A turn hold is the highest priority: the turn cannot move past it.
+    if (turnHold(gs) != null) return .hold;
+    // Contact window opened today: give battle orders before more time passes.
+    if (contactOpenedToday(gs) != null) return .contact;
+    // Inbox decision newly arrived today (non-blocking), or day before its deadline.
+    for (gs.event_queue.pending.items) |*ev| {
+        if (!ev.needsDecision()) continue;
+        if (ev.day == day) return .decision_due;
+        if (ev.deadline_day > 0 and ev.deadline_day == day + 1) return .decision_due;
+    }
+    // Payday (1st of the month) — salaries out, board refresh, turnover rolls.
+    if (gs.clock.date.isPayday()) return .payday;
+    // Contract milestone today: the contract ends, or the company arrives on world.
+    {
+        var it = gs.contracts.iterator();
+        while (it.next()) |e| {
+            const c = e.value_ptr;
+            if (c.end_day) |d| if (d == day) return .contract_end;
+            if (c.arrive_day) |d| if (d == day) return .contract_end;
+        }
+    }
+    // Company returning home today.
+    {
+        var it = gs.forces.iterator();
+        while (it.next()) |e| {
+            if (e.value_ptr.return_eta_day) |eta| if (eta == day) return .arrival;
+        }
+    }
+    // Unit transfer arriving today.
+    for (gs.unit_transfers.items) |t| {
+        if (t.eta_day == day) return .arrival;
+    }
+    // Bay job (depot repair, fabrication, refit) completing today.
+    for (gs.bay_jobs.items) |j| {
+        if (j.done_day) |d| if (d == day) return .bay_job;
+    }
+    // HQ construction project completing today.
+    {
+        var it = gs.hqs.iterator();
+        while (it.next()) |e| {
+            for (e.value_ptr.projects.items) |p| {
+                if (p.construction_done_day == day) return .project;
+            }
+        }
+    }
+    // Rare hull newly listed on any HQ board today (not a staple, not black market).
+    for (gs.market_listings.items) |l| {
+        if (l.listed_day == day and l.kind == .unit and !l.staple and !l.black_market) return .listing;
+    }
+    // Personnel event (notice given, etc.) newly queued today.
+    for (gs.event_queue.pending.items) |ev| {
+        if (ev.day == day and ev.kind == .notice_given) return .personnel;
+    }
+    return null;
+}
+
 test "depot backlog only counts hulls whose company is home" {
     const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 21 });

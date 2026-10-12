@@ -387,7 +387,7 @@ assert "pick a location" in plain()[-30000:], plain()[-3000:]
 send("\x1b"); send("\x1b")
 send("c", 0.8)                 # clear the plan
 send("1")
-send("n", 1.5)                 # end turn (modal or advance)
+send(".", 1.5)                 # end turn (modal or advance); n is now next-stop
 p = plain()
 if "END TURN?" in p:
     send("n", 1.5)
@@ -518,7 +518,7 @@ send(":"); send("tra"); send("\t", 0.6)                     # ambiguous: candida
 p = plain()[-300:]
 assert "transfer" in p and "train" in p, p
 send("\x1b")
-send("n", 2.0)
+send(".", 2.0)
 if "END TURN?" in plain(): send("n", 2.0)
 send("q"); send("r"); send("q")
 drain(0.5)

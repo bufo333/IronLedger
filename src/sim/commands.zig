@@ -67,6 +67,9 @@ pub const Command = union(enum) {
     /// and nothing blocks it; decisions wait in the inbox with deadlines.
     advance_day,
     advance_days: u32,
+    /// Advance day by day until the stop owner says the commander is needed,
+    /// or until `cap` days have passed. 0 = use `tuning.battle.auto_advance_cap_days`.
+    advance_until_stop: u32,
     hire: struct {
         first: []const u8,
         last: []const u8,
@@ -525,7 +528,33 @@ pub const Result = struct {
     /// `.none` when the full count ran or when zero days elapsed (the zero-
     /// day case returns an error, not a Result). Ephemeral — not persisted,
     /// not in the digest (rule 45 applies to state fields only).
-    stopped: enum { none, insolvent, bankrupt } = .none,
+    stopped: enum {
+        none,
+        insolvent,
+        bankrupt,
+        /// advance_until_stop: the day cap was reached with no other stop.
+        cap_reached,
+        /// advance_until_stop: payday (1st of month) — salaries and board refresh.
+        payday,
+        /// advance_until_stop: inbox decision newly arriving, or day before its deadline.
+        decision_due,
+        /// advance_until_stop: contact window opened for a scheduled engagement.
+        contact,
+        /// advance_until_stop: contract ending or company arriving on world.
+        contract_end,
+        /// advance_until_stop: company returning home, or a unit transfer arriving.
+        arrival,
+        /// advance_until_stop: a structural bay job finished.
+        bay_job,
+        /// advance_until_stop: an HQ construction project completed.
+        project,
+        /// advance_until_stop: a rare hull appeared on the market board.
+        listing,
+        /// advance_until_stop: a personnel event (notice given, etc.) arrived.
+        personnel,
+        /// advance_until_stop: turn hold (unread after-action or unanswered battle decision).
+        hold,
+    } = .none,
     /// advance: the contract whose contact warning stopped a multi-day
     /// advance early.
     contact: types.ContractId = .none,
@@ -596,6 +625,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
     switch (cmd) {
         .advance_day => return tick.advance(gs, 1),
         .advance_days => |n| return tick.advance(gs, n),
+        .advance_until_stop => |cap| return tick.advanceUntilStop(gs, cap),
         .hire => |h| return personnel.execHire(gs, h),
         .recruit => |role| return personnel.execRecruit(gs, role),
         .fire => |id| return personnel.execFire(gs, id),

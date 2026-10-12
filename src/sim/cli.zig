@@ -50,6 +50,7 @@ pub fn parseDay(tokens: *std.mem.TokenIterator(u8, .scalar)) ParseError!Day {
 /// command opens. Parsed as strictly as a command.
 pub const ClientVerb = union(enum) {
     day: Day,
+    next: u32,
     save,
     quit,
     help,
@@ -69,6 +70,13 @@ pub fn parseClientVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .sca
     const tag = std.meta.stringToEnum(std.meta.Tag(ClientVerb), verb) orelse return null;
     const cv: ClientVerb = switch (tag) {
         .day => .{ .day = try parseDay(tokens) },
+        .next => blk: {
+            const cap: u32 = if (tokens.next()) |tok|
+                std.fmt.parseInt(u32, tok, 10) catch return error.BadNumber
+            else
+                0;
+            break :blk .{ .next = cap };
+        },
         .manning => blk: {
             const site = try parseSite(try need(tokens.next()));
             if (site != .company) return error.BadSite;
@@ -839,6 +847,17 @@ pub fn advanceStopText(stopped: @FieldType(game.commands.Result, "stopped")) []c
         .none => "",
         .insolvent => errorText(error.Insolvent),
         .bankrupt => errorText(error.Bankrupt),
+        .cap_reached => "advance limit reached — use `next` again to continue",
+        .payday => "payday — salaries due and the board refreshes",
+        .decision_due => "a decision is waiting in your inbox",
+        .contact => "", // handled by the caller via result.contact
+        .contract_end => "a contract has concluded or your company has arrived",
+        .arrival => "a company or shipment has arrived",
+        .bay_job => "bay work has finished",
+        .project => "construction work has finished",
+        .listing => "a hull appeared on the market board",
+        .personnel => "a personnel matter needs your attention",
+        .hold => "", // handled by the hold path, not advanceStopText
     };
 }
 
@@ -952,6 +971,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "cycledifficulty", "cycledifficulty [+|-]" },
         .{ "shares", "shares <percent>|+|-  (share of contract income paid to shareholders at completion)" },
         .{ "day", "day [n] [force]  (1-365 days; force skips the end-turn checklist)" },
+        .{ "next", "next [cap]  (advance until the next stop; cap defaults to tuning.auto_advance_cap_days)" },
         .{ "manning", "manning co:N" },
         .{ "recallidle", "recallidle co:N" },
         .{ "admit", "admit <person>" },
@@ -1179,6 +1199,11 @@ test "client verbs refuse trailing words; manning takes a company" {
     try t.expectError(error.BadSite, parse("manning hq:1"));
     try t.expect((try parse("accept")) == null);
     try t.expect(usage("day") != null and usage("manning") != null);
+    // `next` with and without optional cap.
+    try t.expectEqual(@as(u32, 0), (try parse("next")).?.next);
+    try t.expectEqual(@as(u32, 30), (try parse("next 30")).?.next);
+    try t.expectError(error.BadNumber, parse("next junk"));
+    try t.expect(usage("next") != null);
 }
 
 test "stockpolicy: no target is twice the minimum, an explicit 0 removes" {

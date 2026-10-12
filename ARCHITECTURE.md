@@ -324,6 +324,18 @@ names which decisions qualify — the test below, written as a switch.
 The test for a new blocking rule is *what it disposes of*, not how big it
 feels. If the worst outcome is a worse bonus, it waits in the inbox.
 
+**The stop model.** Beyond hard holds, the commander needs to be surfaced
+for a broader set of events: payday (salaries, board refresh), a decision
+arriving or nearing its deadline, a contract milestone, an arrival, a
+completed bay job or construction project, a rare hull listing, and a
+personnel event. `checklist.advanceStopOwner` is the single source of
+truth for this stop set — both `advance_until_stop` (P5a, the `n` key)
+and the checklist screen consult it, so a stop condition cannot be enforced
+in one place and reported in another (rule 3, rule 7). The priority order
+is: hold → contact → decision → payday → contract_end → arrival → bay_job
+→ project → listing → personnel. Changing the stop set shifts the
+fixed-seed stop count test; that test is the spec's proof.
+
 Before an engagement there is no hold, only a **stop**. When a scheduled
 engagement comes within `tuning.battle.contact_warning_days`, a multi-day
 advance stops once on that day and the next advance goes ahead. The

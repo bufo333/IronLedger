@@ -434,6 +434,9 @@ pub const Tuning = struct {
         /// shows. At most `battle.min_gap_days`, so every scheduled
         /// engagement opens its window on an advance.
         contact_warning_days: u32, // TUNE
+        /// Maximum days `advance_until_stop` will run before stopping with
+        /// `cap_reached`. 0 in the command means "use this value".
+        auto_advance_cap_days: u32, // TUNE
         /// Per-drawn-OpFor-hull outcome by engagement band (destroyed first, then
         /// combat_ineffective; remainder survive). Percentages. // TUNE
         /// combat_ineffective is an engagement outcome, NOT a HullStatus member.

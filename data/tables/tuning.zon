@@ -272,6 +272,7 @@
         .consolidate_morale = 2, // TUNE: a night off the line
         .consolidate_escalation = -3, // TUNE: consolidating relieves escalation pressure (P4h)
         .contact_warning_days = 3, // TUNE: long enough to change ROE or recall before the fight
+        .auto_advance_cap_days = 90, // TUNE: three months before the player is forced back to the desk
         // Per-drawn-OpFor-hull outcome bands: destroyed_pct non-increasing from decisive_victory to rout;
         // destroyed_pct + ineffective_pct <= 100 per band. // TUNE
         .opfor_outcome = .{

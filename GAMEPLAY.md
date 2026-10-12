@@ -12,9 +12,12 @@ read the AAR from last night's raid, approve an acquisition, answer the
 inbox — an employer's off-contract request, a salvage dispute, a black-market
 contact, a ransom demand — each with a deadline a few days out. Nothing stops
 the clock for you: end turns past a deadline and the cautious default gets
-chosen in your name, entered in the log. Skimming a quiet garrison month in
-a dozen quick turns is fine; the inbox is what catches you when it isn't
-quiet.
+chosen in your name, entered in the log. Skimming a quiet garrison month
+is quick with **advance to the next stop** (`n`): time runs until the
+commander is genuinely needed — payday, a new decision, a contact window,
+a bay job done, a rare hull on the market — then hands back control with
+a sentence in the status bar. Press `.` (or `day` in the console) for a
+single-day advance with the checklist opening first if warnings are up.
 
 **Monthly (the heartbeat):** payday. Every company's P&L lands on your desk —
 contract income vs. payroll, maintenance, supplies, freight, hardship pay.
@@ -184,17 +187,21 @@ you own reports to you (Stages 9A–9C):
   that won't be repaired, reloaded, or fielded. Techs have hours in the
   week; a wounded tech (accidents happen in the bay) gets swapped, and the
   medbay shows who's out, for how long, and who you've triaged to the front.
-- **The turn ends with a checklist**: before the day advances you see what
-  you left undone — decisions near deadline, open slots, hungry companies,
-  overdrawn treasuries, idle bays with demand — and choose to fix it or
-  proceed anyway; a week's advance asks the same as a day's. Red marks
-  what costs you if left, but nothing is forced: most of it is a bounded
-  tax, and the one hard deadline is a contract left combat-ineffective,
-  which breaches after two weeks. Nothing you should have known slips
-  past a turn boundary.
-  What you cannot act on stays on the Desk without stopping the turn: a
-  mek whose pilot is in the medbay keeps the seat for them, and the TO&E
-  shows it sitting out until the day they are back.
+- **The turn ends with a checklist** (`.` / `day`): before the day advances
+  you see what you left undone — decisions near deadline, open slots, hungry
+  companies, overdrawn treasuries, idle bays with demand — and choose to fix
+  it or proceed anyway; a week's advance (`N`) asks the same. Red marks what
+  costs you if left, but nothing is forced: most of it is a bounded tax, and
+  the one hard deadline is a contract left combat-ineffective, which breaches
+  after two weeks. Nothing you should have known slips past a turn boundary.
+  What you cannot act on stays on the Desk without stopping the turn: a mek
+  whose pilot is in the medbay keeps the seat for them, and the TO&E shows it
+  sitting out until the day they are back.
+  **Advance to the next stop** (`n` / `next` in the console) skips the
+  checklist and runs forward until the commander is needed. The stop reason
+  appears in the status bar: "payday", "a decision is waiting in your inbox",
+  "bay work has finished", and so on. The advance never crosses an unanswered
+  decision deadline: it stops the day before and waits.
 - **Contact is announced**: a few days before a scheduled engagement the
   checklist warns — skulls and odds under the ROE in force, fieldable
   strength against what was committed, fights of each munition on the

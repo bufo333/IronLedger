@@ -2112,7 +2112,7 @@ pub const App = struct {
 
     /// Keys every game screen shares. No screen binds one of these (a test
     /// checks), so the order `handleGameKey` asks in never matters.
-    pub const GlobalAction = enum { screen, screen_digit, screen_market, settings, next_pane, prev_pane, cursor_down, cursor_up, page_down, page_up, scroll_left, scroll_right, clear_message, command, end_turn, end_week, quit, music, help };
+    pub const GlobalAction = enum { screen, screen_digit, screen_market, settings, next_pane, prev_pane, cursor_down, cursor_up, page_down, page_up, scroll_left, scroll_right, clear_message, command, next_stop, end_turn, end_week, quit, music, help };
 
     pub const global_bindings = [_]keys.Binding(GlobalAction){
         .{ .match = .{ .fkeys = .{ 1, 10 } }, .action = .screen, .label = "screens", .group = .navigate, .shown = "F1-F10 / 1-0", .show_footer = false, .help = "switch screens: Desk, Map, Forces, Contracts, Ledger, Supply, HQ, Lab, People, Market" },
@@ -2131,7 +2131,8 @@ pub const App = struct {
         .{ .match = .{ .key = .right }, .action = .scroll_right, .label = "columns", .group = .navigate, .show_footer = false, .show_help = false },
         .{ .match = .{ .key = .escape }, .action = .clear_message, .label = "clear the status line", .group = .misc, .show_footer = false, .show_help = false },
         .{ .match = keys.Match.char(':'), .action = .command, .label = "command", .group = .misc, .help = "the command line: every CLI verb works (day, transfer, order, accept, …)" },
-        .{ .match = keys.Match.char('n'), .action = .end_turn, .label = "end turn", .group = .misc, .help = "end the turn (the checklist opens first)" },
+        .{ .match = keys.Match.char('n'), .action = .next_stop, .label = "next stop", .group = .misc, .help = "advance to the next stop" },
+        .{ .match = keys.Match.char('.'), .action = .end_turn, .label = "end turn", .group = .misc, .show_footer = false, .help = "end the turn (the checklist opens first)" },
         .{ .match = keys.Match.char('N'), .action = .end_week, .label = "end 7 turns", .group = .misc, .show_footer = false, .help = "end 7 turns (the checklist opens first)" },
         .{ .match = keys.Match.char('M'), .action = .music, .label = "music on/off", .group = .misc, .show_footer = false },
         .{ .match = keys.Match.char('?'), .action = .help, .label = "help", .group = .misc },
@@ -2292,6 +2293,7 @@ pub const App = struct {
                 self.cmd_prefill.len = 0;
                 self.modal = .{ .input = .command };
             },
+            .next_stop => try self.advanceUntilStop(0),
             .end_turn => try self.endTurnRequest(1),
             .end_week => try self.endTurnRequest(7),
             .quit => self.modal = .quit,
@@ -2873,6 +2875,54 @@ pub const App = struct {
             return;
         }
         self.say(.good, "day {d} · {s}", .{ st.day, st.date });
+    }
+
+    /// Advance day by day until a stop condition fires, or the cap is hit.
+    /// cap == 0 uses the tuning default. Handles all stop reasons: opens the
+    /// relevant screen for contact/hold, shows a status-bar sentence for the rest.
+    fn advanceUntilStop(self: *App, cap: u32) !void {
+        const g = self.state();
+        const res = self.execResult(.{ .advance_until_stop = cap }) orelse {
+            try self.handleGameOver();
+            return;
+        };
+        if (res.stopped == .bankrupt) {
+            try self.handleGameOver();
+            return;
+        }
+        const st = try q.status(self.a(), g);
+        if (res.stopped == .insolvent) {
+            self.say(.amber, "day {d} · {s} — {s}", .{ st.day, st.date, game.cli.advanceStopText(.insolvent) });
+            return;
+        }
+        // Turn holds: open the blocking screen.
+        switch (q.turnHold(g)) {
+            .after_action => |id| {
+                self.say(.crit, "day {d} · {s} — contact: the after-action is on your desk", .{ st.day, st.date });
+                self.battles_from_list = false;
+                self.openModal(.{ .after_action = id });
+                return;
+            },
+            .decision => |id| {
+                self.say(.crit, "day {d} · {s} — a battle decision is waiting on your desk", .{ st.day, st.date });
+                self.openModal(.{ .decision = id });
+                return;
+            },
+            .none => {},
+        }
+        // Contact warning: open battle orders.
+        if (res.contact != .none) {
+            self.say(.amber, "day {d} · {s} — contact ahead: battle orders", .{ st.day, st.date });
+            self.openOrders(res.contact);
+            return;
+        }
+        // All other stop reasons: show a descriptive sentence in the status bar.
+        const stop_text = game.cli.advanceStopText(res.stopped);
+        if (stop_text.len > 0) {
+            self.say(.good, "day {d} · {s} — {s}", .{ st.day, st.date, stop_text });
+        } else {
+            self.say(.good, "day {d} · {s}", .{ st.day, st.date });
+        }
     }
 
     /// Save the campaign and show GAME OVER (or save-failed) when the outfit
@@ -4927,6 +4977,7 @@ pub const App = struct {
             switch (cv) {
                 // The checklist asks first, as for `n`, unless forced.
                 .day => |d| if (d.force) try self.advance(d.days) else try self.endTurnRequest(d.days),
+                .next => |cap| try self.advanceUntilStop(cap),
                 .save => {
                     self.store.save(&self.session.?, self.player_id) catch |err| {
                         self.say(.crit, "save failed: {s}", .{game.cli.errorText(err)});
