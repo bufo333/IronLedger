@@ -1226,6 +1226,79 @@ fn ownerAgreesWithCommand(seed: u64, comptime setup: fn (*GameState) anyerror!vo
     return owned;
 }
 
+/// The first stop of a multi-day advance and the days it took.
+const FirstStop = struct { stop: ?Stop, days: u32 };
+
+/// `ownerAgreesWithCommand` over up to `cap` days from a prepared campaign:
+/// `by_hand` steps the owner day by day, `by_command` runs
+/// `advance_until_stop` with the same cap. Both must reach the same stop on
+/// the same day, the command echoing the contract of a contact stop; the
+/// owner's first stop is returned. Solvent fixtures only: the owner does
+/// not settle solvency.
+fn firstStopAgrees(by_hand: *GameState, by_command: *GameState, cap: u32) !FirstStop {
+    const commands = @import("commands.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var first: FirstStop = .{ .stop = null, .days = 0 };
+    while (first.days < cap) {
+        if (advanceStop(by_hand, null)) |s| {
+            first.stop = s;
+            break;
+        }
+        const watch = try watchDay(arena.allocator(), by_hand);
+        try @import("tick.zig").advanceDay(by_hand);
+        first.days += 1;
+        if (advanceStop(by_hand, &watch)) |s| {
+            first.stop = s;
+            break;
+        }
+    }
+    const r = try commands.execute(by_command, .{ .advance_until_stop = cap });
+    try std.testing.expectEqualStrings(if (first.stop) |s| @tagName(s.reason) else "cap_reached", @tagName(r.stopped));
+    try std.testing.expectEqual(first.days, r.days_advanced);
+    const contact: types.ContractId = if (first.stop) |s| (if (s.reason == .contact) s.contract else .none) else .none;
+    try std.testing.expectEqual(contact, r.contact);
+    return first;
+}
+
+test "advance_until_stop: contact coming into view stops the command on that day, naming the contract; the next goes past it" {
+    var by_hand = GameState.init(std.testing.allocator, .{ .seed = 8125 });
+    defer by_hand.deinit();
+    var by_command = GameState.init(std.testing.allocator, .{ .seed = 8125 });
+    defer by_command.deinit();
+    const window = @import("../domain/tuning.zig").t.battle.contact_warning_days;
+    for ([_]*GameState{ &by_hand, &by_command }) |gs| {
+        const c = try contactFixture(gs);
+        c.next_battle_day = gs.clock.day_index + window + 2;
+    }
+    const opened = try firstStopAgrees(&by_hand, &by_command, 7);
+    try std.testing.expectEqual(@as(u32, 2), opened.days);
+    const stop = opened.stop orelse return error.TestExpectedStop;
+    try std.testing.expectEqual(StopReason.contact, stop.reason);
+    try std.testing.expectEqual(@as(types.ContractId, @enumFromInt(1)), stop.contract);
+    // The next advance moves on: the window opened yesterday, not today.
+    const next = try firstStopAgrees(&by_hand, &by_command, 1);
+    try std.testing.expectEqual(@as(u32, 1), next.days);
+    if (next.stop) |s| try std.testing.expect(s.reason != .contact);
+}
+
+test "advance_until_stop: a battle fought during the advance holds it on that day" {
+    var by_hand = GameState.init(std.testing.allocator, .{ .seed = 8126 });
+    defer by_hand.deinit();
+    var by_command = GameState.init(std.testing.allocator, .{ .seed = 8126 });
+    defer by_command.deinit();
+    for ([_]*GameState{ &by_hand, &by_command }) |gs| {
+        const c = try contactFixture(gs);
+        // Inside the window already, so the fight is the first stop.
+        c.next_battle_day = gs.clock.day_index + 2;
+        try std.testing.expectEqual(@as(?Hold, null), turnHold(gs));
+    }
+    const fought = try firstStopAgrees(&by_hand, &by_command, 7);
+    try std.testing.expectEqual(@as(u32, 2), fought.days);
+    try std.testing.expectEqual(@as(?StopReason, .hold), reasonOf(fought.stop));
+    try std.testing.expect(turnHold(&by_command) != null);
+}
+
 fn reasonOf(stop: ?Stop) ?StopReason {
     return if (stop) |s| s.reason else null;
 }
