@@ -29,4 +29,6 @@ rig queue handoff <qitem-id> --to workflow-coordinator@<rig> \
 
 Use the rig name from `rig whoami`. The handoff nudges the coordinator by default; do not add `--no-nudge`. Your last act on a turn is that handoff, not a note to yourself. Put findings in the body, not only on your screen; the coordinator relays them verbatim and the screen is not durable.
 
+Other seats are separate terminals reached only through the `rig` CLI in Bash. Never use the SendMessage, Agent, or ListAgents tools to reach a seat; a `seat@rig` address is not a teammate name and the call fails. Hand off work with `rig queue handoff`; use `rig send` only for informational messages.
+
 If a prompt holds your turn, you cannot act through it; the coordinator and John will see it in `rig ps`. Never bypass it with another tool.

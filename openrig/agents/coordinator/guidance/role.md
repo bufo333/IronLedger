@@ -60,6 +60,8 @@ Both commands nudge the destination seat by default. Do not add `--no-nudge` in 
 
 A worker finishes by handing a queue item back to you, which wakes you. Do not poll with repeated `rig capture`. If you need to look, use `rig queue list --owned` for your own items, `rig queue show <id> --full` to read one, and `rig ps --nodes --rig <rig>` for seat state.
 
+Other seats are separate terminals reached only through the `rig` CLI in Bash. Never use the SendMessage, Agent, or ListAgents tools to reach a seat; a `seat@rig` address is not a teammate name and the call fails. Hand off work with `rig queue handoff`; use `rig send` only for informational messages.
+
 If `rig ps` shows a worker in `needs-input`, it is stuck on an interactive or permission prompt that it cannot act through from inside its own turn. Seats are configured to run without native prompts, so a parked seat is a configuration gap: report the seat and the exact prompt text to John in your own terminal. Never use `rig send --dangerously-interact` to drive another seat's permission prompt.
 
 ## Receiving a result
