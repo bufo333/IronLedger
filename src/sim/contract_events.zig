@@ -436,7 +436,7 @@ pub fn expireDue(gs: *GameState) !void {
     while (i < gs.event_queue.pending.items.len) {
         // A copy: the effects can reshape the queue under it.
         const ev = gs.event_queue.pending.items[i];
-        if (ev.needsDecision() and gs.clock.day_index >= ev.deadline_day) {
+        if (ev.defaultsBy(gs.clock.day_index)) {
             const opt = ev.options[ev.default_choice];
             const c = if (ev.contract != .none) gs.contracts.getPtr(ev.contract) else null;
             try applyEffectsFor(gs, opt.effects, c, .{ .person = ev.person, .battle = ev.battle });

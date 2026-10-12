@@ -832,6 +832,8 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
             if (r.contact != .none) std.debug.print("stopped for the contact warning: {s}\n", .{try q.contactWarning(al, gs, r.contact)});
             printStatus(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "next")) {
+            // next [cap] — advance until the next stop, then the stop: its
+            // reason, the quiet sentence, and the log since the advance began.
             const cv = (game.cli.parseClientVerb(verb, &tokens) catch |err| {
                 std.debug.print("{s} — usage: {s}\n", .{ game.cli.errorText(err), game.cli.usage("next").? });
                 continue;
@@ -840,13 +842,23 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                 .next => |v| v,
                 else => unreachable,
             };
+            const from_day = (try q.status(al, gs)).day;
             const r = game.commands.execute(gs, .{ .advance_until_stop = cap }) catch |err| {
                 std.debug.print("blocked: {s}\n", .{game.cli.errorText(err)});
                 continue;
             };
-            std.debug.print("advanced {d} day(s)\n", .{r.days_advanced});
-            if (r.stopped != .none) std.debug.print("{s}\n", .{game.cli.advanceStopText(r.stopped)});
+            std.debug.print("advanced {d} day(s)\n{s}\n", .{ r.days_advanced, game.cli.advanceStopText(r.stopped) });
+            if (r.stopped == .bankrupt) {
+                lobby.save(session, 0) catch |err| {
+                    std.debug.print("GAME OVER — the final save failed: {s}\n", .{game.cli.errorText(err)});
+                    continue;
+                };
+                std.debug.print("GAME OVER — the campaign is saved as it ended\n", .{});
+                continue;
+            }
             if (r.contact != .none) std.debug.print("stopped for the contact warning: {s}\n", .{try q.contactWarning(al, gs, r.contact)});
+            if (try q.quietOutlook(al, gs)) |quiet| std.debug.print("{s}\n", .{quiet});
+            printLines(al, try q.logSpan(al, gs, from_day), "  ") catch |err| showError(err);
             printStatus(gs, al) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "manning")) {
             const tok_m = tokens.next() orelse {

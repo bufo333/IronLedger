@@ -324,22 +324,42 @@ names which decisions qualify — the test below, written as a switch.
 The test for a new blocking rule is *what it disposes of*, not how big it
 feels. If the worst outcome is a worse bonus, it waits in the inbox.
 
-**The stop model.** Beyond hard holds, the commander needs to be surfaced
-for a broader set of events. The stop set is context-specific:
+**The stop model.** The player's unit of time is the next stop:
+`advance_until_stop` (the `n` key, `next [cap]`) runs day by day, up to
+`tuning.battle.auto_advance_cap_days`, until the commander is needed.
+`checklist.advanceStop` is the one owner of what stops it, beside
+`turnHold` and `contactOpenedToday`; the command reports exactly the
+`checklist.StopReason` it returns and decides no priority of its own.
+Before each day `checklist.watchDay` records, by identity, what the tick
+consumes — couriers, part orders, returning companies, unit transfers,
+artillery freight, running contracts, structural bay jobs, projects, and
+each person's status — so a stop is a transition that actually happened,
+never a due date that may slip or a count another change can mask.
 
-*On contract (P5a.2):* hold → contact → decision → payday → contract_end
-→ arrival (company return, transfers, part orders, artillery freight).
-`checklist.advanceStopOwner` owns this set.
+In priority order, inside a contract (a contract in transit or active) or
+between contracts: a turn hold; the contact window; a decision queued that
+day or one that would default tomorrow; the employer's combat-ineffective
+breach notice (`contract_control.breachNoticeServed`); payday; a running
+contract closing; a company arriving on its contract world; a company
+coming home, a unit transfer or artillery formation landing. Between
+contracts only: a fund courier or part order landing; a structural bay
+job (hull or artillery depot repair) leaving the bench finished; a
+construction project landing; a rare hull new on an HQ board; someone
+recovering, retiring or resigning. Everything else is a notice: it is in
+the campaign log, and the stop screen shows the log since the advance
+began (`queries.logSpan`), with one quiet sentence when no contract runs
+and nothing is building (`checklist.nothingComing`, `queries.quietOutlook`).
 
-*At home between contracts (P5a.3):* the same set above, plus bay_job
-(structural depot_repair only, actual completion) → project → listing
-(rare hull newly listed) → personnel (actual recovery). Detected by
-`checklist.advanceHomeStop` after `advanceStopOwner`.
-
-`advance_until_stop` (P5a, the `n` key) consults both owners in the
-documented priority order, so a stop condition cannot be enforced in one
-place and reported in another (rule 3, rule 7). Changing the stop set
-shifts the fixed-seed stop count test; that test is the spec's proof.
+An auto advance never crosses a decision deadline. Before its first day
+`advanceStop` asks only whether a decision defaults tomorrow
+(`Event.defaultsBy`, the rule `contract_events.expireDue` applies), so a
+repeated `next` waits with zero days; the default lands only when the
+player advances past it with `advance_days`. Money stops share
+`tick.settleSolvency` with `advance`: an outfit that folds before the
+first day is a typed `.bankrupt` success for `advance_until_stop` and the
+`Bankrupt` error for `advance`, both after the bankruptcy commits. An
+error inside a day leaves the earlier days committed
+(docs/contract-exceptions.md, "Advance commits partial days").
 
 Before an engagement there is no hold, only a **stop**. When a scheduled
 engagement comes within `tuning.battle.contact_warning_days`, a multi-day

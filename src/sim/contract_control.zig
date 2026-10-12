@@ -336,6 +336,12 @@ pub fn recall(gs: *GameState, company: types.ForceId) !u32 {
     return days;
 }
 
+/// The employer served the breach notice on `day`: the contract fell below
+/// half strength and `checkEffectiveness` opened the `grace_days` window.
+pub fn breachNoticeServed(c: *const contract_mod.Contract, day: u32) bool {
+    return c.status == .active and c.ineffective_since == day;
+}
+
 /// Daily: the combat-ineffectiveness clock. Below half the committed
 /// force, the grace window opens (buy local replacements with local
 /// funds); expire it unfilled and the employer declares breach.

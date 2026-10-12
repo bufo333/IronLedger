@@ -13,7 +13,11 @@ const part_mod = @import("../domain/part.zig");
 const hq_ops = @import("hq_ops.zig");
 const table = @import("table.zig");
 const medical = @import("medical.zig");
-const GameState = @import("state.zig").GameState;
+const state_mod = @import("state.zig");
+const GameState = state_mod.GameState;
+const contract_mod = @import("../domain/contract.zig");
+const hq_mod = @import("../domain/hq.zig");
+const contract_control = @import("contract_control.zig");
 const founding = @import("founding.zig");
 const posture = @import("posture.zig");
 const treasury = @import("treasury.zig");
@@ -173,157 +177,214 @@ pub fn turnHold(gs: *GameState) ?Hold {
     return null;
 }
 
-/// Why advance-until-stop must hand control back to the commander on day
-/// `day` (which equals `gs.clock.day_index` after the tick for that day).
-/// Returns the first reason that applies, in priority order; null when
-/// nothing demands the commander's attention yet.
-/// One owner: the command and both frontends share this single source of
-/// truth so a stop condition cannot be enforced in one place and reported
-/// in another (rule 3, rule 7).
+/// Why an advance-until-stop hands the turn back to the commander (ARCH §6
+/// "The stop model"). `advanceStop` is the one owner;
+/// the command reports exactly the reason it returns. Declaration order is
+/// the priority order when several hold on the same day.
 pub const StopReason = enum {
+    /// An unread after-action or an unanswered battle decision (`turnHold`).
     hold,
+    /// A scheduled engagement entered the contact window (`contactOpenedToday`).
     contact,
+    /// A decision arrived in the inbox, or one defaults tomorrow.
     decision_due,
+    /// The employer served the combat-ineffective breach notice
+    /// (`contract_control.breachNoticeServed`).
+    employer_notice,
+    /// The 1st of the month: payroll, the board refresh, turnover rolls.
     payday,
+    /// A running contract closed: completed, breached or failed.
     contract_end,
+    /// A company in transit reached its contract world.
+    on_world,
+    /// A company came home, or a unit transfer or artillery formation
+    /// landed; between contracts, also a fund courier or a part order.
     arrival,
+    /// Between contracts: a structural bay job (hull or artillery depot
+    /// repair) finished.
     bay_job,
+    /// Between contracts: a construction project finished.
     project,
+    /// Between contracts: a rare hull appeared on an HQ board.
     listing,
+    /// Between contracts: someone recovered, retired or resigned.
     personnel,
 };
 
-/// Returns true when advancing to `next_day` would reach or cross an
-/// unanswered decision's deadline, defaulting it without the player's input.
-/// Call before each `advanceDay` in `advanceUntilStop` (rule 3, rule 7).
-pub fn preAdvanceDeadlineStop(gs: *GameState, next_day: u32) bool {
-    for (gs.event_queue.pending.items) |*ev| {
-        if (!ev.needsDecision()) continue;
-        if (ev.deadline_day > 0 and ev.deadline_day <= next_day) return true;
-    }
+/// A stop and the contract it is about (contact, employer notice,
+/// contract end, arrival on world); `.none` otherwise.
+pub const Stop = struct {
+    reason: StopReason,
+    contract: types.ContractId = .none,
+};
+
+const ContractState = struct { id: types.ContractId, status: contract_mod.ContractStatus };
+const PersonState = struct { id: types.PersonId, status: person_mod.Status };
+const BayJobKey = struct { hq: types.HqId, kind: state_mod.BayJobKind, unit: types.UnitId, artillery: types.ArtilleryFormationId };
+const ProjectKey = struct { hq: types.HqId, project: hq_mod.Project };
+
+/// What `advanceStop` must see of the outfit before a tick, because the
+/// tick consumes it: arrivals leave their queues, finished work leaves its
+/// list, and a transition only shows against the earlier state. Every
+/// entity is keyed by identity, so a job queued or a person wounded on the
+/// same day cannot mask one that finished or recovered. Built by
+/// `watchDay` immediately before `tick.advanceDay`; the slices belong to
+/// the allocator passed there.
+pub const DayWatch = struct {
+    /// Inbox events stamped from this ID on were queued by the tick.
+    next_event_id: u32,
+    /// Listings numbered from this ID on were listed by the tick.
+    next_listing_id: u32,
+    /// A fund courier lands on the day the tick runs.
+    courier_lands: bool,
+    delivered_orders: usize,
+    returning: []const types.ForceId,
+    transfers: []const types.UnitId,
+    freight: []const types.ArtilleryFormationId,
+    running: []const ContractState,
+    structural: []const BayJobKey,
+    projects: []const ProjectKey,
+    people: []const PersonState,
+};
+
+/// Record the identities `advanceStop` compares after the next tick. Reads
+/// `gs` only; allocates from `alloc`.
+pub fn watchDay(alloc: std.mem.Allocator, gs: *GameState) !DayWatch {
+    const next_day = gs.clock.day_index + 1;
+    var courier_lands = false;
+    for (gs.fund_couriers.items) |fc| courier_lands = courier_lands or fc.landsBy(next_day);
+    var returning: std.ArrayListUnmanaged(types.ForceId) = .empty;
+    for (gs.forces.values()) |f| if (f.return_eta_day != null) try returning.append(alloc, f.id);
+    var transfers: std.ArrayListUnmanaged(types.UnitId) = .empty;
+    for (gs.unit_transfers.items) |t| try transfers.append(alloc, t.unit);
+    var freight: std.ArrayListUnmanaged(types.ArtilleryFormationId) = .empty;
+    for (gs.artillery_formations.values()) |f| if (f.placement == .freight) try freight.append(alloc, f.id);
+    var running: std.ArrayListUnmanaged(ContractState) = .empty;
+    for (gs.contracts.values()) |*c| if (c.isRunning()) try running.append(alloc, .{ .id = c.id, .status = c.status });
+    var structural: std.ArrayListUnmanaged(BayJobKey) = .empty;
+    for (gs.bay_jobs.items) |j| if (isStructural(j.kind)) try structural.append(alloc, jobKey(j));
+    var projects: std.ArrayListUnmanaged(ProjectKey) = .empty;
+    for (gs.hqs.values()) |*h| for (h.projects.items) |p| try projects.append(alloc, .{ .hq = h.id, .project = p });
+    var people: std.ArrayListUnmanaged(PersonState) = .empty;
+    for (gs.people.values()) |p| try people.append(alloc, .{ .id = p.id, .status = p.status });
+    return .{
+        .next_event_id = gs.event_queue.next_id,
+        .next_listing_id = gs.next_listing_id,
+        .courier_lands = courier_lands,
+        .delivered_orders = deliveredOrders(gs),
+        .returning = returning.items,
+        .transfers = transfers.items,
+        .freight = freight.items,
+        .running = running.items,
+        .structural = structural.items,
+        .projects = projects.items,
+        .people = people.items,
+    };
+}
+
+/// The one stop owner: must the commander look before the next day runs?
+///
+/// With `watch` null nothing has advanced yet, and only a decision that
+/// would default tomorrow stops: the stops of the day already reached were
+/// reported by the advance that reached it, so a repeated advance moves on.
+/// With the `watch` taken before the tick that reached today, every stop of
+/// ARCH §6 "The stop model" applies in `StopReason` order. Inside a contract
+/// (`insideContract`), routine deliveries, bay work, projects, listings and
+/// people are notices on the log only. Pure; consumes no RNG.
+pub fn advanceStop(gs: *GameState, watch: ?*const DayWatch) ?Stop {
+    const day = gs.clock.day_index;
+    const w = watch orelse return if (decisionDefaultsBy(gs, day + 1)) .{ .reason = .decision_due } else null;
+    if (turnHold(gs) != null) return .{ .reason = .hold };
+    if (contactOpenedToday(gs)) |c| return .{ .reason = .contact, .contract = c.id };
+    if (decisionDefaultsBy(gs, day + 1)) return .{ .reason = .decision_due };
+    for (gs.event_queue.pending.items) |*ev| if (ev.needsDecision() and @intFromEnum(ev.id) >= w.next_event_id) return .{ .reason = .decision_due };
+    for (gs.contracts.values()) |*c| if (contract_control.breachNoticeServed(c, day)) return .{ .reason = .employer_notice, .contract = c.id };
+    if (gs.clock.date.isPayday()) return .{ .reason = .payday };
+    for (w.running) |was| if (gs.contracts.getPtr(was.id)) |c| if (c.isClosed()) return .{ .reason = .contract_end, .contract = c.id };
+    for (w.running) |was| if (gs.contracts.getPtr(was.id)) |c| if (was.status == .transit and c.status == .active) return .{ .reason = .on_world, .contract = c.id };
+    for (w.returning) |id| if (gs.force(id)) |f| if (f.return_eta_day == null) return .{ .reason = .arrival };
+    for (w.transfers) |unit| if (!transferPending(gs, unit)) return .{ .reason = .arrival };
+    for (w.freight) |id| if (gs.artillery_formations.get(id)) |f| if (f.placement != .freight) return .{ .reason = .arrival };
+    if (insideContract(gs)) return null;
+    if (w.courier_lands or deliveredOrders(gs) > w.delivered_orders) return .{ .reason = .arrival };
+    for (w.structural) |k| if (!structuralJobQueued(gs, k)) return .{ .reason = .bay_job };
+    for (w.projects) |k| if (!projectQueued(gs, k)) return .{ .reason = .project };
+    for (gs.market_listings.items) |*l| if (rareHullListed(l, day, w.next_listing_id)) return .{ .reason = .listing };
+    for (w.people) |was| if (gs.person(was.id)) |p| if (personnelEvent(was.status, p.status)) return .{ .reason = .personnel };
+    return null;
+}
+
+/// A contract is in transit or active: the stops that apply only between
+/// contracts are notices (ARCH §6 "The stop model").
+pub fn insideContract(gs: *const GameState) bool {
+    for (gs.contracts.values()) |*c| if (c.isRunning()) return true;
     return false;
 }
 
-/// Returns a stop reason for arrivals and completions that land on `next_day`.
-/// These signals are consumed during `advanceDay` and cannot be detected
-/// post-advance; call before each `advanceDay` in `advanceUntilStop`, advance,
-/// then use the saved reason if nothing higher-priority fired post-advance.
-pub fn preAdvanceArrivalStop(gs: *GameState, next_day: u32) ?StopReason {
-    {
-        var it = gs.forces.iterator();
-        while (it.next()) |e| {
-            if (e.value_ptr.return_eta_day) |eta| if (eta == next_day) return .arrival;
-        }
-    }
-    for (gs.unit_transfers.items) |t| {
-        if (t.eta_day == next_day) return .arrival;
-    }
-    for (gs.fund_couriers.items) |fc| {
-        if (fc.eta_day == next_day) return .arrival;
-    }
-    {
-        var it = gs.artillery_formations.iterator();
-        while (it.next()) |e| {
-            switch (e.value_ptr.placement) {
-                .freight => |f| if (f.eta_day == next_day) return .arrival,
-                else => {},
-            }
-        }
-    }
-    return null;
+/// An unanswered decision would take its default on or before `day`
+/// (`contract_events.expireDue` applies it then).
+pub fn decisionDefaultsBy(gs: *const GameState, day: u32) bool {
+    for (gs.event_queue.pending.items) |*ev| if (ev.defaultsBy(day)) return true;
+    return false;
 }
 
-pub fn advanceStopOwner(gs: *GameState, day: u32) ?StopReason {
-    // A turn hold is the highest priority: the turn cannot move past it.
-    if (turnHold(gs) != null) return .hold;
-    // Contact window opened today: give battle orders before more time passes.
-    if (contactOpenedToday(gs) != null) return .contact;
-    // Inbox decision newly arrived today (non-blocking), or day before its deadline.
-    for (gs.event_queue.pending.items) |*ev| {
-        if (!ev.needsDecision()) continue;
-        if (ev.day == day) return .decision_due;
-        if (ev.deadline_day > 0 and ev.deadline_day == day + 1) return .decision_due;
-    }
-    // Payday (1st of the month) — salaries out, board refresh, turnover rolls.
-    if (gs.clock.date.isPayday()) return .payday;
-    // Contract milestone today: the contract ends, or the company arrives on world.
-    {
-        var it = gs.contracts.iterator();
-        while (it.next()) |e| {
-            const c = e.value_ptr;
-            if (c.end_day) |d| if (d == day) return .contract_end;
-            if (c.arrive_day) |d| if (d == day) return .contract_end;
-        }
-    }
-    // Part order delivered today (order stays in the list after delivery).
-    for (gs.part_orders.items) |o| {
-        if (o.status == .delivered) if (o.eta_day) |d| if (d == day) return .arrival;
-    }
-    return null;
+/// Structural depot work: rebuilding a hull's structure or an artillery
+/// formation's (`hq_ops.runDaily` finishes both).
+fn isStructural(kind: state_mod.BayJobKind) bool {
+    return kind == .depot_repair or kind == .artillery_depot_repair;
 }
 
-/// True when the outfit has no active contract — the home context for P5a.3 stops.
-pub fn isAtHome(gs: *const GameState) bool {
-    var it = gs.contracts.iterator();
-    while (it.next()) |e| {
-        if (e.value_ptr.status == .active) return false;
-    }
+fn jobKey(j: state_mod.BayJob) BayJobKey {
+    return .{ .hq = j.hq, .kind = j.kind, .unit = j.unit, .artillery = j.artillery };
+}
+
+/// A failed repair roll keeps the job on the bench, so a job is finished
+/// exactly when it has left the list.
+fn structuralJobQueued(gs: *const GameState, key: BayJobKey) bool {
+    for (gs.bay_jobs.items) |j| if (std.meta.eql(jobKey(j), key)) return true;
+    return false;
+}
+
+fn projectQueued(gs: *GameState, key: ProjectKey) bool {
+    const h = gs.hqs.getPtr(key.hq) orelse return false;
+    for (h.projects.items) |p| if (std.meta.eql(p, key.project)) return true;
+    return false;
+}
+
+fn transferPending(gs: *const GameState, unit: types.UnitId) bool {
+    for (gs.unit_transfers.items) |t| if (t.unit == unit) return true;
+    return false;
+}
+
+/// Delivered orders stay on the books, so the count only rises on a delivery.
+fn deliveredOrders(gs: *const GameState) usize {
+    var n: usize = 0;
+    for (gs.part_orders.items) |o| n += @intFromBool(o.status == .delivered);
+    return n;
+}
+
+/// A rare or very rare hull visible on an HQ board as of `day` that was
+/// not there before the tick: listed by it, or released to the board today.
+fn rareHullListed(l: *const @import("../econ/market.zig").Listing, day: u32, first_new_id: u32) bool {
+    if (l.kind != .unit or l.staple or l.black_market or l.company != .none or l.hq == .none) return false;
+    if (@intFromEnum(l.rarity) < @intFromEnum(types.Rarity.rare)) return false;
+    if (l.available_after > day) return false;
+    return @intFromEnum(l.id) >= first_new_id or l.available_after == day;
+}
+
+/// A recovery (wounded → active) or a departure (active → retired or resigned).
+fn personnelEvent(was: person_mod.Status, now: person_mod.Status) bool {
+    return (was == .wounded and now == .active) or
+        (was == .active and (now == .retired or now == .resigned));
+}
+
+/// Nothing is coming: no contract running, no construction project and no
+/// bay job anywhere: the stop screen says so in one sentence (ARCH §6 "The
+/// stop model").
+pub fn nothingComing(gs: *const GameState) bool {
+    if (insideContract(gs) or gs.bay_jobs.items.len > 0) return false;
+    for (gs.hqs.values()) |*h| if (h.projects.items.len > 0) return false;
     return true;
-}
-
-/// Count of structural (depot_repair) bay jobs currently queued.
-/// Use before and after a tick to detect actual completions.
-pub fn countStructuralBayJobs(gs: *const GameState) usize {
-    var n: usize = 0;
-    for (gs.bay_jobs.items) |j| {
-        if (j.kind == .depot_repair) n += 1;
-    }
-    return n;
-}
-
-/// Total construction-project count across all HQs.
-/// Use before and after a tick to detect actual completions.
-pub fn countProjects(gs: *const GameState) usize {
-    var n: usize = 0;
-    var it = gs.hqs.iterator();
-    while (it.next()) |e| n += e.value_ptr.projects.items.len;
-    return n;
-}
-
-/// Count of wounded people in the outfit.
-/// Use before and after a tick to detect actual recoveries.
-pub fn countWounded(gs: *const GameState) u32 {
-    var n: u32 = 0;
-    var it = gs.people.iterator();
-    while (it.next()) |e| {
-        if (e.value_ptr.status == .wounded) n += 1;
-    }
-    return n;
-}
-
-/// At-home context stops: structural bay job, project, rare listing, personnel
-/// recovery. Only applies between contracts (isAtHome). Pre-advance counts let
-/// the function detect actual completions cleared by the tick (rule 3, rule 7).
-/// Priority: bay_job → project → listing → personnel.
-pub fn advanceHomeStop(
-    gs: *const GameState,
-    day: u32,
-    pre_bay: usize,
-    pre_proj: usize,
-    pre_wounded: u32,
-) ?StopReason {
-    if (!isAtHome(gs)) return null;
-    // Structural bay job actually completed (job removed from list by hq_ops).
-    if (countStructuralBayJobs(gs) < pre_bay) return .bay_job;
-    // Construction project actually completed (project removed from list).
-    if (countProjects(gs) < pre_proj) return .project;
-    // Rare hull (uncommon or rarer) newly listed on any HQ board today.
-    for (gs.market_listings.items) |l| {
-        if (l.listed_day == day and l.kind == .unit and l.rarity != .common and !l.staple and !l.black_market) return .listing;
-    }
-    // Personnel recovery: actual transition wounded → active.
-    if (countWounded(gs) < pre_wounded) return .personnel;
-    return null;
 }
 
 test "depot backlog only counts hulls whose company is home" {
@@ -1140,196 +1201,346 @@ test "turnHold owns the turn-gate; advance_days is refused while a report is unr
     try std.testing.expectEqual(@as(?Hold, null), turnHold(&gs));
 }
 
-test "advanceStopOwner: payday, decision, and pre-advance deadline guard agree with the stop owner" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 8100 });
-    defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+/// Build the same campaign twice with `setup`, then run one day each way:
+/// by hand through the owner (`advanceStop` before the day, `watchDay`,
+/// the tick, `advanceStop` after it) and through the `advance_until_stop`
+/// command with a one-day cap. The command must report exactly the stop the
+/// owner names (rule 67); the owner's stop is returned.
+fn ownerAgreesWithCommand(seed: u64, comptime setup: fn (*GameState) anyerror!void) !?StopReason {
     const commands = @import("commands.zig");
-    // Advance past day 0 so initial listings (listed_day == 0) no longer fire.
-    try @import("tick.zig").advanceDay(&gs);
-    // Day 1, no decision planted yet: no payday, no decision_due.
-    try std.testing.expect(advanceStopOwner(&gs, gs.clock.day_index) == null);
-    // Plant a decision arriving today.
-    try gs.event_queue.push(gs.allocator(), .{
-        .day = gs.clock.day_index,
-        .kind = .off_contract_request,
-        .options = &.{
-            .{ .label = "accept", .effects = &.{} },
-            .{ .label = "decline", .effects = &.{} },
-        },
-        .default_choice = 1,
-        .deadline_day = gs.clock.day_index + 5,
+    var by_hand = GameState.init(std.testing.allocator, .{ .seed = seed });
+    defer by_hand.deinit();
+    var by_command = GameState.init(std.testing.allocator, .{ .seed = seed });
+    defer by_command.deinit();
+    try setup(&by_hand);
+    try setup(&by_command);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const owned: ?StopReason = if (advanceStop(&by_hand, null)) |s| s.reason else owned: {
+        const watch = try watchDay(arena.allocator(), &by_hand);
+        try @import("tick.zig").advanceDay(&by_hand);
+        break :owned if (advanceStop(&by_hand, &watch)) |s| s.reason else null;
+    };
+    const r = try commands.execute(&by_command, .{ .advance_until_stop = 1 });
+    try std.testing.expectEqualStrings(if (owned) |reason| @tagName(reason) else "cap_reached", @tagName(r.stopped));
+    return owned;
+}
+
+fn reasonOf(stop: ?Stop) ?StopReason {
+    return if (stop) |s| s.reason else null;
+}
+
+fn firstCompany(gs: *GameState) types.ForceId {
+    for (gs.forces.values()) |f| if (f.echelon == .company) return f.id;
+    return .none;
+}
+
+/// Between contracts on day 1: a commander and one company; the founding
+/// day and its payday are behind.
+fn atHome(gs: *GameState) !void {
+    const commands = @import("commands.zig");
+    _ = try commands.execute(gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    _ = try commands.execute(gs, .{ .new_company = "Alpha" });
+    try @import("tick.zig").advanceDay(gs);
+}
+
+/// Inside a contract on day 1: the company on an active garrison contract
+/// with no opposition scheduled.
+fn underContract(gs: *GameState) !void {
+    try atHome(gs);
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 100_000 },
+        .status = .active,
+        .assigned_company = firstCompany(gs),
     });
-    // Arrives today → decision_due.
-    try std.testing.expectEqual(StopReason.decision_due, advanceStopOwner(&gs, gs.clock.day_index).?);
-    // Pre-advance deadline gate: does not fire for next_day = deadline - 1.
-    try std.testing.expect(!preAdvanceDeadlineStop(&gs, gs.clock.day_index + 4));
-    // Pre-advance deadline gate: fires on the deadline day itself.
-    try std.testing.expect(preAdvanceDeadlineStop(&gs, gs.clock.day_index + 5));
-    // Resolve the decision: no more decision_due.
-    const ev = gs.event_queue.pending.items[0];
-    _ = try commands.execute(&gs, .{ .resolve_decision = .{ .event = ev.id, .choice = ev.default_choice } });
-    try std.testing.expect(advanceStopOwner(&gs, gs.clock.day_index) == null);
 }
 
-test "advanceStopOwner: payday fires on the first of each month" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 8101 });
-    defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
-    // Advance 31 days to Feb 1 (payday).
-    for (0..31) |_| try @import("tick.zig").advanceDay(&gs);
-    try std.testing.expect(gs.clock.date.isPayday());
-    try std.testing.expectEqual(StopReason.payday, advanceStopOwner(&gs, gs.clock.day_index).?);
+fn courierLands(gs: *GameState) !void {
+    try gs.fund_couriers.append(gs.allocator(), .{ .to = .outfit, .amount = 1_000, .sent_day = 0, .eta_day = gs.clock.day_index + 1 });
 }
 
-test "preAdvanceArrivalStop: detects company return, fund courier, and artillery freight" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 8102 });
-    defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
-    const co = try gs.createForce("Alpha", .company, .none);
-    const day = gs.clock.day_index;
-    // No arrivals yet.
-    try std.testing.expect(preAdvanceArrivalStop(&gs, day + 1) == null);
-    // Plant a returning company.
-    gs.force(co).?.return_eta_day = day + 1;
-    try std.testing.expectEqual(StopReason.arrival, preAdvanceArrivalStop(&gs, day + 1).?);
-    try std.testing.expect(preAdvanceArrivalStop(&gs, day + 2) == null);
-    gs.force(co).?.return_eta_day = null;
-    // Artillery freight arriving on day+1.
-    const af_dom = @import("../domain/artillery_formation.zig");
+fn orderLands(gs: *GameState) !void {
+    try gs.part_orders.append(gs.allocator(), .{ .dest = .{ .hq = gs.seat() }, .part_key = "mlas", .quantity = 1, .ordered_day = 0, .eta_day = gs.clock.day_index + 1, .cost = 0, .status = .in_transit });
+}
+
+fn transferLands(gs: *GameState) !void {
+    try gs.unit_transfers.append(gs.allocator(), .{ .unit = gs.units.keys()[0], .to_company = firstCompany(gs), .eta_day = gs.clock.day_index + 1 });
+}
+
+fn companyReturns(gs: *GameState) !void {
+    const co = try gs.createForce("Beta", .company, .none);
+    gs.force(co).?.return_eta_day = gs.clock.day_index + 1;
+}
+
+fn freightLands(gs: *GameState) !void {
     try gs.artillery_formations.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
         .hull = .none,
         .acquisition_day = 0,
         .paid_price = 0,
-        .placement = .{ .freight = .{
-            .from_hq = gs.seat(),
-            .to_hq = gs.seat(),
-            .dispatch_day = 0,
-            .eta_day = day + 1,
-            .paid_cost = 0,
-        } },
+        .placement = .{ .freight = .{ .from_hq = gs.seat(), .to_hq = gs.seat(), .dispatch_day = 0, .eta_day = gs.clock.day_index + 1, .paid_cost = 0 } },
     });
-    try std.testing.expectEqual(StopReason.arrival, preAdvanceArrivalStop(&gs, day + 1).?);
-    try std.testing.expect(preAdvanceArrivalStop(&gs, day + 2) == null);
-    _ = af_dom;
 }
 
-test "advanceHomeStop: actual structural completion stops at home; failed repair does not" {
-    const commands = @import("commands.zig");
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 8103 });
-    defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
-    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
-    const day = gs.clock.day_index;
-    // Precondition: at home with no active contracts.
-    try std.testing.expect(isAtHome(&gs));
-    // Plant a structural bay job due today (will be completed by the tick).
-    const uid = gs.units.keys()[0];
-    const u = gs.unit(uid).?;
-    for (u.slots.items) |*s| if (s.class == .structure) {
-        s.condition = .destroyed;
-        break;
+test "advanceStop: a quiet day between contracts is no stop, and the command runs to its cap" {
+    try std.testing.expectEqual(@as(?StopReason, null), try ownerAgreesWithCommand(8110, atHome));
+    try std.testing.expectEqual(@as(?StopReason, null), try ownerAgreesWithCommand(8110, underContract));
+}
+
+test "advanceStop: arrivals stop in both contexts; routine deliveries only between contracts" {
+    const S = struct {
+        fn courierHome(gs: *GameState) !void {
+            try atHome(gs);
+            try courierLands(gs);
+        }
+        fn courierContract(gs: *GameState) !void {
+            try underContract(gs);
+            try courierLands(gs);
+        }
+        fn orderHome(gs: *GameState) !void {
+            try atHome(gs);
+            try orderLands(gs);
+        }
+        fn orderContract(gs: *GameState) !void {
+            try underContract(gs);
+            try orderLands(gs);
+        }
+        fn transferHome(gs: *GameState) !void {
+            try atHome(gs);
+            try transferLands(gs);
+        }
+        fn returnContract(gs: *GameState) !void {
+            try underContract(gs);
+            try companyReturns(gs);
+        }
+        fn freightContract(gs: *GameState) !void {
+            try underContract(gs);
+            try freightLands(gs);
+        }
     };
-    try gs.bay_jobs.append(gs.allocator(), .{
-        .hq = gs.seat(),
-        .kind = .depot_repair,
-        .unit = uid,
-        .duration_days = 1,
-        .queued_day = 0,
-        .started_day = 0,
-        .done_day = day + 1,
-    });
-    const pre_bay = countStructuralBayJobs(&gs);
-    const pre_proj = countProjects(&gs);
-    const pre_wounded = countWounded(&gs);
-    try std.testing.expect(pre_bay > 0);
-    // Advance one day so the job completes (hq_ops.runDaily removes it).
-    try @import("tick.zig").advanceDay(&gs);
-    const post_day = gs.clock.day_index;
-    // If the job completed, countStructuralBayJobs should have decreased.
-    // If it failed and was re-queued (redo), it stays; no stop should fire.
-    const pre_bay_after = countStructuralBayJobs(&gs);
-    if (pre_bay_after < pre_bay) {
-        // Actual completion: advanceHomeStop fires.
-        const reason = advanceHomeStop(&gs, post_day, pre_bay, pre_proj, pre_wounded);
-        try std.testing.expectEqual(StopReason.bay_job, reason.?);
-    } else {
-        // Redo: job extended, no structural completion stop.
-        try std.testing.expect(advanceHomeStop(&gs, post_day, pre_bay, pre_proj, pre_wounded) == null);
-    }
+    try std.testing.expectEqual(@as(?StopReason, .arrival), try ownerAgreesWithCommand(8111, S.courierHome));
+    try std.testing.expectEqual(@as(?StopReason, null), try ownerAgreesWithCommand(8111, S.courierContract));
+    try std.testing.expectEqual(@as(?StopReason, .arrival), try ownerAgreesWithCommand(8111, S.orderHome));
+    try std.testing.expectEqual(@as(?StopReason, null), try ownerAgreesWithCommand(8111, S.orderContract));
+    try std.testing.expectEqual(@as(?StopReason, .arrival), try ownerAgreesWithCommand(8111, S.transferHome));
+    try std.testing.expectEqual(@as(?StopReason, .arrival), try ownerAgreesWithCommand(8111, S.returnContract));
+    try std.testing.expectEqual(@as(?StopReason, .arrival), try ownerAgreesWithCommand(8111, S.freightContract));
 }
 
-test "advanceHomeStop: postponed recovery does not stop; actual recovery does" {
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 8104 });
-    defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
-    const day = gs.clock.day_index;
-    // Hire a wounded person not due to heal yet.
-    const pid = try gs.hirePerson("Hurt", "Pilot", .mekwarrior);
-    gs.person(pid).?.status = .wounded;
-    gs.person(pid).?.wound_heal_day = day + 10; // heals later, not today
-    const pre_bay = countStructuralBayJobs(&gs);
-    const pre_proj = countProjects(&gs);
-    const pre_wounded = countWounded(&gs);
-    try std.testing.expect(pre_wounded == 1);
-    // Advance; person should not recover yet.
-    try @import("tick.zig").advanceDay(&gs);
-    const post_day = gs.clock.day_index;
-    try std.testing.expectEqual(@as(u32, 1), countWounded(&gs));
-    // No recovery: advanceHomeStop must not return personnel.
-    try std.testing.expect(advanceHomeStop(&gs, post_day, pre_bay, pre_proj, pre_wounded) == null);
-    // Fast-forward to the heal day.
-    gs.person(pid).?.wound_heal_day = post_day; // heals on this day
-    gs.person(pid).?.medbay_admitted = true; // admitted
-    const pre_w2 = countWounded(&gs);
-    try @import("tick.zig").advanceDay(&gs);
-    const post_day2 = gs.clock.day_index;
-    if (countWounded(&gs) < pre_w2) {
-        try std.testing.expectEqual(StopReason.personnel, advanceHomeStop(&gs, post_day2, pre_bay, pre_proj, pre_w2).?);
-    }
-}
-
-test "advanceHomeStop: no home stops while on an active contract" {
-    const commands = @import("commands.zig");
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 8105 });
-    defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
-    const co = (try commands.execute(&gs, .{ .new_company = "Beta" })).created_force;
-    // Plant an active contract to simulate garrison context.
-    const cid: @import("../domain/types.zig").ContractId = @enumFromInt(99);
-    try gs.contracts.put(gs.allocator(), cid, .{
-        .id = cid,
-        .kind = .garrison_duty,
-        .employer_key = "LC",
-        .enemy_key = "PER",
-        .planet_key = gs.hqs.values()[0].planet_key,
-        .status = .active,
-        .assigned_company = co,
-        .terms = .{ .length_months = 3, .base_pay_month = 50_000 },
-    });
-    try std.testing.expect(!isAtHome(&gs));
-    // Even with a structural job ready, no home stop fires on contract.
-    const uid = gs.units.keys()[0];
-    const u = gs.unit(uid).?;
-    for (u.slots.items) |*s| if (s.class == .structure) {
-        s.condition = .destroyed;
-        break;
+test "advanceStop: a contract's close and its arrival on world stop, naming the contract" {
+    const S = struct {
+        fn ends(gs: *GameState) !void {
+            try underContract(gs);
+            gs.contracts.getPtr(@enumFromInt(1)).?.end_day = gs.clock.day_index + 1;
+        }
+        fn arrives(gs: *GameState) !void {
+            try underContract(gs);
+            const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+            c.status = .transit;
+            c.arrive_day = gs.clock.day_index + 1;
+        }
     };
-    const day = gs.clock.day_index;
-    try gs.bay_jobs.append(gs.allocator(), .{
-        .hq = gs.seat(),
-        .kind = .depot_repair,
-        .unit = uid,
-        .duration_days = 1,
-        .queued_day = 0,
-        .started_day = 0,
-        .done_day = day + 1,
-    });
-    const pre_bay = countStructuralBayJobs(&gs);
-    const pre_proj = countProjects(&gs);
-    const pre_wounded = countWounded(&gs);
+    try std.testing.expectEqual(@as(?StopReason, .contract_end), try ownerAgreesWithCommand(8112, S.ends));
+    try std.testing.expectEqual(@as(?StopReason, .on_world), try ownerAgreesWithCommand(8112, S.arrives));
+    // The stop carries the contract it is about.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8112 });
+    defer gs.deinit();
+    try S.arrives(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const watch = try watchDay(arena.allocator(), &gs);
     try @import("tick.zig").advanceDay(&gs);
-    const post_day = gs.clock.day_index;
-    try std.testing.expect(advanceHomeStop(&gs, post_day, pre_bay, pre_proj, pre_wounded) == null);
+    const stop = advanceStop(&gs, &watch) orelse return error.TestExpectedStop;
+    try std.testing.expectEqual(@as(types.ContractId, @enumFromInt(1)), stop.contract);
+}
+
+test "advanceStop: the employer's breach notice stops inside a contract" {
+    const S = struct {
+        fn understrength(gs: *GameState) !void {
+            try underContract(gs);
+            gs.contracts.getPtr(@enumFromInt(1)).?.committed_bv = 100_000_000;
+        }
+    };
+    try std.testing.expectEqual(@as(?StopReason, .employer_notice), try ownerAgreesWithCommand(8113, S.understrength));
+}
+
+test "advanceStop: structural bay work stops when it finishes, not when the roll sends it back" {
+    const commands = @import("commands.zig");
+    const S = struct {
+        fn rebuildDue(gs: *GameState) !void {
+            try atHome(gs);
+            const uid = gs.units.keys()[0];
+            for (gs.unit(uid).?.slots.items) |*s| if (s.class == .structure) {
+                s.condition = .destroyed;
+                break;
+            };
+            gs.unit(uid).?.status = .repairing;
+            try gs.bay_jobs.append(gs.allocator(), .{ .hq = gs.seat(), .kind = .depot_repair, .unit = uid, .duration_days = 5, .queued_day = 0, .started_day = 0, .done_day = gs.clock.day_index + 1 });
+        }
+    };
+    _ = try ownerAgreesWithCommand(8114, S.rebuildDue);
+    // The repair roll decides the outcome; walk seeds until both happen.
+    var finished = false;
+    var sent_back = false;
+    var seed: u64 = 8200;
+    while (!(finished and sent_back) and seed < 8400) : (seed += 1) {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+        defer gs.deinit();
+        try S.rebuildDue(&gs);
+        const r = try commands.execute(&gs, .{ .advance_until_stop = 1 });
+        if (gs.bay_jobs.items.len == 0) {
+            finished = true;
+            try std.testing.expectEqual(.bay_job, r.stopped);
+        } else {
+            sent_back = true;
+            try std.testing.expect(r.stopped != .bay_job);
+        }
+    }
+    try std.testing.expect(finished and sent_back);
+}
+
+test "advanceStop: artillery depot repair is structural work; fabrication is a notice" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8115 });
+    defer gs.deinit();
+    try atHome(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try gs.bay_jobs.append(gs.allocator(), .{ .hq = gs.seat(), .kind = .artillery_depot_repair, .artillery = @enumFromInt(7), .duration_days = 3, .queued_day = 0 });
+    try gs.bay_jobs.append(gs.allocator(), .{ .hq = gs.seat(), .kind = .fabrication, .item_key = "mlas", .duration_days = 3, .queued_day = 0 });
+    const watch = try watchDay(arena.allocator(), &gs);
+    // The fabrication leaves the bench: a notice, no stop.
+    const fab = gs.bay_jobs.pop().?;
+    try std.testing.expectEqual(@as(?Stop, null), advanceStop(&gs, &watch));
+    // The artillery rebuild leaves it: a stop.
+    try gs.bay_jobs.append(gs.allocator(), fab);
+    _ = gs.bay_jobs.orderedRemove(0);
+    try std.testing.expectEqual(@as(?StopReason, .bay_job), reasonOf(advanceStop(&gs, &watch)));
+    // Inside a contract the same completion is a notice.
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{ .id = @enumFromInt(1), .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 100_000 }, .status = .active, .assigned_company = firstCompany(&gs) });
+    try std.testing.expectEqual(@as(?Stop, null), advanceStop(&gs, &watch));
+}
+
+test "advanceStop: a construction project that lands stops between contracts" {
+    const S = struct {
+        fn building(gs: *GameState) !void {
+            try atHome(gs);
+            try gs.hqs.getPtr(gs.seat()).?.projects.append(gs.allocator(), .{ .kind = .facility_upgrade, .facility = .warehouse, .target_level = 2, .started_day = 0, .paperwork_done_day = 0, .construction_done_day = gs.clock.day_index + 1, .cost = 0 });
+        }
+    };
+    try std.testing.expectEqual(@as(?StopReason, .project), try ownerAgreesWithCommand(8116, S.building));
+}
+
+test "advanceStop: a rare hull new to an HQ board stops; a common one or one already listed does not" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8117 });
+    defer gs.deinit();
+    try atHome(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const old: types.ListingId = @enumFromInt(gs.next_listing_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = old, .kind = .unit, .item_key = "AS7-D", .rarity = .very_rare, .price = 1, .hq = gs.seat(), .listed_day = 0, .expires_day = 400 });
+    gs.next_listing_id += 1;
+    const watch = try watchDay(arena.allocator(), &gs);
+    try std.testing.expectEqual(@as(?Stop, null), advanceStop(&gs, &watch));
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hq = gs.seat(), .listed_day = gs.clock.day_index, .expires_day = 400 });
+    gs.next_listing_id += 1;
+    try std.testing.expectEqual(@as(?Stop, null), advanceStop(&gs, &watch));
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "AS7-D", .rarity = .rare, .price = 1, .hq = gs.seat(), .listed_day = gs.clock.day_index, .expires_day = 400 });
+    gs.next_listing_id += 1;
+    try std.testing.expectEqual(@as(?StopReason, .listing), reasonOf(advanceStop(&gs, &watch)));
+}
+
+test "advanceStop: recovery is judged by identity — a postponed recovery is no stop, a masked one still is" {
+    const S = struct {
+        fn patient(gs: *GameState, heal_day: u32, priority: u8) !types.PersonId {
+            const pid = try gs.hirePerson("Hurt", "Pilot", .mekwarrior);
+            const p = gs.person(pid).?;
+            p.status = .wounded;
+            p.medbay_admitted = true;
+            p.wound_heal_day = heal_day;
+            p.medbay_priority = priority;
+            return pid;
+        }
+        fn due(gs: *GameState) !void {
+            try atHome(gs);
+            _ = try patient(gs, gs.clock.day_index + 1, 0);
+        }
+        /// The due patient waits: every bed holds a higher-priority patient.
+        fn noBed(gs: *GameState) !void {
+            try atHome(gs);
+            for (0..medical.homeBedCapacity(gs, gs.seat())) |_| _ = try patient(gs, gs.clock.day_index + 30, 3);
+            _ = try patient(gs, gs.clock.day_index + 1, 0);
+        }
+    };
+    try std.testing.expectEqual(@as(?StopReason, .personnel), try ownerAgreesWithCommand(8118, S.due));
+    try std.testing.expectEqual(@as(?StopReason, null), try ownerAgreesWithCommand(8118, S.noBed));
+
+    // A recovery on the day someone else is wounded leaves the wounded count
+    // unchanged; the transition still stops. So does a retirement.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8119 });
+    defer gs.deinit();
+    try atHome(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const healing = try S.patient(&gs, gs.clock.day_index + 1, 0);
+    const hurt = try gs.hirePerson("Bay", "Tech", .tech_mek);
+    const leaving = try gs.hirePerson("Old", "Hand", .tech_mek);
+    const watch = try watchDay(arena.allocator(), &gs);
+    gs.person(healing).?.status = .active;
+    gs.person(hurt).?.status = .wounded;
+    try std.testing.expectEqual(@as(?StopReason, .personnel), reasonOf(advanceStop(&gs, &watch)));
+    gs.person(healing).?.status = .wounded;
+    try std.testing.expectEqual(@as(?Stop, null), advanceStop(&gs, &watch));
+    gs.person(leaving).?.status = .retired;
+    try std.testing.expectEqual(@as(?StopReason, .personnel), reasonOf(advanceStop(&gs, &watch)));
+}
+
+test "advanceStop: decisions — one queued by the day stops, one defaulting tomorrow stops before the day" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8120 });
+    defer gs.deinit();
+    try atHome(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const ask: @import("../domain/events.zig").Event = .{
+        .day = gs.clock.day_index,
+        .kind = .off_contract_request,
+        .options = &.{ .{ .label = "accept", .effects = &.{} }, .{ .label = "decline", .effects = &.{} } },
+        .default_choice = 1,
+        .deadline_day = gs.clock.day_index + 5,
+    };
+    // Already in the inbox before the day, not due: no stop.
+    try gs.event_queue.push(gs.allocator(), ask);
+    const watch = try watchDay(arena.allocator(), &gs);
+    try std.testing.expectEqual(@as(?Stop, null), advanceStop(&gs, &watch));
+    try std.testing.expectEqual(@as(?Stop, null), advanceStop(&gs, null));
+    // Queued during the day: a stop.
+    try gs.event_queue.push(gs.allocator(), ask);
+    try std.testing.expectEqual(@as(?StopReason, .decision_due), reasonOf(advanceStop(&gs, &watch)));
+    // Defaulting tomorrow: a stop before the day runs, as well as after it.
+    gs.event_queue.pending.items[0].deadline_day = gs.clock.day_index + 1;
+    try std.testing.expectEqual(@as(?StopReason, .decision_due), reasonOf(advanceStop(&gs, null)));
+    try std.testing.expect(decisionDefaultsBy(&gs, gs.clock.day_index + 1));
+    try std.testing.expect(!decisionDefaultsBy(&gs, gs.clock.day_index));
+}
+
+test "advanceStop: on one day the earlier StopReason wins" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8121 });
+    defer gs.deinit();
+    try atHome(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try courierLands(&gs);
+    try gs.hqs.getPtr(gs.seat()).?.projects.append(gs.allocator(), .{ .kind = .facility_upgrade, .facility = .warehouse, .target_level = 2, .started_day = 0, .paperwork_done_day = 0, .construction_done_day = 99, .cost = 0 });
+    const watch = try watchDay(arena.allocator(), &gs);
+    gs.hqs.getPtr(gs.seat()).?.projects.clearRetainingCapacity();
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "AS7-D", .rarity = .rare, .price = 1, .hq = gs.seat(), .listed_day = gs.clock.day_index, .expires_day = 400 });
+    // A courier, a finished project and a rare hull on one day: the arrival.
+    try std.testing.expectEqual(@as(?StopReason, .arrival), reasonOf(advanceStop(&gs, &watch)));
+    // A decision queued the same day outranks them all.
+    try gs.event_queue.push(gs.allocator(), .{ .day = gs.clock.day_index, .kind = .off_contract_request, .options = &.{.{ .label = "ok", .effects = &.{} }}, .deadline_day = gs.clock.day_index + 5 });
+    try std.testing.expectEqual(@as(?StopReason, .decision_due), reasonOf(advanceStop(&gs, &watch)));
 }

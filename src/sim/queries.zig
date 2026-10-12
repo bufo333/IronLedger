@@ -177,12 +177,6 @@ pub const Status = struct {
     urgent: usize,
 };
 
-/// The current campaign date. Use to iterate toward the next payday without
-/// accessing gs.clock directly from a frontend.
-pub fn currentDate(gs: *const GameState) clock_mod.Date {
-    return gs.clock.date;
-}
-
 pub fn status(alloc: Alloc, gs: *GameState) !Status {
     const d = gs.clock.date;
     var companies: u32 = 0;
@@ -596,15 +590,62 @@ fn appendTag(alloc: Alloc, out: *std.ArrayListUnmanaged(u8), good: bool, text: [
     try out.appendSlice(alloc, "]{/}");
 }
 
-/// Returns formatted log rows for entries added during an advance span:
-/// entries with day > from_day (exclusive). Use after advance-until-stop to
-/// surface the notices accumulated over the just-completed advance (A1).
+/// The campaign log since `from_day`, oldest first, as `logRow`s: every
+/// entry dated after it. An advance logs under each day it runs, so after
+/// an advance from `from_day` these are exactly the entries it produced —
+/// the stop screen's "since you last looked" (ARCH §6 "The stop model").
 pub fn logSpan(alloc: Alloc, gs: *GameState, from_day: u32) ![][]const u8 {
     var rows: std.ArrayListUnmanaged([]const u8) = .empty;
     for (gs.event_log.items) |*e| {
         if (e.day > from_day) try rows.append(alloc, try logRow(alloc, e));
     }
     return rows.toOwnedSlice(alloc);
+}
+
+/// The quiet stop screen's one sentence (ARCH §6 "The stop model") when
+/// `checklist.nothingComing` holds — no contract, nothing building, and the
+/// next payday's date; null while anything is coming.
+pub fn quietOutlook(alloc: Alloc, gs: *GameState) !?[]const u8 {
+    if (!checklist.nothingComing(gs)) return null;
+    var d = gs.clock.date.next();
+    while (!d.isPayday()) d = d.next();
+    return try std.fmt.allocPrint(alloc, "no contract, nothing building — next stop is payday on {s}", .{try d.textAlloc(alloc)});
+}
+
+test "logSpan returns exactly the entries an advance logged, oldest first" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 611 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    try gs.log(.misc, .{}, "before the advance", .{});
+    const from = gs.clock.day_index;
+    try std.testing.expectEqual(@as(usize, 0), (try logSpan(al, &gs, from)).len);
+    gs.clock.advance();
+    try gs.log(.misc, .{}, "first", .{});
+    gs.clock.advance();
+    try gs.log(.misc, .{}, "second", .{});
+    const rows = try logSpan(al, &gs, from);
+    try std.testing.expectEqual(@as(usize, 2), rows.len);
+    try std.testing.expect(std.mem.indexOf(u8, rows[0], "first") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[1], "second") != null);
+    try std.testing.expectEqualStrings(try logRow(al, &gs.event_log.items[2]), rows[1]);
+}
+
+test "quietOutlook speaks only when checklist.nothingComing holds, and names the next payday" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 612 });
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .paymaster);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    try std.testing.expect(checklist.nothingComing(&gs));
+    const quiet = (try quietOutlook(al, &gs)) orelse return error.TestExpectedQuiet;
+    try std.testing.expectEqualStrings("no contract, nothing building — next stop is payday on 3025-02-01", quiet);
+    // Something building: not quiet.
+    try gs.bay_jobs.append(gs.allocator(), .{ .hq = gs.seat(), .kind = .fabrication, .item_key = "mlas", .duration_days = 3, .queued_day = 0 });
+    try std.testing.expect(!checklist.nothingComing(&gs));
+    try std.testing.expectEqual(@as(?[]const u8, null), try quietOutlook(al, &gs));
 }
 
 pub fn logRow(alloc: Alloc, e: *const state_mod.LogEntry) ![]const u8 {

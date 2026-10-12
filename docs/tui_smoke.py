@@ -387,20 +387,22 @@ assert "pick a location" in plain()[-30000:], plain()[-3000:]
 send("\x1b"); send("\x1b")
 send("c", 0.8)                 # clear the plan
 send("1")
-send(".", 1.5)                 # end turn (modal or advance); n is now next-stop
+send(".", 1.5)                 # end the turn: one day (y confirms past the checklist)
 p = plain()
 if "END TURN?" in p:
-    send("n", 1.5)
+    send("y", 1.5)
 assert "day 1" in plain(), plain()[-2000:]
-# P5a: n key runs advance-until-stop; at home (no contract) it advances until
-# the next payday or listing stop.  Verify the day counter has moved.
+# n advances to the next stop and opens the stop screen, titled with the day
+# it stopped on; Enter leaves it for the screen it names.
 mark_n = len(out)
 send("n", 5.0)
 after_n = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark_n:]).decode("utf-8", "replace")
-assert "day " in after_n, "n key did not advance: " + after_n[-1000:]
-# Advance 3 more days from wherever n stopped (day count is not fixed).
+stop = re.search(r"STOPPED · day (\d+)", after_n)
+assert stop and int(stop.group(1)) > 1, "n did not reach the stop screen: " + after_n[-1000:]
+stopped_on = int(stop.group(1))
+send("\r", 1.0)
 send(":"); send("day 3\r", 2.0)
-assert "day " in plain(), plain()[-2000:]
+assert f"day {stopped_on + 3}" in plain()[-30000:], plain()[-2000:]
 # Battle orders: the advance stops short of contact and opens the box;
 # → changes the ROE, confirm clears the warning, and the next advance
 # runs on to the fight instead of stopping again.
@@ -526,7 +528,7 @@ p = plain()[-300:]
 assert "transfer" in p and "train" in p, p
 send("\x1b")
 send(".", 2.0)
-if "END TURN?" in plain(): send("n", 2.0)
+if "END TURN?" in plain(): send("y", 2.0)
 send("q"); send("r"); send("q")
 drain(0.5)
 finish(pid)

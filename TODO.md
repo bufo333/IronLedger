@@ -39,6 +39,11 @@ A package has one primary invariant or subsystem outcome.
   `checklist.zig`; stops inside and outside a contract as listed; notices batch
   into the digest; the stop screen names the reason and opens the screen; `n`
   binds to it; an auto advance never crosses a decision deadline.
+- [ ] Phase-atomic daily tick (rule 17): `tick.advanceDay` prepares each phase's
+  fallible work before it mutates, so an allocation or invariant error inside a
+  day leaves that day unchanged; `advance` and `advance_until_stop` then return
+  errors only with the campaign unchanged, `advance`'s zero-day bankruptcy
+  included. Closes docs/contract-exceptions.md "Advance commits partial days".
 - [ ] P5b the battle you can touch (ROADMAP P5b): phased autoresolve (contact,
   decisive, pursuit or withdrawal) under one seed; a pause between phases with
   recomputed odds and the existing interventions (reserve commit, ROE, air
@@ -49,7 +54,10 @@ A package has one primary invariant or subsystem outcome.
   arc with one callback inside the contract; the matching event deck retired.
 - [ ] Playtest gate: John plays the P5a–P5c slice on one garrison contract before
   P5d is dispatched. If it is not fun, P5d onward is redesigned in ROADMAP.md
-  before scheduling.
+  before scheduling. P5a's stop cadence measures one to four stops per garrison
+  month on seed 4200 against ROADMAP P5a's four to six, for John to judge in
+  play; ROADMAP P5a.2's operation-available or arc-beat stop is not yet
+  implemented.
 - [ ] P5d.1 NPC world-contract design: shared world conflicts and typed opposing
   forces (faction, pirate, or named merc company); player offers, NPC
   commitments, location/transit, pay, readiness, withdrawal, breach, and

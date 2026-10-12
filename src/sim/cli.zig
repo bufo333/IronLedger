@@ -839,25 +839,27 @@ pub fn errorText(err: anyerror) []const u8 {
     };
 }
 
-/// One owner for the stop-reason sentence shown when a multi-day advance
-/// stops mid-run because the outfit ran out of money (C5p, rule 10).
-/// Called by both frontends; the wording reuses the per-error sentences above.
+/// One owner for the sentence naming why an advance stopped (rule 10):
+/// both frontends print it. The money stops reuse the per-error sentences
+/// above; `.none` has no sentence.
 pub fn advanceStopText(stopped: @FieldType(game.commands.Result, "stopped")) []const u8 {
     return switch (stopped) {
         .none => "",
         .insolvent => errorText(error.Insolvent),
         .bankrupt => errorText(error.Bankrupt),
         .cap_reached => "advance limit reached — use `next` again to continue",
-        .payday => "payday — salaries due and the board refreshes",
+        .hold => "the turn waits on an after-action or a battle decision",
+        .contact => "contact ahead — give battle orders",
         .decision_due => "a decision is waiting in your inbox",
-        .contact => "", // handled by the caller via result.contact
-        .contract_end => "a contract has concluded or your company has arrived",
+        .employer_notice => "the employer has served notice: combat-ineffective, breach follows the grace window",
+        .payday => "payday — salaries due and the board refreshes",
+        .contract_end => "a contract has closed",
+        .on_world => "a company has arrived on its contract world",
         .arrival => "a company or shipment has arrived",
-        .bay_job => "bay work has finished",
+        .bay_job => "structural bay work has finished",
         .project => "construction work has finished",
-        .listing => "a hull appeared on the market board",
-        .personnel => "a personnel matter needs your attention",
-        .hold => "", // handled by the hold path, not advanceStopText
+        .listing => "a rare hull appeared on the market board",
+        .personnel => "someone recovered, retired or resigned",
     };
 }
 

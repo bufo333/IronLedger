@@ -159,7 +159,7 @@ check 'under contract:'
 check 'readiest co.'
 check 'skull'
 check 'advanced 3 day'
-# P5a: `next` (cap 1) advances; trailing token is refused via parseClientVerb.
+# `next 1` advances one day to its cap; a trailing token is refused with the usage.
 check 'advance limit reached'
 check 'those arguments do not fit the verb — usage: next'
 # P3c.6: mech <unit id> prints the lifecycle summary; unknown id prints the usage line.

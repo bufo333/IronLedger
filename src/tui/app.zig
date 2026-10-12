@@ -154,6 +154,21 @@ const Modal = union(enum) {
     leaderboard_detail: types.MercCompanyId,
     /// Artillery formation detail (narrow terminals: no side pane).
     arty_detail: types.ArtilleryFormationId,
+    /// The stop screen (docs/tui.md, Modals: Stop screen): why an advance-until-stop stopped,
+    /// and the log since it started; leaving it opens the screen it names.
+    stop_report: StopReport,
+};
+
+/// Where the stop screen leads: the tab where the stop is acted on, or the
+/// modal a hold or a contact waits on. That modal revalidates the ID when
+/// it opens (rule 40).
+const StopNext = union(enum) { tab: Tab, after_action: types.BattleId, decision: types.EventId, orders: types.ContractId };
+
+const StopReport = struct {
+    stopped: @FieldType(game.commands.Result, "stopped"),
+    /// The day the advance started from; the log after it is the span.
+    from_day: u32,
+    next: StopNext,
 };
 
 const MechView = enum { summary, combat, maintenance, ownership };
@@ -1485,7 +1500,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail => try self.drawList(al),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail, .stop_report => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -2250,6 +2265,7 @@ pub const App = struct {
         .{ .name = "Soundtrack", .legend = &music_legend },
         .{ .name = "Decision", .legend = &decision_legend },
         .{ .name = "Contract log", .legend = &log_legend },
+        .{ .name = "Stop screen (after `n`)", .legend = &stop_legend },
         .{ .name = "After-action report", .legend = &after_action_legend },
         .{ .name = "Emblem editor", .legend = &editor_legend },
         .{ .name = "Number form", .legend = &amount_legend },
@@ -2877,14 +2893,15 @@ pub const App = struct {
         self.say(.good, "day {d} · {s}", .{ st.day, st.date });
     }
 
-    /// Advance day by day until a stop condition fires, or the cap is hit.
-    /// cap == 0 uses the tuning default. Handles all stop reasons: opens the
-    /// relevant screen for contact/hold, routes to the relevant screen for each
-    /// stop reason, and shows a log-span digest and stop description.
+    /// Advance until the next stop (`advance_until_stop`; cap 0 = the tuned
+    /// cap) and show the stop screen in front of the screen it stops for:
+    /// the reason, the quiet sentence when nothing is coming, and the log
+    /// the advance produced. A bankruptcy goes to the saved GAME OVER.
     fn advanceUntilStop(self: *App, cap: u32) !void {
         const g = self.state();
-        const start_day = (try q.status(self.a(), g)).day;
+        const from_day = (try q.status(self.a(), g)).day;
         const res = self.execResult(.{ .advance_until_stop = cap }) orelse {
+            // An outfit already bankrupt is refused; the save still runs.
             try self.handleGameOver();
             return;
         };
@@ -2893,104 +2910,63 @@ pub const App = struct {
             return;
         }
         const st = try q.status(self.a(), g);
-        if (res.stopped == .insolvent) {
-            self.say(.amber, "day {d} · {s} — {s}", .{ st.day, st.date, game.cli.advanceStopText(.insolvent) });
-            return;
-        }
-        // Structured-log entries accumulated over the advance span (A1).
-        const span_rows = try q.logSpan(self.a(), g, start_day);
-        const span_count = span_rows.len;
-        // Turn holds: open the blocking screen and show span digest.
-        switch (q.turnHold(g)) {
-            .after_action => |id| {
-                self.say(.crit, "day {d} · {s} — after-action on your desk{s}", .{
-                    st.day, st.date,
-                    if (span_count > 0) try std.fmt.allocPrint(self.a(), " · {d} event{s}", .{ span_count, if (span_count == 1) "" else "s" }) else "",
-                });
-                self.battles_from_list = false;
-                self.openModal(.{ .after_action = id });
-                return;
-            },
-            .decision => |id| {
-                self.say(.crit, "day {d} · {s} — battle decision on your desk{s}", .{
-                    st.day, st.date,
-                    if (span_count > 0) try std.fmt.allocPrint(self.a(), " · {d} event{s}", .{ span_count, if (span_count == 1) "" else "s" }) else "",
-                });
-                self.openModal(.{ .decision = id });
-                return;
-            },
+        const style: Style = switch (res.stopped) {
+            .insolvent, .hold, .contact, .employer_notice => .amber,
+            else => .good,
+        };
+        self.say(style, "day {d} · {s} — {s}", .{ st.day, st.date, game.cli.advanceStopText(res.stopped) });
+        const next = self.stopNext(res);
+        if (next == .tab) self.switchTab(next.tab);
+        self.openModal(.{ .stop_report = .{ .stopped = res.stopped, .from_day = from_day, .next = next } });
+    }
+
+    /// The screen a stop is about (docs/tui.md, Modals: Stop screen): the after-action or
+    /// battle decision a hold waits on, the battle orders for a contact,
+    /// else the tab where the reason is acted on.
+    fn stopNext(self: *App, res: game.commands.Result) StopNext {
+        switch (q.turnHold(self.state())) {
+            .after_action => |id| return .{ .after_action = id },
+            .decision => |id| return .{ .decision = id },
             .none => {},
         }
-        // Contact warning: open battle orders and show span digest.
-        if (res.contact != .none) {
-            self.say(.amber, "day {d} · {s} — contact ahead: battle orders{s}", .{
-                st.day, st.date,
-                if (span_count > 0) try std.fmt.allocPrint(self.a(), " · {d} event{s}", .{ span_count, if (span_count == 1) "" else "s" }) else "",
-            });
-            self.openOrders(res.contact);
-            return;
-        }
-        const stop_text = game.cli.advanceStopText(res.stopped);
-        // Quiet cap_reached: no contract and nothing under construction — name
-        // the next payday.  Any span entries are included in the Desk log.
-        if (res.stopped == .cap_reached) {
-            var d = q.currentDate(g);
-            var days_left: u32 = 0;
-            while (!d.isPayday()) {
-                d = d.next();
-                days_left += 1;
-            }
-            var date_buf: [10]u8 = undefined;
-            self.say(.good, "day {d} · {s} — payday in {d} day{s} ({s}){s}", .{
-                st.day, st.date, days_left, if (days_left == 1) "" else "s", d.text(&date_buf),
-                if (span_count > 0) try std.fmt.allocPrint(self.a(), " · {d} event{s}", .{ span_count, if (span_count == 1) "" else "s" }) else "",
-            });
-            return;
-        }
-        // Typed screen routing for each stop reason, with span entries digest.
-        // Entries are visible on the Desk (log) regardless of the destination tab.
-        const suffix = if (span_count > 0)
-            try std.fmt.allocPrint(self.a(), " · {d} event{s} since day {d}", .{ span_count, if (span_count == 1) "" else "s", start_day })
-        else
-            @as([]const u8, "");
-        switch (res.stopped) {
-            .payday, .decision_due => {
-                self.switchTab(.desk);
-                self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
+        if (res.contact != .none) return .{ .orders = res.contact };
+        return .{ .tab = switch (res.stopped) {
+            .employer_notice, .contract_end, .on_world => .contracts,
+            .payday, .insolvent, .bankrupt => .ledger,
+            .arrival => .supply,
+            .bay_job, .project => .hq,
+            .listing => .market,
+            .personnel => .people,
+            .none, .cap_reached, .hold, .contact, .decision_due => .desk,
+        } };
+    }
+
+    /// What the stop screen opens on leaving, in words.
+    fn stopNextName(next: StopNext) []const u8 {
+        return switch (next) {
+            .tab => |t| tabName(t),
+            .after_action => "the after-action",
+            .decision => "the battle decision",
+            .orders => "the battle orders",
+        };
+    }
+
+    fn leaveStopReport(self: *App, next: StopNext) void {
+        self.modal = .none;
+        switch (next) {
+            .tab => |t| self.switchTab(t),
+            .after_action => |id| {
+                self.battles_from_list = false;
+                self.openModal(.{ .after_action = id });
             },
-            .contract_end => {
-                self.switchTab(.contracts);
-                self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
-            },
-            .arrival => {
-                self.switchTab(.supply);
-                self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
-            },
-            .bay_job, .project => {
-                self.switchTab(.hq);
-                self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
-            },
-            .listing => {
-                self.switchTab(.market);
-                self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
-            },
-            .personnel => {
-                self.switchTab(.people);
-                self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
-            },
-            else => {
-                if (stop_text.len > 0) {
-                    self.say(.good, "day {d} · {s} — {s}{s}", .{ st.day, st.date, stop_text, suffix });
-                } else {
-                    self.say(.good, "day {d} · {s}{s}", .{ st.day, st.date, suffix });
-                }
-            },
+            .decision => |id| self.openModal(.{ .decision = id }),
+            .orders => |cid| self.openOrders(cid),
         }
     }
 
     /// Save the campaign and show GAME OVER (or save-failed) when the outfit
-    /// goes bankrupt.  Shared by the zero-day bankrupt error path and the
-    /// mid-advance stopped-bankrupt path (C5p).
+    /// goes bankrupt. Shared by every advance: a zero-day refusal, a stop
+    /// mid-advance, and advance-until-stop folding before its first day.
     fn handleGameOver(self: *App) !void {
         const g = self.state();
         if (!(try q.status(self.a(), g)).bankrupt) return;
@@ -3506,6 +3482,25 @@ pub const App = struct {
                     .max_h = full_h,
                 };
             },
+            .stop_report => |sr| {
+                const g = self.state();
+                const st = try q.status(al, g);
+                const span = try q.logSpan(al, g, sr.from_day);
+                var head: std.ArrayListUnmanaged([]const u8) = .empty;
+                try head.append(al, "");
+                try head.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}}", .{game.cli.advanceStopText(sr.stopped)}));
+                if (try q.quietOutlook(al, g)) |quiet| try head.append(al, try std.fmt.allocPrint(al, "  {s}", .{quiet}));
+                try head.append(al, try std.fmt.allocPrint(al, "  {{d}}since day {d}:{{/}}", .{sr.from_day}));
+                return .{
+                    .title = try keys.title(al, try std.fmt.allocPrint(al, "STOPPED · day {d} · {s} · {s}", .{ st.day, st.date, stopNextName(sr.next) }), &stop_legend),
+                    .right_title = try std.fmt.allocPrint(al, "{d} logged · oldest first", .{span.len}),
+                    .head = head.items,
+                    .rows = if (span.len > 0) span else &.{"{d}nothing logged{/}"},
+                    .scroll = true,
+                    .w = self.screen.cols,
+                    .max_h = full_h,
+                };
+            },
             .operation_pick => |cid| {
                 const ops = try q.contractOperations(al, self.state(), cid);
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -3972,11 +3967,22 @@ pub const App = struct {
         .{ .match = keys.Match.char('q'), .action = .close, .label = "close", .group = .misc, .show_footer = false },
     };
 
+    /// The stop screen: it scrolls like a list, and leaving it by either key
+    /// opens the screen the stop names.
+    const StopAction = enum { proceed, top, bottom };
+    pub const stop_bindings = [_]keys.Binding(StopAction){
+        .{ .match = .{ .key = .enter }, .action = .proceed, .label = "open that screen", .group = .act },
+        .{ .match = .{ .key = .escape }, .action = .proceed, .label = "open that screen", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('g'), .action = .top, .label = "start", .group = .navigate, .show_footer = false },
+        .{ .match = keys.Match.char('G'), .action = .bottom, .label = "end", .group = .navigate },
+    };
+
     const raise_hulls_legend = keys.entries(RaiseHullsAction, &raise_hulls_bindings);
     const raise_support_legend = keys.entries(RaiseSupportAction, &raise_support_bindings);
     const music_legend = keys.entries(MusicAction, &music_bindings);
     const decision_legend = keys.entries(DecisionAction, &decision_bindings);
     const log_legend = keys.entries(LogAction, &log_bindings);
+    const stop_legend = keys.entries(StopAction, &stop_bindings);
     const sheet_legend = keys.entries(SheetAction, &sheet_bindings);
     const help_legend = keys.entries(HelpAction, &help_bindings);
     const help_navigation_legend = [_]keys.Entry{
@@ -4425,6 +4431,14 @@ pub const App = struct {
                     .close => self.modal = .none,
                 }
             },
+            .stop_report => |sr| {
+                const hit = keys.lookup(StopAction, &stop_bindings, 0, key) orelse return false;
+                switch (hit.action) {
+                    .proceed => self.leaveStopReport(sr.next),
+                    .top => self.modal_cursor = 0,
+                    .bottom => self.modal_cursor = std.math.maxInt(usize) / 2,
+                }
+            },
             .operation_pick => |cid| {
                 if (key != .char) return false;
                 const al = self.a();
@@ -4618,8 +4632,8 @@ pub const App = struct {
     }
     const EndTurnAction = enum { day, week, next_stop, jump, cancel };
     pub const end_turn_bindings = [_]keys.Binding(EndTurnAction){
-        .{ .match = keys.Match.char('n'), .action = .next_stop, .label = "advance until the next stop (bypasses this modal)", .group = .act },
-        .{ .match = keys.Match.char('y'), .action = .day, .label = "a day", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('y'), .action = .day, .label = "end the turn anyway (the days asked for)", .group = .act },
+        .{ .match = keys.Match.char('n'), .action = .next_stop, .label = "advance to the next stop instead", .group = .act },
         .{ .match = keys.Match.char('N'), .action = .week, .label = "end 7 turns", .group = .act },
         .{ .match = .{ .chars = .{ '1', '9' } }, .action = .jump, .label = "go to that warning", .group = .navigate },
         .{ .match = .{ .key = .escape }, .action = .cancel, .label = "not yet", .group = .misc },
@@ -4708,7 +4722,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail => try self.listKey(key),
+            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail, .stop_report => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {
@@ -5042,7 +5056,7 @@ pub const App = struct {
         };
         if (client) |cv| {
             switch (cv) {
-                // The checklist asks first, as for `n`, unless forced.
+                // The checklist asks first, as for `.`, unless forced.
                 .day => |d| if (d.force) try self.advance(d.days) else try self.endTurnRequest(d.days),
                 .next => |cap| try self.advanceUntilStop(cap),
                 .save => {
@@ -5201,21 +5215,92 @@ test "every screen draws at full size and at 80x24, and the cursor clamps after 
     try c.app.draw();
 }
 
-test "the end-turn key moves the calendar, and Esc closes whatever modal it opened" {
+test "the end-turn key ends one day, and Esc closes whatever modal it opened" {
     const c = try clientForTest(std.testing.allocator);
     defer deinitForTest(c, std.testing.allocator);
     const day0 = (try q.status(c.app.a(), c.app.state())).day;
-    try pressForTest(c, .{ .char = 'n' });
-    // With warnings standing the checklist asks first; `n` again confirms.
-    if (c.app.modal != .none) try pressForTest(c, .{ .char = 'n' });
-    try std.testing.expect((try q.status(c.app.a(), c.app.state())).day > day0);
+    try pressForTest(c, .{ .char = '.' });
+    // With warnings standing the checklist asks first; `y` ends the day.
+    if (c.app.modal == .end_turn) try pressForTest(c, .{ .char = 'y' });
+    try std.testing.expectEqual(day0 + 1, (try q.status(c.app.a(), c.app.state())).day);
     try pressForTest(c, .{ .char = '?' });
     try std.testing.expect(c.app.modal != .none);
     try pressForTest(c, .escape);
     try std.testing.expect(c.app.modal == .none);
 }
 
-test "a malformed :day moves no time; N asks first like n, and n there ends the week" {
+test "n advances to the next stop and shows the stop screen in front of the screen it names" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    const al = c.app.a();
+    const day0 = (try q.status(al, c.app.state())).day;
+    try pressForTest(c, .{ .char = 'n' });
+    const report = switch (c.app.modal) {
+        .stop_report => |r| r,
+        else => return error.TestExpectedStopScreen,
+    };
+    try std.testing.expect((try q.status(al, c.app.state())).day > day0);
+    try std.testing.expectEqual(day0, report.from_day);
+    try std.testing.expect(report.stopped != .none);
+    // The screen it stops for is already behind it; Enter leaves to it.
+    const tab = c.app.tab;
+    try std.testing.expectEqual(StopNext{ .tab = tab }, report.next);
+    try pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .none);
+    try std.testing.expectEqual(tab, c.app.tab);
+}
+
+test "the stop screen lists the advance's log span under its reason, and the quiet sentence only when nothing is coming" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    const al = c.app.a();
+    const g = c.app.state();
+    const from = (try q.status(al, g)).day;
+    try c.app.advanceUntilStop(0);
+    const report = switch (c.app.modal) {
+        .stop_report => |r| r,
+        else => return error.TestExpectedStopScreen,
+    };
+    const view = try c.app.listView(al);
+    const span = try q.logSpan(al, g, from);
+    try std.testing.expect(span.len > 0);
+    try std.testing.expectEqual(span.len, view.rows.len);
+    for (span, view.rows) |want, got| try std.testing.expectEqualStrings(want, got);
+    var named = false;
+    var quiet = false;
+    for (view.head) |row| {
+        named = named or std.mem.indexOf(u8, row, game.cli.advanceStopText(report.stopped)) != null;
+        quiet = quiet or std.mem.indexOf(u8, row, "nothing building") != null;
+    }
+    try std.testing.expect(named);
+    try std.testing.expectEqual((try q.quietOutlook(al, g)) != null, quiet);
+    // A contract running: the quiet sentence goes.
+    try g.contracts.put(g.allocator(), @enumFromInt(99), .{ .id = @enumFromInt(99), .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 1 }, .status = .transit });
+    try std.testing.expectEqual(@as(?[]const u8, null), try q.quietOutlook(al, g));
+    for ((try c.app.listView(al)).head) |row| try std.testing.expect(std.mem.indexOf(u8, row, "nothing building") == null);
+}
+
+test "a stop on an unread after-action leads to it, and an outfit that folds before the first day reaches the saved GAME OVER" {
+    const al = std.testing.allocator;
+    {
+        const c = try clientForTest(al);
+        defer deinitForTest(c, al);
+        const next = StopNext{ .after_action = @enumFromInt(3) };
+        c.app.openModal(.{ .stop_report = .{ .stopped = .hold, .from_day = 0, .next = next } });
+        try pressForTest(c, .escape);
+        try std.testing.expectEqual(Modal{ .after_action = @enumFromInt(3) }, c.app.modal);
+    }
+    {
+        const c = try clientForTest(al);
+        defer deinitForTest(c, al);
+        c.app.state().funds = -100_000_000;
+        try pressForTest(c, .{ .char = 'n' });
+        try std.testing.expect(c.app.modal == .game_over_saved);
+        try std.testing.expect((try q.status(c.app.a(), c.app.state())).bankrupt);
+    }
+}
+
+test "a malformed :day moves no time; N asks first like a day, and y there ends the week" {
     const c = try clientForTest(std.testing.allocator);
     defer deinitForTest(c, std.testing.allocator);
     const al = c.app.a();
@@ -5233,8 +5318,8 @@ test "a malformed :day moves no time; N asks first like n, and n there ends the 
     try pressForTest(c, .{ .char = 'N' });
     try std.testing.expect(c.app.modal == .end_turn);
     try std.testing.expectEqual(day0, (try q.status(al, c.app.state())).day);
-    try pressForTest(c, .{ .char = 'n' });
-    try std.testing.expect((try q.status(al, c.app.state())).day > day0);
+    try pressForTest(c, .{ .char = 'y' });
+    try std.testing.expectEqual(day0 + 7, (try q.status(al, c.app.state())).day);
 }
 
 test "the end-turn prompt asks only about warnings that prompt; Desk notes stay out" {
@@ -5285,6 +5370,7 @@ test "every modal, welcome and wizard table is well formed" {
     try K.expectWellFormed(App.MusicAction, &App.music_bindings);
     try K.expectWellFormed(App.DecisionAction, &App.decision_bindings);
     try K.expectWellFormed(App.LogAction, &App.log_bindings);
+    try K.expectWellFormed(App.StopAction, &App.stop_bindings);
     try K.expectWellFormed(App.AfterActionAction, &App.after_action_bindings);
     try K.expectWellFormed(App.EditorAction, &App.editor_bindings);
     try K.expectWellFormed(App.AmountKey, &App.amount_bindings);

@@ -177,6 +177,12 @@ pub const Event = struct {
         return self.options.len > 0 and self.chosen == null;
     }
 
+    /// Unanswered on `day`, its deadline has come: the default applies
+    /// (`contract_events.expireDue`).
+    pub fn defaultsBy(self: *const Event, day: u32) bool {
+        return self.needsDecision() and day >= self.deadline_day;
+    }
+
     /// Unanswered and holding the turn.
     pub fn holdsTurn(self: *const Event) bool {
         return self.needsDecision() and self.kind.blocksTurn();

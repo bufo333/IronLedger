@@ -15,9 +15,10 @@ the clock for you: end turns past a deadline and the cautious default gets
 chosen in your name, entered in the log. Skimming a quiet garrison month
 is quick with **advance to the next stop** (`n`): time runs until the
 commander is genuinely needed — payday, a new decision, a contact window,
-a bay job done, a rare hull on the market — then hands back control with
-a sentence in the status bar. Press `.` (or `day` in the console) for a
-single-day advance with the checklist opening first if warnings are up.
+between contracts a bay job done or a rare hull on the market — then the
+stop screen says why, lists everything logged since, and opens the screen
+the stop is about. Press `.` (or `day` in the console) for a single-day
+advance with the checklist opening first if warnings are up.
 
 **Monthly (the heartbeat):** payday. Every company's P&L lands on your desk —
 contract income vs. payroll, maintenance, supplies, freight, hardship pay.
@@ -198,10 +199,17 @@ you own reports to you (Stages 9A–9C):
   whose pilot is in the medbay keeps the seat for them, and the TO&E shows it
   sitting out until the day they are back.
   **Advance to the next stop** (`n` / `next` in the console) skips the
-  checklist and runs forward until the commander is needed. The stop reason
-  appears in the status bar: "payday", "a decision is waiting in your inbox",
-  "bay work has finished", and so on. The advance never crosses an unanswered
-  decision deadline: it stops the day before and waits.
+  checklist and runs forward, up to three months, until the commander is
+  needed. Inside a contract that is a hold, contact, a new decision, the
+  employer's breach notice, payday, the contract closing or reaching its
+  world, or a company or hull arriving; between contracts also deliveries,
+  finished structural bay work and construction, a rare hull on the board,
+  and people recovering or leaving. The stop screen names the reason, lists
+  what was logged since you last looked — with nothing coming it says so in
+  one sentence, naming the next payday — and opens the screen the stop is
+  about. The advance never crosses an unanswered decision deadline: it stops
+  the day before and waits; only an explicit `.` or `day` lets the default
+  apply.
 - **Contact is announced**: a few days before a scheduled engagement the
   checklist warns — skulls and odds under the ROE in force, fieldable
   strength against what was committed, fights of each munition on the

@@ -473,6 +473,14 @@ filters to the active context (see the Keys description above).
 | `G` | end |
 | `q` | close |
 
+### Stop screen (after `n`)
+
+| Key | Does |
+|---|---|
+| `Enter` | open that screen |
+| `g` | start |
+| `G` | end |
+
 ### After-action report
 
 | Key | Does |
@@ -526,7 +534,8 @@ filters to the active context (see the Keys description above).
 
 | Key | Does |
 |---|---|
-| `n` | advance until the next stop (bypasses this modal) |
+| `y` | end the turn anyway (the days asked for) |
+| `n` | advance to the next stop instead |
 | `N` | end 7 turns |
 | `1-9` | go to that warning |
 | `Esc` | not yet |
@@ -665,9 +674,16 @@ modal, campaign saved as it ended) once nothing could.
 
 Modals: **End turn** (the checklist rows that prompt, with jump targets;
 opens for `.` (one day) and `N` (seven days) advances while a row prompts,
-and `:day n force` skips it; Desk notes such as a hull waiting on a pilot in
-the medbay or restless crew stay on the Desk; `n` bypasses this modal and
-runs advance-until-stop instead) ·
+and `:day n force` skips it; `y` ends the days asked for, `n` advances to
+the next stop instead; Desk notes such as a hull waiting on a pilot in the
+medbay or restless crew stay on the Desk) ·
+**Stop screen** (after `n` or `:next [cap]`: the stop's sentence from
+`cli.advanceStopText`, the quiet sentence from `queries.quietOutlook` when
+no contract runs and nothing is building, and every log row the advance
+produced (`queries.logSpan`), oldest first, in front of the screen the stop
+is about — the tab where it is acted on, or the after-action, battle
+decision or battle orders it waits on, which Enter or Esc then opens; an
+outfit that folds goes to the saved GAME OVER instead) ·
 **Decision** (options with effects, default marked) ·
 **Battle orders** (the situation and odds; ←/→ step the ROE and each
 lance's role with the odds recomputed, Enter buys the emergency resupply,

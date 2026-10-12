@@ -71,6 +71,11 @@ pub const FundCourier = struct {
     amount: types.CBills,
     sent_day: u32,
     eta_day: u32,
+
+    /// The courier is credited by `day` (`tick.runTravel`).
+    pub fn landsBy(self: FundCourier, day: u32) bool {
+        return day >= self.eta_day;
+    }
 };
 
 /// "Keep this entity topped up to `floor`, moving at most `monthly_cap`" —

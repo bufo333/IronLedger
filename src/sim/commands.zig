@@ -67,8 +67,8 @@ pub const Command = union(enum) {
     /// and nothing blocks it; decisions wait in the inbox with deadlines.
     advance_day,
     advance_days: u32,
-    /// Advance day by day until the stop owner says the commander is needed,
-    /// or until `cap` days have passed. 0 = use `tuning.battle.auto_advance_cap_days`.
+    /// Advance day by day until `checklist.advanceStop` says the commander is
+    /// needed, or until `cap` days have passed (0 = `tuning.battle.auto_advance_cap_days`).
     advance_until_stop: u32,
     hire: struct {
         first: []const u8,
@@ -524,37 +524,31 @@ pub const Result = struct {
     artillery_freight_cost: types.CBills = 0,
     artillery_eta_day: u32 = 0,
     days_advanced: u32 = 0,
-    /// advance: why a multi-day advance stopped before the requested count.
-    /// `.none` when the full count ran. Zero days with `.decision_due` is a
-    /// valid success result (deadline guard fired before the first advance).
-    /// Other zero-day cases return an error. Ephemeral — not persisted, not
-    /// in the digest (rule 45 applies to state fields only).
+    /// advance: why a multi-day advance stopped before the requested count;
+    /// `.none` when the full count ran. A zero-day refusal is an error, not a
+    /// Result. advance_until_stop always names its stop: `.cap_reached`, a
+    /// money stop, or the `checklist.StopReason` of the same name. It may
+    /// succeed with zero days for `.decision_due` (a decision defaults
+    /// tomorrow) and `.bankrupt` (the outfit folded before the first day).
+    /// Ephemeral — not persisted, not in the digest (rule 45 applies to
+    /// state fields only).
     stopped: enum {
         none,
         insolvent,
         bankrupt,
-        /// advance_until_stop: the day cap was reached with no other stop.
         cap_reached,
-        /// advance_until_stop: payday (1st of month) — salaries and board refresh.
-        payday,
-        /// advance_until_stop: inbox decision newly arriving, or day before its deadline.
-        decision_due,
-        /// advance_until_stop: contact window opened for a scheduled engagement.
-        contact,
-        /// advance_until_stop: contract ending or company arriving on world.
-        contract_end,
-        /// advance_until_stop: company returning home, or a unit transfer arriving.
-        arrival,
-        /// advance_until_stop: a structural bay job finished.
-        bay_job,
-        /// advance_until_stop: an HQ construction project completed.
-        project,
-        /// advance_until_stop: a rare hull appeared on the market board.
-        listing,
-        /// advance_until_stop: a personnel event (notice given, etc.) arrived.
-        personnel,
-        /// advance_until_stop: turn hold (unread after-action or unanswered battle decision).
         hold,
+        contact,
+        decision_due,
+        employer_notice,
+        payday,
+        contract_end,
+        on_world,
+        arrival,
+        bay_job,
+        project,
+        listing,
+        personnel,
     } = .none,
     /// advance: the contract whose contact warning stopped a multi-day
     /// advance early.
