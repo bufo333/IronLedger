@@ -4870,6 +4870,8 @@ test "battle reports beyond forty survive save and load" {
             .terrain = "plains",
             .weather = "clear",
             .outcome = .victory,
+            .held_field = true,
+            .phases = battle_phases_rules.courseForTest(.victory),
         });
     }
     gs.next_battle_id = report_count + 1;
@@ -4913,6 +4915,8 @@ test "permanent report identities and battle backlinks reject corruption" {
         .terrain = "plains",
         .weather = "clear",
         .outcome = .victory,
+        .held_field = true,
+        .phases = battle_phases_rules.courseForTest(.victory),
     });
     gs.next_battle_id = 3;
     try gs.hull_combat_records.append(gs.allocator(), .{ .hull_instance_id = hid, .battle_id = @enumFromInt(1) });
@@ -4931,7 +4935,7 @@ test "permanent report identities and battle backlinks reject corruption" {
 
     try std.testing.expectError(error.ConstraintViolation, store.db.exec("INSERT INTO battle_report (cid, ord, id) VALUES (1, 2, 1)"));
 
-    try store.db.exec("DELETE FROM battle_report WHERE id = 1");
+    try store.db.exec("DELETE FROM battle_report_phase WHERE report_ord = (SELECT ord FROM battle_report WHERE id = 1); DELETE FROM battle_report WHERE id = 1");
     try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
 }
 
@@ -5709,6 +5713,7 @@ test "a recovery decision remembers its battle, and a held hull its lance" {
         .terrain = "plains",
         .weather = "clear",
         .outcome = .defeat,
+        .phases = battle_phases_rules.courseForTest(.defeat),
     });
     const taken = blk: {
         var it = gs.units.iterator();
@@ -6164,6 +6169,8 @@ test "operation.tempo and battle_report.operation_tempo round-trip through save/
         .terrain = "",
         .weather = "",
         .outcome = .victory,
+        .held_field = true,
+        .phases = battle_phases_rules.courseForTest(.victory),
         .score_delta = 2,
         .score_after = 2,
         .command_rights = "independent",
@@ -6329,6 +6336,8 @@ test "non-default op.intent and non-null operation_intent round-trip through sav
         .terrain = "",
         .weather = "",
         .outcome = .victory,
+        .held_field = true,
+        .phases = battle_phases_rules.courseForTest(.victory),
         .score_delta = 2,
         .score_after = 2,
         .command_rights = "independent",
@@ -6410,6 +6419,8 @@ test "operation_task and battle_report_task round-trip with ≥2 rows (P4e)" {
         .terrain = "",
         .weather = "",
         .outcome = .victory,
+        .held_field = true,
+        .phases = battle_phases_rules.courseForTest(.victory),
         .score_delta = 2,
         .score_after = 2,
         .command_rights = "independent",
@@ -6488,6 +6499,8 @@ test "v40 historical fixture is refused without mutation" {
         .terrain = "",
         .weather = "",
         .outcome = .victory,
+        .held_field = true,
+        .phases = battle_phases_rules.courseForTest(.victory),
         .score_delta = 2,
         .score_after = 2,
         .command_rights = "independent",
@@ -7566,6 +7579,8 @@ test "hull_combat_records survive a save/load round-trip with identical stateHas
         .terrain = "plains",
         .weather = "clear",
         .outcome = .victory,
+        .held_field = true,
+        .phases = battle_phases_rules.courseForTest(.victory),
     });
     gs.next_battle_id = 2;
 
@@ -7655,6 +7670,8 @@ test "an orphan hull_instance_id in a hull_combat_record rejects the load as cor
         .terrain = "plains",
         .weather = "clear",
         .outcome = .victory,
+        .held_field = true,
+        .phases = battle_phases_rules.courseForTest(.victory),
     });
     gs.next_battle_id = 2;
 
@@ -10410,12 +10427,39 @@ test "a battle report whose phase rows are removed refuses to load; a concession
         // The count itself wrong.
         "UPDATE battle_report SET phase_count=phase_count-1",
         "UPDATE battle_report SET phase_count=0",
+        // Every phase and the count with them: the fought verdict and its
+        // consequences are left with no course, which no concession or
+        // forfeit carries.
+        "DELETE FROM battle_report_phase; UPDATE battle_report SET phase_count=0",
         // A fought verdict the phases do not carry.
         "UPDATE battle_report SET hits_taken=hits_taken+1",
         "UPDATE battle_report SET outcome=CASE outcome WHEN 'rout' THEN 'victory' ELSE 'rout' END",
         "UPDATE battle_report SET held_field=1-held_field",
         "UPDATE battle_report_phase SET momentum=momentum+1 WHERE ord=1",
+        // Modifiers that leave every margin and band as they were but put
+        // the contact and decisive dice outside 2d6.
+        "UPDATE battle_report_phase SET ratio_bonus=ratio_bonus+100 WHERE ord<2",
+        "UPDATE battle_report_phase SET ratio_bonus=ratio_bonus-100 WHERE ord<2",
     }) |tamper| try expectBattleTamperRefusedForTest(store, &gs, tamper);
+    // The battle's terminal phase rewritten to a clean pursuit (held field)
+    // or a clean covered recovery (lost field), which take no hits: on a die
+    // 2d6 shows it loads, on a die of 200 it is refused.
+    const held = gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1].held_field;
+    const terminal = if (held) "order_kind='pursue'" else "order_kind='cover_recovery'";
+    const tuning = @import("../domain/tuning.zig").t;
+    const clean_margin: i32 = @as(i32, rng_mod.roll2d6_max) - tuning.battle.phases.par;
+    const feasible = try std.fmt.allocPrintSentinel(std.testing.allocator, "UPDATE battle_report_phase SET {s}, margin={d} WHERE ord=2", .{ terminal, clean_margin }, 0);
+    defer std.testing.allocator.free(feasible);
+    try store.save(&gs);
+    try store.db.exec(feasible);
+    {
+        var rewritten = try store.load(std.testing.allocator, gs.campaign_id);
+        defer rewritten.deinit();
+        try std.testing.expectEqual(clean_margin, rewritten.battle_reports.kept.items[rewritten.battle_reports.kept.items.len - 1].phases[2].margin);
+    }
+    const impossible = try std.fmt.allocPrintSentinel(std.testing.allocator, "UPDATE battle_report_phase SET {s}, margin={d} WHERE ord=2", .{ terminal, 200 - tuning.battle.phases.par }, 0);
+    defer std.testing.allocator.free(impossible);
+    try expectBattleTamperRefusedForTest(store, &gs, impossible);
     // A concession and a forfeit fight no phase: their empty reports load.
     for ([_]bool{ false, true }) |forfeited| {
         var one_step = GameState.init(std.testing.allocator, .{ .seed = 3007 });

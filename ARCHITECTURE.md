@@ -511,7 +511,9 @@ Between phases the turn pauses on a **phase report**: the margin, the hits
 taken so far (nothing lands until the battle ends), the momentum, the ROE
 for the next phase and the exact odds of each band of the next phase
 (`nextPhaseOdds`, every 2d6 result enumerated, Edge included; no RNG). The
-legal orders at each pause are `battle_phases.legalOrders`: engage; press on,
+screen shows those exact counts as whole percentages totalling 100
+(`queries.oddsPercents`: each band rounded down, the points left to the
+largest remainders). The legal orders at each pause are `battle_phases.legalOrders`: engage; press on,
 withdraw or an ROE change at contact; pursue or consolidate after a held
 field, cover the recovery or withdraw after a lost one. An ROE change is
 recorded on the battle, never written to the company's standing ROE, and is
@@ -1138,7 +1140,10 @@ a record for a missing or inactive contract, more than one record, orders out
 of sequence or orphaned, a malformed integer, a count the rows do not match,
 a course of orders that `battle_phases.recordConsistent` rejects, and report
 phases that are not a whole course agreeing with the report's verdict
-(`battle_phases.reportPhasesConsistent`). Once the campaign is loaded,
+(`battle_phases.reportPhasesConsistent`): every rolled phase's margin must
+need a die 2d6 can show under its recorded modifiers, and a report with no
+phases must be a concession or a forfeit as those write it, with no measured
+power, losses, kills, prisoners or hits. Once the campaign is loaded,
 `battle.validateInProgress` replays every prefix of the orders from live
 state and requires exactly the pause stored for it, with the engagement
 due, nothing else holding the turn and no ROE order the employer reserves.

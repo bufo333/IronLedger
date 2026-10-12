@@ -497,15 +497,18 @@ pub fn recordConsistent(record: *const phase_mod.BattleInProgress) bool {
 /// after it. The decisive phase carries the contact band's momentum, its
 /// margin earns the report's outcome, and with its ROE the field, the
 /// withdrawal and the report's ROE follow; an unrolled phase carries no
-/// figures, a costed one hits exactly when its die costs, and the phases'
-/// hits sum to the report's. A concession or a forfeit fights no phase.
-/// The loader refuses anything else (rule 47).
+/// figures, a costed one hits exactly when its die costs, every rolled
+/// phase's margin needs a die 2d6 can show, and the phases' hits sum to the
+/// report's. Only a concession or a forfeit fights no phase
+/// (`unfoughtConsistent`). The loader refuses anything else (rule 47).
 pub fn reportPhasesConsistent(report: *const battle_report.BattleReport) bool {
     const phases = report.phases;
-    if (phases.len == 0) return true;
+    if (phases.len == 0) return unfoughtConsistent(report);
+    if (report.conceded) return false;
     const contact = phases[0];
     if (contact.phase != .contact or contact.order != .engage) return false;
     if (contact.roe_roll != roeRoll(contact.roe) or contact.momentum != 0) return false;
+    if (!marginFeasible(contact.margin, &.{ contact.ratio_bonus, contact.scenario_mod, contact.roe_roll })) return false;
     var hits: u64 = contact.hits;
     switch (phases.len) {
         2 => {
@@ -519,6 +522,8 @@ pub fn reportPhasesConsistent(report: *const battle_report.BattleReport) bool {
             if (d.phase != .decisive or d.order != .press_on or d.roe_roll != roeRoll(d.roe)) return false;
             if (d.ratio_bonus != contact.ratio_bonus or d.scenario_mod != contact.scenario_mod) return false;
             if (d.momentum != contactMomentum(contactBand(contact.margin))) return false;
+            // The decisive die or, after a losing roll, the Edge die.
+            if (!marginFeasible(d.margin, &.{ d.ratio_bonus, d.scenario_mod, d.roe_roll, d.momentum })) return false;
             const roll = std.math.cast(i32, @as(i64, d.margin) + tuning.battle.phases.par) orelse return false;
             const outcome = outcomeAt(roll);
             const held = heldField(outcome, d.roe);
@@ -531,19 +536,43 @@ pub fn reportPhasesConsistent(report: *const battle_report.BattleReport) bool {
     return hits == report.hits_taken;
 }
 
+/// A report with no fought phase is a concession or a forfeit as
+/// `battle.concede` and `battle.forfeit` write it: a conceded defeat on a
+/// lost field, or a bloodless victory on a held one; no power was measured,
+/// and the fight cost and earned nothing.
+fn unfoughtConsistent(r: *const battle_report.BattleReport) bool {
+    const verdict = if (r.conceded) r.outcome == .defeat and !r.held_field else r.outcome == .victory and r.held_field;
+    return verdict and !r.withdrew and r.player_power == 0 and r.enemy_power == 0 and
+        r.hits_taken == 0 and r.destroyed == 0 and r.wounded == 0 and r.kia == 0 and
+        r.lost_hulls == 0 and r.missing == 0 and r.hulls.len == 0 and r.battle_loss_comp == 0 and
+        r.enemy_destroyed_bv == 0 and r.kills_credited == 0 and r.prisoners == 0;
+}
+
+/// A rolled phase's margin is one a 2d6 die can earn: margin + par less the
+/// die-free modifiers lies in the 2d6 range. Checked arithmetic, so no
+/// stored figure can overflow into the range.
+fn marginFeasible(margin: i32, mods: []const i32) bool {
+    var die: i64 = @as(i64, margin) + tuning.battle.phases.par;
+    for (mods) |m| die -= m;
+    return die >= rng_mod.roll2d6_min and die <= rng_mod.roll2d6_max;
+}
+
 /// The phase that ends a battle after the decisive one, as `run` records it:
 /// a consolidation or a withdrawal rolls nothing; a pursuit or a covered
-/// recovery rolls the pursuit die and takes hits exactly when its band costs.
+/// recovery rolls the pursuit die, a die 2d6 can show, and takes hits
+/// exactly when its band costs.
 fn terminalConsistent(last: PhaseRecord) bool {
     const unrolled: PhaseRecord = .{ .phase = last.phase, .order = last.order, .roe = last.roe };
-    const die = std.math.cast(u8, @as(i64, last.margin) + tuning.battle.phases.par) orelse return false;
-    const extra_hit_pct = switch (last.order) {
+    const rolled_phase: phase_mod.Phase = switch (last.order) {
         .consolidate => return last.phase == .pursuit and std.meta.eql(last, unrolled),
         .withdraw => return last.phase == .withdrawal and std.meta.eql(last, unrolled),
-        .pursue => if (last.phase != .pursuit) return false else pursuitVerdict(die).extra_hit_pct,
-        .cover_recovery => if (last.phase != .withdrawal) return false else coverVerdict(die).extra_hit_pct,
+        .pursue => .pursuit,
+        .cover_recovery => .withdrawal,
         .engage, .press_on, .roe => return false,
     };
+    if (last.phase != rolled_phase or !marginFeasible(last.margin, &.{})) return false;
+    const die: u8 = @intCast(@as(i64, last.margin) + tuning.battle.phases.par);
+    const extra_hit_pct = if (last.order == .pursue) pursuitVerdict(die).extra_hit_pct else coverVerdict(die).extra_hit_pct;
     const rolled: PhaseRecord = .{ .phase = last.phase, .order = last.order, .roe = last.roe, .margin = last.margin, .hits = last.hits };
     return std.meta.eql(last, rolled) and (last.hits > 0) == (extra_hit_pct > 0);
 }
@@ -562,6 +591,27 @@ pub fn commandAllowedDuringBattle(cmd: commands.Command) bool {
         .battle_order => true,
         else => false,
     };
+}
+
+/// A whole fought course that earns `outcome` under standard ROE with no
+/// modifiers and no hits, for a hand-built test report: an even contact, the
+/// lowest decisive die that earns the outcome, and a consolidation or a
+/// withdrawal. The report takes `heldField(outcome, .standard)` and no hits.
+pub fn courseForTest(comptime outcome: autoresolve.Outcome) []const PhaseRecord {
+    const course = comptime blk: {
+        const p = tuning.battle.phases;
+        const momentum = contactMomentum(contactBand(0));
+        var die: i32 = rng_mod.roll2d6_min;
+        while (die <= rng_mod.roll2d6_max and outcomeAt(die + momentum) != outcome) die += 1;
+        if (die > rng_mod.roll2d6_max) @compileError("no die earns " ++ @tagName(outcome));
+        const held = heldField(outcome, .standard);
+        break :blk [max_phases]PhaseRecord{
+            .{ .phase = .contact, .order = .engage, .roe = .standard },
+            .{ .phase = .decisive, .order = .press_on, .roe = .standard, .momentum = momentum, .margin = die + momentum - p.par },
+            .{ .phase = if (held) .pursuit else .withdrawal, .order = if (held) .consolidate else .withdraw, .roe = .standard },
+        };
+    };
+    return &course;
 }
 
 // ---------------------------------------------------------------- tests
@@ -772,9 +822,6 @@ test "reportPhasesConsistent accepts every course run finishes and refuses a tru
         }
     };
     try std.testing.expect(finished > 0);
-    // A concession or a forfeit fights no phase.
-    const none = reportForTest(&.{ .outcome = .defeat, .held_field = false, .withdrew = false, .hits = 0, .hit_pct = 0, .reserve_steadied = false, .edge_used = false, .roe = .standard, .recovery_roe = .standard });
-    try std.testing.expect(reportPhasesConsistent(&none));
 
     const dice: Dice = .{ .contact = 7, .decisive = 12, .edge = 7, .pursuit = 4 };
     const pursued = (try run(test_inputs, dice, &.{ .engage, .press_on, .pursue })).finished;
@@ -823,6 +870,109 @@ test "reportPhasesConsistent accepts every course run finishes and refuses a tru
     try std.testing.expect(!reportPhasesConsistent(&forged));
     @memcpy(&phases, good.phases);
     try std.testing.expect(reportPhasesConsistent(&forged));
+}
+
+/// A report with no phases, as `battle.concede` (conceded) or
+/// `battle.forfeit` writes it.
+fn unfoughtForTest(conceded: bool) battle_report.BattleReport {
+    var r = reportForTest(&.{ .outcome = if (conceded) .defeat else .victory, .held_field = !conceded, .withdrew = false, .hits = 0, .hit_pct = 0, .reserve_steadied = false, .edge_used = false, .roe = .standard, .recovery_roe = .standard });
+    r.conceded = conceded;
+    return r;
+}
+
+test "reportPhasesConsistent: only a concession or a forfeit fights no phase" {
+    const hulls = [_]battle_report.HullHit{.{ .unit = @enumFromInt(1), .chassis_key = "x", .chassis_name = "X", .armor_before = 90, .armor_after = 70 }};
+    for ([_]bool{ true, false }) |conceded| {
+        const genuine = unfoughtForTest(conceded);
+        try std.testing.expect(reportPhasesConsistent(&genuine));
+        // Anything a fight measured, cost or earned.
+        inline for (.{ "player_power", "enemy_power", "hits_taken", "destroyed", "wounded", "kia", "lost_hulls", "missing", "battle_loss_comp", "enemy_destroyed_bv", "kills_credited", "prisoners" }) |field| {
+            var forged = genuine;
+            @field(forged, field) = 1;
+            try std.testing.expect(!reportPhasesConsistent(&forged));
+        }
+        var forged = genuine;
+        forged.hulls = &hulls;
+        try std.testing.expect(!reportPhasesConsistent(&forged));
+        forged = genuine;
+        forged.withdrew = true;
+        try std.testing.expect(!reportPhasesConsistent(&forged));
+        // The other one-step verdict, or the other field, under this flag.
+        forged = genuine;
+        forged.outcome = if (conceded) .victory else .defeat;
+        try std.testing.expect(!reportPhasesConsistent(&forged));
+        forged = genuine;
+        forged.held_field = conceded;
+        try std.testing.expect(!reportPhasesConsistent(&forged));
+    }
+    // Consumer: a fought course's report stripped of its phases is refused,
+    // and a concession cannot carry a fought course.
+    const dice: Dice = .{ .contact = 7, .decisive = 9, .edge = 7, .pursuit = 7 };
+    const course = (try run(test_inputs, dice, &.{ .engage, .press_on, .consolidate })).finished;
+    var fought = reportForTest(&course);
+    try std.testing.expect(reportPhasesConsistent(&fought));
+    fought.conceded = true;
+    try std.testing.expect(!reportPhasesConsistent(&fought));
+    fought.conceded = false;
+    fought.phases = &.{};
+    try std.testing.expect(!reportPhasesConsistent(&fought));
+}
+
+test "courseForTest gives every outcome a course the report check accepts" {
+    inline for (@typeInfo(autoresolve.Outcome).@"enum".fields) |field| {
+        const outcome: autoresolve.Outcome = @enumFromInt(field.value);
+        var r = reportForTest(&.{ .outcome = outcome, .held_field = heldField(outcome, .standard), .withdrew = false, .hits = 0, .hit_pct = 0, .reserve_steadied = false, .edge_used = false, .roe = .standard, .recovery_roe = .standard });
+        r.phases = courseForTest(outcome);
+        try std.testing.expect(reportPhasesConsistent(&r));
+        r.held_field = !r.held_field;
+        try std.testing.expect(!reportPhasesConsistent(&r));
+    }
+}
+
+test "reportPhasesConsistent refuses a phase margin no 2d6 die earns" {
+    // At each end of the 2d6 range, every rolled phase of a genuine course
+    // is accepted, and the same phase one past that end is refused; the band
+    // the margin falls in, and so every other figure, is unchanged.
+    var checked: usize = 0;
+    for ([_]struct { die: u8, past: i32 }{ .{ .die = rng_mod.roll2d6_min, .past = -1 }, .{ .die = rng_mod.roll2d6_max, .past = 1 } }) |end| {
+        const dice: Dice = .{ .contact = end.die, .decisive = end.die, .edge = end.die, .pursuit = end.die };
+        for ([_]Order{ .pursue, .cover_recovery }) |last| {
+            const course = run(test_inputs, dice, &.{ .engage, .press_on, last }) catch continue;
+            const good = reportForTest(&course.finished);
+            try std.testing.expect(reportPhasesConsistent(&good));
+            var phases: [max_phases]PhaseRecord = undefined;
+            for (0..max_phases) |k| {
+                @memcpy(&phases, good.phases);
+                phases[k].margin += end.past;
+                var forged = good;
+                forged.phases = &phases;
+                try std.testing.expect(!reportPhasesConsistent(&forged));
+                checked += 1;
+            }
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 2 * max_phases), checked);
+
+    // A clean pursuit whose margin claims a die of 200, and margins so far
+    // out that only checked arithmetic keeps them out of the range.
+    const held: Dice = .{ .contact = 7, .decisive = 12, .edge = 7, .pursuit = 12 };
+    const good = reportForTest(&(try run(test_inputs, held, &.{ .engage, .press_on, .pursue })).finished);
+    try std.testing.expect(reportPhasesConsistent(&good));
+    var phases: [max_phases]PhaseRecord = undefined;
+    var forged = good;
+    forged.phases = &phases;
+    for ([_]i32{ 200 - tuning.battle.phases.par, std.math.maxInt(i32), std.math.minInt(i32) }) |margin| {
+        @memcpy(&phases, good.phases);
+        phases[2].margin = margin;
+        try std.testing.expect(!reportPhasesConsistent(&forged));
+    }
+    // Modifiers that move the die out of range under an unchanged margin.
+    for ([_]i32{ 100, -100, std.math.maxInt(i32), std.math.minInt(i32) }) |shift| {
+        @memcpy(&phases, good.phases);
+        phases[0].ratio_bonus = shift;
+        phases[1].ratio_bonus = shift;
+        try std.testing.expect(!reportPhasesConsistent(&forged));
+    }
 }
 
 test "defaultOrder walks a battle to its end, legally at every pause" {

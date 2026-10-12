@@ -81,17 +81,21 @@ pub const Rng = struct {
         return self.prngs[@intFromEnum(stream)].random();
     }
 
-    /// The BattleTech die roll.
+    /// The BattleTech die roll, `roll2d6_min` to `roll2d6_max`.
     pub fn roll2d6(self: *Rng, stream: Stream) u8 {
         const r = self.random(stream);
         return r.intRangeAtMost(u8, 1, 6) + r.intRangeAtMost(u8, 1, 6);
     }
 };
 
+/// The range of `Rng.roll2d6`.
+pub const roll2d6_min: u8 = 2;
+pub const roll2d6_max: u8 = 12;
+
 /// Returns a deterministic seed whose first roll on `stream` is `want`, or null
 /// when `want` is outside the 2d6 range.
 pub fn seedForFirstRoll(stream: Stream, want: u8) ?u64 {
-    if (want < 2 or want > 12) return null;
+    if (want < roll2d6_min or want > roll2d6_max) return null;
     var seed: u64 = 0;
     while (true) : (seed += 1) {
         var rng = Rng.init(seed);
@@ -125,7 +129,7 @@ test "2d6 stays in range" {
     var r = Rng.init(7);
     for (0..1000) |_| {
         const v = r.roll2d6(.events);
-        try std.testing.expect(v >= 2 and v <= 12);
+        try std.testing.expect(v >= roll2d6_min and v <= roll2d6_max);
     }
 }
 

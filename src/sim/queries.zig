@@ -447,6 +447,33 @@ pub const BattlePhaseView = struct {
     default_order: battle_phase.Order,
 };
 
+/// Whole percentages of stored odds that total exactly 100: each band gets
+/// its exact share rounded down, and the points left go one each to the
+/// bands with the largest remainders, the earlier band first on a tie. A
+/// band no die result reaches shows 0%. All zeros when the odds count
+/// nothing.
+pub fn oddsPercents(odds: battle_phase.Odds) [battle_phase.max_bands]u8 {
+    var percents: [battle_phase.max_bands]u8 = @splat(0);
+    if (odds.total == 0) return percents;
+    var remainders: [battle_phase.max_bands]u32 = @splat(0);
+    var given: u32 = 0;
+    for (odds.counts, 0..) |n, band| {
+        const scaled = @as(u32, n) * 100;
+        percents[band] = @intCast(scaled / odds.total);
+        remainders[band] = scaled % odds.total;
+        given += percents[band];
+    }
+    while (given < 100) : (given += 1) {
+        var best: usize = 0;
+        for (remainders, 0..) |rem, band| if (rem > remainders[best]) {
+            best = band;
+        };
+        percents[best] += 1;
+        remainders[best] = 0;
+    }
+    return percents;
+}
+
 /// The battle screen for a contract whose engagement is due or being
 /// fought; null when it has none. Reads the stored phase report only: the
 /// odds were computed when the pause was reached (rules 29, 31).
@@ -485,9 +512,10 @@ pub fn battlePhaseReport(alloc: Alloc, gs: *GameState, id: types.ContractId) !?B
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "hits taken so far {s}{d}{{/}} · they land on the line when the battle ends", .{ if (r.hits > 0) "{c}" else "{g}", r.hits }));
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "ROE for the next phase: {s}{s}", .{ @tagName(r.roe), if (roe_locked) " {d}(set by the employer's integrated command){/}" else "" }));
         var odds: std.ArrayListUnmanaged(u8) = .empty;
+        const percents = oddsPercents(r.odds);
         for (0..r.odds.next.bands()) |band| {
             if (band > 0) try odds.appendSlice(alloc, " · ");
-            try odds.print(alloc, "{s} {d}%", .{ r.odds.next.bandLabel(band), (@as(u32, r.odds.counts[band]) * 100 + r.odds.total / 2) / @max(1, r.odds.total) });
+            try odds.print(alloc, "{s} {d}%", .{ r.odds.next.bandLabel(band), percents[band] });
         }
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "next — {s}: {s}", .{ @tagName(r.odds.next), odds.items }));
     } else {
@@ -5183,12 +5211,59 @@ test "the battle screen offers exactly the orders the rule allows and shows the 
         }
         try std.testing.expectEqualDeep(battle_phases.defaultOrder(latest), view.default_order);
         if (latest) |r| {
-            var odds_line = false;
-            for (view.lines) |line| odds_line = odds_line or std.mem.indexOf(u8, line, @tagName(r.odds.next)) != null;
-            try std.testing.expect(odds_line);
+            // The odds line shows every band of the next phase at the
+            // percentages `oddsPercents` gives the stored odds: 100 in all.
+            const prefix = try std.fmt.allocPrint(a, "next — {s}: ", .{@tagName(r.odds.next)});
+            const line = for (view.lines) |line| {
+                if (std.mem.startsWith(u8, line, prefix)) break line;
+            } else return error.TestExpectedEqual;
+            const percents = oddsPercents(r.odds);
+            var shown: usize = 0;
+            var total: u32 = 0;
+            var bands = std.mem.splitSequence(u8, line[prefix.len..], " · ");
+            while (bands.next()) |band| : (shown += 1) {
+                try std.testing.expectEqualStrings(try std.fmt.allocPrint(a, "{s} {d}%", .{ r.odds.next.bandLabel(shown), percents[shown] }), band);
+                total += percents[shown];
+            }
+            try std.testing.expectEqual(r.odds.next.bands(), shown);
+            try std.testing.expectEqual(@as(u32, 100), total);
         }
     }
     try std.testing.expect(try battlePhaseReport(a, &gs, @enumFromInt(99)) == null);
+}
+
+test "oddsPercents totals 100 for every distribution the next phase can have" {
+    const battle_phases = @import("battle_phases.zig");
+    // The contact pause the review reproduced: 360/576/252/108/0 of 1296
+    // rounds independently to 28 + 44 + 19 + 8 + 0 = 99.
+    const shown: battle_phase.Odds = .{ .next = .decisive, .counts = .{ 360, 576, 252, 108, 0 }, .total = 1296 };
+    try std.testing.expectEqual([battle_phase.max_bands]u8{ 28, 45, 19, 8, 0 }, oddsPercents(shown));
+    try std.testing.expectEqual([battle_phase.max_bands]u8{ 0, 0, 0, 0, 0 }, oddsPercents(.{}));
+    // Every next phase, over the modifiers, ROE, momentum and Edge a pause
+    // can carry: whole percentages of 100 in all, each within a point of
+    // its exact share, none on a band no die result reaches.
+    var checked: usize = 0;
+    for ([_]battle_phase.NextPhase{ .decisive, .pursuit, .cover }) |next| {
+        var mod: i32 = -10;
+        while (mod <= 10) : (mod += 1) for ([_]force_dom.Roe{ .hold, .standard, .cautious }) |roe| {
+            var momentum: i32 = -1;
+            while (momentum <= 1) : (momentum += 1) for ([_]bool{ false, true }) |edge| {
+                const odds = battle_phases.nextPhaseOdds(next, .{ .ratio_bonus = mod, .scenario_mod = 0 }, roe, momentum, edge);
+                const percents = oddsPercents(odds);
+                var total: u32 = 0;
+                for (odds.counts, percents, 0..) |n, pct, band| {
+                    total += pct;
+                    if (band >= next.bands() or n == 0) try std.testing.expectEqual(@as(u8, 0), pct);
+                    const exact = @as(u32, n) * 100;
+                    try std.testing.expect(@as(u32, pct) * odds.total <= exact + odds.total);
+                    try std.testing.expect(exact < (@as(u32, pct) + 1) * odds.total);
+                }
+                try std.testing.expectEqual(@as(u32, 100), total);
+                checked += 1;
+            };
+        };
+    }
+    try std.testing.expectEqual(@as(usize, 3 * 21 * 3 * 3 * 2), checked);
 }
 
 test "the battle orders show the levers and the resupply the command would buy" {

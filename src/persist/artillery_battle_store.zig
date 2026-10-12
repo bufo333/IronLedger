@@ -270,6 +270,7 @@ test "captured player crew names survive command battle save load and escaped vi
 fn capturedCampaignForTest(gs: *GameState, held: bool) !void {
     const capabilities = @import("../sim/artillery_operations.zig");
     const artillery_battle = @import("../sim/artillery_battle.zig");
+    const battle_phases = @import("../sim/battle_phases.zig");
     const scenario = @import("../domain/scenario.zig");
     const id = try capabilities.fixtureForTest(gs, true);
     const f = gs.artillery_formations.getPtr(id).?;
@@ -283,10 +284,13 @@ fn capturedCampaignForTest(gs: *GameState, held: bool) !void {
     var a = try artillery_battle.snapshot(gs, c, .not_ready);
     const enemy_power = artillery_battle.fire(gs, &a, 0, 10000);
     _ = try artillery_battle.applyExposure(gs, &a, combat.percent_scale * combat.exposure_divisor, false);
+    // A defeat, or a draw where the field is held, and its fought course.
+    const outcome: @import("../domain/autoresolve.zig").Outcome = if (held) .draw else .defeat;
+    const phases = if (held) battle_phases.courseForTest(.draw) else battle_phases.courseForTest(.defeat);
     var random = gs.rng;
-    _ = try artillery_battle.recover(gs, &a, c, scenario.roll(&random, .battle, c.kind), .defeat, .standard, false, held, false, 0, 1);
+    _ = try artillery_battle.recover(gs, &a, c, scenario.roll(&random, .battle, c.kind), outcome, .standard, false, held, false, 0, 1);
     try artillery_battle.reward(gs, &a, -1);
-    const r: report.BattleReport = .{ .id = @enumFromInt(gs.next_battle_id), .day = 0, .contract = cid, .company = c.assigned_company, .kind = "recon raid", .enemy_key = c.enemy_key, .scenario = "", .terrain = "", .weather = "", .outcome = .defeat, .held_field = held, .enemy_power = enemy_power, .artillery = a };
+    const r: report.BattleReport = .{ .id = @enumFromInt(gs.next_battle_id), .day = 0, .contract = cid, .company = c.assigned_company, .kind = "recon raid", .enemy_key = c.enemy_key, .scenario = "", .terrain = "", .weather = "", .outcome = outcome, .held_field = held, .enemy_power = enemy_power, .phases = phases, .artillery = a };
     gs.next_battle_id += 1;
     try gs.battle_reports.record(gs.allocator(), r);
     try artillery_battle.recordHistory(gs, a, r.id, cid);
