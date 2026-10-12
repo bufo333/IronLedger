@@ -121,3 +121,18 @@ Design ideas, not defects; each needs its design in ROADMAP.md first.
 
 Deferred indefinitely — uncommitted features. Their ROADMAP.md designs stand;
 reschedule only on explicit dispatch.
+
+- [ ] Const view read path: give the frontend/view read path a `*const
+  GameState` so view code cannot mutate campaign state through the pointer it
+  reads; mutation stays reachable only through `commands.execute` (contract
+  rules 7, 8, 31). Because Zig `const` coercion is one-directional, this reaches
+  the whole `src/sim/queries.zig` read path, the sim read-helpers it calls
+  (`posture`, `readiness`, `battle`, `contract_control`, `operations`, `lift`,
+  `maintenance`, `toe`), and the shared `GameState` interior-pointer accessors
+  (`person`, `unit`, `force`, `deploymentContract`, `actor`, `rival`,
+  `officerArc`, `refitPlanFor`), so the end state changes the `GameState`
+  accessor surface (a public API) and spans more than one cohesive branch
+  (rule 86). The accessor API strategy — additive const read variants,
+  const-canonical accessors with explicit mutation paths, or a read-only view
+  wrapper — is unresolved. Design in ROADMAP.md first before scheduling; needs
+  its own approved plan(s).
