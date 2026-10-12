@@ -525,9 +525,10 @@ pub const Result = struct {
     artillery_eta_day: u32 = 0,
     days_advanced: u32 = 0,
     /// advance: why a multi-day advance stopped before the requested count.
-    /// `.none` when the full count ran or when zero days elapsed (the zero-
-    /// day case returns an error, not a Result). Ephemeral — not persisted,
-    /// not in the digest (rule 45 applies to state fields only).
+    /// `.none` when the full count ran. Zero days with `.decision_due` is a
+    /// valid success result (deadline guard fired before the first advance).
+    /// Other zero-day cases return an error. Ephemeral — not persisted, not
+    /// in the digest (rule 45 applies to state fields only).
     stopped: enum {
         none,
         insolvent,

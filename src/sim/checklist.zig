@@ -221,22 +221,13 @@ pub fn preAdvanceArrivalStop(gs: *GameState, next_day: u32) ?StopReason {
     for (gs.fund_couriers.items) |fc| {
         if (fc.eta_day == next_day) return .arrival;
     }
-    for (gs.bay_jobs.items) |j| {
-        if (j.done_day) |d| if (d == next_day) return .bay_job;
-    }
     {
-        var it = gs.hqs.iterator();
+        var it = gs.artillery_formations.iterator();
         while (it.next()) |e| {
-            for (e.value_ptr.projects.items) |p| {
-                if (p.construction_done_day == next_day) return .project;
+            switch (e.value_ptr.placement) {
+                .freight => |f| if (f.eta_day == next_day) return .arrival,
+                else => {},
             }
-        }
-    }
-    {
-        var it = gs.people.iterator();
-        while (it.next()) |e| {
-            const p = e.value_ptr;
-            if (p.status == .wounded) if (p.wound_heal_day) |d| if (d == next_day) return .personnel;
         }
     }
     return null;
@@ -268,10 +259,70 @@ pub fn advanceStopOwner(gs: *GameState, day: u32) ?StopReason {
     for (gs.part_orders.items) |o| {
         if (o.status == .delivered) if (o.eta_day) |d| if (d == day) return .arrival;
     }
+    return null;
+}
+
+/// True when the outfit has no active contract — the home context for P5a.3 stops.
+pub fn isAtHome(gs: *const GameState) bool {
+    var it = gs.contracts.iterator();
+    while (it.next()) |e| {
+        if (e.value_ptr.status == .active) return false;
+    }
+    return true;
+}
+
+/// Count of structural (depot_repair) bay jobs currently queued.
+/// Use before and after a tick to detect actual completions.
+pub fn countStructuralBayJobs(gs: *const GameState) usize {
+    var n: usize = 0;
+    for (gs.bay_jobs.items) |j| {
+        if (j.kind == .depot_repair) n += 1;
+    }
+    return n;
+}
+
+/// Total construction-project count across all HQs.
+/// Use before and after a tick to detect actual completions.
+pub fn countProjects(gs: *const GameState) usize {
+    var n: usize = 0;
+    var it = gs.hqs.iterator();
+    while (it.next()) |e| n += e.value_ptr.projects.items.len;
+    return n;
+}
+
+/// Count of wounded people in the outfit.
+/// Use before and after a tick to detect actual recoveries.
+pub fn countWounded(gs: *const GameState) u32 {
+    var n: u32 = 0;
+    var it = gs.people.iterator();
+    while (it.next()) |e| {
+        if (e.value_ptr.status == .wounded) n += 1;
+    }
+    return n;
+}
+
+/// At-home context stops: structural bay job, project, rare listing, personnel
+/// recovery. Only applies between contracts (isAtHome). Pre-advance counts let
+/// the function detect actual completions cleared by the tick (rule 3, rule 7).
+/// Priority: bay_job → project → listing → personnel.
+pub fn advanceHomeStop(
+    gs: *const GameState,
+    day: u32,
+    pre_bay: usize,
+    pre_proj: usize,
+    pre_wounded: u32,
+) ?StopReason {
+    if (!isAtHome(gs)) return null;
+    // Structural bay job actually completed (job removed from list by hq_ops).
+    if (countStructuralBayJobs(gs) < pre_bay) return .bay_job;
+    // Construction project actually completed (project removed from list).
+    if (countProjects(gs) < pre_proj) return .project;
     // Rare hull (uncommon or rarer) newly listed on any HQ board today.
     for (gs.market_listings.items) |l| {
         if (l.listed_day == day and l.kind == .unit and l.rarity != .common and !l.staple and !l.black_market) return .listing;
     }
+    // Personnel recovery: actual transition wounded → active.
+    if (countWounded(gs) < pre_wounded) return .personnel;
     return null;
 }
 
@@ -1131,7 +1182,7 @@ test "advanceStopOwner: payday fires on the first of each month" {
     try std.testing.expectEqual(StopReason.payday, advanceStopOwner(&gs, gs.clock.day_index).?);
 }
 
-test "preAdvanceArrivalStop: detects company return, fund courier, and personnel recovery" {
+test "preAdvanceArrivalStop: detects company return, fund courier, and artillery freight" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 8102 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
@@ -1144,10 +1195,141 @@ test "preAdvanceArrivalStop: detects company return, fund courier, and personnel
     try std.testing.expectEqual(StopReason.arrival, preAdvanceArrivalStop(&gs, day + 1).?);
     try std.testing.expect(preAdvanceArrivalStop(&gs, day + 2) == null);
     gs.force(co).?.return_eta_day = null;
-    // Plant a wounded person recovering on day+1.
+    // Artillery freight arriving on day+1.
+    const af_dom = @import("../domain/artillery_formation.zig");
+    try gs.artillery_formations.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .hull = .none,
+        .acquisition_day = 0,
+        .paid_price = 0,
+        .placement = .{ .freight = .{
+            .from_hq = gs.seat(),
+            .to_hq = gs.seat(),
+            .dispatch_day = 0,
+            .eta_day = day + 1,
+            .paid_cost = 0,
+        } },
+    });
+    try std.testing.expectEqual(StopReason.arrival, preAdvanceArrivalStop(&gs, day + 1).?);
+    try std.testing.expect(preAdvanceArrivalStop(&gs, day + 2) == null);
+    _ = af_dom;
+}
+
+test "advanceHomeStop: actual structural completion stops at home; failed repair does not" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8103 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+    const day = gs.clock.day_index;
+    // Precondition: at home with no active contracts.
+    try std.testing.expect(isAtHome(&gs));
+    // Plant a structural bay job due today (will be completed by the tick).
+    const uid = gs.units.keys()[0];
+    const u = gs.unit(uid).?;
+    for (u.slots.items) |*s| if (s.class == .structure) {
+        s.condition = .destroyed;
+        break;
+    };
+    try gs.bay_jobs.append(gs.allocator(), .{
+        .hq = gs.seat(),
+        .kind = .depot_repair,
+        .unit = uid,
+        .duration_days = 1,
+        .queued_day = 0,
+        .started_day = 0,
+        .done_day = day + 1,
+    });
+    const pre_bay = countStructuralBayJobs(&gs);
+    const pre_proj = countProjects(&gs);
+    const pre_wounded = countWounded(&gs);
+    try std.testing.expect(pre_bay > 0);
+    // Advance one day so the job completes (hq_ops.runDaily removes it).
+    try @import("tick.zig").advanceDay(&gs);
+    const post_day = gs.clock.day_index;
+    // If the job completed, countStructuralBayJobs should have decreased.
+    // If it failed and was re-queued (redo), it stays; no stop should fire.
+    const pre_bay_after = countStructuralBayJobs(&gs);
+    if (pre_bay_after < pre_bay) {
+        // Actual completion: advanceHomeStop fires.
+        const reason = advanceHomeStop(&gs, post_day, pre_bay, pre_proj, pre_wounded);
+        try std.testing.expectEqual(StopReason.bay_job, reason.?);
+    } else {
+        // Redo: job extended, no structural completion stop.
+        try std.testing.expect(advanceHomeStop(&gs, post_day, pre_bay, pre_proj, pre_wounded) == null);
+    }
+}
+
+test "advanceHomeStop: postponed recovery does not stop; actual recovery does" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8104 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const day = gs.clock.day_index;
+    // Hire a wounded person not due to heal yet.
     const pid = try gs.hirePerson("Hurt", "Pilot", .mekwarrior);
     gs.person(pid).?.status = .wounded;
-    gs.person(pid).?.wound_heal_day = day + 1;
-    try std.testing.expectEqual(StopReason.personnel, preAdvanceArrivalStop(&gs, day + 1).?);
-    try std.testing.expect(preAdvanceArrivalStop(&gs, day + 2) == null);
+    gs.person(pid).?.wound_heal_day = day + 10; // heals later, not today
+    const pre_bay = countStructuralBayJobs(&gs);
+    const pre_proj = countProjects(&gs);
+    const pre_wounded = countWounded(&gs);
+    try std.testing.expect(pre_wounded == 1);
+    // Advance; person should not recover yet.
+    try @import("tick.zig").advanceDay(&gs);
+    const post_day = gs.clock.day_index;
+    try std.testing.expectEqual(@as(u32, 1), countWounded(&gs));
+    // No recovery: advanceHomeStop must not return personnel.
+    try std.testing.expect(advanceHomeStop(&gs, post_day, pre_bay, pre_proj, pre_wounded) == null);
+    // Fast-forward to the heal day.
+    gs.person(pid).?.wound_heal_day = post_day; // heals on this day
+    gs.person(pid).?.medbay_admitted = true; // admitted
+    const pre_w2 = countWounded(&gs);
+    try @import("tick.zig").advanceDay(&gs);
+    const post_day2 = gs.clock.day_index;
+    if (countWounded(&gs) < pre_w2) {
+        try std.testing.expectEqual(StopReason.personnel, advanceHomeStop(&gs, post_day2, pre_bay, pre_proj, pre_w2).?);
+    }
+}
+
+test "advanceHomeStop: no home stops while on an active contract" {
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8105 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const co = (try commands.execute(&gs, .{ .new_company = "Beta" })).created_force;
+    // Plant an active contract to simulate garrison context.
+    const cid: @import("../domain/types.zig").ContractId = @enumFromInt(99);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = gs.hqs.values()[0].planet_key,
+        .status = .active,
+        .assigned_company = co,
+        .terms = .{ .length_months = 3, .base_pay_month = 50_000 },
+    });
+    try std.testing.expect(!isAtHome(&gs));
+    // Even with a structural job ready, no home stop fires on contract.
+    const uid = gs.units.keys()[0];
+    const u = gs.unit(uid).?;
+    for (u.slots.items) |*s| if (s.class == .structure) {
+        s.condition = .destroyed;
+        break;
+    };
+    const day = gs.clock.day_index;
+    try gs.bay_jobs.append(gs.allocator(), .{
+        .hq = gs.seat(),
+        .kind = .depot_repair,
+        .unit = uid,
+        .duration_days = 1,
+        .queued_day = 0,
+        .started_day = 0,
+        .done_day = day + 1,
+    });
+    const pre_bay = countStructuralBayJobs(&gs);
+    const pre_proj = countProjects(&gs);
+    const pre_wounded = countWounded(&gs);
+    try @import("tick.zig").advanceDay(&gs);
+    const post_day = gs.clock.day_index;
+    try std.testing.expect(advanceHomeStop(&gs, post_day, pre_bay, pre_proj, pre_wounded) == null);
 }

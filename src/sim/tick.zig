@@ -909,10 +909,11 @@ pub fn advanceUntilStop(gs: *GameState, cap: u32) Error!Result {
         }
         if (gs.funds + treasury.inboundToOutfit(gs) < 0) {
             if (try treasury.isInsolvent(gs.scratch(), gs)) {
+                // Return an error with no mutation when zero days have elapsed.
+                if (result.days_advanced == 0) return Error.Bankrupt;
                 const log_entry = try gs.prepareLog(.finance, .{}, "[bankrupt] the outfit cannot cover {d}: creditors seize what is left", .{gs.funds});
                 gs.bankrupt = true;
                 gs.commitLog(log_entry);
-                if (result.days_advanced == 0) return Error.Bankrupt;
                 result.stopped = .bankrupt;
                 return result;
             }
@@ -926,13 +927,18 @@ pub fn advanceUntilStop(gs: *GameState, cap: u32) Error!Result {
             result.stopped = .decision_due;
             return result;
         }
-        // Pre-advance: record arrivals/completions cleared during the tick.
+        // Pre-advance: arrivals cleared by the tick (company return, transfers,
+        // fund couriers, artillery freight). Recorded before the tick so they
+        // are not lost when the tick consumes the arriving entity.
         const pre_stop = checklist.preAdvanceArrivalStop(gs, next_day);
+        // Count home-context completion indicators before the tick.
+        const pre_bay = checklist.countStructuralBayJobs(gs);
+        const pre_proj = checklist.countProjects(gs);
+        const pre_wounded = checklist.countWounded(gs);
         try advanceDay(gs);
         result.days_advanced += 1;
         const day = gs.clock.day_index;
-        // Consult the one stop owner for post-advance signals (hold, contact,
-        // decision, payday, contract_end, listing). Higher priority than pre_stop.
+        // Post-advance: hold, contact, decision, payday, contract_end, part arrival.
         if (checklist.advanceStopOwner(gs, day)) |reason| {
             result.stopped = switch (reason) {
                 .hold => .hold,
@@ -951,8 +957,7 @@ pub fn advanceUntilStop(gs: *GameState, cap: u32) Error!Result {
             }
             return result;
         }
-        // Pre-advance arrivals/completions (consumed during the tick, higher
-        // priority than cap_reached).
+        // Pre-advance arrivals (consumed by the tick; checked before home stops).
         if (pre_stop) |reason| {
             result.stopped = switch (reason) {
                 .hold => .hold,
@@ -965,6 +970,18 @@ pub fn advanceUntilStop(gs: *GameState, cap: u32) Error!Result {
                 .project => .project,
                 .listing => .listing,
                 .personnel => .personnel,
+            };
+            return result;
+        }
+        // Home-context stops: bay_job → project → listing → personnel.
+        // Only fires between contracts; based on actual state transitions.
+        if (checklist.advanceHomeStop(gs, day, pre_bay, pre_proj, pre_wounded)) |reason| {
+            result.stopped = switch (reason) {
+                .bay_job => .bay_job,
+                .project => .project,
+                .listing => .listing,
+                .personnel => .personnel,
+                else => unreachable,
             };
             return result;
         }
@@ -1551,7 +1568,7 @@ test "advance_until_stop with cap 1 advances exactly one day and reports cap_rea
 }
 
 test "advance_until_stop and advance agree: stop owner and command return the same reason" {
-    // A payday stop: both advance and the stop owner recognize payday on day 30.
+    // A payday stop: both advance and the stop owner recognize payday on day 31.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 902 });
     defer gs.deinit();
     _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .paymaster);
@@ -1649,20 +1666,26 @@ test "fixed-seed stop count: garrison stops per month exceed home stops" {
     const home_stops = try advanceMonth(&gs);
     try std.testing.expect(home_stops >= 1 and home_stops <= 2);
 
-    // Garrison phase: put the company on a contract.
-    try std.testing.expect(gs.contract_offers.items.len > 0);
+    // Garrison phase: accept a garrison_duty offer for a quiet month.
+    var garrison_offer_id: ?@import("../domain/types.zig").ContractId = null;
+    for (gs.contract_offers.items) |o| {
+        if (o.kind == .garrison_duty) {
+            garrison_offer_id = o.id;
+            break;
+        }
+    }
+    try std.testing.expect(garrison_offer_id != null);
     _ = try @import("commands.zig").execute(&gs, .{
-        .accept_contract = .{ .offer = gs.contract_offers.items[0].id, .company = co },
+        .accept_contract = .{ .offer = garrison_offer_id.?, .company = co },
     });
-    // A garrison contract month has transit, payday, and contract events; more
-    // than a home month.  The seed is fixed so the count is deterministic.
+    // A quiet garrison month: transit, payday, and contract milestones; 4-6
+    // stops on this fixed seed (rule 2: changing the stop set moves the count).
     const garrison_stops = try advanceMonth(&gs);
-    try std.testing.expect(garrison_stops >= home_stops);
-    try std.testing.expect(garrison_stops <= 8);
+    try std.testing.expect(garrison_stops >= 4 and garrison_stops <= 6);
 }
 
 test "advance_until_stop pre-advance deadline guard fires on second call, not first" {
-    // F1: repeated call must return 0 days advanced with decision_due.
+    // Repeated call must return 0 days advanced with decision_due.
     // If the pre-advance guard is missing, the second call crosses the deadline
     // and defaults the decision.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 904 });
@@ -1700,27 +1723,33 @@ test "advance_until_stop pre-advance deadline guard fires on second call, not fi
     _ = checklist;
 }
 
-test "bankrupt log atomicity: failing prepareLog leaves bankrupt flag unset" {
-    // F7: gs.bankrupt must remain false if prepareLog's allocation fails.
-    // Save the arena page lists, null them so the next alloc must request a
-    // new page, install a FailingAllocator as the child, then restore everything
-    // so deinit can free the original pages without a leak.
+test "advance_until_stop bankrupt atomicity: no state mutation on zero-day bankrupt return" {
+    // When the outfit is insolvent before any advance, advanceUntilStop returns
+    // Error.Bankrupt without advancing a day. The bankrupt flag must remain
+    // false: no mutation before the error (F7 fix).
+    // credit_floor is 2_000_000 c-bills, so funds must be below -2M to be
+    // genuinely insolvent with no assets.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 905 });
     defer gs.deinit();
     _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .paymaster);
-    gs.funds = -1;
-    const saved_used = gs.arena.state.used_list;
-    const saved_free = gs.arena.state.free_list;
-    const orig_child = gs.arena.child_allocator;
-    gs.arena.state.used_list = null;
-    gs.arena.state.free_list = null;
-    var fa = std.testing.FailingAllocator.init(orig_child, .{ .fail_index = 0 });
-    gs.arena.child_allocator = fa.allocator();
-    const result = advanceDay(&gs);
-    // Restore before deinit so deinit can free the original pages.
-    gs.arena.state.used_list = saved_used;
-    gs.arena.state.free_list = saved_free;
-    gs.arena.child_allocator = orig_child;
-    try std.testing.expectError(error.OutOfMemory, result);
+    // The starter HQ holds ~725K in initial stock and 2M in credit floor, so
+    // total coverage is ~3.09M. Setting funds to -10M forces genuine insolvency.
+    gs.funds = -10_000_000;
     try std.testing.expect(!gs.bankrupt);
+    const result = advanceUntilStop(&gs, 10);
+    try std.testing.expectError(error.Bankrupt, result);
+    try std.testing.expect(!gs.bankrupt);
+}
+
+test "advance_until_stop bankrupt atomicity: already-bankrupt flag returns error without side effects" {
+    // When gs.bankrupt is already true, advanceUntilStop returns Error.Bankrupt
+    // immediately (zero days) via the guard at the top of the loop.
+    // This path must also be side-effect free (no second commit, no flag toggle).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 905 });
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .paymaster);
+    gs.bankrupt = true;
+    const result = advanceUntilStop(&gs, 10);
+    try std.testing.expectError(error.Bankrupt, result);
+    try std.testing.expect(gs.bankrupt);
 }

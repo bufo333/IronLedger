@@ -2897,34 +2897,42 @@ pub const App = struct {
             self.say(.amber, "day {d} · {s} — {s}", .{ st.day, st.date, game.cli.advanceStopText(.insolvent) });
             return;
         }
-        // Collect log entries added during this advance for the digest.
-        var span_count: u32 = 0;
-        for (g.event_log.items) |entry| {
-            if (entry.day > start_day) span_count += 1;
-        }
-        // Turn holds: open the blocking screen.
+        // Structured-log entries accumulated over the advance span (A1).
+        const span_rows = try q.logSpan(self.a(), g, start_day);
+        const span_count = span_rows.len;
+        // Turn holds: open the blocking screen and show span digest.
         switch (q.turnHold(g)) {
             .after_action => |id| {
-                self.say(.crit, "day {d} · {s} — after-action on your desk", .{ st.day, st.date });
+                self.say(.crit, "day {d} · {s} — after-action on your desk{s}", .{
+                    st.day, st.date,
+                    if (span_count > 0) try std.fmt.allocPrint(self.a(), " · {d} event{s}", .{ span_count, if (span_count == 1) "" else "s" }) else "",
+                });
                 self.battles_from_list = false;
                 self.openModal(.{ .after_action = id });
                 return;
             },
             .decision => |id| {
-                self.say(.crit, "day {d} · {s} — battle decision on your desk", .{ st.day, st.date });
+                self.say(.crit, "day {d} · {s} — battle decision on your desk{s}", .{
+                    st.day, st.date,
+                    if (span_count > 0) try std.fmt.allocPrint(self.a(), " · {d} event{s}", .{ span_count, if (span_count == 1) "" else "s" }) else "",
+                });
                 self.openModal(.{ .decision = id });
                 return;
             },
             .none => {},
         }
-        // Contact warning: open battle orders.
+        // Contact warning: open battle orders and show span digest.
         if (res.contact != .none) {
-            self.say(.amber, "day {d} · {s} — contact ahead: battle orders", .{ st.day, st.date });
+            self.say(.amber, "day {d} · {s} — contact ahead: battle orders{s}", .{
+                st.day, st.date,
+                if (span_count > 0) try std.fmt.allocPrint(self.a(), " · {d} event{s}", .{ span_count, if (span_count == 1) "" else "s" }) else "",
+            });
             self.openOrders(res.contact);
             return;
         }
         const stop_text = game.cli.advanceStopText(res.stopped);
-        // Quiet cap_reached with no active contract: announce the next payday.
+        // Quiet cap_reached: no contract and nothing under construction — name
+        // the next payday.  Any span entries are included in the Desk log.
         if (res.stopped == .cap_reached) {
             var d = q.currentDate(g);
             var days_left: u32 = 0;
@@ -2939,7 +2947,8 @@ pub const App = struct {
             });
             return;
         }
-        // Typed screen routing for each stop reason, with span digest.
+        // Typed screen routing for each stop reason, with span entries digest.
+        // Entries are visible on the Desk (log) regardless of the destination tab.
         const suffix = if (span_count > 0)
             try std.fmt.allocPrint(self.a(), " · {d} event{s} since day {d}", .{ span_count, if (span_count == 1) "" else "s", start_day })
         else
@@ -4607,9 +4616,9 @@ pub const App = struct {
         for (checklist) |w| if (w.prompts) try asks.append(al, w);
         return asks.toOwnedSlice(al);
     }
-    const EndTurnAction = enum { day, week, jump, cancel };
+    const EndTurnAction = enum { day, week, next_stop, jump, cancel };
     pub const end_turn_bindings = [_]keys.Binding(EndTurnAction){
-        .{ .match = keys.Match.char('n'), .action = .day, .label = "advance until the next stop (bypasses this modal)", .group = .act },
+        .{ .match = keys.Match.char('n'), .action = .next_stop, .label = "advance until the next stop (bypasses this modal)", .group = .act },
         .{ .match = keys.Match.char('y'), .action = .day, .label = "a day", .group = .act, .show_footer = false, .show_help = false },
         .{ .match = keys.Match.char('N'), .action = .week, .label = "end 7 turns", .group = .act },
         .{ .match = .{ .chars = .{ '1', '9' } }, .action = .jump, .label = "go to that warning", .group = .navigate },
@@ -4814,6 +4823,10 @@ pub const App = struct {
                 const hit = keys.lookup(EndTurnAction, &end_turn_bindings, 0, key) orelse return;
                 switch (hit.action) {
                     .cancel => self.modal = .none,
+                    .next_stop => {
+                        self.modal = .none;
+                        try self.advanceUntilStop(0);
+                    },
                     .day => {
                         self.modal = .none;
                         try self.advance(self.end_turn_days);

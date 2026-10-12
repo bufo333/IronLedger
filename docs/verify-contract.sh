@@ -38,7 +38,7 @@ core=$(find src/domain src/sim src/econ src/gen -name '*.zig' | sort)
 
 # §1 Layers
 check "frontends touching GameState fields" \
-    "$(grep -nE '\b(g|gs)\.(units|hqs|forces|people|clock|funds|loans|market_listings|contract_offers|supply_policies|unit_transfers|bankrupt|outfit_name|campaign_id)\b' $tui)"
+    "$(grep -nE '\b(g|gs)\.(units|hqs|forces|people|clock|funds|loans|market_listings|contract_offers|supply_policies|unit_transfers|bankrupt|outfit_name|campaign_id|event_log)\b' $tui)"
 check "frontends calling GameState methods" \
     "$(grep -nE '\b(g|gs)\.[a-zA-Z_]+\(' $tui | grep -vE '\.(allocator|diff)\(')"
 check "frontends reaching sim, store or domain modules" \

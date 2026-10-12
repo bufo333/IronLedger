@@ -596,6 +596,17 @@ fn appendTag(alloc: Alloc, out: *std.ArrayListUnmanaged(u8), good: bool, text: [
     try out.appendSlice(alloc, "]{/}");
 }
 
+/// Returns formatted log rows for entries added during an advance span:
+/// entries with day > from_day (exclusive). Use after advance-until-stop to
+/// surface the notices accumulated over the just-completed advance (A1).
+pub fn logSpan(alloc: Alloc, gs: *GameState, from_day: u32) ![][]const u8 {
+    var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (gs.event_log.items) |*e| {
+        if (e.day > from_day) try rows.append(alloc, try logRow(alloc, e));
+    }
+    return rows.toOwnedSlice(alloc);
+}
+
 pub fn logRow(alloc: Alloc, e: *const state_mod.LogEntry) ![]const u8 {
     const mk: []const u8 = switch (e.category) {
         .battle => "{a}",

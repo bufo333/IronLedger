@@ -325,16 +325,21 @@ The test for a new blocking rule is *what it disposes of*, not how big it
 feels. If the worst outcome is a worse bonus, it waits in the inbox.
 
 **The stop model.** Beyond hard holds, the commander needs to be surfaced
-for a broader set of events: payday (salaries, board refresh), a decision
-arriving or nearing its deadline, a contract milestone, an arrival, a
-completed bay job or construction project, a rare hull listing, and a
-personnel event. `checklist.advanceStopOwner` is the single source of
-truth for this stop set — `advance_until_stop` (P5a, the `n` key) consults
-it, so a stop condition cannot be enforced
-in one place and reported in another (rule 3, rule 7). The priority order
-is: hold → contact → decision → payday → contract_end → arrival → bay_job
-→ project → listing → personnel. Changing the stop set shifts the
-fixed-seed stop count test; that test is the spec's proof.
+for a broader set of events. The stop set is context-specific:
+
+*On contract (P5a.2):* hold → contact → decision → payday → contract_end
+→ arrival (company return, transfers, part orders, artillery freight).
+`checklist.advanceStopOwner` owns this set.
+
+*At home between contracts (P5a.3):* the same set above, plus bay_job
+(structural depot_repair only, actual completion) → project → listing
+(rare hull newly listed) → personnel (actual recovery). Detected by
+`checklist.advanceHomeStop` after `advanceStopOwner`.
+
+`advance_until_stop` (P5a, the `n` key) consults both owners in the
+documented priority order, so a stop condition cannot be enforced in one
+place and reported in another (rule 3, rule 7). Changing the stop set
+shifts the fixed-seed stop count test; that test is the spec's proof.
 
 Before an engagement there is no hold, only a **stop**. When a scheduled
 engagement comes within `tuning.battle.contact_warning_days`, a multi-day
