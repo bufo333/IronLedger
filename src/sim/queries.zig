@@ -5234,8 +5234,9 @@ test "the battle screen offers exactly the orders the rule allows and shows the 
 
 test "oddsPercents totals 100 for every distribution the next phase can have" {
     const battle_phases = @import("battle_phases.zig");
-    // The contact pause the review reproduced: 360/576/252/108/0 of 1296
-    // rounds independently to 28 + 44 + 19 + 8 + 0 = 99.
+    // A contact pause's decisive odds of 360/576/252/108/0 in 1296 round
+    // independently to 28 + 44 + 19 + 8 + 0 = 99; the shown percentages
+    // total 100.
     const shown: battle_phase.Odds = .{ .next = .decisive, .counts = .{ 360, 576, 252, 108, 0 }, .total = 1296 };
     try std.testing.expectEqual([battle_phase.max_bands]u8{ 28, 45, 19, 8, 0 }, oddsPercents(shown));
     try std.testing.expectEqual([battle_phase.max_bands]u8{ 0, 0, 0, 0, 0 }, oddsPercents(.{}));
