@@ -23,6 +23,7 @@ const force_mod = @import("../domain/force.zig");
 const battle_report_mod = @import("../domain/battle_report.zig");
 const battle_phase_mod = @import("../domain/battle_phase.zig");
 const battle_phases_rules = @import("../sim/battle_phases.zig");
+const battle_rules = @import("../sim/battle.zig");
 const autoresolve_mod = @import("../domain/autoresolve.zig");
 const hq_mod = @import("../domain/hq.zig");
 const contract_mod = @import("../domain/contract.zig");
@@ -96,7 +97,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, battle INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS refit_plan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, committed INTEGER CHECK (committed IN (0,1)), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS refit_op (cid INTEGER NOT NULL, plan_ord INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, slot_key TEXT, location TEXT, part_key TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, plan_ord) REFERENCES refit_plan(cid, ord) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL CHECK (id > 0), day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)), salvage_unclaimed INTEGER NOT NULL DEFAULT 0, operation TEXT NOT NULL DEFAULT '', operation_intent TEXT NOT NULL DEFAULT '', operation_tempo TEXT NOT NULL DEFAULT '', operation_interventions TEXT NOT NULL DEFAULT '', artillery_present INTEGER NOT NULL CHECK(typeof(artillery_present)='integer' AND artillery_present IN (0,1)), UNIQUE (cid, ord), UNIQUE (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL CHECK (id > 0), day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)), salvage_unclaimed INTEGER NOT NULL DEFAULT 0, operation TEXT NOT NULL DEFAULT '', operation_intent TEXT NOT NULL DEFAULT '', operation_tempo TEXT NOT NULL DEFAULT '', operation_interventions TEXT NOT NULL DEFAULT '', artillery_present INTEGER NOT NULL CHECK(typeof(artillery_present)='integer' AND artillery_present IN (0,1)), phase_count INTEGER NOT NULL CHECK (typeof(phase_count)='integer' AND phase_count BETWEEN 0 AND 3), UNIQUE (cid, ord), UNIQUE (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_hit (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, chassis_key TEXT, chassis_name TEXT, armor_before INTEGER, armor_after INTEGER, slot TEXT, slot_part TEXT, slot_result TEXT, destroyed INTEGER, cause TEXT, pilot INTEGER, crew_name TEXT, wound_severity INTEGER, wound_location TEXT, wound_permanent INTEGER, fate TEXT, recovery_roll INTEGER, recovery_target INTEGER, lost INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_ammo (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, family TEXT, burned INTEGER, reserve INTEGER, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_salvage (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, key TEXT, name TEXT, bv INTEGER, armor_pct INTEGER, quality TEXT, damaged INTEGER, destroyed INTEGER, missing INTEGER, hull_instance_id INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
@@ -104,7 +105,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS operation_intervention (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, operation_id INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_task (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL, lance_id INTEGER NOT NULL, lance_name TEXT NOT NULL, task TEXT NOT NULL, succeeded INTEGER NOT NULL CHECK (succeeded IN (0,1)), note TEXT NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report_phase (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord BETWEEN 0 AND 2), phase TEXT NOT NULL CHECK (phase IN ('contact','decisive','pursuit','withdrawal')), order_kind TEXT NOT NULL CHECK (order_kind IN ('engage','press_on','withdraw','pursue','consolidate','cover_recovery','roe')), order_roe TEXT CHECK (order_roe IS NULL OR order_roe IN ('hold','standard','cautious')), roe TEXT NOT NULL CHECK (roe IN ('hold','standard','cautious')), ratio_bonus INTEGER NOT NULL CHECK (typeof(ratio_bonus)='integer' AND ratio_bonus BETWEEN -2147483648 AND 2147483647), scenario_mod INTEGER NOT NULL CHECK (typeof(scenario_mod)='integer' AND scenario_mod BETWEEN -2147483648 AND 2147483647), roe_roll INTEGER NOT NULL CHECK (typeof(roe_roll)='integer' AND roe_roll BETWEEN -2147483648 AND 2147483647), momentum INTEGER NOT NULL CHECK (typeof(momentum)='integer' AND momentum BETWEEN -2147483648 AND 2147483647), margin INTEGER NOT NULL CHECK (typeof(margin)='integer' AND margin BETWEEN -2147483648 AND 2147483647), hits INTEGER NOT NULL CHECK (typeof(hits)='integer' AND hits BETWEEN 0 AND 4294967295), PRIMARY KEY (cid, report_ord, ord), CHECK ((order_roe IS NULL) = (order_kind != 'roe')), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS battle_in_progress (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), contract_id INTEGER NOT NULL CHECK (typeof(contract_id)='integer' AND contract_id BETWEEN 1 AND 4294967295), phase TEXT NOT NULL CHECK (phase IN ('contact','decisive')), PRIMARY KEY (cid, contract_id), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS battle_in_progress (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), contract_id INTEGER NOT NULL CHECK (typeof(contract_id)='integer' AND contract_id BETWEEN 1 AND 4294967295), phase TEXT NOT NULL CHECK (phase IN ('contact','decisive')), orders INTEGER NOT NULL CHECK (typeof(orders)='integer' AND orders >= 1), PRIMARY KEY (cid, contract_id), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_in_progress_order (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), order_kind TEXT NOT NULL CHECK (order_kind IN ('engage','press_on','withdraw','pursue','consolidate','cover_recovery','roe')), order_roe TEXT CHECK (order_roe IS NULL OR order_roe IN ('hold','standard','cautious')), pause TEXT NOT NULL CHECK (pause IN ('contact','decisive')), margin INTEGER NOT NULL CHECK (typeof(margin)='integer' AND margin BETWEEN -2147483648 AND 2147483647), hits INTEGER NOT NULL CHECK (typeof(hits)='integer' AND hits BETWEEN 0 AND 4294967295), momentum INTEGER NOT NULL CHECK (typeof(momentum)='integer' AND momentum BETWEEN -2147483648 AND 2147483647), roe TEXT NOT NULL CHECK (roe IN ('hold','standard','cautious')), outcome TEXT CHECK (outcome IS NULL OR outcome IN ('decisive_victory','victory','draw','defeat','rout')), held_field INTEGER NOT NULL CHECK (held_field IN (0,1)), odds_next TEXT NOT NULL CHECK (odds_next IN ('decisive','pursuit','cover')), odds_0 INTEGER NOT NULL CHECK (typeof(odds_0)='integer' AND odds_0 BETWEEN 0 AND 65535), odds_1 INTEGER NOT NULL CHECK (typeof(odds_1)='integer' AND odds_1 BETWEEN 0 AND 65535), odds_2 INTEGER NOT NULL CHECK (typeof(odds_2)='integer' AND odds_2 BETWEEN 0 AND 65535), odds_3 INTEGER NOT NULL CHECK (typeof(odds_3)='integer' AND odds_3 BETWEEN 0 AND 65535), odds_4 INTEGER NOT NULL CHECK (typeof(odds_4)='integer' AND odds_4 BETWEEN 0 AND 65535), odds_total INTEGER NOT NULL CHECK (typeof(odds_total)='integer' AND odds_total BETWEEN 1 AND 65535), PRIMARY KEY (cid, contract_id, ord), CHECK ((order_roe IS NULL) = (order_kind != 'roe')), CHECK ((outcome IS NULL) = (pause = 'contact')), CHECK (pause = 'decisive' OR held_field = 0), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, contract_id) REFERENCES battle_in_progress(cid, contract_id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS actor (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, first_name TEXT NOT NULL, last_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, trust INTEGER NOT NULL DEFAULT 0, debt INTEGER NOT NULL DEFAULT 0, respect INTEGER NOT NULL DEFAULT 0, hostility INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS world_state (cid INTEGER NOT NULL, ord INTEGER NOT NULL, planet_key TEXT NOT NULL, security INTEGER NOT NULL DEFAULT 0, civilian_support INTEGER NOT NULL DEFAULT 0, infrastructure_strain INTEGER NOT NULL DEFAULT 0, employer_control INTEGER NOT NULL DEFAULT 0, enemy_influence INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, planet_key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
@@ -2009,7 +2010,7 @@ pub const Store = struct {
         // are child rows; the ammunition family is stored by name, not
         // by position, because `part.munition_keys` can grow and a
         // positional encoding would silently re-label saved rows.
-        const br = try self.db.prepare("INSERT INTO battle_report VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48,?49,?50,?51,?52,?53,?54,?55,?56,?57,?58)");
+        const br = try self.db.prepare("INSERT INTO battle_report VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32,?33,?34,?35,?36,?37,?38,?39,?40,?41,?42,?43,?44,?45,?46,?47,?48,?49,?50,?51,?52,?53,?54,?55,?56,?57,?58,?59)");
         defer br.finalize();
         const bh = try self.db.prepare("INSERT INTO battle_report_hit VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)");
         defer bh.finalize();
@@ -2039,7 +2040,7 @@ pub const Store = struct {
                 @as(i64, r.armor_left),                 r.salvage.claimed_bv,                 r.salvage.haulable_bv,                                              r.salvage.liaison_cut,
                 r.salvage.exchange_cash,                r.salvage.items,                      @as(i64, @intFromBool(r.conceded)),                                 @as(i64, @intFromBool(r.acknowledged)),
                 r.salvage.unclaimed_bv,                 r.operation,                          if (r.operation_intent) |oi| @tagName(oi) else @as([]const u8, ""), if (r.operation_tempo) |ot| @tagName(ot) else @as([]const u8, ""),
-                r.operation_interventions,              r.artillery != null,
+                r.operation_interventions,              r.artillery != null,                  @as(i64, @intCast(r.phases.len)),
             });
             try br.run();
             if (r.artillery) |a| try artillery_battle_store.save(self.db, cid, ord, &a);
@@ -2107,16 +2108,24 @@ pub const Store = struct {
         }
     }
 
-    /// The battle in progress: its contract and pause, then each order with
-    /// the pause report it reached, in order.
+    /// The battle in progress: its contract, pause and order count, then
+    /// each order with the pause report it reached, in order. The record
+    /// count (meta `battle_in_progress_count`) and each record's order count
+    /// are serialization completeness checks, not state: a removed record
+    /// or a truncated course of orders is corruption, never a battle not
+    /// yet engaged or one paused earlier.
     fn saveBattleInProgress(self: Store, gs: *GameState, cid: i64) !void {
-        const bb = try self.db.prepare("INSERT INTO battle_in_progress VALUES (?1,?2,?3,?4)");
+        const bb = try self.db.prepare("INSERT INTO battle_in_progress VALUES (?1,?2,?3,?4,?5)");
         defer bb.finalize();
         const bo = try self.db.prepare("INSERT INTO battle_in_progress_order VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)");
         defer bo.finalize();
+        const count = try self.db.prepare("INSERT INTO meta VALUES (?1,'battle_in_progress_count',?2)");
+        defer count.finalize();
+        try count.bindAll(.{ cid, @as(i64, @intCast(gs.battles_in_progress.items.len)) });
+        try count.run();
         for (gs.battles_in_progress.items, 0..) |record, i| {
             const contract: i64 = @intFromEnum(record.contract);
-            try bb.bindAll(.{ cid, @as(i64, @intCast(i)), contract, @tagName(record.phase) });
+            try bb.bindAll(.{ cid, @as(i64, @intCast(i)), contract, @tagName(record.phase), @as(i64, @intCast(record.steps.items.len)) });
             try bb.run();
             for (record.steps.items, 0..) |step, si| {
                 const r = step.report;
@@ -2280,6 +2289,8 @@ pub const Store = struct {
         try artillery.validate(&gs);
         try validateCounters(&gs);
         try validateStoredStrings(&gs);
+        // Last: the battle in progress replays from the complete, validated campaign.
+        try battle_rules.validateInProgress(&gs);
         return gs;
     }
 
@@ -3288,7 +3299,7 @@ pub const Store = struct {
         const alloc = gs.allocator();
         // Battle reports. Child rows are read per report; an outcome or
         // ROE that does not parse is `error.CorruptSave`.
-        const br = try self.db.prepare("SELECT ord, id, day, contract, company, kind, enemy_key, scenario, terrain, weather, outcome, held_field, withdrew, roe, roe_overridden, player_power, enemy_power, conditions_mod, close_terrain, air_grounded, convoy_hit, edge_spent_by, recon_quality, avg_fatigue, avg_morale, hits_taken, destroyed, wounded, kia, lost_hulls, missing, enemy_destroyed_bv, kills_credited, prisoners, battle_loss_comp, score_after, score_delta, morale_delta, fatigue_add, battle_loss_pct, salvage_pct, command_rights, silenced_mounts, armor_left, salvage_claimed, salvage_haulable, salvage_cut, salvage_cash, salvage_items, conceded, acknowledged, salvage_unclaimed, operation, operation_intent, operation_tempo, operation_interventions, artillery_present, typeof(artillery_present)='integer' FROM battle_report WHERE cid = ?1 ORDER BY ord");
+        const br = try self.db.prepare("SELECT ord, id, day, contract, company, kind, enemy_key, scenario, terrain, weather, outcome, held_field, withdrew, roe, roe_overridden, player_power, enemy_power, conditions_mod, close_terrain, air_grounded, convoy_hit, edge_spent_by, recon_quality, avg_fatigue, avg_morale, hits_taken, destroyed, wounded, kia, lost_hulls, missing, enemy_destroyed_bv, kills_credited, prisoners, battle_loss_comp, score_after, score_delta, morale_delta, fatigue_add, battle_loss_pct, salvage_pct, command_rights, silenced_mounts, armor_left, salvage_claimed, salvage_haulable, salvage_cut, salvage_cash, salvage_items, conceded, acknowledged, salvage_unclaimed, operation, operation_intent, operation_tempo, operation_interventions, artillery_present, typeof(artillery_present)='integer' AND typeof(phase_count)='integer', phase_count FROM battle_report WHERE cid = ?1 ORDER BY ord");
         defer br.finalize();
         try br.bindAll(.{cid});
         while (try br.next()) {
@@ -3302,7 +3313,7 @@ pub const Store = struct {
             const ammo = try self.loadReportAmmo(alloc, cid, ord);
             const candidates = try self.loadReportSalvage(alloc, cid, ord);
             const tasks = try self.loadReportTasks(alloc, cid, ord);
-            const phases = try self.loadReportPhases(alloc, cid, ord);
+            const phases = try self.loadReportPhases(alloc, cid, ord, try br.intAs(usize, 58));
             try gs.battle_reports.kept.append(alloc, .{
                 .id = try toId(types.BattleId, br.int(1)),
                 .day = try br.intAs(u32, 2),
@@ -3376,6 +3387,7 @@ pub const Store = struct {
                 .tasks = tasks,
                 .artillery = artillery_result,
             });
+            if (!battle_phases_rules.reportPhasesConsistent(&gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1])) return error.CorruptSave;
         }
         try artillery_battle_store.validateParents(self.db, cid);
         // Post-load orphan check: a child row whose report_ord names no loaded
@@ -3430,9 +3442,10 @@ pub const Store = struct {
         };
     }
 
-    /// A report's fought phases, in order: contiguous from 0, at most
-    /// `battle_phases.max_phases`, each integer stored as an integer.
-    fn loadReportPhases(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64) ![]battle_phase_mod.PhaseRecord {
+    /// A report's fought phases, in order: contiguous from 0, exactly the
+    /// `count` the report row records, at most `battle_phases.max_phases`,
+    /// each integer stored as an integer.
+    fn loadReportPhases(self: Store, alloc: std.mem.Allocator, cid: i64, ord: i64, count: usize) ![]battle_phase_mod.PhaseRecord {
         var phases: std.ArrayListUnmanaged(battle_phase_mod.PhaseRecord) = .empty;
         const bp = try self.db.prepare("SELECT ord, phase, order_kind, order_roe, roe, ratio_bonus, scenario_mod, roe_roll, momentum, margin, hits, typeof(ord)='integer' AND typeof(ratio_bonus)='integer' AND typeof(scenario_mod)='integer' AND typeof(roe_roll)='integer' AND typeof(momentum)='integer' AND typeof(margin)='integer' AND typeof(hits)='integer' FROM battle_report_phase WHERE cid = ?1 AND report_ord = ?2 ORDER BY ord");
         defer bp.finalize();
@@ -3452,21 +3465,26 @@ pub const Store = struct {
                 .hits = try bp.intAs(u32, 10),
             });
         }
+        if (phases.items.len != count) return error.CorruptSave;
         return phases.items;
     }
 
     /// The battle in progress (rules 47, 70). Fails closed on an unknown
     /// phase or order, a record for a missing or inactive contract, more than
     /// one record (the battle lock allows one), orders out of sequence or
-    /// orphaned, a malformed integer, and a course of orders or a pause that
-    /// `battle_phases.recordConsistent` rejects.
+    /// orphaned, a malformed integer, a record count (meta
+    /// `battle_in_progress_count`) or an order count the rows do not match,
+    /// and a course of orders or a pause that `battle_phases.recordConsistent`
+    /// rejects. `battle.validateInProgress` replays the record once the
+    /// whole campaign is loaded.
     fn loadBattleInProgress(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const bb = try self.db.prepare("SELECT ord, contract_id, phase, typeof(ord)='integer' AND typeof(contract_id)='integer' FROM battle_in_progress WHERE cid = ?1 ORDER BY ord");
+        const bb = try self.db.prepare("SELECT ord, contract_id, phase, typeof(ord)='integer' AND typeof(contract_id)='integer' AND typeof(orders)='integer', orders FROM battle_in_progress WHERE cid = ?1 ORDER BY ord");
         defer bb.finalize();
         try bb.bindAll(.{cid});
         while (try bb.next()) {
             if (bb.int(3) != 1) return error.CorruptSave;
+            const orders = try bb.intAs(usize, 4);
             if (bb.int(0) != @as(i64, @intCast(gs.battles_in_progress.items.len)) or gs.battles_in_progress.items.len > 0) return error.CorruptSave;
             const contract = try toId(types.ContractId, bb.int(1));
             const c = gs.contracts.getPtr(contract) orelse return error.CorruptSave;
@@ -3503,6 +3521,7 @@ pub const Store = struct {
                     },
                 });
             }
+            if (record.steps.items.len != orders) return error.CorruptSave;
             if (!battle_phases_rules.recordConsistent(&record)) return error.CorruptSave;
             try gs.battles_in_progress.append(alloc, record);
         }
@@ -3511,6 +3530,7 @@ pub const Store = struct {
         try orphan.bindAll(.{cid});
         if (!try orphan.next()) return error.CorruptSave;
         if (orphan.int(0) > 0) return error.CorruptSave;
+        if ((try self.hqMetaUint(cid, "battle_in_progress_count", true)).? != gs.battles_in_progress.items.len) return error.CorruptSave;
     }
 
     /// The hulls a report's hit rows name, in order.
@@ -10218,7 +10238,7 @@ test "malformed battle-in-progress rows refuse to load" {
         "UPDATE battle_in_progress SET contract_id=-1; UPDATE battle_in_progress_order SET contract_id=-1",
         "UPDATE battle_in_progress SET contract_id=4294967296; UPDATE battle_in_progress_order SET contract_id=4294967296",
         "UPDATE contract SET status='completed' WHERE is_offer=0",
-        "INSERT INTO battle_in_progress SELECT cid, ord+1, contract_id+1, phase FROM battle_in_progress",
+        "INSERT INTO battle_in_progress SELECT cid, ord+1, contract_id+1, phase, orders FROM battle_in_progress",
         "DELETE FROM battle_in_progress",
         "DELETE FROM battle_in_progress_order",
         "DELETE FROM battle_in_progress_order WHERE ord=2",
@@ -10260,7 +10280,7 @@ test "malformed battle-in-progress rows refuse to load" {
     }
     // A second record for the same contract, past the primary key.
     try store.save(&gs);
-    try store.db.exec("PRAGMA foreign_keys=OFF; ALTER TABLE battle_in_progress RENAME TO bip_old; CREATE TABLE battle_in_progress(cid,ord,contract_id,phase); INSERT INTO battle_in_progress SELECT * FROM bip_old; INSERT INTO battle_in_progress SELECT cid, ord+1, contract_id, phase FROM bip_old; DROP TABLE bip_old; PRAGMA foreign_keys=ON");
+    try store.db.exec("PRAGMA foreign_keys=OFF; ALTER TABLE battle_in_progress RENAME TO bip_old; CREATE TABLE battle_in_progress(cid,ord,contract_id,phase,orders); INSERT INTO battle_in_progress SELECT * FROM bip_old; INSERT INTO battle_in_progress SELECT cid, ord+1, contract_id, phase, orders FROM bip_old; DROP TABLE bip_old; PRAGMA foreign_keys=ON");
     try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
 }
 
@@ -10302,6 +10322,179 @@ test "a battle report's phases round trip, and malformed phase rows refuse to lo
         std.debug.print("accepted battle phase corruption: {s}\n", .{tamper});
         return error.TestExpectedError;
     }
+}
+
+/// Saves `gs`, applies `tamper` with every column constraint enforced, and
+/// requires the load to refuse it as `CorruptSave` with the stored rows and
+/// the source campaign unchanged.
+fn expectBattleTamperRefusedForTest(store: Store, gs: *GameState, tamper: [*:0]const u8) !void {
+    try store.save(gs);
+    const source = digest.stateHash(gs);
+    try store.db.exec(tamper);
+    const stored = try databaseFingerprintForTest(store.db);
+    var invalid = store.load(std.testing.allocator, gs.campaign_id) catch |err| {
+        try std.testing.expectEqual(error.CorruptSave, err);
+        try std.testing.expectEqual(stored, try databaseFingerprintForTest(store.db));
+        try std.testing.expectEqual(source, digest.stateHash(gs));
+        return;
+    };
+    invalid.deinit();
+    std.debug.print("accepted battle corruption: {s}\n", .{tamper});
+    return error.TestExpectedError;
+}
+
+test "a battle in progress whose rows are removed refuses to load, the store and campaign unchanged" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    _ = try battleInProgressForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+    for ([_][*:0]const u8{
+        // Both tables' rows: the contact history and the battle lock gone.
+        "DELETE FROM battle_in_progress_order; DELETE FROM battle_in_progress",
+        // The last order, the pause rewound to the shorter course it leaves.
+        "DELETE FROM battle_in_progress_order WHERE ord=2; UPDATE battle_in_progress SET phase='contact'",
+        // The completeness counts themselves missing, malformed or wrong.
+        "DELETE FROM meta WHERE key='battle_in_progress_count'",
+        "UPDATE meta SET value=0 WHERE key='battle_in_progress_count'",
+        "UPDATE meta SET value=2 WHERE key='battle_in_progress_count'",
+        "UPDATE meta SET value=-1 WHERE key='battle_in_progress_count'",
+        "UPDATE meta SET value=1.5 WHERE key='battle_in_progress_count'",
+        "UPDATE battle_in_progress SET orders=orders+1",
+        "UPDATE battle_in_progress SET orders=orders-1",
+    }) |tamper| try expectBattleTamperRefusedForTest(store, &gs, tamper);
+}
+
+test "a due engagement not yet engaged, and a finished one, load with no battle in progress" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    const id = try @import("../sim/battle.zig").dueEngagementForTest(&gs, true, 30);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+    {
+        var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+        defer loaded.deinit();
+        try std.testing.expectEqual(@as(usize, 0), loaded.battles_in_progress.items.len);
+        try std.testing.expectEqual(@as(?types.ContractId, id), @import("../sim/battle.zig").dueEngagement(&loaded));
+    }
+    // A count that claims a battle the rows do not hold.
+    try expectBattleTamperRefusedForTest(store, &gs, "UPDATE meta SET value=1 WHERE key='battle_in_progress_count'");
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .battle_order = .{ .contract = id, .order = .engage } });
+    try finishBattleForTest(&gs);
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+}
+
+test "a battle report whose phase rows are removed refuses to load; a concession or a forfeit keeps none" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    _ = try battleInProgressForTest(&gs);
+    try finishBattleForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+    for ([_][*:0]const u8{
+        // The terminal phase.
+        "DELETE FROM battle_report_phase WHERE ord=(SELECT MAX(ord) FROM battle_report_phase)",
+        // Every phase of a fought battle.
+        "DELETE FROM battle_report_phase",
+        // The decisive phase, the terminal one renumbered to close the gap.
+        "DELETE FROM battle_report_phase WHERE ord=1; UPDATE battle_report_phase SET ord=1 WHERE ord=2",
+        // The terminal phase, the count lowered to match: an unfinished course.
+        "DELETE FROM battle_report_phase WHERE ord=2; UPDATE battle_report SET phase_count=2",
+        // The count itself wrong.
+        "UPDATE battle_report SET phase_count=phase_count-1",
+        "UPDATE battle_report SET phase_count=0",
+        // A fought verdict the phases do not carry.
+        "UPDATE battle_report SET hits_taken=hits_taken+1",
+        "UPDATE battle_report SET outcome=CASE outcome WHEN 'rout' THEN 'victory' ELSE 'rout' END",
+        "UPDATE battle_report SET held_field=1-held_field",
+        "UPDATE battle_report_phase SET momentum=momentum+1 WHERE ord=1",
+    }) |tamper| try expectBattleTamperRefusedForTest(store, &gs, tamper);
+    // A concession and a forfeit fight no phase: their empty reports load.
+    for ([_]bool{ false, true }) |forfeited| {
+        var one_step = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+        defer one_step.deinit();
+        const id = try @import("../sim/battle.zig").dueEngagementForTest(&one_step, forfeited, 100);
+        if (forfeited) {
+            one_step.faction_rosters.getPtr("DC").?.clearRetainingCapacity();
+        } else {
+            for (one_step.units.values()) |*u| u.status = .destroyed;
+        }
+        _ = try @import("../sim/commands.zig").execute(&one_step, .{ .battle_order = .{ .contract = id, .order = .engage } });
+        const report = one_step.battle_reports.kept.items[one_step.battle_reports.kept.items.len - 1];
+        try std.testing.expectEqual(@as(usize, 0), report.phases.len);
+        try std.testing.expectEqual(!forfeited, report.conceded);
+        const one_step_store = try Store.open(":memory:");
+        defer one_step_store.close();
+        try one_step_store.save(&one_step);
+        var loaded = try one_step_store.load(std.testing.allocator, one_step.campaign_id);
+        defer loaded.deinit();
+        const reloaded = loaded.battle_reports.kept.items[loaded.battle_reports.kept.items.len - 1];
+        try std.testing.expectEqual(report.id, reloaded.id);
+        try std.testing.expectEqual(@as(usize, 0), reloaded.phases.len);
+        try std.testing.expectEqual(report.conceded, reloaded.conceded);
+    }
+}
+
+test "a battle in progress whose stored pauses its replay does not reach refuses to load, the store and campaign unchanged" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    const id = try battleInProgressForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+    // A forged decisive verdict that every column constraint and
+    // `recordConsistent` accept: another outcome, with its field and odds.
+    const record = battle_phases_rules.inProgress(&gs).?;
+    const real = record.latest().*;
+    const outcome: autoresolve_mod.Outcome = if (real.outcome.? == .victory) .defeat else .victory;
+    const held = battle_phases_rules.heldField(outcome, real.roe);
+    const next: battle_phase_mod.NextPhase = if (held) .pursuit else .cover;
+    const steps = try std.testing.allocator.dupe(battle_phase_mod.Step, record.steps.items);
+    defer std.testing.allocator.free(steps);
+    steps[steps.len - 1].report.outcome = outcome;
+    steps[steps.len - 1].report.held_field = held;
+    steps[steps.len - 1].report.odds = .{ .next = next, .counts = .{ 36, 0, 0, 0, 0 }, .total = 36 };
+    const forged: battle_phase_mod.BattleInProgress = .{ .contract = id, .phase = .decisive, .steps = .{ .items = steps, .capacity = steps.len } };
+    try std.testing.expect(battle_phases_rules.recordConsistent(&forged));
+    var sql: [320]u8 = undefined;
+    try expectBattleTamperRefusedForTest(store, &gs, try std.fmt.bufPrintZ(&sql, "UPDATE battle_in_progress_order SET outcome='{s}', held_field={d}, odds_next='{s}', odds_0=36, odds_1=0, odds_2=0, odds_3=0, odds_4=0, odds_total=36 WHERE pause='decisive'", .{ @tagName(outcome), @intFromBool(held), @tagName(next) }));
+    for ([_][*:0]const u8{
+        // Impossible contact figures inside every column range.
+        "UPDATE battle_in_progress_order SET hits=4294967295, margin=2147483647, momentum=2147483647 WHERE ord=0",
+        "UPDATE battle_in_progress_order SET hits=hits+1 WHERE ord=0",
+        "UPDATE battle_in_progress_order SET margin=margin+1 WHERE ord=0",
+        "UPDATE battle_in_progress_order SET momentum=momentum+1 WHERE ord=0",
+        "UPDATE battle_in_progress_order SET roe=CASE roe WHEN 'hold' THEN 'standard' ELSE 'hold' END WHERE ord=0",
+        "UPDATE battle_in_progress_order SET odds_0=odds_total, odds_1=0, odds_2=0, odds_3=0, odds_4=0 WHERE ord=0",
+        "UPDATE battle_in_progress_order SET hits=hits+1 WHERE pause='decisive'",
+        "UPDATE battle_in_progress_order SET margin=margin-1 WHERE pause='decisive'",
+        // Another ROE order, its report agreeing with it: the replay does not.
+        "UPDATE battle_in_progress_order SET order_roe='hold', roe='hold' WHERE ord=1",
+    }) |tamper| try expectBattleTamperRefusedForTest(store, &gs, tamper);
+    // A contract whose engagement is not yet due: no battle could have started.
+    try expectBattleTamperRefusedForTest(store, &gs, try std.fmt.bufPrintZ(&sql, "UPDATE contract SET next_battle=next_battle+5 WHERE is_offer=0 AND id={d}", .{@intFromEnum(id)}));
+
+    // Under integrated command the employer holds the ROE: a saved record
+    // holding an ROE order is one the command refuses.
+    var locked = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer locked.deinit();
+    const lid = try @import("../sim/battle.zig").dueEngagementForTest(&locked, true, 30);
+    for ([_]battle_phase_mod.Order{ .engage, .{ .roe = .cautious } }) |order| {
+        _ = try @import("../sim/commands.zig").execute(&locked, .{ .battle_order = .{ .contract = lid, .order = order } });
+    }
+    const locked_store = try Store.open(":memory:");
+    defer locked_store.close();
+    try locked_store.save(&locked);
+    try expectCurrentRoundTripForTest(locked_store, &locked);
+    try expectBattleTamperRefusedForTest(locked_store, &locked, try std.fmt.bufPrintZ(&sql, "UPDATE contract SET command_rights='integrated' WHERE is_offer=0 AND id={d}", .{@intFromEnum(lid)}));
 }
 
 test "a store at format 63 is refused before any change, battle in progress or not" {

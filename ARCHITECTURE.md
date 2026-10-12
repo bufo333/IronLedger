@@ -1129,10 +1129,20 @@ only after COMMIT.
 **A battle in progress is saved** (schema 64): `battle_in_progress` (the
 contract and its pause) and `battle_in_progress_order` (each order with the
 pause report it reached, odds included), and each report's fought phases in
-`battle_report_phase`. The loader refuses an unknown phase or order, a
-record for a missing or inactive contract, more than one record, orders out
-of sequence or orphaned, a malformed integer, and a course of orders that
-`battle_phases.recordConsistent` rejects. Saving mid-battle, loading and
+`battle_report_phase`. The record count (meta `battle_in_progress_count`),
+each record's order count and each report's phase count are saved as
+completeness checks, so a removed record, a truncated course of orders or a
+report missing phases is corruption, never a battle not yet engaged, an
+earlier pause or a concession. The loader refuses an unknown phase or order,
+a record for a missing or inactive contract, more than one record, orders out
+of sequence or orphaned, a malformed integer, a count the rows do not match,
+a course of orders that `battle_phases.recordConsistent` rejects, and report
+phases that are not a whole course agreeing with the report's verdict
+(`battle_phases.reportPhasesConsistent`). Once the campaign is loaded,
+`battle.validateInProgress` replays every prefix of the orders from live
+state and requires exactly the pause stored for it, with the engagement
+due, nothing else holding the turn and no ROE order the employer reserves.
+A forged pause is refused, never repaired. Saving mid-battle, loading and
 finishing gives the same digest as finishing without the save.
 
 **RNG state is saved per stream**: the campaign seed plus one

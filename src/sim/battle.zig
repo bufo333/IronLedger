@@ -177,19 +177,12 @@ pub fn execBattleOrder(gs: *GameState, o: @FieldType(commands.Command, "battle_o
     } else null;
     if (record == null) {
         if (gs.battles_in_progress.items.len > 0) return error.BattleInProgress;
-        if (!engagementDue(gs, c)) return error.NoEngagementDue;
-        // A battle starts only when nothing else holds the turn: an unread
-        // report or an unanswered decision cannot be dealt with under the lock.
-        if (@import("checklist.zig").turnHold(gs)) |hold| switch (hold) {
-            .unread_after_action => return error.ReportUnread,
-            .battle_decision => return error.DecisionPending,
-            .engagement_due => {},
-        };
+        try startAllowed(gs, c);
     }
     const pause: ?battle_phase.Pause = if (record) |r| r.phase else null;
     const held = if (record) |r| r.latest().held_field else false;
     if (!battle_phases.orderLegal(pause, held, o.order)) return error.OrderNotLegal;
-    if (o.order == .roe and c.terms.command_rights.overridesRoe()) return error.RoeReservedByEmployer;
+    try roeOrderAllowed(c, o.order);
 
     const given = if (record) |r| r.steps.items.len else 0;
     const orders = try gs.scratch().alloc(battle_phase.Order, given + 1);
@@ -199,6 +192,60 @@ pub fn execBattleOrder(gs: *GameState, o: @FieldType(commands.Command, "battle_o
     };
     orders[given] = o.order;
     return fightOrders(gs, o.contract, orders, gs.scratch());
+}
+
+/// The contract's engagement may be started: it is due, and nothing else
+/// holds the turn, since an unread report or an unanswered decision cannot
+/// be dealt with under the battle lock.
+fn startAllowed(gs: *GameState, c: *const contract_mod.Contract) error{ NoEngagementDue, ReportUnread, DecisionPending }!void {
+    if (!engagementDue(gs, c)) return error.NoEngagementDue;
+    if (@import("checklist.zig").turnHold(gs)) |hold| switch (hold) {
+        .unread_after_action => return error.ReportUnread,
+        .battle_decision => return error.DecisionPending,
+        .engagement_due => {},
+    };
+}
+
+/// An ROE order is refused while the employer holds the ROE under
+/// integrated command (ROADMAP P5b.3).
+fn roeOrderAllowed(c: *const contract_mod.Contract, order: battle_phase.Order) error{RoeReservedByEmployer}!void {
+    if (order == .roe and c.terms.command_rights.overridesRoe()) return error.RoeReservedByEmployer;
+}
+
+/// A loaded battle in progress is one the battle order command could have
+/// left (rules 1, 47): its contract's engagement was startable (due, nothing
+/// else holding the turn, which the battle lock keeps true), no ROE order is
+/// one the employer reserves, and replaying each prefix of its orders from
+/// live state in a discarded workspace reaches exactly the pause stored for
+/// it. Anything else is `error.CorruptSave`, never repaired; nothing changes.
+pub fn validateInProgress(gs: *GameState) error{ CorruptSave, OutOfMemory }!void {
+    const record = battle_phases.inProgress(gs) orelse return;
+    const c = gs.contracts.getPtr(record.contract) orelse return error.CorruptSave;
+    startAllowed(gs, c) catch return error.CorruptSave;
+    const orders = try gs.scratch().alloc(battle_phase.Order, record.steps.items.len);
+    defer gs.scratch().free(orders);
+    for (record.steps.items, 0..) |step, i| {
+        roeOrderAllowed(c, step.order) catch return error.CorruptSave;
+        orders[i] = step.order;
+        const reached = replayPause(gs, record.contract, orders[0 .. i + 1]) catch |err| switch (err) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => return error.CorruptSave,
+        };
+        if (!std.meta.eql(reached, step.report)) return error.CorruptSave;
+    }
+}
+
+/// The pause `orders` reach from live state, fought in a discarded
+/// workspace; `error.OrderNotLegal` when they end the battle instead.
+fn replayPause(gs: *GameState, id: types.ContractId, orders: []const battle_phase.Order) !battle_phase.PhaseReport {
+    var engagement = try battle_preparation.Engagement.init(gs, gs.scratch());
+    defer engagement.deinit();
+    const staged = &engagement.view;
+    const contract = staged.contracts.getPtr(id) orelse return error.UnknownContract;
+    return switch (try fightStaged(staged, contract, .{ .given = orders }, gs.scratch())) {
+        .paused => |report| report,
+        .finished => error.OrderNotLegal,
+    };
 }
 
 /// Fights `orders` from live state in a discarded workspace. A pause is
@@ -5835,6 +5882,62 @@ test "the battle lock refuses every other command while a battle is in progress"
     const paused = digest.stateHash(&gs);
     try std.testing.expectError(error.OrderNotLegal, orderForTest(&gs, id, .engage));
     try std.testing.expectEqual(paused, digest.stateHash(&gs));
+}
+
+test "validateInProgress accepts each pause the command records and refuses a record it could not have left" {
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    const id = try dueEngagementForTest(&gs, true, 30);
+    try validateInProgress(&gs);
+    // Consumer: every pause the battle order command records replays exactly.
+    for ([_]battle_phase.Order{ .engage, .{ .roe = .cautious }, .press_on }) |order| {
+        _ = try orderForTest(&gs, id, order);
+        try validateInProgress(&gs);
+    }
+    const before = digest.stateHash(&gs);
+    const record = &gs.battles_in_progress.items[0];
+    const c = gs.contracts.getPtr(id).?;
+    // A stored pause the replay does not reach.
+    for (record.steps.items) |*step| {
+        const real = step.report;
+        step.report.hits += 1;
+        try std.testing.expectError(error.CorruptSave, validateInProgress(&gs));
+        step.report = real;
+        step.report.momentum -= 1;
+        try std.testing.expectError(error.CorruptSave, validateInProgress(&gs));
+        step.report = real;
+    }
+    // An engagement not yet due could not have been started.
+    c.next_battle_day = gs.clock.day_index + 1;
+    try std.testing.expectError(error.CorruptSave, validateInProgress(&gs));
+    c.next_battle_day = gs.clock.day_index;
+    // An unread report would have held the turn before contact was joined.
+    try gs.battle_reports.kept.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_battle_id), .day = 0, .contract = id, .company = c.assigned_company, .kind = "", .enemy_key = "", .scenario = "", .terrain = "", .weather = "", .outcome = .draw, .roe = .standard });
+    try std.testing.expectError(error.CorruptSave, validateInProgress(&gs));
+    _ = gs.battle_reports.kept.pop();
+    try validateInProgress(&gs);
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    // Consumer: the report the battle publishes is a whole course.
+    while (battle_phases.inProgress(&gs) != null) try @import("tick.zig").fightDueEngagement(&gs);
+    try std.testing.expect(battle_phases.reportPhasesConsistent(&gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1]));
+
+    // Under integrated command the employer reserves the ROE. The record is
+    // built from the replay itself, so it matches every pause and only the
+    // lock refuses the ROE order it holds.
+    var locked = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer locked.deinit();
+    const lid = try dueEngagementForTest(&locked, true, 30);
+    locked.contracts.getPtr(lid).?.terms.command_rights = .integrated;
+    const course = [_]battle_phase.Order{ .engage, .{ .roe = .cautious } };
+    var record_under_lock: battle_phase.BattleInProgress = .{ .contract = lid, .phase = .contact };
+    for (course, 1..) |order, n| try record_under_lock.steps.append(locked.allocator(), .{ .order = order, .report = try replayPause(&locked, lid, course[0..n]) });
+    try locked.battles_in_progress.append(locked.allocator(), record_under_lock);
+    const steps = &locked.battles_in_progress.items[0].steps;
+    steps.items.len = 1;
+    try validateInProgress(&locked);
+    steps.items.len = 2;
+    try std.testing.expectError(error.CorruptSave, validateInProgress(&locked));
 }
 
 test "concession and forfeit resolve on the first order as one-step battles" {

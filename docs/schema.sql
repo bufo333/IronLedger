@@ -94,6 +94,9 @@ CREATE TABLE campaign (
 -- It is serialization completeness metadata, not GameState state. Current
 -- next_hq_id is required, an original SQLite INTEGER, nonzero, and greater
 -- than all live and retired identities; current corruption is never repaired.
+-- v64 requires battle_in_progress_count (including zero), the exact
+-- battle_in_progress row count, likewise completeness metadata: removed
+-- battle rows are corruption, never an engagement not yet engaged.
 CREATE TABLE meta (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,
@@ -799,6 +802,7 @@ CREATE TABLE battle_report (
     operation_tempo TEXT    NOT NULL DEFAULT '',     -- P4f: TempoPosture tag name of the committed operation; empty = no tempo
     operation_interventions TEXT NOT NULL DEFAULT '', -- P4g: comma-separated intervention labels applied; empty = none
     artillery_present INTEGER NOT NULL CHECK(typeof(artillery_present)='integer' AND artillery_present IN (0,1)), -- required result-presence marker, never inferred from child rows
+    phase_count     INTEGER NOT NULL CHECK (typeof(phase_count)='integer' AND phase_count BETWEEN 0 AND 3), -- exact battle_report_phase row count (0: a concession or a forfeit); completeness check, not state
     UNIQUE (cid, ord),
     UNIQUE (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
@@ -985,6 +989,7 @@ CREATE TABLE battle_in_progress (
     ord             INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), -- always 0
     contract_id     INTEGER NOT NULL CHECK (typeof(contract_id)='integer' AND contract_id BETWEEN 1 AND 4294967295), -- -> contract.id
     phase           TEXT    NOT NULL CHECK (phase IN ('contact','decisive')), -- the pause reached (domain/battle_phase.zig Pause)
+    orders          INTEGER NOT NULL CHECK (typeof(orders)='integer' AND orders >= 1), -- exact battle_in_progress_order row count; completeness check, not state
     PRIMARY KEY (cid, contract_id),
     UNIQUE (cid, ord),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
