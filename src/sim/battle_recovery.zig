@@ -17,12 +17,15 @@ const personnel = @import("personnel.zig");
 const contract_events = @import("contract_events.zig");
 
 /// Shared recovery modifier for one battlefield and the combined ordinary and
-/// carrier wreck population. Source: ARCH section 7 and existing loss tuning.
-pub fn situation(gs: *GameState, c: *const contract.Contract, battle_scenario: *const scenario.Scenario, outcome: autoresolve.Outcome, roe: force.Roe, has_salvage: bool, trucks: i64, wrecks: i64) i32 {
+/// carrier wreck population; `covered` when the commander covered the
+/// recovery after a lost field (`tuning.battle.phases.cover`). Source: ARCH
+/// section 7 and existing loss tuning.
+pub fn situation(gs: *GameState, c: *const contract.Contract, battle_scenario: *const scenario.Scenario, outcome: autoresolve.Outcome, roe: force.Roe, covered: bool, has_salvage: bool, trucks: i64, wrecks: i64) i32 {
     const t = tuning.loss;
     const rt = t.roe;
     const task_bonus = if (operations.committedCombatOp(c)) |op| operations.operationTaskMods(gs, c, op).recovery_bonus else 0;
-    return (if (has_salvage) t.recovery_salvage_lance else 0) +
+    return (if (covered) tuning.battle.phases.cover.recovery_mod else 0) +
+        (if (has_salvage) t.recovery_salvage_lance else 0) +
         (if (trucks >= wrecks and trucks > 0) t.recovery_trucks else 0) +
         (if (lift.hasCrewedDropship(gs, c.assigned_company)) t.recovery_dropship else 0) +
         (if (outcome == .rout) t.recovery_rout else 0) +
@@ -59,9 +62,12 @@ test "combined wreck population prevents duplicate truck sufficiency and escape 
     const c: contract.Contract = .{ .id = @enumFromInt(1), .kind = .recon_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 } };
     var rng = gs.rng;
     const battle_scenario = scenario.roll(&rng, .battle, c.kind);
-    const ordinary = situation(&gs, &c, battle_scenario, .defeat, .standard, false, 1, 1);
-    const combined = situation(&gs, &c, battle_scenario, .defeat, .standard, false, 1, 2);
+    const ordinary = situation(&gs, &c, battle_scenario, .defeat, .standard, false, false, 1, 1);
+    const combined = situation(&gs, &c, battle_scenario, .defeat, .standard, false, false, 1, 2);
     try std.testing.expectEqual(tuning.loss.recovery_trucks, ordinary - combined);
+    // A covered recovery rolls better by the rearguard's share.
+    const covered = situation(&gs, &c, battle_scenario, .defeat, .standard, true, false, 1, 1);
+    try std.testing.expectEqual(tuning.battle.phases.cover.recovery_mod, covered - ordinary);
     const id = try gs.hirePerson("Actual", "Crew", .vehicle_crew);
     gs.person(id).?.skills.clearRetainingCapacity();
     var expected = gs.rng;

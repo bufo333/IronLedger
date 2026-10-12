@@ -1,10 +1,11 @@
-//! Battle autoresolution (Stage 7, ARCH §7). Adaptation of MekHQ's ACAR.
-//! Combat-class contracts schedule engagements every few weeks; each
-//! resolves without the player from what the campaign built: BV and crew
-//! skill, machine condition, fatigue and morale, the support echelon, and
-//! recon. Damage lands on real part slots, casualties go to the infirmary,
-//! salvage and battle-loss comp hit the ledger, and the AAR names the
-//! reasons. Legibility over drama: a loss should trace to causes.
+//! Battle resolution (Stage 7, P5b; ARCH §7). Adaptation of MekHQ's ACAR.
+//! Combat-class contracts schedule engagements every few weeks; each holds
+//! the turn when its day comes and is fought in phases under the
+//! commander's orders (`battle_phases`), from what the campaign built: BV
+//! and crew skill, machine condition, fatigue and morale, the support
+//! echelon, and recon. Damage lands on real part slots, casualties go to
+//! the infirmary, salvage and battle-loss comp hit the ledger, and the AAR
+//! names the reasons. Legibility over drama: a loss should trace to causes.
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
@@ -36,6 +37,9 @@ const battle_preparation = @import("battle_preparation.zig");
 const battle_casualties = @import("battle_casualties.zig");
 const battle_recovery = @import("battle_recovery.zig");
 const artillery_battle = @import("artillery_battle.zig");
+const battle_phases = @import("battle_phases.zig");
+const battle_phase = @import("../domain/battle_phase.zig");
+const commands = @import("commands.zig");
 
 /// Salvage trucks (SVT-1) a company can work a battlefield: operational
 /// (fit crew, not parked or busy) SVT-1s only (ARCH §9.3 active capability).
@@ -117,28 +121,130 @@ pub fn effectiveRoe(gs: *GameState, c: *const contract_mod.Contract, company: ty
     return if (gs.force(company)) |f| f.roe else .standard;
 }
 
-/// battle_resolution phase, daily: schedule and resolve engagements for
-/// active combat-class contracts.
+/// An active contract with someone to fight. Garrison work fights too
+/// (ARCH §8): the enemy probes the perimeter, but a contract with no rolled
+/// opposing force has nothing to probe with.
+fn fightsEngagements(c: *const contract_mod.Contract) bool {
+    if (c.status != .active) return false;
+    return !(c.kind.isGarrisonClass() and !c.hasOpfor());
+}
+
+/// battle_resolution phase, daily: schedule the first engagement of each
+/// active combat-class contract. An engagement whose day arrives is not
+/// fought here: it holds the turn (`engagementDue`) until the commander
+/// fights it with battle orders, after that day's tick (ARCH §6 step 8).
 pub fn runDaily(gs: *GameState) !void {
     var index: usize = 0;
     while (index < gs.contracts.count()) : (index += 1) {
         const id = gs.contracts.keys()[index];
         const c = gs.contracts.getPtr(id).?;
-        if (c.status != .active) continue;
-        // Garrison work fights too (ARCH §8): the enemy probes the
-        // perimeter — a contract with no rolled opposing force has nothing to probe with.
-        if (c.kind.isGarrisonClass() and !c.hasOpfor()) continue;
-        if (c.next_battle_day == null) {
-            var scheduling = gs.*;
-            const next = std.math.add(u32, gs.clock.day_index, nextBattleGap(&scheduling, c)) catch return error.OutOfRange;
-            gs.rng = scheduling.rng;
-            c.next_battle_day = next;
-            continue;
-        }
-        if (gs.clock.day_index >= c.next_battle_day.?) {
-            try resolvePreparedEngagement(gs, id, gs.scratch(), true);
-        }
+        if (!fightsEngagements(c) or c.next_battle_day != null) continue;
+        var scheduling = gs.*;
+        const next = std.math.add(u32, gs.clock.day_index, nextBattleGap(&scheduling, c)) catch return error.OutOfRange;
+        gs.rng = scheduling.rng;
+        c.next_battle_day = next;
     }
+}
+
+/// The contract's scheduled engagement has come due and waits on the
+/// commander: it holds the turn (`checklist.turnHold`) until the final
+/// phase publishes and the next engagement is scheduled.
+pub fn engagementDue(gs: *const GameState, c: *const contract_mod.Contract) bool {
+    if (!fightsEngagements(c)) return false;
+    const day = c.next_battle_day orelse return false;
+    return gs.clock.day_index >= day;
+}
+
+/// The engagement the turn waits on: the battle in progress, else the first
+/// contract whose engagement is due, in contract order.
+pub fn dueEngagement(gs: *const GameState) ?types.ContractId {
+    if (battle_phases.inProgress(gs)) |record| return record.contract;
+    for (gs.contracts.values()) |*c| if (engagementDue(gs, c)) return c.id;
+    return null;
+}
+
+/// The battle order command (ARCH §7 "The phased engagement"). Validates
+/// the order against the contract's due or in-progress engagement, replays
+/// the engagement from live state in a discarded workspace under every
+/// order given so far plus this one, then either appends the order and the
+/// pause it reached to the battle record or, when the order ends the
+/// battle, publishes the engagement and its next schedule atomically and
+/// removes the record. A refusal changes nothing (rules 11–13).
+pub fn execBattleOrder(gs: *GameState, o: @FieldType(commands.Command, "battle_order")) commands.Error!commands.Result {
+    const c = gs.contracts.getPtr(o.contract) orelse return error.UnknownContract;
+    const record: ?*battle_phase.BattleInProgress = for (gs.battles_in_progress.items) |*r| {
+        if (r.contract == o.contract) break r;
+    } else null;
+    if (record == null) {
+        if (gs.battles_in_progress.items.len > 0) return error.BattleInProgress;
+        if (!engagementDue(gs, c)) return error.NoEngagementDue;
+        // A battle starts only when nothing else holds the turn: an unread
+        // report or an unanswered decision cannot be dealt with under the lock.
+        if (@import("checklist.zig").turnHold(gs)) |hold| switch (hold) {
+            .unread_after_action => return error.ReportUnread,
+            .battle_decision => return error.DecisionPending,
+            .engagement_due => {},
+        };
+    }
+    const pause: ?battle_phase.Pause = if (record) |r| r.phase else null;
+    const held = if (record) |r| r.latest().held_field else false;
+    if (!battle_phases.orderLegal(pause, held, o.order)) return error.OrderNotLegal;
+    if (o.order == .roe and c.terms.command_rights.overridesRoe()) return error.RoeReservedByEmployer;
+
+    const given = if (record) |r| r.steps.items.len else 0;
+    const orders = try gs.scratch().alloc(battle_phase.Order, given + 1);
+    defer gs.scratch().free(orders);
+    if (record) |r| for (r.steps.items, 0..) |step, i| {
+        orders[i] = step.order;
+    };
+    orders[given] = o.order;
+    return fightOrders(gs, o.contract, orders, gs.scratch());
+}
+
+/// Fights `orders` from live state in a discarded workspace. A pause is
+/// recorded on the battle record (its capacity reserved before the first
+/// mutation); a finished battle is published through the workspace with the
+/// next engagement scheduled, and its record removed without allocation.
+fn fightOrders(gs: *GameState, id: types.ContractId, orders: []const battle_phase.Order, backing: std.mem.Allocator) !commands.Result {
+    var engagement = try battle_preparation.Engagement.init(gs, backing);
+    defer engagement.deinit();
+    const staged = &engagement.view;
+    const contract = staged.contracts.getPtr(id) orelse return error.UnknownContract;
+    const record_index: ?usize = for (gs.battles_in_progress.items, 0..) |r, i| {
+        if (r.contract == id) break i;
+    } else null;
+    switch (try fightStaged(staged, contract, .{ .given = orders }, backing)) {
+        .paused => |report| {
+            const step: battle_phase.Step = .{ .order = orders[orders.len - 1], .report = report };
+            if (record_index) |i| {
+                const record = &gs.battles_in_progress.items[i];
+                try record.steps.ensureUnusedCapacity(gs.allocator(), 1);
+                record.steps.appendAssumeCapacity(step);
+                record.phase = report.pause;
+            } else {
+                var steps: std.ArrayListUnmanaged(battle_phase.Step) = .empty;
+                try steps.ensureTotalCapacity(gs.allocator(), 1);
+                try gs.battles_in_progress.ensureUnusedCapacity(gs.allocator(), 1);
+                steps.appendAssumeCapacity(step);
+                gs.battles_in_progress.appendAssumeCapacity(.{ .contract = id, .phase = report.pause, .steps = steps });
+            }
+            return .{ .battle_pause = report.pause };
+        },
+        .finished => {
+            try scheduleNextEngagement(staged, contract);
+            const report_id = staged.battle_reports.kept.items[staged.battle_reports.kept.items.len - 1].id;
+            var publication = try engagement.prepare(gs);
+            publication.commit(gs, staged);
+            if (record_index) |i| _ = gs.battles_in_progress.orderedRemove(i);
+            return .{ .battle_report = report_id };
+        },
+    }
+}
+
+/// The next engagement after one is fought, at its RNG position after the
+/// battle's own draws.
+fn scheduleNextEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
+    c.next_battle_day = std.math.add(u32, gs.clock.day_index, nextBattleGap(gs, c)) catch return error.OutOfRange;
 }
 
 const SideState = struct {
@@ -588,13 +694,14 @@ fn recoverWrecks(
     scenario: *const @import("../domain/scenario.zig").Scenario,
     outcome: autoresolve.Outcome,
     roe: force_mod.Roe,
+    covered: bool,
     trucks: i64,
     hit_log: *std.ArrayListUnmanaged(battle_report.HullHit),
     combined_wrecks: i64,
 ) !FieldLoss {
     var loss: FieldLoss = .{};
     const t = tuning.loss;
-    const situation = battle_recovery.situation(gs, c, scenario, outcome, roe, player.mods.has_salvage_lance, trucks, combined_wrecks);
+    const situation = battle_recovery.situation(gs, c, scenario, outcome, roe, covered, player.mods.has_salvage_lance, trucks, combined_wrecks);
     for (hit_log.items) |*h| {
         if (!h.destroyed) continue;
         const u = gs.unit(h.unit) orelse continue;
@@ -705,17 +812,16 @@ const FieldLoss = struct {
     damage_value: types.CBills = 0,
 };
 
-/// One opposed roll decides the engagement (ARCH §7 steps 3–4 collapse
-/// into the margin): the scenario off the AtB table, the opposition
-/// scaled to it, then 2d6 + the power ratio + the conditions + the
-/// company's rules of engagement, re-rolled once if a pilot spends Edge.
-/// Returns everything downstream needs to know about how it
-/// went, so no later phase re-derives the odds.
-/// Pool-path .battle draws: scenario → eligible artillery accuracy → opposed
-/// roll → (edge re-roll). Without eligible artillery the accuracy draw is absent.
-/// No variance draw on the pool path; force size is already reflected by
-/// drawOpforHulls (garrison via drawSize) and pool depletion/exclusion.
-fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const SideState, env: terrain_mod.Environment, enemy_bv_override: ?i64, artillery_result: *?battle_report.ArtilleryResult) Opening {
+/// What the engagement brings to its phases, fixed before the phase dice:
+/// the scenario off the AtB table, the opposition scaled to it and
+/// suppressed by the artillery salvo (ARCH §7 step 2, the contact phase),
+/// and the die-free modifiers every phase roll shares. Consumes no draw
+/// that depends on orders, so every course of orders sees the same setup.
+/// Pool-path .battle draws: scenario → eligible artillery accuracy. Without
+/// eligible artillery the accuracy draw is absent. No variance draw on the
+/// pool path; force size is already reflected by drawOpforHulls (garrison
+/// via drawSize) and pool depletion/exclusion.
+fn openEngagement(gs: *GameState, c: *const contract_mod.Contract, player: *const SideState, env: terrain_mod.Environment, enemy_bv_override: ?i64, artillery_result: *?battle_report.ArtilleryResult) Setup {
     // What kind of fight this is (AtB scenario table): it scales
     // the enemy, tilts the roll, weights the score and decides what a
     // held field is worth.
@@ -763,107 +869,63 @@ fn openingRoll(gs: *GameState, c: *const contract_mod.Contract, player: *const S
     else
         operations_m.InterventionProfile{ .surprise_reduction = 0, .prepared_roll_bonus = 0 };
 
-    // One opposed roll decides the engagement (rounds within are abstracted;
-    // ARCH §7 steps 3–4 collapse into the margin).
     // The scenario's tilt, and what scouts give back (an ambush spotted
     // is half an ambush).
     // Recon task also reduces the scenario's surprise element (surprise_reduction). // TUNE
     const scenario_mod: i32 = @as(i32, scenario.roll_mod) + (if (player.mods.recon_quality > 0) @as(i32, scenario.scout_bonus) else 0) + env.rollMod() + task_mods.surprise_reduction + tempo_mods.surprise_reduction + tempo_mods.prepared_roll_bonus + intervention_mods.surprise_reduction + intervention_mods.prepared_roll_bonus;
     // Close terrain evens the odds: numbers count for less in the woods and the streets.
     const ratio_bonus: i32 = if (env.close()) @min(ratioBonus(player.power, enemy_power), 2) else ratioBonus(player.power, enemy_power);
-    // Rules of engagement: the company's standing order, unless an
-    // integrated employer's officers set it.
-    const rt = tuning.loss.roe;
-    const roe = effectiveRoe(gs, c, c.assigned_company);
-    const roe_roll: i32 = switch (roe) {
-        .hold => rt.hold_roll,
-        .standard => 0,
-        .cautious => rt.cautious_roll,
-    };
-    var roll = @as(i32, gs.rng.roll2d6(.battle)) + ratio_bonus + scenario_mod + roe_roll;
-    // Edge: a pilot with Edge to spend re-rolls a lost engagement once per contract.
-    var edge_used_by: types.PersonId = .none;
-    if (roll < 6) {
-        for (player.engaged.items) |uid| {
-            const u = gs.unit(uid) orelse continue;
-            const p = gs.person(u.pilot) orelse continue;
-            if (p.has("edge") and !p.edge_spent) {
-                p.edge_spent = true;
-                edge_used_by = p.id;
-                roll = @as(i32, gs.rng.roll2d6(.battle)) + ratio_bonus + scenario_mod + roe_roll;
-                break;
-            }
+    // Edge: the first pilot in the line with Edge to spend re-rolls a lost
+    // decisive phase once per contract (`battle_phases.decisiveVerdict`).
+    var edge_pilot: types.PersonId = .none;
+    for (player.engaged.items) |uid| {
+        const u = gs.unit(uid) orelse continue;
+        const p = gs.person(u.pilot) orelse continue;
+        if (p.has("edge") and !p.edge_spent) {
+            edge_pilot = p.id;
+            break;
         }
     }
-    const tb = tuning.battle;
-    const outcome: autoresolve.Outcome = if (roll >= tb.outcome_at.decisive_victory) .decisive_victory //
-        else if (roll >= tb.outcome_at.victory) .victory //
-        else if (roll >= tb.outcome_at.draw) .draw //
-        else if (roll >= tb.outcome_at.defeat) .defeat //
-        else .rout;
-
-    // Player losses scale with how badly it went (tuning.battle.hit_pct).
-    const base_hit_pct: i32 = switch (outcome) {
-        inline else => |o| @field(tb.hit_pct, @tagName(o)),
-    };
-    // A lost fight under hold costs more; a cautious company is already
-    // pulling back when it turns.
-    const lost_fight = outcome.isLoss();
-    var hit_pct: u32 = @intCast(@max(0, base_hit_pct + if (!lost_fight) 0 else switch (roe) {
-        .hold => rt.hold_hits_pct,
-        .standard => 0,
-        .cautious => rt.cautious_hits_pct,
-    }));
-    // Reserve task: if a reserve lance is assigned and the fight goes badly,
-    // clamp hit_pct to the draw level (the reserve steadies a collapsing line). // TUNE
-    const reserve_floor: u32 = @intCast(tb.hit_pct.draw);
-    const reserve_steadied = task_mods.reserve_present and lost_fight and hit_pct > reserve_floor;
-    if (reserve_steadied) hit_pct = reserve_floor;
-    const enemy_loss_pct: u32 = switch (outcome) {
-        inline else => |o| @field(tb.enemy_loss_pct, @tagName(o)),
-    };
-
-    const engaged = player.engaged.items;
-    const hits: u32 = @intCast(@max(
-        @as(usize, if (outcome == .decisive_victory) 0 else 1),
-        engaged.len * hit_pct / 100,
-    ));
     return .{
         .scenario = scenario,
         .enemy_bv = enemy_bv,
         .enemy_power = enemy_power,
-        .scenario_mod = scenario_mod,
-        .roe = roe,
-        .roll = roll,
-        .outcome = outcome,
-        .lost_fight = lost_fight,
-        .enemy_loss_pct = enemy_loss_pct,
-        .hits = hits,
-        .hit_pct = hit_pct,
-        .edge_used_by = edge_used_by,
-        .reserve_steadied = reserve_steadied,
+        .mods = .{ .ratio_bonus = ratio_bonus, .scenario_mod = scenario_mod },
+        // Rules of engagement: the company's standing order, unless an
+        // integrated employer's officers set it.
+        .roe = effectiveRoe(gs, c, c.assigned_company),
+        .reserve_present = task_mods.reserve_present,
+        .edge_pilot = edge_pilot,
     };
 }
 
-/// How the engagement opened and how it went — the roll's inputs and its
-/// verdict, in one value so the phases after it agree on the odds.
-const Opening = struct {
+/// What the engagement brings to its phases (`openEngagement`).
+const Setup = struct {
     scenario: *const @import("../domain/scenario.zig").Scenario,
     enemy_bv: i64,
     enemy_power: i64,
-    scenario_mod: i32,
+    mods: battle_phases.Mods,
+    /// The rules of engagement in force when contact is joined.
     roe: force_mod.Roe,
-    roll: i32,
-    outcome: autoresolve.Outcome,
-    lost_fight: bool,
-    enemy_loss_pct: u32,
-    hits: u32,
-    hit_pct: u32,
+    /// A reserve-tasked lance stands behind the line (P4e).
+    reserve_present: bool,
     /// An id, not a pointer: prisoners are hired into `people` before
     /// the report is written, and that insertion can move every entry.
-    edge_used_by: types.PersonId,
-    /// A reserve lance was present and clamped a bad hit_pct (P4e).
-    reserve_steadied: bool = false,
+    edge_pilot: types.PersonId,
+
+    fn inputs(self: Setup, engaged: usize) battle_phases.Inputs {
+        return .{ .mods = self.mods, .roe = self.roe, .engaged = engaged, .edge_available = self.edge_pilot != .none, .reserve_present = self.reserve_present };
+    }
+};
+
+/// The verdict the consequences read: how the decisive phase, or a
+/// withdrawal after contact, went.
+const Verdict = struct {
+    scenario: *const @import("../domain/scenario.zig").Scenario,
+    outcome: autoresolve.Outcome,
+    roe: force_mod.Roe,
+    held_field: bool,
+    withdrew: bool,
 };
 
 /// What the engagement leaves behind once the shooting stops: the
@@ -875,7 +937,7 @@ fn aftermath(
     gs: *GameState,
     c: *contract_mod.Contract,
     player: *const SideState,
-    open: Opening,
+    verdict: Verdict,
     env: terrain_mod.Environment,
     engaged: []const types.UnitId,
     enemy_destroyed_bv: i64,
@@ -885,11 +947,11 @@ fn aftermath(
 ) !Aftermath {
     const tb = tuning.battle;
     const rt = tuning.loss.roe;
-    const scenario = open.scenario;
-    const outcome = open.outcome;
-    const roe = open.roe;
-    const lost_fight = open.lost_fight;
-    const withdrew = outcome == .draw and roe == .cautious;
+    const scenario = verdict.scenario;
+    const outcome = verdict.outcome;
+    const roe = verdict.roe;
+    const lost_fight = outcome.isLoss();
+    const withdrew = verdict.withdrew;
     c.battles_fought +|= 1;
     c.casualties +|= wounded + kia;
     switch (outcome) {
@@ -1099,6 +1161,10 @@ fn writeHullCombatRecords(
     }
 }
 
+/// Fights an engagement through to its end under the orders an unattended
+/// script gives (`battle_phases.defaultOrder`) and publishes it atomically,
+/// without scheduling the next one: the engagement a decision's "fight"
+/// option starts (`events.Effect.engagement`). Failure changes nothing.
 pub fn resolveEngagement(gs: *GameState, c: *contract_mod.Contract) !void {
     return resolveEngagementWithResolutionScratch(gs, c, gs.scratch());
 }
@@ -1345,56 +1411,38 @@ test "non artillery engagement reference preserves every gameplay field and stre
         defer gs.deinit();
         const id = try engagementFixture(&gs, real_pool);
         try resolveEngagement(&gs, gs.contracts.getPtr(id).?);
-        try std.testing.expectEqual(if (real_pool) @as(u64, 15615413206384862793) else @as(u64, 7434715358146121194), digest.nonArtilleryReferenceHash(&gs));
+        try std.testing.expectEqual(if (real_pool) @as(u64, 13352134096994359390) else @as(u64, 17059056061362327667), digest.nonArtilleryReferenceHash(&gs));
     }
 }
 
-test "daily engagement retries skip an earlier committed contract" {
+test "the daily tick fights nothing: two due engagements hold the turn one after the other" {
     const digest = @import("digest.zig");
-    var reference = GameState.init(std.testing.allocator, .{ .seed = 3007 });
-    defer reference.deinit();
-    const first = try engagementFixture(&reference, true);
+    const checklist = @import("checklist.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    const first = try engagementFixture(&gs, true);
     const second: types.ContractId = @enumFromInt(2);
-    var other = reference.contracts.get(first).?;
+    var other = gs.contracts.get(first).?;
     other.id = second;
     other.next_battle_day = 0;
-    reference.contracts.getPtr(first).?.next_battle_day = 0;
-    try reference.contracts.put(reference.allocator(), second, other);
-    const original = digest.stateHash(&reference);
-    try resolvePreparedEngagement(&reference, first, reference.scratch(), true);
-    const first_committed = digest.stateHash(&reference);
-    try runDaily(&reference);
-    const complete = digest.stateHash(&reference);
-    var index: usize = 0;
-    var failed_after_first = false;
-    while (true) : (index += 1) {
-        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer outer.deinit();
-        var gs = GameState.init(outer.allocator(), .{ .seed = 3007 });
-        _ = try engagementFixture(&gs, true);
-        gs.contracts.getPtr(first).?.next_battle_day = 0;
-        try gs.contracts.put(gs.allocator(), second, other);
-        try std.testing.expectEqual(original, digest.stateHash(&gs));
-        gs.arena.state = .{};
-        var failure = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = index });
-        gs.arena.child_allocator = failure.allocator();
-        defer gs.deinit();
-        if (runDaily(&gs)) |_| {
-            try std.testing.expectEqual(complete, digest.stateHash(&gs));
-            break;
-        } else |err| {
-            try std.testing.expectEqual(error.OutOfMemory, err);
-            const actual = digest.stateHash(&gs);
-            try std.testing.expect(actual == original or actual == first_committed);
-            if (actual == first_committed) failed_after_first = true;
-            gs.arena.child_allocator = outer.allocator();
-            try runDaily(&gs);
-            try std.testing.expectEqual(complete, digest.stateHash(&gs));
-            try std.testing.expectEqual(@as(u32, 1), gs.contracts.get(first).?.battles_fought);
-            try std.testing.expectEqual(@as(u32, 1), gs.contracts.get(second).?.battles_fought);
-        }
-    }
-    try std.testing.expect(failed_after_first);
+    gs.contracts.getPtr(first).?.next_battle_day = 0;
+    try gs.contracts.put(gs.allocator(), second, other);
+    const before = digest.stateHash(&gs);
+    try runDaily(&gs);
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(?checklist.Hold, .engagement_due), checklist.turnHold(&gs));
+    try std.testing.expectEqual(@as(?types.ContractId, first), dueEngagement(&gs));
+    // The second contract waits while the first is fought.
+    _ = try commands.execute(&gs, .{ .battle_order = .{ .contract = first, .order = .engage } });
+    const engaged = digest.stateHash(&gs);
+    try std.testing.expectError(error.BattleInProgress, commands.execute(&gs, .{ .battle_order = .{ .contract = second, .order = .engage } }));
+    try std.testing.expectEqual(engaged, digest.stateHash(&gs));
+    while (battle_phases.inProgress(&gs) != null) try @import("tick.zig").fightDueEngagement(&gs);
+    try std.testing.expectEqual(@as(u32, 1), gs.contracts.get(first).?.battles_fought);
+    try std.testing.expect(!engagementDue(&gs, gs.contracts.getPtr(first).?));
+    try @import("tick.zig").clearHolds(&gs);
+    try std.testing.expectEqual(@as(u32, 1), gs.contracts.get(second).?.battles_fought);
+    try std.testing.expectEqual(@as(?checklist.Hold, null), checklist.turnHold(&gs));
 }
 
 test "initial contact schedule overflow leaves complete campaign unchanged" {
@@ -1409,21 +1457,45 @@ test "initial contact schedule overflow leaves complete campaign unchanged" {
 }
 
 fn resolveEngagementWithResolutionScratch(gs: *GameState, c: *contract_mod.Contract, resolution_backing: std.mem.Allocator) !void {
-    return resolvePreparedEngagement(gs, c.id, resolution_backing, false);
-}
-
-fn resolvePreparedEngagement(gs: *GameState, id: types.ContractId, backing: std.mem.Allocator, daily: bool) !void {
-    var engagement = try battle_preparation.Engagement.init(gs, backing);
+    var engagement = try battle_preparation.Engagement.init(gs, resolution_backing);
     defer engagement.deinit();
     const staged = &engagement.view;
-    const contract = staged.contracts.getPtr(id) orelse return error.UnknownContract;
-    try resolveStagedEngagement(staged, contract, backing);
-    if (daily) contract.next_battle_day = std.math.add(u32, staged.clock.day_index, nextBattleGap(staged, contract)) catch return error.OutOfRange;
+    const contract = staged.contracts.getPtr(c.id) orelse return error.UnknownContract;
+    _ = try fightStaged(staged, contract, .unattended, resolution_backing);
     var publication = try engagement.prepare(gs);
     publication.commit(gs, staged);
 }
 
-fn resolveStagedEngagement(gs: *GameState, c: *contract_mod.Contract, resolution_backing: std.mem.Allocator) !void {
+/// How an engagement is fought: under the orders given so far, or through
+/// to its end under the orders an unattended script gives
+/// (`battle_phases.defaultOrder`).
+const Orders = union(enum) {
+    given: []const battle_phase.Order,
+    unattended,
+};
+
+/// What one replay of an engagement reached.
+const Reached = union(enum) {
+    paused: battle_phase.PhaseReport,
+    finished,
+};
+
+/// Fights an engagement in the staged workspace `gs` (rule 76: preparation
+/// here and in `drawOpposition`/`openEngagement`, the phase verdicts in
+/// `battle_phases`, the consequences in `concludeEngagement`; the next
+/// schedule is the caller's). A pause leaves the workspace to be discarded;
+/// a finished engagement has applied its complete aftermath to it.
+/// Concession (nobody fit to field) and forfeit (the enemy pool exhausted)
+/// finish on the first order, at their positions in the preparation.
+fn fightStaged(gs: *GameState, c: *contract_mod.Contract, orders: Orders, resolution_backing: std.mem.Allocator) !Reached {
+    return fightStagedObserved(gs, c, orders, resolution_backing, null);
+}
+
+/// What an engagement brought to its phases and the dice it drew, for a
+/// test to compare the command's course with `battle_phases.run`.
+const Observed = struct { inputs: battle_phases.Inputs, dice: battle_phases.Dice };
+
+fn fightStagedObserved(gs: *GameState, c: *contract_mod.Contract, orders: Orders, resolution_backing: std.mem.Allocator, observed: ?*?Observed) !Reached {
     try gs.battle_reports.prepareRecord(gs.allocator());
     var resolution_scratch = std.heap.ArenaAllocator.init(resolution_backing);
     defer resolution_scratch.deinit();
@@ -1434,18 +1506,81 @@ fn resolveStagedEngagement(gs: *GameState, c: *contract_mod.Contract, resolution
     defer player.family_mounts.deinit(gs.scratch());
     defer player.ammo_reserved.deinit(gs.scratch());
     defer player.engaged.deinit(gs.scratch());
-    // Pool routing: real hull draw vs. bloodless win vs. abstraction
-    // (docs/p3c-economy-design.md §8.E). Single owner: opforPool.
+    const opposition = (try drawOpposition(gs, c, resolution_alloc)) orelse {
+        try forfeit(gs, c);
+        return .finished;
+    };
+
+    // Complete every fallible OpFor allocation and draw before weather consumes
+    // the battle stream, so a failed draw allocation leaves the engagement unchanged.
+    const env: terrain_mod.Environment = blk: {
+        const world = planet_mod.find(c.planet_key) orelse break :blk .{};
+        const t = terrain_mod.terrainOf(world);
+        break :blk .{ .terrain = t, .weather = terrain_mod.rollWeather(&gs.rng, .battle, t) };
+    };
+    populatePlayerSide(gs, c, env, &player);
+    if (player.engaged.items.len == 0) {
+        try concede(gs, c);
+        return .finished;
+    }
+
+    var artillery_result = try artillery_battle.snapshot(gs, c, .not_ready);
+    const setup = openEngagement(gs, c, &player, env, opposition.enemy_bv_override, &artillery_result);
+    const dice = battle_phases.Dice.draw(&gs.rng);
+    if (observed) |out| out.* = .{ .inputs = setup.inputs(player.engaged.items.len), .dice = dice };
+    const final = switch (try courseOf(setup.inputs(player.engaged.items.len), dice, orders)) {
+        .paused => |report| return .{ .paused = report },
+        .finished => |f| f,
+    };
+    try concludeEngagement(gs, c, &player, opposition, env, setup, artillery_result, final, resolution_alloc);
+    return .finished;
+}
+
+/// The course of the engagement under `orders`. Unattended, each pause is
+/// answered with `battle_phases.defaultOrder` until the battle ends.
+fn courseOf(inputs: battle_phases.Inputs, dice: battle_phases.Dice, orders: Orders) error{OrderNotLegal}!battle_phases.Course {
+    switch (orders) {
+        .given => |list| return battle_phases.run(inputs, dice, list) catch error.OrderNotLegal,
+        .unattended => {
+            var list: [battle_phases.max_phases]battle_phase.Order = undefined;
+            list[0] = battle_phases.defaultOrder(null);
+            var n: usize = 1;
+            while (true) {
+                const course = battle_phases.run(inputs, dice, list[0..n]) catch return error.OrderNotLegal;
+                switch (course) {
+                    .finished => return course,
+                    .paused => |report| {
+                        list[n] = battle_phases.defaultOrder(&report);
+                        n += 1;
+                    },
+                }
+            }
+        },
+    }
+}
+
+/// The opposition an engagement draws (`opforPool`): the routing, and on
+/// the pool path the hulls fielded and their summed BV.
+const Opposition = struct {
+    resolution: PoolResolution,
+    drawn: []types.HullInstanceId = &.{},
+    enemy_bv_override: ?i64 = null,
+};
+
+/// Routes the opposition (docs/p3c-economy-design.md §8.E; single owner:
+/// `opforPool`) and, on the pool path, reserves the lost-field dispersal and
+/// draws the fielded hulls into `resolution_alloc`, all before weather.
+/// Null when the enemy forfeits: its pool is absent, empty, or every
+/// remaining hull was combat-ineffective earlier on this contract.
+fn drawOpposition(gs: *GameState, c: *const contract_mod.Contract, resolution_alloc: std.mem.Allocator) !?Opposition {
     const resolution = opforPool(gs, c);
-    var drawn: []types.HullInstanceId = &.{};
-    var enemy_bv_override: ?i64 = null;
     var draw_candidates: []const types.HullInstanceId = &.{};
     var filtered_candidates: ?[]types.HullInstanceId = null;
     defer if (filtered_candidates) |buf| gs.scratch().free(buf);
     var draw_count: usize = 0;
     switch (resolution) {
-        .abstraction => {}, // leave both defaults: existing RAT/BV abstraction behaviour
-        .forfeit => return forfeit(gs, c),
+        .abstraction => return .{ .resolution = resolution }, // existing RAT/BV abstraction behaviour
+        .forfeit => return null,
         .pool => |pool| {
             // Exclusion set: hulls that were combat_ineffective in an earlier
             // battle of this contract (derived from committed records, no new column).
@@ -1483,7 +1618,7 @@ fn resolveStagedEngagement(gs: *GameState, c: *contract_mod.Contract, resolution
                 filtered_candidates = filt_buf_raw;
                 draw_candidates = filt_buf_raw[0..filt_len];
             }
-            if (draw_candidates.len == 0) return forfeit(gs, c); // all remaining hulls combat_ineffective
+            if (draw_candidates.len == 0) return null; // all remaining hulls combat_ineffective
             const garrison_probe = c.kind.isGarrisonClass();
             draw_count = opfor.drawSize(draw_candidates.len, c.enemy_lances, garrison_probe);
 
@@ -1494,64 +1629,56 @@ fn resolveStagedEngagement(gs: *GameState, c: *contract_mod.Contract, resolution
         },
     }
 
-    switch (resolution) {
-        .pool => {
-            drawn = try drawOpforHulls(gs, resolution_alloc, draw_candidates, draw_count);
-            // Fielded BV = Σ drawn-hull BVs (B2: opposed roll uses real hull BVs).
-            var fielded_bv: i64 = 0;
-            for (drawn) |hid| {
-                const inst = gs.hull_instances.getPtr(hid) orelse continue;
-                if (chassis_mod.find(inst.base_key)) |ch| fielded_bv += ch.bv;
-            }
-            enemy_bv_override = fielded_bv;
-        },
-        else => {},
+    const drawn = try drawOpforHulls(gs, resolution_alloc, draw_candidates, draw_count);
+    // Fielded BV = Σ drawn-hull BVs (B2: the phase rolls use real hull BVs).
+    var fielded_bv: i64 = 0;
+    for (drawn) |hid| {
+        const inst = gs.hull_instances.getPtr(hid) orelse continue;
+        if (chassis_mod.find(inst.base_key)) |ch| fielded_bv += ch.bv;
     }
+    return .{ .resolution = resolution, .drawn = drawn, .enemy_bv_override = fielded_bv };
+}
 
-    // Complete every fallible OpFor allocation and draw before weather consumes
-    // the battle stream, so a failed draw allocation leaves the engagement unchanged.
-    const env: terrain_mod.Environment = blk: {
-        const world = planet_mod.find(c.planet_key) orelse break :blk .{};
-        const t = terrain_mod.terrainOf(world);
-        break :blk .{ .terrain = t, .weather = terrain_mod.rollWeather(&gs.rng, .battle, t) };
-    };
-    populatePlayerSide(gs, c, env, &player);
-    if (player.engaged.items.len == 0) return concede(gs, c);
-
-    var artillery_result = try artillery_battle.snapshot(gs, c, .not_ready);
-    const open = openingRoll(gs, c, &player, env, enemy_bv_override, &artillery_result);
-    const scenario = open.scenario;
-    const enemy_power = open.enemy_power;
-    const scenario_mod = open.scenario_mod;
-    const roe = open.roe;
-    const outcome = open.outcome;
-    const enemy_loss_pct = open.enemy_loss_pct;
-    const hits = open.hits;
-    const edge_used_by = open.edge_used_by;
-    const enemy_bv = open.enemy_bv;
-    const tb = tuning.battle;
+/// A finished engagement's complete aftermath, applied to the staged
+/// workspace in its fixed RNG order after the phase dice: OpFor hull
+/// outcomes, hits, recovery, salvage, prisoners, the aftermath, the
+/// operation binding, then the report and what it leaves behind
+/// (`publishEngagement`).
+fn concludeEngagement(
+    gs: *GameState,
+    c: *contract_mod.Contract,
+    player: *const SideState,
+    opposition: Opposition,
+    env: terrain_mod.Environment,
+    setup: Setup,
+    artillery_snapshot: ?battle_report.ArtilleryResult,
+    final: battle_phases.Final,
+    resolution_alloc: std.mem.Allocator,
+) !void {
+    const drawn = opposition.drawn;
+    const enemy_bv_override = opposition.enemy_bv_override;
+    const scenario = setup.scenario;
+    const outcome = final.outcome;
+    const roe = final.roe;
+    const enemy_bv = setup.enemy_bv;
     const engaged = player.engaged.items;
+    var artillery_result = artillery_snapshot;
+    const verdict: Verdict = .{ .scenario = scenario, .outcome = outcome, .roe = roe, .held_field = final.held_field, .withdrew = final.withdrew };
+    // Edge spent on the decisive re-roll.
+    if (final.edge_used) gs.person(setup.edge_pilot).?.edge_spent = true;
+    const edge_used_by: types.PersonId = if (final.edge_used) setup.edge_pilot else .none;
+    // A pursuit runs more of the enemy down.
+    const enemy_loss_pct: u32 = @min(100, final.enemy_loss_bonus_pct + switch (outcome) {
+        inline else => |o| @field(tuning.battle.enemy_loss_pct, @tagName(o)),
+    });
 
-    // Pool path: per-hull outcomes (fixed position in .battle stream, after open).
-    // Abstraction path: drawn is empty so this loop produces nothing.
-    // outcomes[] is parallel to drawn[]; only drawn hulls have entries.
-    const opfor_outcomes_buf = try resolution_alloc.alloc(opfor.OpforHullOutcome, drawn.len);
-    var enemy_destroyed_bv_real: i64 = 0;
-    for (drawn, 0..) |hid, i| {
-        const oc = opfor.hullOutcome(&gs.rng, .battle, outcome);
-        opfor_outcomes_buf[i] = oc;
-        if (oc == .destroyed) {
-            const inst = gs.hull_instances.getPtr(hid) orelse continue;
-            if (chassis_mod.find(inst.base_key)) |ch| enemy_destroyed_bv_real += ch.bv;
-        }
-    }
-    const opfor_outcomes = opfor_outcomes_buf[0..drawn.len];
+    const opfor_result = try opforOutcomes(gs, resolution_alloc, drawn, outcome, final.enemy_loss_bonus_pct);
+    const opfor_outcomes = opfor_result.outcomes;
 
     // A lost-field wreck disposition commits after combat records remove hulls
     // from the pool. Allocate and filter that exact slice before battle state
     // starts changing so the late commit cannot fail.
-    const withdrew = outcome == .draw and roe == .cautious;
-    const held_field = outcome.heldField() and !withdrew;
+    const held_field = final.held_field;
     const pool_path = enemy_bv_override != null;
     var destroyed_wrecks_storage: ?[]types.HullInstanceId = null;
     const destroyed_wrecks = if (pool_path and !held_field) blk: {
@@ -1571,129 +1698,34 @@ fn resolveStagedEngagement(gs: *GameState, c: *contract_mod.Contract, resolution
     // the fight, so it copies the names it needs (battle_report.HullHit).
     var hit_log: std.ArrayListUnmanaged(battle_report.HullHit) = .empty;
     defer hit_log.deinit(gs.scratch());
-    const tally = try applyHits(gs, &player, engaged, hits, &hit_log);
-    var damage_value = tally.damage_value;
-    const carrier_hit = try artillery_battle.applyExposure(gs, &artillery_result, open.hit_pct, player.mods.has_mash_lance);
-    const destroyed = tally.destroyed + carrier_hit.destroyed;
-    const wounded = tally.wounded + carrier_hit.wounded;
-    const kia = tally.kia + carrier_hit.kia;
-    var combined_wrecks: i64 = 0;
-    for (hit_log.items) |hit| combined_wrecks += @intFromBool(hit.destroyed);
-    if (artillery_result) |a| if (a.physical_participation and a.damage == .recoverable) {
-        combined_wrecks += 1;
-    };
-
-    // Spoils: salvage rights over the enemy's wrecks — but only if you held
-    // the field (retreating forces strip nothing) — prisoners if you can
-    // hold them, employer compensation for your losses.
     // Pool path: enemy_destroyed_bv from real hull BVs (B2).
     // Abstraction path: existing @divTrunc formula.
     const enemy_destroyed_bv = if (enemy_bv_override != null)
-        enemy_destroyed_bv_real
+        opfor_result.destroyed_bv
     else
         @divTrunc(enemy_bv * enemy_loss_pct, 100);
+    const field = try fieldLosses(gs, c, player, scenario, final, &artillery_result, &hit_log);
+    const destroyed = field.destroyed;
+    const wounded = field.wounded;
+    const kia = field.kia;
+    const damage_value = field.damage_value;
+    const lost_hulls = field.lost_hulls;
+    const missing = field.missing;
     // What the crews can actually haul off the field is bounded by the
     // salvage trucks on hand (`haulCapacityBv`).
-    const trucks = salvageTrucks(gs, c.assigned_company);
-    const haulable_bv = @min(enemy_destroyed_bv, haulCapacityBv(trucks));
-
-    // Who holds the field keeps the wrecks (CamOps salvage): on a
-    // lost field each hull wrecked there is dragged off only if the crews
-    // can get to it — salvage lance, trucks, a DropShip to lift it, your
-    // own ground — else the enemy has it. Its pilot walks out or is taken.
-    var lost_hulls: u32 = 0;
-    var missing: u32 = 0;
-    if (!held_field) {
-        const loss = try recoverWrecks(gs, c, &player, scenario, outcome, roe, trucks, &hit_log, combined_wrecks);
-        lost_hulls = loss.hulls;
-        missing = loss.missing;
-        damage_value += loss.damage_value;
-    }
-    const carrier_loss = try artillery_battle.recover(gs, &artillery_result, c, scenario, outcome, roe, held_field, player.mods.has_salvage_lance, trucks, combined_wrecks);
-    lost_hulls += carrier_loss.lost;
-    missing += carrier_loss.missing;
-    if (artillery_result) |a| damage_value += a.compensation_basis;
-    // The wrecks on offer and the part of the claim still to be
-    // divided. Both stay empty unless the haul is worth a decision.
-    var salvage_candidates: []const battle_report.SalvageCandidate = &.{};
-    var salvage_unclaimed: i64 = 0;
-    // Determine the committed combat operation's intent early — needed for
-    // salvage gating and score modifiers below (docs/p4-operations-design.md §6).
+    const haulable_bv = @min(enemy_destroyed_bv, haulCapacityBv(field.trucks));
+    // The committed combat operation's intent gates salvage and shapes the
+    // score below (docs/p4-operations-design.md §6).
     // battle.zig MUST NOT import operation_control.zig (rule 5).
-    const committed_op_early = operations_m.committedCombatOp(c);
-    const op_intent: ?operation_mod.Intent = if (committed_op_early) |op| op.intent else null;
-    const op_tempo: ?operation_mod.TempoPosture = if (committed_op_early) |op| op.tempo else null;
-    const op_interventions: []const u8 = if (committed_op_early) |op|
-        try operations_m.interventionSummary(gs.allocator(), op)
-    else
-        "";
-    // Salvage is things, not money: your share of what the
-    // crews haul off a held field becomes wrecks and parts crated to the
-    // home HQ depot — to store, strip, or rebuild into a working hull.
-    var salvage_bv: i64 = if (held_field) types.applyBp(salvageClaimBv(haulable_bv, c.terms.salvage_pct, player.mods.has_salvage_lance), scenario.salvage_bp) else 0;
-    // Gate salvage on the committed operation's intent profile (rule 20).
-    // No new RNG draw: intent is a deterministic post-roll modifier (design §6).
-    if (op_intent) |intent| {
-        if (!operations_m.intentProfile(intent).salvage_allowed) {
-            salvage_bv = 0;
-        }
-    }
-    // The liaison's cut: under tighter command rights the employer
-    // claims part of what you haul.
-    const before_cut = salvage_bv;
-    salvage_bv = types.applyBp(salvage_bv, c.terms.command_rights.salvageShareBp());
-    const liaison_cut = before_cut - salvage_bv;
-    // Salvage exchange: the employer keeps every wreck and part and
-    // pays the claim in cash into the company's local funds.
-    var exchange_cash: types.CBills = 0;
-    // Pool path: real drawn hulls were fielded (enemy_bv_override is set).
-    const spoils = if (c.terms.salvage_exchange) blk: {
-        exchange_cash = types.applyBp(salvage_bv * tuning.contract.salvage_cbills_per_bv, tuning.contract.salvage_exchange_bp);
-        if (exchange_cash > 0) try gs.postTreasury(.{ .company = c.assigned_company }, .{
-            .day = gs.clock.day_index,
-            .amount = exchange_cash,
-            .category = .salvage,
-            .company = c.assigned_company,
-            .contract = c.id,
-            .note = "salvage exchange",
-        });
-        // Pool path, held field: employer takes every destroyed drawn hull
-        // immediately (B6). No inbox, no player unit; cash already posted.
-        if (pool_path and held_field) {
-            for (drawn, opfor_outcomes) |hid, oc| {
-                if (oc == .destroyed) try gs.transferHullOwnership(hid, .{ .faction = c.employer_key }, c.enemy_key, .salvage);
-            }
-        }
-        break :blk if (exchange_cash > 0) try std.fmt.allocPrint(gs.allocator(), "salvage exchange — the employer keeps the wrecks and pays {s} c-bills for your {d} BV claim", .{ try types.moneyText(gs.allocator(), exchange_cash), salvage_bv }) else "";
-    } else blk: {
-        // Roll (or build from drawn hulls) what is out there once, then see
-        // whether the claim buys a real choice. If it does, nothing is taken
-        // yet — the commander divides the haul from the inbox.
-        if (salvage_bv <= 0) break :blk ""; // nothing to divide, nothing to roll
-        if (pool_path) {
-            // Pool path: candidates ARE the drawn destroyed hulls. ALWAYS defer
-            // to the inbox — the salvage_priority decision is mandatory and
-            // turn-holding (events.zig:77/181; checklist.zig:170; tick.zig:807).
-            salvage_candidates = try poolSalvageCandidates(gs, drawn, opfor_outcomes);
-            salvage_unclaimed = salvage_bv;
-            break :blk "";
-        }
-        // Abstraction path: roll fictional wrecks and offer a choice only when
-        // the claim spans more than one plan.
-        salvage_candidates = try rollSalvageCandidates(gs, c);
-        if (salvageWorthAsking(salvage_candidates, salvage_bv)) {
-            salvage_unclaimed = salvage_bv;
-            break :blk "";
-        }
-        break :blk try takeSalvage(gs, c, salvage_candidates, salvage_bv, .most_hulls);
-    };
-    const salvage = salvage_bv; // for the AAR
+    const committed_op = operations_m.committedCombatOp(c);
+    const op_intent: ?operation_mod.Intent = if (committed_op) |op| op.intent else null;
+    const spoils = try claimSpoils(gs, c, player, scenario, held_field, op_intent, pool_path, drawn, opfor_outcomes, haulable_bv);
 
     // Expend the reloads this fight consumed, itemized below.
     // ammo_reserved was drawn from on-hand stock during battle preparation;
     // the batch must be satisfiable — a short is a programming error (rule 15).
     if (!sites.consumeStockBatch(gs, player.site, &player.ammo_reserved)) unreachable;
-    const captured = try takePrisoners(gs, c, &player, held_field, enemy_loss_pct, enemy_destroyed_bv);
+    const captured = try takePrisoners(gs, c, player, held_field, enemy_loss_pct, enemy_destroyed_bv);
     const comp = types.applyPct(damage_value, c.terms.battle_loss_pct);
     if (comp > 0) {
         try gs.postTransaction(.{
@@ -1711,7 +1743,7 @@ fn resolveStagedEngagement(gs: *GameState, c: *contract_mod.Contract, resolution
     // HullCombatRecord writing below (P3c.2). Scratch-owned; freed after use.
     var per_unit_kills: std.ArrayListUnmanaged(@import("personnel.zig").UnitKills) = .empty;
     defer per_unit_kills.deinit(gs.scratch());
-    const after = try aftermath(gs, c, &player, open, env, engaged, enemy_destroyed_bv, wounded, kia, &per_unit_kills);
+    const after = try aftermath(gs, c, player, verdict, env, engaged, enemy_destroyed_bv, wounded, kia, &per_unit_kills);
     const score_delta = after.score_delta;
     const morale_delta = after.morale_delta;
     const convoy_hit = after.convoy_hit;
@@ -1737,41 +1769,252 @@ fn resolveStagedEngagement(gs: *GameState, c: *contract_mod.Contract, resolution
         if (profile.fatigue_add > 0) applyCompanyAftermath(gs, c.assigned_company, 0, profile.fatigue_add);
     }
 
-    // Operation binding: if a combat operation was committed, associate it
-    // with this engagement. Reserve the extra arc result log line now
-    // (failure-atomic: reserve before any mutation, commit infallibly).
+    // Everything this engagement did, as fields. The AAR is
+    // rendered from it, so the record and the narrative cannot drift.
+    const report = try assembleReport(gs, c, player, env, setup, final, .{
+        .artillery = artillery_result,
+        .convoy_hit = convoy_hit,
+        .edge_used_by = edge_used_by,
+        .destroyed = destroyed,
+        .wounded = wounded,
+        .kia = kia,
+        .lost_hulls = lost_hulls,
+        .missing = missing,
+        .enemy_destroyed_bv = enemy_destroyed_bv,
+        .kills_credited = kills_credited,
+        .prisoners = captured,
+        .battle_loss_comp = comp,
+        .score_delta = score_delta,
+        .morale_delta = morale_delta,
+        .fatigue_add = after.fatigue_add,
+        .hits = hit_log.items,
+        .haulable_bv = haulable_bv,
+        .spoils = spoils,
+    });
+    try publishEngagement(gs, c, report, .{
+        .hit_log = hit_log.items,
+        .opposition = opposition,
+        .opfor_outcomes = opfor_outcomes,
+        .destroyed_wrecks = destroyed_wrecks,
+        .engaged = engaged,
+        .per_unit_kills = per_unit_kills.items,
+        .artillery = artillery_result,
+        .carrier_missing = field.carrier_missing,
+        .enemy_destroyed_bv = enemy_destroyed_bv,
+        .score_delta = score_delta,
+    });
+}
+
+/// Pool path: one outcome per drawn hull at its fixed position in the
+/// `.battle` stream after the phase dice, a pursuit widening the destroyed
+/// band, and the BV of the hulls destroyed. Abstraction path: `drawn` is
+/// empty and so is the result.
+fn opforOutcomes(gs: *GameState, alloc: std.mem.Allocator, drawn: []const types.HullInstanceId, outcome: autoresolve.Outcome, loss_bonus_pct: u8) !struct { outcomes: []opfor.OpforHullOutcome, destroyed_bv: i64 } {
+    const outcomes = try alloc.alloc(opfor.OpforHullOutcome, drawn.len);
+    var destroyed_bv: i64 = 0;
+    for (drawn, outcomes) |hid, *oc| {
+        oc.* = opfor.hullOutcomePursued(&gs.rng, .battle, outcome, loss_bonus_pct);
+        if (oc.* != .destroyed) continue;
+        const inst = gs.hull_instances.getPtr(hid) orelse continue;
+        if (chassis_mod.find(inst.base_key)) |ch| destroyed_bv += ch.bv;
+    }
+    return .{ .outcomes = outcomes, .destroyed_bv = destroyed_bv };
+}
+
+/// What the line lost: the hits (`applyHits`), the carrier's exposure, and
+/// on a lost field the wreck recovery and the crews' escape.
+const Field = struct {
+    destroyed: u8,
+    wounded: u8,
+    kia: u8,
+    damage_value: types.CBills,
+    lost_hulls: u32,
+    missing: u32,
+    /// Missing people from the carrier's crew alone.
+    carrier_missing: u32,
+    trucks: i64,
+};
+
+/// The finished engagement's losses, in their RNG order: the hits on the
+/// line, the carrier's exposure, then on a lost field the recovery rolls
+/// (CamOps salvage: who holds the field keeps the wrecks; a wreck comes home
+/// only if the crews can reach it, and its pilot walks out or is taken).
+/// Appends every hit to `hit_log` and records the recovery rolls on it.
+fn fieldLosses(
+    gs: *GameState,
+    c: *contract_mod.Contract,
+    player: *const SideState,
+    scenario: *const @import("../domain/scenario.zig").Scenario,
+    final: battle_phases.Final,
+    artillery_result: *?battle_report.ArtilleryResult,
+    hit_log: *std.ArrayListUnmanaged(battle_report.HullHit),
+) !Field {
+    const tally = try applyHits(gs, player, player.engaged.items, final.hits, hit_log);
+    var damage_value = tally.damage_value;
+    const carrier_hit = try artillery_battle.applyExposure(gs, artillery_result, final.hit_pct, player.mods.has_mash_lance);
+    var combined_wrecks: i64 = 0;
+    for (hit_log.items) |hit| combined_wrecks += @intFromBool(hit.destroyed);
+    if (artillery_result.*) |a| if (a.physical_participation and a.damage == .recoverable) {
+        combined_wrecks += 1;
+    };
+    const trucks = salvageTrucks(gs, c.assigned_company);
+    var lost_hulls: u32 = 0;
+    var missing: u32 = 0;
+    if (!final.held_field) {
+        const loss = try recoverWrecks(gs, c, player, scenario, final.outcome, final.recovery_roe, final.covered, trucks, hit_log, combined_wrecks);
+        lost_hulls = loss.hulls;
+        missing = loss.missing;
+        damage_value += loss.damage_value;
+    }
+    const carrier_loss = try artillery_battle.recover(gs, artillery_result, c, scenario, final.outcome, final.recovery_roe, final.covered, final.held_field, player.mods.has_salvage_lance, trucks, combined_wrecks);
+    if (artillery_result.*) |a| damage_value += a.compensation_basis;
+    return .{
+        .destroyed = tally.destroyed + carrier_hit.destroyed,
+        .wounded = tally.wounded + carrier_hit.wounded,
+        .kia = tally.kia + carrier_hit.kia,
+        .damage_value = damage_value,
+        .lost_hulls = lost_hulls + carrier_loss.lost,
+        .missing = missing + carrier_loss.missing,
+        .carrier_missing = carrier_loss.missing,
+        .trucks = trucks,
+    };
+}
+
+/// What the salvage claim became (`battle_report.SalvageManifest`).
+const Spoils = struct {
+    claimed_bv: i64,
+    liaison_cut: i64,
+    exchange_cash: types.CBills,
+    items: []const u8,
+    candidates: []const battle_report.SalvageCandidate,
+    unclaimed_bv: i64,
+};
+
+/// Salvage is things, not money: the company's share of what the crews
+/// haul off a held field becomes wrecks and parts crated home — or cash
+/// under a salvage exchange. The claim is gated by the committed
+/// operation's intent and cut by the employer's liaison; a haul worth a
+/// choice waits in the inbox rather than being taken now.
+fn claimSpoils(
+    gs: *GameState,
+    c: *contract_mod.Contract,
+    player: *const SideState,
+    scenario: *const @import("../domain/scenario.zig").Scenario,
+    held_field: bool,
+    op_intent: ?operation_mod.Intent,
+    /// Real drawn hulls were fielded (`Opposition.enemy_bv_override` is set).
+    pool_path: bool,
+    drawn: []const types.HullInstanceId,
+    opfor_outcomes: []const opfor.OpforHullOutcome,
+    haulable_bv: i64,
+) !Spoils {
+    var salvage_bv: i64 = if (held_field) types.applyBp(salvageClaimBv(haulable_bv, c.terms.salvage_pct, player.mods.has_salvage_lance), scenario.salvage_bp) else 0;
+    // Gate salvage on the committed operation's intent profile (rule 20).
+    // No new RNG draw: intent is a deterministic post-roll modifier (design §6).
+    if (op_intent) |intent| {
+        if (!operations_m.intentProfile(intent).salvage_allowed) salvage_bv = 0;
+    }
+    // The liaison's cut: under tighter command rights the employer
+    // claims part of what you haul.
+    const before_cut = salvage_bv;
+    salvage_bv = types.applyBp(salvage_bv, c.terms.command_rights.salvageShareBp());
+    var out: Spoils = .{ .claimed_bv = salvage_bv, .liaison_cut = before_cut - salvage_bv, .exchange_cash = 0, .items = "", .candidates = &.{}, .unclaimed_bv = 0 };
+    if (c.terms.salvage_exchange) {
+        // Salvage exchange: the employer keeps every wreck and part and
+        // pays the claim in cash into the company's local funds.
+        out.exchange_cash = types.applyBp(salvage_bv * tuning.contract.salvage_cbills_per_bv, tuning.contract.salvage_exchange_bp);
+        if (out.exchange_cash > 0) try gs.postTreasury(.{ .company = c.assigned_company }, .{
+            .day = gs.clock.day_index,
+            .amount = out.exchange_cash,
+            .category = .salvage,
+            .company = c.assigned_company,
+            .contract = c.id,
+            .note = "salvage exchange",
+        });
+        // Pool path, held field: employer takes every destroyed drawn hull
+        // immediately (B6). No inbox, no player unit; cash already posted.
+        if (pool_path and held_field) {
+            for (drawn, opfor_outcomes) |hid, oc| {
+                if (oc == .destroyed) try gs.transferHullOwnership(hid, .{ .faction = c.employer_key }, c.enemy_key, .salvage);
+            }
+        }
+        if (out.exchange_cash > 0) out.items = try std.fmt.allocPrint(gs.allocator(), "salvage exchange — the employer keeps the wrecks and pays {s} c-bills for your {d} BV claim", .{ try types.moneyText(gs.allocator(), out.exchange_cash), salvage_bv });
+        return out;
+    }
+    // Roll (or build from drawn hulls) what is out there once, then see
+    // whether the claim buys a real choice. If it does, nothing is taken
+    // yet — the commander divides the haul from the inbox.
+    if (salvage_bv <= 0) return out; // nothing to divide, nothing to roll
+    if (pool_path) {
+        // Pool path: candidates ARE the drawn destroyed hulls. ALWAYS defer
+        // to the inbox — the salvage_priority decision is mandatory and
+        // turn-holding (events.zig:77/181; checklist.zig:170; tick.zig:807).
+        out.candidates = try poolSalvageCandidates(gs, drawn, opfor_outcomes);
+        out.unclaimed_bv = salvage_bv;
+        return out;
+    }
+    // Abstraction path: roll fictional wrecks and offer a choice only when
+    // the claim spans more than one plan.
+    out.candidates = try rollSalvageCandidates(gs, c);
+    if (salvageWorthAsking(out.candidates, salvage_bv)) {
+        out.unclaimed_bv = salvage_bv;
+        return out;
+    }
+    out.items = try takeSalvage(gs, c, out.candidates, salvage_bv, .most_hulls);
+    return out;
+}
+
+/// The consequence figures a report records (`assembleReport`).
+const Consequences = struct {
+    artillery: ?battle_report.ArtilleryResult,
+    convoy_hit: bool,
+    edge_used_by: types.PersonId,
+    destroyed: u8,
+    wounded: u8,
+    kia: u8,
+    lost_hulls: u32,
+    missing: u32,
+    enemy_destroyed_bv: i64,
+    kills_credited: u32,
+    prisoners: u32,
+    battle_loss_comp: types.CBills,
+    score_delta: i32,
+    morale_delta: i32,
+    fatigue_add: u8,
+    /// Copied into the report: the caller frees its list.
+    hits: []const battle_report.HullHit,
+    haulable_bv: i64,
+    spoils: Spoils,
+};
+
+/// The finished engagement as one record: the fight, its phases and the
+/// order given at each, the costs, the spoils, the ammunition and the
+/// tasked lances' results. Allocates every payload in the campaign arena
+/// and takes the next battle ID; mutates nothing else.
+fn assembleReport(
+    gs: *GameState,
+    c: *const contract_mod.Contract,
+    player: *const SideState,
+    env: terrain_mod.Environment,
+    setup: Setup,
+    final: battle_phases.Final,
+    k: Consequences,
+) !battle_report.BattleReport {
     // battle.zig MUST NOT import operation_control.zig (rule 5).
-    const committed_op = committed_op_early;
+    const committed_op = operations_m.committedCombatOp(c);
     const op_template_name: []const u8 = if (committed_op) |op|
         if (operation_mod.findTemplate(op.template_key)) |t| t.name else ""
     else
         "";
-    var arc_log_text: []const u8 = "";
-    if (committed_op != null) {
-        // Allocate the log text now (only allocates; does NOT touch event_log).
-        // reserveLog is called later, immediately before the infallible commit
-        // block, so nothing appends to event_log between the reservation and
-        // the appendAssumeCapacity (bug fix: the AAR render loop runs between
-        // here and the commit block and would have consumed the reserved slot).
-        var arc_date_buf: [10]u8 = undefined;
-        const band = operations_m.combatBand(outcome);
-        arc_log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] combat operation resolved: {s} ({s})", .{
-            gs.clock.date.text(&arc_date_buf),
-            op_template_name,
-            @tagName(band),
-        });
-    }
-
-    // Build per-lance task result slice (P4e). Arena-owned: names duped via gs.allocator().
-    // battle.zig MUST NOT import operation_control.zig (rule 5).
+    // Per-lance task results (P4e). Arena-owned: names duped via gs.allocator().
     var task_results: std.ArrayListUnmanaged(battle_report.TaskedLance) = .empty;
     if (committed_op) |op| {
         for (op.tasks.items) |lt| {
             const lf = gs.force(lt.lance);
             const lance_name = if (lf) |f| try gs.allocator().dupe(u8, f.name) else "";
-            const succeeded = operations_m.taskSucceeded(lt.task, operations_m.combatBand(outcome), held_field);
+            const succeeded = operations_m.taskSucceeded(lt.task, operations_m.combatBand(final.outcome), final.held_field);
             const note = try gs.allocator().dupe(u8, switch (lt.task) {
-                .reserve => if (open.reserve_steadied) "steadied a bad opening" else if (succeeded) "held in reserve" else "line broke before reserve could act",
+                .reserve => if (final.reserve_steadied) "steadied a bad opening" else if (succeeded) "held in reserve" else "line broke before reserve could act",
                 .main_effort => if (succeeded) "led the advance" else "could not break through",
                 .screen => if (succeeded) "screened the advance" else "screen failed",
                 .escort => if (succeeded) "escort held" else "escort failed",
@@ -1788,79 +2031,117 @@ fn resolveStagedEngagement(gs: *GameState, c: *contract_mod.Contract, resolution
             });
         }
     }
-
-    // Everything this engagement did, as fields. The AAR is
-    // rendered from it, so the record and the narrative cannot drift.
     var ammo_lines: std.ArrayListUnmanaged(battle_report.AmmoLine) = .empty;
     for (part_mod.munition_keys) |key| try ammo_lines.append(gs.allocator(), .{
         .key = key,
         .burned = player.ammo_reserved.get(key) orelse 0,
         .left = gs.stockCount(player.site, key),
     });
-    const report: battle_report.BattleReport = .{
+    return .{
         .id = gs.nextBattleId(),
         .operation = op_template_name,
-        .operation_intent = op_intent,
-        .operation_tempo = op_tempo,
-        .operation_interventions = op_interventions,
+        .operation_intent = if (committed_op) |op| op.intent else null,
+        .operation_tempo = if (committed_op) |op| op.tempo else null,
+        .operation_interventions = if (committed_op) |op| try operations_m.interventionSummary(gs.allocator(), op) else "",
         .tasks = task_results.items,
-        .artillery = artillery_result,
+        .artillery = k.artillery,
         .day = gs.clock.day_index,
         .contract = c.id,
         .company = c.assigned_company,
         .kind = c.kind.label(),
         .enemy_key = c.enemy_key,
-        .scenario = scenario.name,
+        .scenario = setup.scenario.name,
         .terrain = terrain_mod.terrainRow(env.terrain).name,
         .weather = terrain_mod.weatherRow(env.weather).name,
-        .outcome = outcome,
-        .held_field = held_field,
-        .withdrew = withdrew,
-        .roe = roe,
+        .outcome = final.outcome,
+        .held_field = final.held_field,
+        .withdrew = final.withdrew,
+        .roe = final.roe,
         .roe_overridden = c.terms.command_rights.overridesRoe(),
         .player_power = player.power,
-        .enemy_power = enemy_power,
-        .conditions_mod = scenario_mod,
+        .enemy_power = setup.enemy_power,
+        .conditions_mod = setup.mods.scenario_mod,
+        .phases = try gs.allocator().dupe(battle_phase.PhaseRecord, final.phases()),
         .close_terrain = env.close(),
         .air_grounded = env.groundsAir(),
-        .convoy_hit = convoy_hit,
-        .edge_spent_by = if (gs.person(edge_used_by)) |p| try p.rankedName(gs.allocator()) else "",
+        .convoy_hit = k.convoy_hit,
+        .edge_spent_by = if (gs.person(k.edge_used_by)) |p| try p.rankedName(gs.allocator()) else "",
         .recon_quality = player.mods.recon_quality,
         .avg_fatigue = player.mods.avg_fatigue,
         .avg_morale = player.mods.avg_morale,
-        .hits_taken = hits,
-        .destroyed = destroyed,
-        .wounded = wounded,
-        .kia = kia,
-        .lost_hulls = lost_hulls,
-        .missing = missing,
-        .enemy_destroyed_bv = enemy_destroyed_bv,
-        .kills_credited = kills_credited,
-        .prisoners = captured,
-        .battle_loss_comp = comp,
+        .hits_taken = final.hits,
+        .destroyed = k.destroyed,
+        .wounded = k.wounded,
+        .kia = k.kia,
+        .lost_hulls = k.lost_hulls,
+        .missing = k.missing,
+        .enemy_destroyed_bv = k.enemy_destroyed_bv,
+        .kills_credited = k.kills_credited,
+        .prisoners = k.prisoners,
+        .battle_loss_comp = k.battle_loss_comp,
         .score_after = c.score,
-        .score_delta = score_delta,
-        .morale_delta = morale_delta,
-        .fatigue_add = tb.fatigue_base + env.fatigue(),
+        .score_delta = k.score_delta,
+        .morale_delta = k.morale_delta,
+        .fatigue_add = k.fatigue_add,
         .battle_loss_pct = c.terms.battle_loss_pct,
         .salvage_pct = c.terms.salvage_pct,
         .command_rights = @tagName(c.terms.command_rights),
-        // Owned, not borrowed: `hit_log` is freed when this function
-        // returns, and the report outlives it.
-        .hulls = try gs.allocator().dupe(battle_report.HullHit, hit_log.items),
+        // Owned, not borrowed: the hit log is freed when the engagement
+        // concludes, and the report outlives it.
+        .hulls = try gs.allocator().dupe(battle_report.HullHit, k.hits),
         .ammo = ammo_lines.items,
         .silenced_mounts = player.silenced_mounts,
         .armor_left = gs.stockCount(player.site, "armor"),
         .salvage = .{
-            .claimed_bv = salvage,
-            .haulable_bv = haulable_bv,
-            .liaison_cut = liaison_cut,
-            .exchange_cash = exchange_cash,
-            .items = spoils,
-            .candidates = salvage_candidates,
-            .unclaimed_bv = salvage_unclaimed,
+            .claimed_bv = k.spoils.claimed_bv,
+            .haulable_bv = k.haulable_bv,
+            .liaison_cut = k.spoils.liaison_cut,
+            .exchange_cash = k.spoils.exchange_cash,
+            .items = k.spoils.items,
+            .candidates = k.spoils.candidates,
+            .unclaimed_bv = k.spoils.unclaimed_bv,
         },
     };
+}
+
+/// What `publishEngagement` leaves behind besides the report.
+const Aftertrail = struct {
+    hit_log: []const battle_report.HullHit,
+    opposition: Opposition,
+    opfor_outcomes: []const opfor.OpforHullOutcome,
+    destroyed_wrecks: []const types.HullInstanceId,
+    engaged: []const types.UnitId,
+    per_unit_kills: []const @import("personnel.zig").UnitKills,
+    artillery: ?battle_report.ArtilleryResult,
+    carrier_missing: u32,
+    enemy_destroyed_bv: i64,
+    score_delta: i32,
+};
+
+/// Records the finished engagement and what follows from it, in order: the
+/// rendered AAR on the campaign log, the report, hulls left to the enemy,
+/// the contract's objectives, the committed operation's resolution, the
+/// decisions the fight raises, the hull combat records, the carrier's
+/// history and a lost field's enemy wreck dispersal.
+fn publishEngagement(gs: *GameState, c: *contract_mod.Contract, report: battle_report.BattleReport, t: Aftertrail) !void {
+    const outcome = report.outcome;
+    const held_field = report.held_field;
+    const pool_path = t.opposition.enemy_bv_override != null;
+    const committed_op = operations_m.committedCombatOp(c);
+    var arc_log_text: []const u8 = "";
+    if (committed_op) |op| {
+        // Allocate the log text now (only allocates; does NOT touch event_log).
+        // reserveLog is called later, immediately before the infallible commit
+        // block, so nothing appends to event_log between the reservation and
+        // the appendAssumeCapacity (the AAR render loop runs before it and
+        // would otherwise consume the reserved slot).
+        var arc_date_buf: [10]u8 = undefined;
+        arc_log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] combat operation resolved: {s} ({s})", .{
+            gs.clock.date.text(&arc_date_buf),
+            if (operation_mod.findTemplate(op.template_key)) |tpl| tpl.name else "",
+            @tagName(operations_m.combatBand(outcome)),
+        });
+    }
     const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
     for (try after_action.render(gs.allocator(), &report)) |line| try gs.log(.battle, ctx, "{s}", .{line});
     // The structured report is the permanent account; the log carries its
@@ -1869,11 +2150,11 @@ fn resolveStagedEngagement(gs: *GameState, c: *contract_mod.Contract, resolution
     // Hulls left on the field pass into enemy hands — off
     // our books once the AAR has named them, but held, not struck off:
     // a recovery raid has something to win back.
-    for (hit_log.items) |h| if (h.lost) try held_hulls_m.holdUnit(gs, h.unit, c.enemy_key, report.id);
+    for (t.hit_log) |h| if (h.lost) try held_hulls_m.holdUnit(gs, h.unit, c.enemy_key, report.id);
 
     // Objectives: the pool shrinks, VP accrue, and a broken pool
     // completes the contract.
-    try @import("contract_control.zig").recordBattle(gs, c, enemy_destroyed_bv, score_delta);
+    try @import("contract_control.zig").recordBattle(gs, c, t.enemy_destroyed_bv, t.score_delta);
     // Arc operation binding: transition the committed combat op and log result.
     // reserveLog is called here, immediately before the first mutation, so
     // nothing appends to event_log between reservation and appendAssumeCapacity
@@ -1906,10 +2187,10 @@ fn resolveStagedEngagement(gs: *GameState, c: *contract_mod.Contract, resolution
     // And a lost field asks whether the company goes back for what it
     // left. The two are exclusive: wrecks are only left behind on
     // a field that was lost.
-    if (report.hullsLost() > 0 or missing > carrier_loss.missing) try @import("contract_events.zig").queueRecoveryPush(gs, c, report.id);
+    if (report.hullsLost() > 0 or report.missing > t.carrier_missing) try @import("contract_events.zig").queueRecoveryPush(gs, c, report.id);
     // And a haul the claim cannot stretch over asks how to divide it.
     // Nothing has been taken yet; the trucks wait on the answer.
-    if (salvage_unclaimed > 0) try @import("contract_events.zig").queueSalvage(gs, c, report.id);
+    if (report.salvage.unclaimed_bv > 0) try @import("contract_events.zig").queueSalvage(gs, c, report.id);
     // And the night after any fight the techs pool their hours on the
     // damage, asking whose hull comes first only when the order
     // changes the outcome. Last, so a salvage answer's spares and armour
@@ -1925,30 +2206,30 @@ fn resolveStagedEngagement(gs: *GameState, c: *contract_mod.Contract, resolution
     try writeHullCombatRecords(
         gs,
         gs.allocator(),
-        engaged,
-        opfor_outcomes,
-        drawn,
+        t.engaged,
+        t.opfor_outcomes,
+        t.opposition.drawn,
         report.id,
         c.id,
-        per_unit_kills.items,
-        hit_log.items,
-        resolution,
+        t.per_unit_kills,
+        t.hit_log,
+        t.opposition.resolution,
     );
 
-    try artillery_battle.recordHistory(gs, artillery_result, report.id, c.id);
+    try artillery_battle.recordHistory(gs, t.artillery, report.id, c.id);
 
     // P3f.2: a lost field leaves the drawn destroyed enemy hulls pool-removed
     // but .active and enemy-owned. Give each a terminal disposition: enemy
     // recovery up to capacity, remainder dispersed to the black market
     // (docs/p3f-faction-loop-design.md §3). black_market owns the rule (rule 76).
     if (pool_path and !held_field) {
-        if (destroyed_wrecks.len > 0) {
+        if (t.destroyed_wrecks.len > 0) {
             var rng_copy = gs.rng;
-            const source_owner = switch (resolution) {
+            const source_owner = switch (t.opposition.resolution) {
                 .pool => |pool| pool.owner,
                 else => unreachable,
             };
-            black_market.commitEnemyWreckDispersal(gs, destroyed_wrecks, source_owner, gs.clock.day_index, c.planet_key, &rng_copy);
+            black_market.commitEnemyWreckDispersal(gs, t.destroyed_wrecks, source_owner, gs.clock.day_index, c.planet_key, &rng_copy);
             gs.rng = rng_copy;
         }
     }
@@ -3272,8 +3553,11 @@ test "garrison work sees probes — a lance of the enemy's, every few weeks" {
         .status = .active,
         .assigned_company = co,
     });
+    // Each probe holds the turn on its day and is fought with the unattended
+    // orders; its report is read and its decisions take their defaults.
     for (0..180) |_| {
         try runDaily(&gs);
+        try @import("tick.zig").clearHolds(&gs);
         gs.clock.day_index += 1;
     }
     const probed = gs.contracts.getPtr(@enumFromInt(1)).?;
@@ -5149,7 +5433,6 @@ test "pool-path salvage decision holds the turn until resolved" {
     // advance_days returns error.DecisionPending until the decision is resolved.
     const testing = std.testing;
     const checklist = @import("checklist.zig");
-    const commands = @import("commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4002 });
     defer gs.deinit();
     gs.clock.day_index = 1;
@@ -5323,3 +5606,330 @@ test "transferHullOwnership: employer exchange routes hull to faction, active, s
 // Test 6: persistence round-trip lives in src/persist/store.zig (rule 5:
 // sim does not import persist). See:
 // "pool-path salvage: hull_instance_id round-trips through save/load"
+
+// ---------------------------------------------------------- phased battle
+
+/// A recon raid whose engagement is due today, its line's armour capped at
+/// `armor` (a battered line takes kills from fewer hits).
+pub fn dueEngagementForTest(gs: *GameState, real_pool: bool, armor: u8) !types.ContractId {
+    const id = try engagementFixture(gs, real_pool);
+    // The contract is inserted directly: its counter follows so a save loads.
+    gs.next_contract_id = @max(gs.next_contract_id, @intFromEnum(id) + 1);
+    gs.contracts.getPtr(id).?.next_battle_day = gs.clock.day_index;
+    for (gs.units.values()) |*u| u.armor_pct = @min(u.armor_pct, armor);
+    return id;
+}
+
+/// An active recon raid for `company` in a campaign already founded, its
+/// engagement due today.
+pub fn dueEngagementForCompanyForTest(gs: *GameState, company: types.ForceId) !types.ContractId {
+    const id: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    try gs.contracts.put(gs.allocator(), id, .{
+        .id = id,
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 30, .battle_loss_pct = 30 },
+        .status = .active,
+        .assigned_company = company,
+        .monthly_net = 300_000,
+        .next_battle_day = gs.clock.day_index,
+    });
+    return id;
+}
+
+fn orderForTest(gs: *GameState, id: types.ContractId, order: battle_phase.Order) !commands.Result {
+    return commands.execute(gs, .{ .battle_order = .{ .contract = id, .order = order } });
+}
+
+/// The complete digest less the battle record: what a pause must leave alone.
+fn digestBesideBattleForTest(gs: *GameState) u64 {
+    const saved = gs.battles_in_progress;
+    gs.battles_in_progress = .empty;
+    defer gs.battles_in_progress = saved;
+    return @import("digest.zig").stateHash(gs);
+}
+
+/// The inputs and dice the contract's engagement fights with from live
+/// state, observed in a discarded workspace: nothing changes.
+fn observeEngagementForTest(gs: *GameState, id: types.ContractId) !Observed {
+    var engagement = try battle_preparation.Engagement.init(gs, gs.scratch());
+    defer engagement.deinit();
+    const staged = &engagement.view;
+    var observed: ?Observed = null;
+    _ = try fightStagedObserved(staged, staged.contracts.getPtr(id).?, .{ .given = &.{.engage} }, gs.scratch(), &observed);
+    return observed.?;
+}
+
+/// Fights a fresh fixture under `orders` (the battle finished with the
+/// unattended orders when they stop short) and returns its last report.
+fn foughtForTest(gs: *GameState, seed: u64, armor: u8, orders: []const battle_phase.Order) !*const battle_report.BattleReport {
+    gs.* = GameState.init(std.testing.allocator, .{ .seed = seed });
+    const id = try dueEngagementForTest(gs, false, armor);
+    for (orders) |o| _ = try orderForTest(gs, id, o);
+    while (battle_phases.inProgress(gs) != null) try @import("tick.zig").fightDueEngagement(gs);
+    return &gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1];
+}
+
+test "a due engagement holds the turn: advance refuses and advance until stop stops on the hold with its contract" {
+    const digest = @import("digest.zig");
+    const queries = @import("queries.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    const id = try engagementFixture(&gs, false);
+    gs.contracts.getPtr(id).?.next_battle_day = gs.clock.day_index + 2;
+    const r = try commands.execute(&gs, .{ .advance_until_stop = 0 });
+    try std.testing.expectEqual(@as(u32, 2), r.days_advanced);
+    try std.testing.expect(r.stopped == .hold);
+    try std.testing.expectEqual(id, r.contract);
+    try std.testing.expectEqual(id, queries.turnHold(&gs).engagement);
+    const held = digest.stateHash(&gs);
+    try std.testing.expectError(error.EngagementDue, commands.execute(&gs, .advance_day));
+    try std.testing.expectError(error.EngagementDue, commands.execute(&gs, .{ .advance_days = 7 }));
+    try std.testing.expectError(error.EngagementDue, commands.execute(&gs, .{ .advance_until_stop = 0 }));
+    try std.testing.expectEqual(held, digest.stateHash(&gs));
+    // The pre-battle levers stand until contact is joined.
+    _ = try commands.execute(&gs, .{ .set_roe = .{ .company = gs.contracts.getPtr(id).?.assigned_company, .roe = .cautious } });
+}
+
+test "engaging fights contact and pauses: odds over every band, nothing lands until the battle ends" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    const id = try dueEngagementForTest(&gs, true, 100);
+    const before = digestBesideBattleForTest(&gs);
+    const observed = try observeEngagementForTest(&gs, id);
+    try std.testing.expectEqual(before, digestBesideBattleForTest(&gs));
+    const r = try orderForTest(&gs, id, .engage);
+    try std.testing.expectEqual(@as(?battle_phase.Pause, .contact), r.battle_pause);
+    // No hull damage, casualty, salvage, score, stock or live RNG change.
+    try std.testing.expectEqual(before, digestBesideBattleForTest(&gs));
+    const record = battle_phases.inProgress(&gs).?;
+    const report = record.latest().*;
+    var sum: u32 = 0;
+    for (report.odds.counts) |n| sum += n;
+    try std.testing.expect(report.odds.total > 0);
+    try std.testing.expectEqual(@as(u32, report.odds.total), sum);
+    // Consumer agreement: the command stored exactly the course's pause,
+    // its contact verdict and its odds (battle_phases.contactVerdict, nextPhaseOdds).
+    try std.testing.expectEqualDeep((try battle_phases.run(observed.inputs, observed.dice, &.{.engage})).paused, report);
+    const contact = battle_phases.contactVerdict(observed.dice.contact, observed.inputs.mods, observed.inputs.roe);
+    try std.testing.expectEqual(battle_phases.lineHits(observed.inputs.engaged, contact.hit_pct), report.hits);
+    try std.testing.expectEqualDeep(battle_phases.nextPhaseOdds(.decisive, observed.inputs.mods, report.roe, contact.momentum, observed.inputs.edge_available), report.odds);
+}
+
+test "a withdrawal after contact preserves hulls at the cost of the field (fixed seed)" {
+    var withdrawn: GameState = undefined;
+    defer withdrawn.deinit();
+    var pressed: GameState = undefined;
+    defer pressed.deinit();
+    const w = try foughtForTest(&withdrawn, 9, 30, &.{ .engage, .withdraw });
+    const p = try foughtForTest(&pressed, 9, 30, &.{ .engage, .press_on });
+    try std.testing.expect(!w.held_field and w.withdrew);
+    try std.testing.expectEqual(autoresolve.Outcome.draw, w.outcome);
+    try std.testing.expect(w.hits_taken <= p.hits_taken);
+    try std.testing.expect(w.destroyed <= p.destroyed and w.lost_hulls <= p.lost_hulls);
+    // The strict difference on this fixture: pressing on holds the field and
+    // loses hulls; withdrawing gives up the field and keeps them.
+    try std.testing.expect(p.held_field);
+    try std.testing.expect(w.destroyed + w.lost_hulls < p.destroyed + p.lost_hulls);
+    // Consumer agreement: the report lands exactly the course's hits
+    // (battle_phases.decisiveHits, lineHits).
+    var fresh = GameState.init(std.testing.allocator, .{ .seed = 9 });
+    defer fresh.deinit();
+    const id = try dueEngagementForTest(&fresh, false, 30);
+    const observed = try observeEngagementForTest(&fresh, id);
+    try std.testing.expectEqual((try battle_phases.run(observed.inputs, observed.dice, &.{ .engage, .withdraw })).finished.hits, w.hits_taken);
+    const pause = (try battle_phases.run(observed.inputs, observed.dice, &.{ .engage, .press_on })).paused;
+    try std.testing.expectEqual((try battle_phases.run(observed.inputs, observed.dice, &.{ .engage, .press_on, battle_phases.defaultOrder(&pause) })).finished.hits, p.hits_taken);
+}
+
+test "earlier phases are never re-rolled: the contact report and the dice are the same whatever orders follow" {
+    const branches = [_][]const battle_phase.Order{
+        &.{ .engage, .withdraw },
+        &.{ .engage, .press_on },
+        &.{ .engage, .{ .roe = .cautious }, .press_on },
+        &.{ .engage, .{ .roe = .hold }, .withdraw },
+    };
+    var contact: ?battle_phase.PhaseReport = null;
+    var contact_phase: ?battle_phase.PhaseRecord = null;
+    var dice: ?battle_phases.Dice = null;
+    var decisive_phase: ?battle_phase.PhaseRecord = null;
+    for (branches) |orders| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+        defer gs.deinit();
+        const id = try dueEngagementForTest(&gs, true, 100);
+        const observed = try observeEngagementForTest(&gs, id);
+        if (dice) |d| try std.testing.expectEqualDeep(d, observed.dice) else dice = observed.dice;
+        _ = try orderForTest(&gs, id, .engage);
+        const report = battle_phases.inProgress(&gs).?.latest().*;
+        if (contact) |c| try std.testing.expectEqualDeep(c, report) else contact = report;
+        for (orders[1..]) |o| _ = try orderForTest(&gs, id, o);
+        while (battle_phases.inProgress(&gs) != null) try @import("tick.zig").fightDueEngagement(&gs);
+        const phases = gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1].phases;
+        if (contact_phase) |c| try std.testing.expectEqualDeep(c, phases[0]) else contact_phase = phases[0];
+        // The contact the battle finished with is the contact the pause showed.
+        try std.testing.expectEqual(report.margin, phases[0].margin);
+        try std.testing.expectEqual(report.hits, phases[0].hits);
+        // The decisive phase under the same ROE is the same roll in every branch that fights it.
+        if (orders.len == 2 and orders[1] == .press_on) decisive_phase = phases[1];
+    }
+    try std.testing.expect(decisive_phase != null);
+}
+
+test "an ROE change at a pause moves the next phase's odds and verdict; integrated command refuses it" {
+    const digest = @import("digest.zig");
+    var standard: GameState = undefined;
+    defer standard.deinit();
+    var cautious: GameState = undefined;
+    defer cautious.deinit();
+    const s = try foughtForTest(&standard, 8, 100, &.{ .engage, .press_on });
+    const k = try foughtForTest(&cautious, 8, 100, &.{ .engage, .{ .roe = .cautious }, .press_on });
+    try std.testing.expect(s.outcome != k.outcome);
+    try std.testing.expectEqual(force_mod.Roe.cautious, k.roe);
+    // The odds the pause shows move with the order.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8 });
+    defer gs.deinit();
+    const id = try dueEngagementForTest(&gs, false, 100);
+    _ = try orderForTest(&gs, id, .engage);
+    const at_contact = battle_phases.inProgress(&gs).?.latest().odds;
+    _ = try orderForTest(&gs, id, .{ .roe = .cautious });
+    try std.testing.expect(!std.meta.eql(at_contact, battle_phases.inProgress(&gs).?.latest().odds));
+    // Under integrated command the employer holds the ROE: refused, nothing changes.
+    var locked = GameState.init(std.testing.allocator, .{ .seed = 8 });
+    defer locked.deinit();
+    const lid = try dueEngagementForTest(&locked, false, 100);
+    locked.contracts.getPtr(lid).?.terms.command_rights = .integrated;
+    _ = try orderForTest(&locked, lid, .engage);
+    const before = digest.stateHash(&locked);
+    try std.testing.expectError(error.RoeReservedByEmployer, orderForTest(&locked, lid, .{ .roe = .cautious }));
+    try std.testing.expectEqual(before, digest.stateHash(&locked));
+}
+
+test "the battle lock refuses every other command while a battle is in progress" {
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    const id = try dueEngagementForTest(&gs, false, 100);
+    const company = gs.contracts.getPtr(id).?.assigned_company;
+    _ = try orderForTest(&gs, id, .engage);
+    const before = digest.stateHash(&gs);
+    const refused = [_]commands.Command{
+        .advance_day,
+        .{ .set_roe = .{ .company = company, .roe = .hold } },
+        .{ .buy_listing = .{ .listing = @enumFromInt(1), .buyer = .{ .hq = gs.seat() } } },
+        .{ .recruit = .mekwarrior },
+        .{ .read_report = @enumFromInt(1) },
+    };
+    for (refused) |cmd| {
+        // Owner and consumer agree: what the lock forbids, the command refuses.
+        try std.testing.expect(!battle_phases.commandAllowedDuringBattle(cmd));
+        try std.testing.expectError(error.BattleInProgress, commands.execute(&gs, cmd));
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+    }
+    const allowed: commands.Command = .{ .battle_order = .{ .contract = id, .order = .press_on } };
+    try std.testing.expect(battle_phases.commandAllowedDuringBattle(allowed));
+    _ = try commands.execute(&gs, allowed);
+    // An order not legal at the pause is refused with its own error, and changes nothing.
+    const paused = digest.stateHash(&gs);
+    try std.testing.expectError(error.OrderNotLegal, orderForTest(&gs, id, .engage));
+    try std.testing.expectEqual(paused, digest.stateHash(&gs));
+}
+
+test "concession and forfeit resolve on the first order as one-step battles" {
+    const checklist = @import("checklist.zig");
+    for ([_]bool{ false, true }) |forfeited| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+        defer gs.deinit();
+        const id = try dueEngagementForTest(&gs, forfeited, 100);
+        if (forfeited) {
+            gs.faction_rosters.getPtr("DC").?.clearRetainingCapacity();
+        } else {
+            for (gs.units.values()) |*u| u.status = .destroyed;
+        }
+        const r = try orderForTest(&gs, id, .engage);
+        try std.testing.expectEqual(@as(?battle_phase.Pause, null), r.battle_pause);
+        try std.testing.expect(battle_phases.inProgress(&gs) == null);
+        const report = gs.battle_reports.find(r.battle_report).?;
+        try std.testing.expectEqual(!forfeited, report.conceded);
+        try std.testing.expectEqual(if (forfeited) autoresolve.Outcome.victory else autoresolve.Outcome.defeat, report.outcome);
+        try std.testing.expectEqual(@as(usize, 0), report.phases.len);
+        try std.testing.expectEqual(@as(?checklist.Hold, .unread_after_action), checklist.turnHold(&gs));
+        try std.testing.expect(!engagementDue(&gs, gs.contracts.getPtr(id).?));
+    }
+}
+
+test "the after-action names every phase and the order given at it, and the campaign log carries the same lines" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 9 });
+    defer gs.deinit();
+    const id = try dueEngagementForTest(&gs, false, 30);
+    _ = try orderForTest(&gs, id, .engage);
+    _ = try orderForTest(&gs, id, .{ .roe = .cautious });
+    _ = try orderForTest(&gs, id, .press_on);
+    const final_order = battle_phases.defaultOrder(battle_phases.inProgress(&gs).?.latest());
+    const r = try orderForTest(&gs, id, final_order);
+    const report = gs.battle_reports.find(r.battle_report).?;
+    try std.testing.expectEqual(@as(usize, 3), report.phases.len);
+    try std.testing.expectEqual(battle_phase.Order.engage, report.phases[0].order);
+    try std.testing.expectEqual(battle_phase.Order.press_on, report.phases[1].order);
+    try std.testing.expectEqual(force_mod.Roe.cautious, report.phases[1].roe);
+    try std.testing.expectEqualDeep(final_order, report.phases[2].order);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const lines = try after_action.render(arena.allocator(), report);
+    for (report.phases) |p| {
+        const line = try std.fmt.allocPrint(arena.allocator(), "[AAR]   {s}", .{try after_action.phaseText(arena.allocator(), p)});
+        try std.testing.expect(std.mem.indexOf(u8, line, p.phase.label()) != null);
+        try std.testing.expect(std.mem.indexOf(u8, line, p.order.label()) != null);
+        var in_aar = false;
+        for (lines) |l| in_aar = in_aar or std.mem.eql(u8, l, line);
+        var in_log = false;
+        for (gs.event_log.items) |e| in_log = in_log or std.mem.endsWith(u8, e.text, line);
+        try std.testing.expect(in_aar and in_log);
+    }
+}
+
+test "a failed battle order leaves the complete campaign unchanged, and a retry fights the same battle" {
+    const digest = @import("digest.zig");
+    // Pattern one: an order that pauses (replay plus record growth).
+    // Pattern two: the order that ends the battle (workspace publication,
+    // record removal and the next schedule).
+    for ([_][]const battle_phase.Order{ &.{}, &.{ .engage, .press_on } }) |given| {
+        const final_order: battle_phase.Order = if (given.len == 0) .engage else .withdraw;
+        var reference = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+        defer reference.deinit();
+        const id = try dueEngagementForTest(&reference, true, 30);
+        for (given) |o| _ = try orderForTest(&reference, id, o);
+        const held = battle_phases.inProgress(&reference);
+        const last: battle_phase.Order = if (held) |r| battle_phases.defaultOrder(r.latest()) else final_order;
+        _ = try orderForTest(&reference, id, last);
+        const expected = digest.stateHash(&reference);
+        var index: usize = 0;
+        var failed: usize = 0;
+        while (true) : (index += 1) {
+            var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+            defer outer.deinit();
+            var gs = GameState.init(outer.allocator(), .{ .seed = 3007 });
+            _ = try dueEngagementForTest(&gs, true, 30);
+            for (given) |o| _ = try orderForTest(&gs, id, o);
+            const before = digest.stateHash(&gs);
+            var failure = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = index });
+            gs.arena.state = .{};
+            gs.arena.child_allocator = failure.allocator();
+            defer gs.deinit();
+            if (orderForTest(&gs, id, last)) |_| {
+                try std.testing.expectEqual(expected, digest.stateHash(&gs));
+                break;
+            } else |err| {
+                try std.testing.expectEqual(error.OutOfMemory, err);
+                try std.testing.expectEqual(before, digest.stateHash(&gs));
+                failed += 1;
+                gs.arena.child_allocator = outer.allocator();
+                _ = try orderForTest(&gs, id, last);
+                try std.testing.expectEqual(expected, digest.stateHash(&gs));
+            }
+        }
+        try std.testing.expect(failed > 0);
+    }
+}

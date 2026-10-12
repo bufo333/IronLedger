@@ -1,8 +1,8 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 63, the only supported store and campaign format.
+-- Matches schema_version 64, the only supported store and campaign format.
 -- Older and newer formats are refused before persistent mutation under
--- docs/engineering-contract.md rule 51; only empty stores initialize schema 63.
+-- docs/engineering-contract.md rule 51; only empty stores initialize schema 64.
 -- The executable DDL and dormant historical migration declarations live in
 -- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
@@ -70,7 +70,7 @@ CREATE TABLE campaign (
     commander       TEXT,
     day             INTEGER NOT NULL,                -- day_index at save
     date            TEXT    NOT NULL,                -- in-game date at save
-    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 63; older/newer versions are refused before load or overwrite
+    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 64; older/newer versions are refused before load or overwrite
     save_seq        INTEGER NOT NULL,                -- store-wide save counter, orders "most recent"
     player_id       INTEGER NOT NULL DEFAULT 0       -- -> player.id; 0 = none
 );
@@ -953,6 +953,74 @@ CREATE TABLE battle_report_task (
     FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_battle_report_task_report ON battle_report_task(cid, report_ord);
+
+-- P5b.1: the phases an engagement fought and the order given at each
+-- (child of battle_report; empty for a concession or a forfeit).
+CREATE TABLE battle_report_phase (
+    cid             INTEGER NOT NULL,
+    report_ord      INTEGER NOT NULL, -- -> battle_report.ord
+    ord             INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord BETWEEN 0 AND 2), -- fought order, contiguous from 0 (battle_phases.max_phases)
+    phase           TEXT    NOT NULL CHECK (phase IN ('contact','decisive','pursuit','withdrawal')), -- domain/battle_phase.zig Phase
+    order_kind      TEXT    NOT NULL CHECK (order_kind IN ('engage','press_on','withdraw','pursue','consolidate','cover_recovery','roe')), -- Order tag
+    order_roe       TEXT    CHECK (order_roe IS NULL OR order_roe IN ('hold','standard','cautious')), -- an ROE order's ROE; NULL for every other order
+    roe             TEXT    NOT NULL CHECK (roe IN ('hold','standard','cautious')), -- the ROE the phase was fought under
+    ratio_bonus     INTEGER NOT NULL CHECK (typeof(ratio_bonus)='integer' AND ratio_bonus BETWEEN -2147483648 AND 2147483647), -- die-free modifiers (0 for an unrolled phase)
+    scenario_mod    INTEGER NOT NULL CHECK (typeof(scenario_mod)='integer' AND scenario_mod BETWEEN -2147483648 AND 2147483647),
+    roe_roll        INTEGER NOT NULL CHECK (typeof(roe_roll)='integer' AND roe_roll BETWEEN -2147483648 AND 2147483647),
+    momentum        INTEGER NOT NULL CHECK (typeof(momentum)='integer' AND momentum BETWEEN -2147483648 AND 2147483647),
+    margin          INTEGER NOT NULL CHECK (typeof(margin)='integer' AND margin BETWEEN -2147483648 AND 2147483647), -- roll less tuning.battle.phases.par
+    hits            INTEGER NOT NULL CHECK (typeof(hits)='integer' AND hits BETWEEN 0 AND 4294967295), -- hits the phase added
+    PRIMARY KEY (cid, report_ord, ord),
+    CHECK ((order_roe IS NULL) = (order_kind != 'roe')),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_battle_report_phase_report ON battle_report_phase(cid, report_ord);
+
+-- P5b.1: the battle in progress — at most one (the battle lock). The
+-- contract table has no unique (cid, id), so the loader checks that the
+-- contract exists and is active.
+CREATE TABLE battle_in_progress (
+    cid             INTEGER NOT NULL,
+    ord             INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), -- always 0
+    contract_id     INTEGER NOT NULL CHECK (typeof(contract_id)='integer' AND contract_id BETWEEN 1 AND 4294967295), -- -> contract.id
+    phase           TEXT    NOT NULL CHECK (phase IN ('contact','decisive')), -- the pause reached (domain/battle_phase.zig Pause)
+    PRIMARY KEY (cid, contract_id),
+    UNIQUE (cid, ord),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_battle_in_progress_cid ON battle_in_progress(cid);
+
+-- P5b.1: each order given in the battle in progress and the pause report it
+-- reached. Replaying the orders from live state reaches the same pauses.
+CREATE TABLE battle_in_progress_order (
+    cid             INTEGER NOT NULL,
+    contract_id     INTEGER NOT NULL, -- -> battle_in_progress.contract_id
+    ord             INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), -- order given, contiguous from 0
+    order_kind      TEXT    NOT NULL CHECK (order_kind IN ('engage','press_on','withdraw','pursue','consolidate','cover_recovery','roe')),
+    order_roe       TEXT    CHECK (order_roe IS NULL OR order_roe IN ('hold','standard','cautious')),
+    pause           TEXT    NOT NULL CHECK (pause IN ('contact','decisive')), -- the pause this order reached
+    margin          INTEGER NOT NULL CHECK (typeof(margin)='integer' AND margin BETWEEN -2147483648 AND 2147483647),
+    hits            INTEGER NOT NULL CHECK (typeof(hits)='integer' AND hits BETWEEN 0 AND 4294967295), -- hits taken so far (not yet landed)
+    momentum        INTEGER NOT NULL CHECK (typeof(momentum)='integer' AND momentum BETWEEN -2147483648 AND 2147483647),
+    roe             TEXT    NOT NULL CHECK (roe IN ('hold','standard','cautious')), -- ROE for the next phase
+    outcome         TEXT    CHECK (outcome IS NULL OR outcome IN ('decisive_victory','victory','draw','defeat','rout')), -- decisive verdict; NULL at contact
+    held_field      INTEGER NOT NULL CHECK (held_field IN (0,1)),
+    odds_next       TEXT    NOT NULL CHECK (odds_next IN ('decisive','pursuit','cover')), -- the next phase the odds are for
+    odds_0          INTEGER NOT NULL CHECK (typeof(odds_0)='integer' AND odds_0 BETWEEN 0 AND 65535), -- dice results per band, band order of the next phase's enum
+    odds_1          INTEGER NOT NULL CHECK (typeof(odds_1)='integer' AND odds_1 BETWEEN 0 AND 65535),
+    odds_2          INTEGER NOT NULL CHECK (typeof(odds_2)='integer' AND odds_2 BETWEEN 0 AND 65535),
+    odds_3          INTEGER NOT NULL CHECK (typeof(odds_3)='integer' AND odds_3 BETWEEN 0 AND 65535),
+    odds_4          INTEGER NOT NULL CHECK (typeof(odds_4)='integer' AND odds_4 BETWEEN 0 AND 65535),
+    odds_total      INTEGER NOT NULL CHECK (typeof(odds_total)='integer' AND odds_total BETWEEN 1 AND 65535), -- equally likely results counted
+    PRIMARY KEY (cid, contract_id, ord),
+    CHECK ((order_roe IS NULL) = (order_kind != 'roe')),
+    CHECK ((outcome IS NULL) = (pause = 'contact')),
+    CHECK (pause = 'decisive' OR held_field = 0),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, contract_id) REFERENCES battle_in_progress(cid, contract_id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_battle_in_progress_order_cid ON battle_in_progress_order(cid, contract_id);
 
 -- P4i: persistent contract-introduced actors with a narrow relationship model.
 -- One row per actor per campaign. actors.recurring is set when the actor recurs

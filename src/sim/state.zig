@@ -16,6 +16,7 @@ const clock_mod = @import("../domain/clock.zig");
 const rng_mod = @import("rng.zig");
 const events_mod = @import("../domain/events.zig");
 const battle_report_mod = @import("../domain/battle_report.zig");
+const battle_phase_mod = @import("../domain/battle_phase.zig");
 const difficulty_mod = @import("../domain/difficulty.zig");
 const finance_mod = @import("../econ/finance.zig");
 const person_gen = @import("../gen/person_gen.zig");
@@ -297,6 +298,10 @@ pub const GameState = struct {
     next_battle_id: u32 = 1,
     /// Every resolved engagement as a structured campaign record.
     battle_reports: battle_report_mod.Journal = .{},
+    /// Engagements the commander has started and not finished, at most one
+    /// (the battle lock refuses a second): the orders given and the pauses
+    /// they reached (ARCH §7 "The phased engagement").
+    battles_in_progress: std.ArrayListUnmanaged(battle_phase_mod.BattleInProgress) = .empty,
     /// Hulls the enemy dragged off a field we lost: off the books
     /// but not struck off, so a recovery raid has something to win back.
     held_hulls: std.ArrayListUnmanaged(unit_mod.HeldHull) = .empty,
@@ -1350,6 +1355,7 @@ pub const GameState = struct {
         .{ "event_log", .persisted },
         .{ "next_battle_id", .persisted },
         .{ "battle_reports", .persisted },
+        .{ "battles_in_progress", .persisted },
         .{ "held_hulls", .persisted },
         .{ "fund_couriers", .persisted },
         .{ "policies", .persisted },

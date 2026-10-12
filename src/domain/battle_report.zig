@@ -26,6 +26,7 @@ const autoresolve = @import("autoresolve.zig");
 const operation = @import("operation.zig");
 const artillery_operations = @import("artillery_operations.zig");
 const artillery_combat = @import("artillery_combat.zig");
+const battle_phase = @import("battle_phase.zig");
 
 /// What a hit did to a mounted part.
 pub const SlotResult = enum {
@@ -237,6 +238,9 @@ pub const BattleReport = struct {
     air_grounded: bool = false,
     convoy_hit: bool = false,
     edge_spent_by: []const u8 = "",
+    /// The phases fought and the order given at each (ARCH §7 "The phased
+    /// engagement"); empty for a concession or a forfeit.
+    phases: []const battle_phase.PhaseRecord = &.{},
     recon_quality: u8 = 0,
     avg_fatigue: u8 = 0,
     avg_morale: u8 = 0,

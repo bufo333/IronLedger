@@ -111,7 +111,18 @@ pub fn clearHoldsForTest(gs: *GameState, al: std.mem.Allocator) !void {
             const ev = try queries.pendingDecision(al, gs, id) orelse return;
             _ = commands.execute(gs, .{ .resolve_decision = .{ .event = id, .choice = ev.default_choice } }) catch {};
         },
+        .engagement => |id| {
+            const view = try queries.battlePhaseReport(al, gs, id) orelse return;
+            _ = try commands.execute(gs, .{ .battle_order = .{ .contract = id, .order = view.default_order } });
+        },
     };
+}
+
+/// An engagement due today for the campaign's first company, for client
+/// tests that need the battle screen.
+pub fn dueEngagementForTest(gs: *GameState) !types.ContractId {
+    for (gs.forces.values()) |f| if (f.echelon == .company) return @import("battle.zig").dueEngagementForCompanyForTest(gs, f.id);
+    return error.NoCompany;
 }
 
 /// Found a campaign and accept the first eligible arc-contract offer.

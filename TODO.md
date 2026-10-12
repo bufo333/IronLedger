@@ -45,10 +45,12 @@ A package has one primary invariant or subsystem outcome.
   mutates, and the command restores earlier days and phases when a later day or
   the preparation between days fails (preparing each phase alone does not).
   Closes docs/contract-exceptions.md "Advance commits partial days".
-- [ ] P5b the battle you can touch (ROADMAP P5b): phased autoresolve (contact,
+- [x] P5b.1 the battle you can touch (ROADMAP P5b): phased autoresolve (contact,
   decisive, pursuit or withdrawal) under one seed; a pause between phases with
-  recomputed odds and the existing interventions (reserve commit, ROE, air
-  cover, tactical withdrawal, command capacity); AAR and operation record name
+  recomputed odds and the existing interventions (ROE, tactical withdrawal);
+  AAR names each phase; fixed-seed and refusal tests.
+- [ ] P5b.2 the battle you can touch (ROADMAP P5b): the existing interventions
+  (reserve commit, air cover, command capacity); AAR and operation record name
   each intervention; fixed-seed and refusal tests.
 - [ ] P5c situations slice (ROADMAP P5c.1–P5c.4): actor-owned situations with
   typed flags on relationship and world state; three situations on the garrison

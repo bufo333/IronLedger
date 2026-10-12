@@ -36,7 +36,8 @@ const commands = @import("commands.zig");
 
 /// The ordered phases of one campaign day. Order is part of the spec:
 /// e.g. shipments must arrive (travel) before supply consumption, and
-/// battles resolve after contract events may have spawned them.
+/// engagements are scheduled after contract events; one that comes due
+/// holds the turn and is fought after the day's phases (ARCH §6 step 8).
 pub const DayPhase = enum {
     travel,
     supply_consumption,
@@ -83,7 +84,7 @@ pub fn advanceDay(gs: *GameState) !void {
     try operation_control.resolveDueOperations(gs); // contract_events sub-step: resolve due non-combat ops and finale
     try operations.advanceClocks(gs); // contract_events sub-step: escalation-clock advancement
     if (gs.clock.date.isPayday()) try operations.refreshCommandCapacity(gs); // monthly command-capacity grant
-    try battle.runDaily(gs); // battle_resolution: due engagements resolve
+    try battle.runDaily(gs); // battle_resolution: engagements are scheduled; a due one holds the turn
     try resolveArcFinales(gs); // arc collapse check: high escalation at terminal beat triggers immediate finale (P4h)
     try contract_control.checkEffectiveness(gs); // the ineffectiveness clock
     if (gs.clock.day_index % types.days_per_week == 0 and gs.clock.day_index > 0) {
@@ -836,6 +837,7 @@ fn holdError(gs: *GameState) ?Error {
     return switch (@import("checklist.zig").turnHold(gs) orelse return null) {
         .unread_after_action => Error.ReportUnread,
         .battle_decision => Error.DecisionPending,
+        .engagement_due => Error.EngagementDue,
     };
 }
 
@@ -845,9 +847,10 @@ pub fn advance(gs: *GameState, days: u32) Error!Result {
     // money: a negative outfit treasury holds the turn until a
     // loan or a sale covers it, and past all credit the outfit folds.
     var result: Result = .{};
-    // Nothing moves while an engagement is unread or a battle
-    // decision is unanswered; `read <id>` clears the first,
-    // `decide <id> <n>` the second, and the client opens both for you.
+    // Nothing moves while an engagement is unread, a battle decision is
+    // unanswered or an engagement waits on battle orders; `read <id>`
+    // clears the first, `decide <id> <n>` the second, `battle <contract> …`
+    // the third, and the client opens each for you.
     if (holdError(gs)) |e| return e;
     for (0..days) |_| {
         if (gs.bankrupt) {
@@ -877,10 +880,10 @@ pub fn advance(gs: *GameState, days: u32) Error!Result {
         try advanceDay(gs);
         result.days_advanced += 1;
         // A battle disposes of hulls and people permanently and has no
-        // safe default to lapse to (ARCH §6), so an unread after-action
-        // or an unanswered battle decision holds the turn. A multi-day
-        // advance stops on the day it lands rather than resolving the
-        // rest of the week around it.
+        // safe default to lapse to (ARCH §6), so an unread after-action,
+        // an unanswered battle decision or an engagement come due holds
+        // the turn. A multi-day advance stops on the day it lands rather
+        // than resolving the rest of the week around it.
         if (@import("checklist.zig").turnHold(gs) != null) return result;
         // The contact warning is a heads-up, not a hold: the advance stops
         // on the day it appears and the next advance goes ahead.
@@ -957,7 +960,11 @@ pub fn advanceUntilStop(gs: *GameState, cap: u32) Error!Result {
         result.days_advanced += 1;
         if (checklist.advanceStop(gs, &watch)) |stop| {
             result.stopped = stoppedFor(stop.reason);
-            if (stop.reason == .contact) result.contact = stop.contract;
+            switch (stop.reason) {
+                .contact => result.contact = stop.contract,
+                .hold => result.contract = stop.contract,
+                else => {},
+            }
             return result;
         }
     }
@@ -1014,7 +1021,17 @@ pub fn clearHolds(gs: *GameState) !void {
             const ev = gs.event_queue.blocking().?;
             _ = try commands.execute(gs, .{ .resolve_decision = .{ .event = ev.id, .choice = ev.default_choice } });
         },
+        .engagement_due => try fightDueEngagement(gs),
     };
+}
+
+/// Gives the due engagement's next order as an unattended script does
+/// (`battle_phases.defaultOrder`).
+pub fn fightDueEngagement(gs: *GameState) !void {
+    const battle_phases = @import("battle_phases.zig");
+    const contract = battle.dueEngagement(gs).?;
+    const latest = if (battle_phases.inProgress(gs)) |r| r.latest() else null;
+    _ = try commands.execute(gs, .{ .battle_order = .{ .contract = contract, .order = battle_phases.defaultOrder(latest) } });
 }
 
 test "an unread after-action holds the turn, and a week stops on the day it lands" {
@@ -1038,16 +1055,23 @@ test "an unread after-action holds the turn, and a week stops on the day it land
     try gs.addStock(site, "armor", 60);
     for (@import("../domain/part.zig").munition_keys) |key| try gs.addStock(site, key, 40);
 
+    // The week stops on the day the engagement comes due, and the turn
+    // waits on its orders; once fought, it waits on the report.
     var guard: u32 = 0;
-    while (gs.battle_reports.unread() == null and guard < 20) : (guard += 1) {
+    while (battle.dueEngagement(&gs) == null and guard < 20) : (guard += 1) {
         const r = try commands.execute(&gs, .{ .advance_days = 7 });
-        if (gs.battle_reports.unread() != null) {
+        if (battle.dueEngagement(&gs) != null) {
             try std.testing.expect(r.days_advanced < 7);
             break;
         }
         if (r.contact == .none) try std.testing.expectEqual(@as(u32, 7), r.days_advanced);
     }
-    const waiting = gs.battle_reports.unread() orelse return error.NoBattleInTwentyWeeks;
+    _ = battle.dueEngagement(&gs) orelse return error.NoBattleInTwentyWeeks;
+    try std.testing.expectError(Error.EngagementDue, commands.execute(&gs, .{ .advance_days = 7 }));
+    try std.testing.expectError(Error.EngagementDue, commands.execute(&gs, .advance_day));
+    try std.testing.expect(gs.battle_reports.unread() == null);
+    while (battle.dueEngagement(&gs) != null) try fightDueEngagement(&gs);
+    const waiting = gs.battle_reports.unread() orelse return error.NoReportAfterTheFight;
 
     try std.testing.expectError(Error.ReportUnread, commands.execute(&gs, .{ .advance_days = 7 }));
     try std.testing.expectError(Error.ReportUnread, commands.execute(&gs, .advance_day));
@@ -1096,6 +1120,7 @@ test "a field held asks for the tempo, and the turn waits for the answer" {
     while (gs.event_queue.blocking() == null and guard < 40) : (guard += 1) {
         while (gs.battle_reports.unread()) |u| _ = try commands.execute(&gs, .{ .read_report = u.id });
         _ = try commands.execute(&gs, .{ .advance_days = 7 });
+        while (battle.dueEngagement(&gs) != null) try fightDueEngagement(&gs);
         while (gs.battle_reports.unread()) |u| _ = try commands.execute(&gs, .{ .read_report = u.id });
     }
     const pending = gs.event_queue.blocking() orelse return error.NoHeldFieldInFortyWeeks;

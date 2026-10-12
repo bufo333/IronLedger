@@ -69,6 +69,9 @@ pub const WarningKind = enum {
     /// A battle decision nobody has answered. Like the unread
     /// after-action, the turn waits on it rather than defaulting.
     battle_decision,
+    /// An engagement has come due or is being fought: the turn waits on
+    /// the commander's battle orders (`turnHold`).
+    engagement_due,
     /// An engagement is inside the contact warning window: the odds, the
     /// strength and the ammunition while ROE and recall can still act.
     contact_imminent,
@@ -81,7 +84,7 @@ pub const WarningKind = enum {
     /// an insolvent outfit refuse an advance.
     pub fn urgent(self: WarningKind) bool {
         return switch (self) {
-            .unread_after_action, .battle_decision, .decision_due, .understaffed_hq, .overdrawn, .combat_ineffective, .dry_ammo, .hungry, .untreated_wounded, .insolvent => true,
+            .unread_after_action, .battle_decision, .engagement_due, .decision_due, .understaffed_hq, .overdrawn, .combat_ineffective, .dry_ammo, .hungry, .untreated_wounded, .insolvent => true,
             else => false,
         };
     }
@@ -164,16 +167,19 @@ pub fn contactOpenedToday(gs: *GameState) ?*const @import("../domain/contract.zi
     return null;
 }
 
-/// Why time is not moving (ARCH §6). Two things stop a turn outside
-/// money, and both dispose of something permanent with no safe default to
-/// lapse to: an engagement nobody has read, and a battle decision nobody
-/// has answered. One function decides, so `advance` and the checklist
-/// cannot disagree about whether the turn is held.
-pub const Hold = enum { unread_after_action, battle_decision };
+/// Why time is not moving (ARCH §6). Three things stop a turn outside
+/// money, and each disposes of something permanent with no safe default to
+/// lapse to: an engagement nobody has read, a battle decision nobody has
+/// answered, and an engagement that has come due and waits on the
+/// commander's orders (`battle.dueEngagement`). One function decides, so
+/// `advance` and the checklist cannot disagree about whether the turn is
+/// held. Declaration order is the order they are dealt with.
+pub const Hold = enum { unread_after_action, battle_decision, engagement_due };
 
 pub fn turnHold(gs: *GameState) ?Hold {
     if (gs.battle_reports.unread() != null) return .unread_after_action;
     if (gs.event_queue.blocking() != null) return .battle_decision;
+    if (@import("battle.zig").dueEngagement(gs) != null) return .engagement_due;
     return null;
 }
 
@@ -182,7 +188,8 @@ pub fn turnHold(gs: *GameState) ?Hold {
 /// the command reports exactly the reason it returns. Declaration order is
 /// the priority order when several hold on the same day.
 pub const StopReason = enum {
-    /// An unread after-action or an unanswered battle decision (`turnHold`).
+    /// An unread after-action, an unanswered battle decision, or an
+    /// engagement waiting on the commander's orders (`turnHold`).
     hold,
     /// A scheduled engagement entered the contact window (`contactOpenedToday`).
     contact,
@@ -211,8 +218,8 @@ pub const StopReason = enum {
     personnel,
 };
 
-/// A stop and the contract it is about (contact, employer notice,
-/// contract end, arrival on world); `.none` otherwise.
+/// A stop and the contract it is about (an engagement hold, contact,
+/// employer notice, contract end, arrival on world); `.none` otherwise.
 pub const Stop = struct {
     reason: StopReason,
     contract: types.ContractId = .none,
@@ -294,7 +301,7 @@ pub fn watchDay(alloc: std.mem.Allocator, gs: *GameState) !DayWatch {
 pub fn advanceStop(gs: *GameState, watch: ?*const DayWatch) ?Stop {
     const day = gs.clock.day_index;
     const w = watch orelse return if (decisionDefaultsBy(gs, day + 1)) .{ .reason = .decision_due } else null;
-    if (turnHold(gs) != null) return .{ .reason = .hold };
+    if (turnHold(gs)) |hold| return .{ .reason = .hold, .contract = if (hold == .engagement_due) @import("battle.zig").dueEngagement(gs).? else .none };
     if (contactOpenedToday(gs)) |c| return .{ .reason = .contact, .contract = c.id };
     if (decisionDefaultsBy(gs, day + 1)) return .{ .reason = .decision_due };
     for (gs.event_queue.pending.items) |*ev| if (ev.needsDecision() and @intFromEnum(ev.id) >= w.next_event_id) return .{ .reason = .decision_due };
@@ -441,6 +448,17 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
         }) });
     }
 
+    // An engagement waiting on battle orders holds the turn as well.
+    if (@import("battle.zig").dueEngagement(gs)) |id| {
+        const c = gs.contracts.getPtr(id).?;
+        const world = if (@import("../domain/planet.zig").find(c.planet_key)) |p| p.name else c.planet_key;
+        try out.append(alloc, .{ .kind = .engagement_due, .contract = id, .text = try std.fmt.allocPrint(alloc, "{s}: the engagement on {s} {s} — give battle orders", .{
+            if (gs.force(c.assigned_company)) |f| try table.plain(alloc, f.name) else "—",
+            world,
+            if (@import("battle_phases.zig").inProgress(gs) != null) "is being fought" else "has come due",
+        }) });
+    }
+
     // Money first: nothing else matters if the outfit cannot pay.
     if (gs.funds + treasury.inboundToOutfit(gs) < 0) {
         const folds = try treasury.isInsolvent(alloc, gs);
@@ -459,7 +477,8 @@ pub fn turnWarnings(gs: *GameState, alloc: std.mem.Allocator) ![]Warning {
             const c = ce.value_ptr;
             if (c.status != .active) continue;
             if (battle.inContactWindow(gs, c)) {
-                if (!battle.ordersConfirmed(c)) try out.append(alloc, .{ .kind = .contact_imminent, .text = try contactText(alloc, gs, c), .contract = c.id });
+                // A due engagement is warned of as the hold above.
+                if (!battle.ordersConfirmed(c) and !battle.engagementDue(gs, c)) try out.append(alloc, .{ .kind = .contact_imminent, .text = try contactText(alloc, gs, c), .contract = c.id });
                 continue;
             }
             const rt = (try offer_rating.rateOffer(alloc, gs, c, c.assigned_company)) orelse continue;

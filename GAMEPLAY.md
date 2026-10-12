@@ -222,6 +222,22 @@ you own reports to you (Stages 9A–9C):
   recall that breaches the contract. The odds recompute as you change
   them. Confirming the orders clears the warning; skipping them leaves the
   current settings standing, and the next advance goes ahead either way.
+- **You fight the battle**: on the engagement's day, after the day's other
+  business, the turn holds until you fight it — the client opens the
+  battle screen (`battle <contract>` in the REPL). `engage` joins contact;
+  the battle then pauses on a phase report: the margin, the hits taken so
+  far (none land until the battle ends), and the exact odds of the next
+  phase under your orders. At the contact pause you can **press on** to
+  the decisive phase, change the **ROE** for it (not under integrated
+  command), or **withdraw**: the field is lost, but only the hits so far
+  land and the wrecks roll as a cautious withdrawal. After the decisive
+  phase a held field may be **pursued** (more of the enemy run down, at the
+  risk of hits) or **consolidated**; a lost field may be **covered** (the
+  wrecks roll better to come home, at the risk of hits) or left now. The
+  dice are fixed when contact is joined — an order changes what happens
+  next, never what already happened — and while a battle is being fought
+  nothing else can be ordered. A save taken mid-battle resumes the same
+  fight. The after-action names every phase and the order you gave.
 - **Orders are exact**: the command line (and the console) takes every
   word you type or refuses the order with its usage — a stray word is
   never quietly dropped, a choice outside its list is never read as the

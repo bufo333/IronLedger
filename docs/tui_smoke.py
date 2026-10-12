@@ -439,6 +439,35 @@ mark = len(out)
 send(":"); send("day 30\r", 2.5)
 after = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "replace")
 assert "contact ahead" not in after and "BATTLE ORDERS" not in after, after[-3000:]
+
+
+def fight_battle(refuse_first):
+    """P5b.1: the advance stops on the engagement's day and opens the battle
+    screen. Engage, press on, then consolidate a held field — or, when that
+    is refused on a lost one, withdraw; the after-action opens and Esc reads it."""
+    assert wait_for("BATTLE ·", tail=30000), plain()[-3000:]
+    if refuse_first:
+        send("p", 0.8)                 # press on before contact is joined: refused
+        assert wait_for("cannot be given at this point of the battle", tail=2500), plain()[-3000:]
+    send("e", 1.5)
+    assert wait_for("contact fought", tail=30000), plain()[-3000:]
+    send("p", 1.5)
+    assert wait_for("decisive phase fought", tail=30000), plain()[-3000:]
+    send("c", 1.5)                     # an after-action ignores the w that follows
+    send("w", 1.5)
+    assert wait_for("the battle is over", tail=30000), plain()[-3000:]
+    mark_read = len(out)
+    send("\x1b", 0.8)                  # read the after-action
+    # The decisions the fight raised open one after another: answer each.
+    for _ in range(6):
+        frame = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark_read:]).decode("utf-8", "replace")
+        if "DECISION" not in frame[-6000:]:
+            break
+        mark_read = len(out)
+        send("1", 1.0)
+
+
+fight_battle(True)
 send("\x1b", 0.5); send("\x1b", 0.5)
 # P4g: exercise the intervention picker on a committed combat op.  The
 # garrison auto-probe battle above has been resolved; the contract is still
@@ -456,10 +485,18 @@ if has_ops:
     assert "INTERVENTION" in plain()[-30000:], plain()[-3000:]
     send("\x1b", 0.5)                 # close intervention picker
     send("\x1b", 0.5)                 # close operations modal
-    # press_gap_days = 3, so the committed battle fires within 3 days;
-    # advance 3 days with force so it fires and opens the after-action.
-    send(":"); send("day 3 force\r", 2.0)
-    send("\x1b", 0.5)                 # close after-action (marks it read)
+    # Advance with force until the committed battle comes due and holds the
+    # turn (within the longest engagement gap), then fight it.
+    due = False
+    for _ in range(8):
+        mark_day = len(out)
+        send(":"); send("day 3 force\r", 2.0)
+        if "BATTLE ·" in re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark_day:]).decode("utf-8", "replace"):
+            due = True
+            break
+        send("\x1b", 0.5)
+    assert due, plain()[-3000:]
+    fight_battle(False)
     send("\x1b", 0.5)                 # close any decision modal that auto-opened
 # Layout-boundary smoke: Forces focus must not wedge on a narrow resize.
 # Switch to Forces, Tab to the pool pane (focus 1), shrink to 118 columns

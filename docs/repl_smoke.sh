@@ -93,6 +93,19 @@ printf '%s\n' \
   'artillery 999' \
   'seat 999 badname 1' \
   'seat 999 commander 1' \
+  'day 30 force' \
+  'day 30 force' \
+  'day 30 force' \
+  'day 30 force' \
+  'day 30 force' \
+  'battle 9' \
+  'battle 9 pursue' \
+  'battle 9 engage' \
+  'sell 3' \
+  'battle 9 roe hold' \
+  'battle 9 on' \
+  'battle 9 consolidate' \
+  'battle 9 withdraw' \
   'save' \
   'quit' > "$work/input"
 # A watchdog kills a hung REPL (macOS has no `timeout`); the exit status
@@ -186,4 +199,16 @@ check 'usage: repairarty'
 check 'refused: the artillery carrier needs'
 check 'required home HQ pool'
 check '#1 sold'
+# P5b.1: a due engagement holds the turn and is fought in phases through
+# `battle`: an order not legal at the pause and any other command under the
+# battle lock are refused; the AAR names each phase and its order.
+check 'an engagement waits on your orders'
+check 'battle 9 engage'
+check 'refused: that order cannot be given at this point of the battle'
+check 'engage: contact fought — the battle pauses for orders'
+check 'refused: a battle is being fought'
+check 'ROE hold for the next phase — the odds are recomputed'
+check 'press on: decisive fought'
+check 'the battle is over — after-action #'
+check 'AAR\]   contact — engage: margin'
 echo "REPL SMOKE OK"

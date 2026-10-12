@@ -118,19 +118,44 @@ pub const OpforHullOutcome = enum { destroyed, combat_ineffective, surviving };
 /// engagement outcome band (docs/p3c-economy-design.md §8.E).
 /// One .battle draw: uintLessThan(u8, 100).
 pub fn hullOutcome(rng: *rng_mod.Rng, stream: rng_mod.Stream, outcome: autoresolve.Outcome) OpforHullOutcome {
+    return hullOutcomePursued(rng, stream, outcome, 0);
+}
+
+/// `hullOutcome` after a pursuit that ran `destroyed_bonus_pct` more of the
+/// enemy down: the destroyed band widens by that many points, taken from
+/// the hulls that would otherwise have been ineffective or survived. One
+/// draw, like `hullOutcome`.
+pub fn hullOutcomePursued(rng: *rng_mod.Rng, stream: rng_mod.Stream, outcome: autoresolve.Outcome, destroyed_bonus_pct: u8) OpforHullOutcome {
     // Extract the two thresholds for this band. Each opfor_outcome field is an
     // anonymous struct of the same shape; use inline else to index by tag name
     // and extract each u8 field (avoids nominal-type mismatch across branches).
-    const destroyed_pct: u8 = switch (outcome) {
+    const destroyed_pct: u16 = @as(u16, switch (outcome) {
         inline else => |o| @field(tuning.battle.opfor_outcome, @tagName(o)).destroyed_pct,
-    };
-    const ineffective_pct: u8 = switch (outcome) {
+    }) + destroyed_bonus_pct;
+    const ineffective_pct: u16 = switch (outcome) {
         inline else => |o| @field(tuning.battle.opfor_outcome, @tagName(o)).ineffective_pct,
     };
     const pct_roll = rng.random(stream).uintLessThan(u8, 100);
     if (pct_roll < destroyed_pct) return .destroyed;
     if (pct_roll < destroyed_pct + ineffective_pct) return .combat_ineffective;
     return .surviving;
+}
+
+test "a pursuit widens the destroyed band on the same single draw" {
+    var destroyed: [2]u32 = .{ 0, 0 };
+    for (0..200) |seed| for ([_]u8{ 0, 30 }, 0..) |bonus, i| {
+        var rng = rng_mod.Rng.init(seed);
+        const before = rng;
+        const oc = hullOutcomePursued(&rng, .battle, .draw, bonus);
+        destroyed[i] += @intFromBool(oc == .destroyed);
+        var once = before;
+        _ = once.random(.battle).uintLessThan(u8, 100);
+        try std.testing.expectEqualDeep(once, rng);
+    };
+    try std.testing.expect(destroyed[1] > destroyed[0]);
+    var a = rng_mod.Rng.init(7);
+    var b = rng_mod.Rng.init(7);
+    try std.testing.expectEqual(hullOutcome(&a, .battle, .victory), hullOutcomePursued(&b, .battle, .victory, 0));
 }
 
 test "drawSize: B1 formula — non-garrison scales lances, garrison caps at one lance, pool_len clamp, lances floor" {

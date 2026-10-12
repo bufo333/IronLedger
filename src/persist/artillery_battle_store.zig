@@ -284,7 +284,7 @@ fn capturedCampaignForTest(gs: *GameState, held: bool) !void {
     const enemy_power = artillery_battle.fire(gs, &a, 0, 10000);
     _ = try artillery_battle.applyExposure(gs, &a, combat.percent_scale * combat.exposure_divisor, false);
     var random = gs.rng;
-    _ = try artillery_battle.recover(gs, &a, c, scenario.roll(&random, .battle, c.kind), .defeat, .standard, held, false, 0, 1);
+    _ = try artillery_battle.recover(gs, &a, c, scenario.roll(&random, .battle, c.kind), .defeat, .standard, false, held, false, 0, 1);
     try artillery_battle.reward(gs, &a, -1);
     const r: report.BattleReport = .{ .id = @enumFromInt(gs.next_battle_id), .day = 0, .contract = cid, .company = c.assigned_company, .kind = "recon raid", .enemy_key = c.enemy_key, .scenario = "", .terrain = "", .weather = "", .outcome = .defeat, .held_field = held, .enemy_power = enemy_power, .artillery = a };
     gs.next_battle_id += 1;

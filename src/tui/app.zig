@@ -27,6 +27,8 @@ pub const Table = screen_mod.Table;
 pub const q = game.queries;
 pub const types = game.types;
 pub const Command = game.commands.Command;
+/// Battle orders are command payloads (rule 8: typed enums for commands).
+const battle_phase = game.battle_phase;
 const operations_mod = game.operations;
 const Lobby = game.lobby.Lobby;
 /// The session handle the lobby hands out; the client passes it to
@@ -70,6 +72,9 @@ const Modal = union(enum) {
     /// Battle orders for the engagement in view: the levers that can still
     /// change the fight, and confirming them.
     battle_orders: types.ContractId,
+    /// The battle screen for a due or in-progress engagement: the phase
+    /// report, the next phase's odds, and the orders legal at the pause.
+    battle: types.ContractId,
     input: InputKind,
     help,
     /// One command behind a yes/no (rule 36): the body quotes the stakes,
@@ -162,7 +167,7 @@ const Modal = union(enum) {
 /// Where the stop screen leads: the tab where the stop is acted on, or the
 /// modal a hold or a contact waits on. That modal revalidates the ID when
 /// it opens (rule 40).
-const StopNext = union(enum) { tab: Tab, after_action: types.BattleId, decision: types.EventId, orders: types.ContractId };
+const StopNext = union(enum) { tab: Tab, after_action: types.BattleId, decision: types.EventId, orders: types.ContractId, battle: types.ContractId };
 
 const StopReport = struct {
     stopped: @FieldType(game.commands.Result, "stopped"),
@@ -1500,7 +1505,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail, .stop_report => try self.drawList(al),
+            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail, .stop_report => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -2264,6 +2269,7 @@ pub const App = struct {
         .{ .name = "Raise a company · crews", .legend = &raise_crews_legend },
         .{ .name = "Soundtrack", .legend = &music_legend },
         .{ .name = "Decision", .legend = &decision_legend },
+        .{ .name = "Battle", .legend = &battle_legend },
         .{ .name = "Contract log", .legend = &log_legend },
         .{ .name = "Stop screen (after `n`)", .legend = &stop_legend },
         .{ .name = "After-action report", .legend = &after_action_legend },
@@ -2474,6 +2480,21 @@ pub const App = struct {
     /// Open the battle orders for a contract, cursor on the first lever.
     pub fn openOrders(self: *App, id: types.ContractId) void {
         self.openModal(.{ .battle_orders = id });
+    }
+
+    /// Send one battle order through `execResult` (rule 37). A pause keeps
+    /// the battle screen open on its new report; the order that ends the
+    /// battle opens the after-action it published.
+    fn giveBattleOrder(self: *App, id: types.ContractId, order: battle_phase.Order) !void {
+        const cmd: Command = .{ .battle_order = .{ .contract = id, .order = order } };
+        const res = self.execResult(cmd) orelse return;
+        self.say(.good, "{s}", .{try q.resultText(self.a(), self.state(), cmd, res)});
+        if (res.battle_pause != null) {
+            self.modal_cursor = 0;
+            return;
+        }
+        self.battles_from_list = false;
+        self.openModal(.{ .after_action = res.battle_report });
     }
 
     // ---- settings form: one look with the pickers and the amount form ----
@@ -2883,6 +2904,11 @@ pub const App = struct {
                 self.openModal(.{ .decision = id });
                 return;
             },
+            .engagement => |id| {
+                self.say(.crit, "day {d} · {s} — contact: the engagement waits on your orders", .{ st.day, st.date });
+                self.openModal(.{ .battle = id });
+                return;
+            },
             .none => {},
         }
         if (res.contact != .none) {
@@ -2927,6 +2953,7 @@ pub const App = struct {
         switch (q.turnHold(self.state())) {
             .after_action => |id| return .{ .after_action = id },
             .decision => |id| return .{ .decision = id },
+            .engagement => |id| return .{ .battle = id },
             .none => {},
         }
         if (res.contact != .none) return .{ .orders = res.contact };
@@ -2948,6 +2975,7 @@ pub const App = struct {
             .after_action => "the after-action",
             .decision => "the battle decision",
             .orders => "the battle orders",
+            .battle => "the battle",
         };
     }
 
@@ -2961,6 +2989,7 @@ pub const App = struct {
             },
             .decision => |id| self.openModal(.{ .decision = id }),
             .orders => |cid| self.openOrders(cid),
+            .battle => |cid| self.openModal(.{ .battle = cid }),
         }
     }
 
@@ -3218,6 +3247,25 @@ pub const App = struct {
                 }
                 if (!found) try rows.append(al, "  {d}this decision has been resolved{/}");
                 return .{ .title = try keys.title(al, try listTitle(al, "DECISION", null, "later", false), &decision_legend), .rows = rows.items, .read_only = true, .w = layout.modal.decision_w, .max_h = layout.modal.decision_max_h };
+            },
+            .battle => |cid| {
+                const view = (try q.battlePhaseReport(al, self.state(), cid)) orelse
+                    return .{ .title = "BATTLE", .rows = &.{ "", "  {d}this engagement has been fought — its after-action is on record{/}" }, .read_only = true, .w = layout.modal.decision_w, .max_h = layout.modal.decision_max_h };
+                var head: std.ArrayListUnmanaged([]const u8) = .empty;
+                try head.append(al, "");
+                for (view.lines) |line| try head.append(al, try std.fmt.allocPrint(al, "  {s}", .{line}));
+                try head.append(al, "");
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                for (view.orders) |o| try rows.append(al, try std.fmt.allocPrint(al, "  {s}{s}{s}{s}", .{ o.text, if (o.locked.len > 0) "  {d}(" else "", o.locked, if (o.locked.len > 0) "){/}" else "" }));
+                return .{
+                    .title = try listTitleWith(al, view.title, &battle_legend, "give that order", "later (the turn waits)", false),
+                    .head = head.items,
+                    .rows = rows.items,
+                    .n = rows.items.len,
+                    .foot = try al.dupe([]const u8, &.{ "", try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keys.title(al, "", &battle_legend)}) }),
+                    .w = layout.modal.decision_w,
+                    .max_h = full_h,
+                };
             },
             .raise_hulls => {
                 const g = self.state();
@@ -3960,6 +4008,19 @@ pub const App = struct {
     pub const decision_bindings = [_]keys.Binding(DecisionAction){
         .{ .match = .{ .chars = .{ '1', '9' } }, .action = .choose, .label = "choose", .group = .act },
     };
+    /// The battle screen's orders (ARCH §7 "The phased engagement"). Each
+    /// key sends its order; the command refuses one that is not legal at
+    /// this pause, with its own sentence.
+    const BattleAction = enum { engage, press_on, withdraw, pursue, consolidate, cover, roe };
+    pub const battle_bindings = [_]keys.Binding(BattleAction){
+        .{ .match = keys.Match.char('e'), .action = .engage, .label = "engage", .group = .act, .help = "fight the contact phase" },
+        .{ .match = keys.Match.char('p'), .action = .press_on, .label = "press on", .group = .act, .help = "fight the decisive phase" },
+        .{ .match = keys.Match.char('w'), .action = .withdraw, .label = "withdraw", .group = .act, .help = "give up the field: after contact only the hits so far land; after a lost decisive phase the wrecks take their usual recovery rolls" },
+        .{ .match = keys.Match.char('u'), .action = .pursue, .label = "pursue", .group = .act, .help = "after a held field: run the enemy down, at the risk of hits" },
+        .{ .match = keys.Match.char('c'), .action = .consolidate, .label = "consolidate", .group = .act, .help = "after a held field: end the battle as it stands" },
+        .{ .match = keys.Match.char('v'), .action = .cover, .label = "cover", .group = .act, .help = "after a lost field: cover the recovery of the wrecks, at the risk of hits" },
+        .{ .match = keys.Match.char('r'), .action = .roe, .label = "ROE", .group = .act, .help = "at the contact pause: step the ROE for the next phase (standard → cautious → hold)" },
+    };
     const LogAction = enum { top, bottom, close };
     pub const log_bindings = [_]keys.Binding(LogAction){
         .{ .match = keys.Match.char('g'), .action = .top, .label = "start", .group = .navigate, .show_footer = false },
@@ -3981,6 +4042,7 @@ pub const App = struct {
     const raise_support_legend = keys.entries(RaiseSupportAction, &raise_support_bindings);
     const music_legend = keys.entries(MusicAction, &music_bindings);
     const decision_legend = keys.entries(DecisionAction, &decision_bindings);
+    const battle_legend = keys.entries(BattleAction, &battle_bindings);
     const log_legend = keys.entries(LogAction, &log_bindings);
     const stop_legend = keys.entries(StopAction, &stop_bindings);
     const sheet_legend = keys.entries(SheetAction, &sheet_bindings);
@@ -4101,6 +4163,12 @@ pub const App = struct {
     fn listEnter(self: *App) !void {
         const al = self.a();
         switch (self.modal) {
+            .battle => |cid| {
+                const view = (try q.battlePhaseReport(al, self.state(), cid)) orelse return;
+                if (view.orders.len == 0) return;
+                const row = view.orders[@min(self.modal_cursor, view.orders.len - 1)];
+                try self.giveBattleOrder(row.contract, row.order);
+            },
             .battle_list => {
                 const rows = try q.battleList(al, self.state());
                 if (rows.len == 0) return;
@@ -4423,6 +4491,22 @@ pub const App = struct {
                     },
                 }
             },
+            .battle => |cid| {
+                const hit = keys.lookup(BattleAction, &battle_bindings, 0, key) orelse return false;
+                const order: battle_phase.Order = switch (hit.action) {
+                    .engage => .engage,
+                    .press_on => .press_on,
+                    .withdraw => .withdraw,
+                    .pursue => .pursue,
+                    .consolidate => .consolidate,
+                    .cover => .cover_recovery,
+                    .roe => blk: {
+                        const view = (try q.battlePhaseReport(self.a(), self.state(), cid)) orelse return true;
+                        break :blk .{ .roe = view.roe.next() };
+                    },
+                };
+                try self.giveBattleOrder(cid, order);
+            },
             .contract_log => {
                 const hit = keys.lookup(LogAction, &log_bindings, 0, key) orelse return false;
                 switch (hit.action) {
@@ -4722,7 +4806,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail, .stop_report => try self.listKey(key),
+            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail, .stop_report => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {
@@ -4737,6 +4821,7 @@ pub const App = struct {
                         // on a screen that refuses to advance.
                         self.modal = switch (q.turnHold(self.state())) {
                             .decision => |ev| .{ .decision = ev },
+                            .engagement => |cid| .{ .battle = cid },
                             else => if (self.battles_from_list) .{ .battle_list = {} } else .none,
                         };
                     },
@@ -5215,6 +5300,54 @@ test "every screen draws at full size and at 80x24, and the cursor clamps after 
     try c.app.draw();
 }
 
+test "the battle screen: keys and rows send their own orders, the cursor clamps, it draws narrow, and a fought engagement shows empty" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    const al = c.app.a();
+    const id = try game.campaign_scripts.dueEngagementForTest(c.app.state());
+    try std.testing.expectEqual(id, q.turnHold(c.app.state()).engagement);
+    c.app.openModal(.{ .battle = id });
+    try c.app.draw();
+    // Before contact the one row is engage, and its key sends it.
+    var view = (try q.battlePhaseReport(al, c.app.state(), id)).?;
+    try std.testing.expectEqual(@as(usize, 1), view.orders.len);
+    try std.testing.expectEqual(battle_phase.Order.engage, view.orders[0].order);
+    try pressForTest(c, .{ .char = 'e' });
+    try std.testing.expect(c.app.modal == .battle);
+    view = (try q.battlePhaseReport(c.app.a(), c.app.state(), id)).?;
+    // Every row carries its contract and the typed order its command sends.
+    for (view.orders) |row| try std.testing.expectEqual(id, row.contract);
+    const list = try c.app.listView(c.app.a());
+    try std.testing.expectEqual(view.orders.len, list.n);
+    // A cursor run past the rows clamps to the last one: Enter sends that row's order.
+    c.app.modal_cursor = 99;
+    const last = view.orders[view.orders.len - 1].order;
+    try pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .battle);
+    view = (try q.battlePhaseReport(c.app.a(), c.app.state(), id)).?;
+    try std.testing.expectEqual(last.roe, view.roe);
+    // It draws at 80x24 too.
+    try c.app.screen.resize(80, 24);
+    try c.app.draw();
+    try c.app.screen.resize(200, 50);
+    // Enter on the withdraw row (by identity, not position) ends the battle
+    // and opens its after-action.
+    for (view.orders, 0..) |row, i| if (row.order == .withdraw) {
+        c.app.modal_cursor = i;
+    };
+    try pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .after_action);
+    try std.testing.expect(q.turnHold(c.app.state()) == .after_action);
+    // The engagement is fought: its screen is empty and offers nothing.
+    try std.testing.expect(try q.battlePhaseReport(c.app.a(), c.app.state(), id) == null);
+    c.app.openModal(.{ .battle = id });
+    const empty = try c.app.listView(c.app.a());
+    try std.testing.expectEqual(@as(usize, 0), empty.n);
+    try c.app.draw();
+    try pressForTest(c, .escape);
+    try std.testing.expect(c.app.modal == .none);
+}
+
 test "the end-turn key ends one day, and Esc closes whatever modal it opened" {
     const c = try clientForTest(std.testing.allocator);
     defer deinitForTest(c, std.testing.allocator);
@@ -5369,6 +5502,9 @@ test "every modal, welcome and wizard table is well formed" {
     try K.expectWellFormed(App.RaiseCrewsAction, &App.raise_crews_bindings);
     try K.expectWellFormed(App.MusicAction, &App.music_bindings);
     try K.expectWellFormed(App.DecisionAction, &App.decision_bindings);
+    try K.expectWellFormed(App.BattleAction, &App.battle_bindings);
+    // Battle keys must not shadow the list keys the screen also walks with.
+    for (App.battle_bindings) |b| for (App.list_bindings) |l| try std.testing.expect(!b.match.overlaps(l.match));
     try K.expectWellFormed(App.LogAction, &App.log_bindings);
     try K.expectWellFormed(App.StopAction, &App.stop_bindings);
     try K.expectWellFormed(App.AfterActionAction, &App.after_action_bindings);

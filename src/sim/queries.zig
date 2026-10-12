@@ -27,6 +27,7 @@ const maintenance = @import("maintenance.zig");
 // Named `toe_mod`, not `toe`: this file already owns a public `toe` query.
 const toe_mod = @import("toe.zig");
 const hull_instance_mod = @import("../domain/hull_instance.zig");
+const battle_phase = @import("../domain/battle_phase.zig");
 const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
 const lift = @import("lift.zig");
@@ -228,12 +229,15 @@ pub const TurnHold = union(enum) {
     none,
     after_action: types.BattleId,
     decision: types.EventId,
+    /// The contract whose engagement waits on battle orders.
+    engagement: types.ContractId,
 };
 
 pub fn turnHold(gs: *GameState) TurnHold {
     return switch (checklist.turnHold(gs) orelse return .none) {
         .unread_after_action => .{ .after_action = gs.battle_reports.unread().?.id },
         .battle_decision => .{ .decision = gs.event_queue.blocking().?.id },
+        .engagement_due => .{ .engagement = @import("battle.zig").dueEngagement(gs).? },
     };
 }
 
@@ -418,6 +422,110 @@ pub fn battleOrders(alloc: Alloc, gs: *GameState, id: types.ContractId) !?Battle
     };
 }
 
+/// One order the battle screen offers: the typed order its command sends.
+pub const BattleOrderRow = struct {
+    contract: types.ContractId,
+    order: battle_phase.Order,
+    text: []const u8,
+    /// Why the command will likely refuse it (rule 34: informative only;
+    /// the command still runs and gives the canonical refusal). Empty when
+    /// nothing stands in the way.
+    locked: []const u8 = "",
+};
+
+/// A due or in-progress engagement as the battle screen shows it: the
+/// stored phase report, the next phase's odds by band, and the orders
+/// legal at the pause (`battle_phases.legalOrders`).
+pub const BattlePhaseView = struct {
+    contract: types.ContractId,
+    title: []const u8,
+    lines: []const []const u8,
+    orders: []const BattleOrderRow,
+    /// The rules of engagement for the next phase.
+    roe: @import("../domain/force.zig").Roe,
+    /// The order an unattended script gives here (`battle_phases.defaultOrder`).
+    default_order: battle_phase.Order,
+};
+
+/// The battle screen for a contract whose engagement is due or being
+/// fought; null when it has none. Reads the stored phase report only: the
+/// odds were computed when the pause was reached (rules 29, 31).
+pub fn battlePhaseReport(alloc: Alloc, gs: *GameState, id: types.ContractId) !?BattlePhaseView {
+    const battle = @import("battle.zig");
+    const battle_phases = @import("battle_phases.zig");
+    const c = gs.contracts.getPtr(id) orelse return null;
+    const record: ?*const battle_phase.BattleInProgress = for (gs.battles_in_progress.items) |*r| {
+        if (r.contract == id) break r;
+    } else null;
+    if (record == null and !battle.engagementDue(gs, c)) return null;
+    const latest: ?*const battle_phase.PhaseReport = if (record) |r| r.latest() else null;
+    const roe_locked = c.terms.command_rights.overridesRoe();
+    const roe = if (latest) |r| r.roe else battle.effectiveRoe(gs, c, c.assigned_company);
+
+    var lines: std.ArrayListUnmanaged([]const u8) = .empty;
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}} · {s} for {s} against {s} on {s}", .{
+        try forceName(alloc, gs, c.assigned_company), c.kind.label(), c.employer_key, c.enemy_key, planetName(c.planet_key),
+    }));
+    try lines.append(alloc, "");
+    if (latest) |r| {
+        var given: std.ArrayListUnmanaged(u8) = .empty;
+        for (record.?.steps.items, 0..) |step, i| {
+            if (i > 0) try given.appendSlice(alloc, " → ");
+            try given.appendSlice(alloc, step.order.label());
+        }
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "orders given: {s}", .{given.items}));
+        switch (r.pause) {
+            .contact => try lines.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}contact fought{{/}} · margin {s}{d} · momentum {s}{d} into the decisive phase", .{
+                if (r.margin >= 0) "+" else "", r.margin, if (r.momentum >= 0) "+" else "", r.momentum,
+            })),
+            .decisive => try lines.append(alloc, try std.fmt.allocPrint(alloc, "{{a}}decisive phase fought{{/}} · margin {s}{d} · {s} — {s}", .{
+                if (r.margin >= 0) "+" else "", r.margin, @tagName(r.outcome.?), if (r.held_field) "{g}the field is held{/}" else "{c}the field is lost{/}",
+            })),
+        }
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "hits taken so far {s}{d}{{/}} · they land on the line when the battle ends", .{ if (r.hits > 0) "{c}" else "{g}", r.hits }));
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "ROE for the next phase: {s}{s}", .{ @tagName(r.roe), if (roe_locked) " {d}(set by the employer's integrated command){/}" else "" }));
+        var odds: std.ArrayListUnmanaged(u8) = .empty;
+        for (0..r.odds.next.bands()) |band| {
+            if (band > 0) try odds.appendSlice(alloc, " · ");
+            try odds.print(alloc, "{s} {d}%", .{ r.odds.next.bandLabel(band), (@as(u32, r.odds.counts[band]) * 100 + r.odds.total / 2) / @max(1, r.odds.total) });
+        }
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "next — {s}: {s}", .{ @tagName(r.odds.next), odds.items }));
+    } else {
+        try lines.append(alloc, "{a}the engagement has come due{/} · contact not yet joined");
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "ROE {s}{s} · the battle orders (ROE, lances, resupply) stand until you engage", .{
+            @tagName(roe), if (roe_locked) " {d}(set by the employer's integrated command){/}" else "",
+        }));
+    }
+
+    const p = @import("../domain/tuning.zig").t.battle.phases;
+    var rows: std.ArrayListUnmanaged(BattleOrderRow) = .empty;
+    const pause: ?battle_phase.Pause = if (latest) |r| r.pause else null;
+    const held = if (latest) |r| r.held_field else false;
+    for (battle_phases.legalOrders(pause, held)) |kind| switch (kind) {
+        .engage => try rows.append(alloc, .{ .contract = id, .order = .engage, .text = "engage — fight the contact phase" }),
+        .press_on => try rows.append(alloc, .{ .contract = id, .order = .press_on, .text = "press on — fight the decisive phase" }),
+        .withdraw => try rows.append(alloc, .{ .contract = id, .order = .withdraw, .text = if (pause == .contact)
+            "withdraw — give up the field; only the hits taken so far land"
+        else
+            "withdraw now — the wrecks take their usual recovery rolls, no more hits" }),
+        .pursue => try rows.append(alloc, .{ .contract = id, .order = .pursue, .text = try std.fmt.allocPrint(alloc, "pursue — run them down for {d}% more of the enemy, at the risk of {d}% of the line in hits", .{ p.pursuit.enemy_loss_bonus_pct, p.pursuit.extra_hit_pct }) }),
+        .consolidate => try rows.append(alloc, .{ .contract = id, .order = .consolidate, .text = "consolidate — end the battle as it stands" }),
+        .cover_recovery => try rows.append(alloc, .{ .contract = id, .order = .cover_recovery, .text = try std.fmt.allocPrint(alloc, "cover the recovery — wrecks roll {s}{d} to come home, at the risk of {d}% of the line in hits", .{ if (p.cover.recovery_mod >= 0) "+" else "", p.cover.recovery_mod, p.cover.extra_hit_pct }) }),
+        .roe => for ([_]@import("../domain/force.zig").Roe{ .standard, .cautious, .hold }) |r| {
+            if (r == roe) continue;
+            try rows.append(alloc, .{ .contract = id, .order = .{ .roe = r }, .text = try std.fmt.allocPrint(alloc, "ROE {s} for the next phase — {s}", .{ @tagName(r), r.describe() }), .locked = if (roe_locked) "the employer's integrated command sets ROE" else "" });
+        },
+    };
+    return .{
+        .contract = id,
+        .title = try std.fmt.allocPrint(alloc, "BATTLE · {s}", .{try forceName(alloc, gs, c.assigned_company)}),
+        .lines = try lines.toOwnedSlice(alloc),
+        .orders = try rows.toOwnedSlice(alloc),
+        .roe = roe,
+        .default_order = battle_phases.defaultOrder(latest),
+    };
+}
+
 /// The contact warning for one contract: the line a multi-day advance
 /// stopped to show. Empty when the contract is gone or not in its window.
 pub fn contactWarning(alloc: Alloc, gs: *GameState, id: types.ContractId) ![]const u8 {
@@ -451,7 +559,7 @@ fn jumpFor(kind: checklist.WarningKind) u8 {
         .untreated_wounded, .restless_crew, .retiring_soon => 8,
         .manning_short, .unfit_crew, .crew_recovering => 2,
         .unrebuildable_hulls => 6,
-        .outmatched, .contact_imminent => 3,
+        .outmatched, .contact_imminent, .engagement_due => 3,
     };
 }
 
@@ -5050,6 +5158,39 @@ test "plain CLI text drops every markup tag and cannot carry a terminal control"
     try std.testing.expectEqualStrings("selected tab purple?x", try stripMarks(a, "{s}selected{/} {t}tab{/} {p}purple{/}\x1bx"));
 }
 
+test "the battle screen offers exactly the orders the rule allows and shows the stored odds" {
+    const battle = @import("battle.zig");
+    const battle_phases = @import("battle_phases.zig");
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const id = try battle.dueEngagementForTest(&gs, false, 100);
+    for ([_]?battle_phase.Order{ null, .engage, .press_on }) |given| {
+        if (given) |o| _ = try commands.execute(&gs, .{ .battle_order = .{ .contract = id, .order = o } });
+        const view = (try battlePhaseReport(a, &gs, id)).?;
+        const latest = if (battle_phases.inProgress(&gs)) |r| r.latest() else null;
+        const legal = battle_phases.legalOrders(if (latest) |r| r.pause else null, if (latest) |r| r.held_field else false);
+        // Every row is legal where the battle stands, every legal kind has a
+        // row, and each row is one the command accepts.
+        for (view.orders) |row| try std.testing.expect(battle_phases.orderLegal(if (latest) |r| r.pause else null, if (latest) |r| r.held_field else false, row.order));
+        for (legal) |kind| {
+            var shown = false;
+            for (view.orders) |row| shown = shown or std.meta.activeTag(row.order) == kind;
+            try std.testing.expect(shown);
+        }
+        try std.testing.expectEqualDeep(battle_phases.defaultOrder(latest), view.default_order);
+        if (latest) |r| {
+            var odds_line = false;
+            for (view.lines) |line| odds_line = odds_line or std.mem.indexOf(u8, line, @tagName(r.odds.next)) != null;
+            try std.testing.expect(odds_line);
+        }
+    }
+    try std.testing.expect(try battlePhaseReport(a, &gs, @enumFromInt(99)) == null);
+}
+
 test "the battle orders show the levers and the resupply the command would buy" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1213 });
     defer gs.deinit();
@@ -6483,6 +6624,8 @@ pub fn afterAction(alloc: Alloc, gs: *GameState, id: types.BattleId) !?AfterActi
             if (r.withdrew) " {a}· withdrew{/}" else "",
         }));
         try fight.append(alloc, try std.fmt.allocPrint(alloc, "{{d}}recon {d} · fatigue {d} · morale {d}{{/}}", .{ r.recon_quality, r.avg_fatigue, r.avg_morale }));
+        if (r.phases.len > 0) try fight.append(alloc, "");
+        for (r.phases) |p| try fight.append(alloc, try table.plain(alloc, try @import("after_action.zig").phaseText(alloc, p)));
         try fight.append(alloc, "");
         try fight.append(alloc, try std.fmt.allocPrint(alloc, "{d} hit · {s}{d} destroyed{{/}} · {s}{d} WIA{{/}} · {s}{d} KIA{{/}}", .{
             r.hits_taken,
@@ -7467,6 +7610,12 @@ pub fn resultText(
         .trim_stock => return try std.fmt.allocPrint(alloc, "{d} tons sent home", .{result.tons_moved}),
         .strip_unit => return "stripped for parts — see Supply for the crates",
         .confirm_orders => return "battle orders given — the contact warning is cleared",
+        .battle_order => |o| return if (o.order == .roe)
+            try std.fmt.allocPrint(alloc, "{s} for the next phase — the odds are recomputed (`battle {d}`)", .{ o.order.label(), @intFromEnum(o.contract) })
+        else if (result.battle_pause) |pause|
+            try std.fmt.allocPrint(alloc, "{s}: {s} fought — the battle pauses for orders (`battle {d}`)", .{ o.order.label(), pause.phase().label(), @intFromEnum(o.contract) })
+        else
+            try std.fmt.allocPrint(alloc, "{s}: the battle is over — after-action #{d} is on your desk (`battles {d}`)", .{ o.order.label(), @intFromEnum(result.battle_report), @intFromEnum(result.battle_report) }),
         .emergency_resupply => return try std.fmt.allocPrint(alloc, "emergency resupply: {d}t delivered to the field stores", .{result.tons_moved}),
         .buy_artillery => return try std.fmt.allocPrint(alloc, "bought Mobile Long Tom #{d} — see `artillery`", .{@intFromEnum(result.artillery_formation)}),
         .attach_artillery => |req| return try std.fmt.allocPrint(alloc, "artillery #{d} attached to {s}", .{ @intFromEnum(req.formation), try forceName(alloc, gs, req.company) }),

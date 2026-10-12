@@ -273,6 +273,23 @@
         .consolidate_escalation = -3, // TUNE: consolidating relieves escalation pressure (P4h)
         .contact_warning_days = 3, // TUNE: long enough to change ROE or recall before the fight
         .auto_advance_cap_days = 90, // TUNE: three months before the player is forced back to the desk
+        // The phased engagement (ARCH §7). Invented placeholders, no
+        // sourcebook basis; the playtest after P5c settles them. // TUNE
+        .phases = .{
+            .par = 7, // the 2d6 mean
+            .contact = .{
+                .won_margin = 2, // TUNE: contact roll 9+ wins it
+                .lost_margin = -2, // TUNE: contact roll 5- loses it
+                .won_hit_pct = 0, // TUNE: a won contact costs nothing yet
+                .even_hit_pct = 10, // TUNE
+                .lost_hit_pct = 20, // TUNE: under a draw's 25% total
+                .won_momentum = 1, // TUNE
+                .even_momentum = 0,
+                .lost_momentum = -1, // TUNE
+            },
+            .pursuit = .{ .clean_at = 8, .costly_at = 5, .enemy_loss_bonus_pct = 10, .extra_hit_pct = 10 }, // TUNE
+            .cover = .{ .clean_at = 7, .extra_hit_pct = 10, .recovery_mod = 2 }, // TUNE: as good as a cautious withdrawal's recovery
+        },
         // Per-drawn-OpFor-hull outcome bands: destroyed_pct non-increasing from decisive_victory to rout;
         // destroyed_pct + ineffective_pct <= 100 per band. // TUNE
         .opfor_outcome = .{

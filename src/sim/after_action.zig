@@ -18,6 +18,7 @@
 
 const std = @import("std");
 const battle_report = @import("../domain/battle_report.zig");
+const battle_phase = @import("../domain/battle_phase.zig");
 const BattleReport = battle_report.BattleReport;
 const HullHit = battle_report.HullHit;
 const SlotResult = battle_report.SlotResult;
@@ -133,6 +134,8 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
         }) else "",
     }));
 
+    for (r.phases) |p| try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   {s}", .{try phaseText(alloc, p)}));
+
     try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | enemy losses {d} BV ≈ {d} kill{s} credited{s} | salvage {d} BV claimed | comp {d} | score {d}", .{
         r.hits_taken,         r.destroyed,        r.wounded,                              r.kia,
         r.enemy_destroyed_bv, r.kills_credited,   if (r.kills_credited == 1) "" else "s", if (r.prisoners > 0) try std.fmt.allocPrint(alloc, ", {d} prisoner{s} taken (inbox)", .{ r.prisoners, if (r.prisoners == 1) "" else "s" }) else "",
@@ -190,6 +193,35 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
     }));
 
     return out.toOwnedSlice(alloc);
+}
+
+/// One fought phase in words: the phase, the order given at it, its margin
+/// and die-free modifiers where a roll decided it, and the hits it added.
+/// "decisive — press on: margin +2 (ratio +1, conditions +0, ROE standard
+/// +0, momentum -1), 2 hits". The AAR and the after-action sheet both use it.
+pub fn phaseText(alloc: std.mem.Allocator, p: battle_phase.PhaseRecord) ![]const u8 {
+    const sign = struct {
+        fn of(v: i32) []const u8 {
+            return if (v >= 0) "+" else "";
+        }
+    };
+    const rolled = switch (p.phase) {
+        .contact, .decisive => true,
+        .pursuit => p.order == .pursue,
+        .withdrawal => p.order == .cover_recovery,
+    };
+    const hits = try std.fmt.allocPrint(alloc, "{d} hit{s}", .{ p.hits, if (p.hits == 1) "" else "s" });
+    if (!rolled) return std.fmt.allocPrint(alloc, "{s} — {s}: {s}", .{ p.phase.label(), p.order.label(), switch (p.phase) {
+        .withdrawal => "the field given up, no further hits",
+        else => "the battle ends as it stands",
+    } });
+    if (p.phase == .pursuit or p.phase == .withdrawal) return std.fmt.allocPrint(alloc, "{s} — {s}: margin {s}{d}, {s}", .{ p.phase.label(), p.order.label(), sign.of(p.margin), p.margin, hits });
+    return std.fmt.allocPrint(alloc, "{s} — {s}: margin {s}{d} (ratio {s}{d}, conditions {s}{d}, ROE {s} {s}{d}{s}), {s}", .{
+        p.phase.label(),        p.order.label(),     sign.of(p.margin),       p.margin,
+        sign.of(p.ratio_bonus), p.ratio_bonus,       sign.of(p.scenario_mod), p.scenario_mod,
+        @tagName(p.roe),        sign.of(p.roe_roll), p.roe_roll,              if (p.phase == .decisive) try std.fmt.allocPrint(alloc, ", momentum {s}{d}", .{ sign.of(p.momentum), p.momentum }) else "",
+        hits,
+    });
 }
 
 /// Conventional lost hulls alone are enemy-held; terminal artillery has its own

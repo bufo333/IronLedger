@@ -310,16 +310,32 @@ permanently — which wrecks the trucks lift, whether the company goes back
 for what it left, whether it presses or consolidates — and there is no
 safe default to lapse to, because every option forfeits something that
 does not come back. So an unanswered after-action report holds the turn,
-and so does an unanswered battle decision, and a multi-day advance stops
-on the day either lands rather than resolving the rest of the week around
-it. Solvency is the other stop (§11): a negative treasury holds the turn
-until it is covered.
+and so does an unanswered battle decision, and so does an engagement whose
+day has come: it waits on the commander's battle orders (§7, "The phased
+engagement"; `battle.dueEngagement`), garrison probes included. A
+multi-day advance stops on the day any of them lands rather than resolving
+the rest of the week around it. Solvency is the other stop (§11): a
+negative treasury holds the turn until it is covered.
 
 `checklist.turnHold` is the one place that decides whether the turn is
-held; `commands.advance` turns its answer into the refusal, the checklist
-turns it into a warning, and `queries.turnHold` carries the id a client
-needs to put the right sheet or decision on screen. `EventKind.blocksTurn`
-names which decisions qualify — the test below, written as a switch.
+held (unread report, then battle decision, then due engagement);
+`commands.advance` turns its answer into the refusal, the checklist turns
+it into a warning, and `queries.turnHold` carries the id a client needs to
+put the right sheet, decision or battle screen on screen; an
+`advance_until_stop` held by an engagement names its contract.
+`EventKind.blocksTurn` names which decisions qualify — the test below,
+written as a switch.
+
+**The battle lock.** From the first battle order until the order that ends
+the battle, only battle orders run: `battle_phases.commandAllowedDuringBattle`
+is the one owner and `commands.execute` refuses every other command with
+`error.BattleInProgress`, consuming nothing. Each order replays the
+engagement from live state, so live state must not move between orders;
+the lock is what makes the persisted battle record small and the replay
+exact. Before the first order the pre-battle levers (ROE, lance roles,
+battle orders, emergency resupply, tasks, interventions) stay open; only
+the advance is held. A battle starts only when no report or decision holds
+the turn.
 
 The test for a new blocking rule is *what it disposes of*, not how big it
 feels. If the worst outcome is a worse bonus, it waits in the inbox.
@@ -362,7 +378,7 @@ error inside a day, or in the solvency check or watch between days, leaves
 the earlier days committed (docs/contract-exceptions.md, "Advance commits
 partial days").
 
-Before an engagement there is no hold, only a **stop**. When a scheduled
+Before an engagement's day there is no hold, only a **stop**. When a scheduled
 engagement comes within `tuning.battle.contact_warning_days`, a multi-day
 advance stops once on that day and the next advance goes ahead. The
 checklist carries a contact warning and the client opens the **battle
@@ -395,7 +411,11 @@ part of the spec:
 6. **Training** — unassigned-to-combat lances train; XP trickle, cadre duties.
 7. **Contract events** — per active contract, roll on the event table for its
    type (see §8); scenario generation for combat-class contracts.
-8. **Battle resolution** — any scenario due today resolves (§7); AAR emitted.
+8. **Battle resolution** — engagements are scheduled; one whose day has come
+   does not resolve here, it **comes due** and holds the turn. The
+   commander fights it after the day's tick and before the next turn, so
+   that day's phases 9–11 run before the fight; the order that ends it
+   publishes the engagement, its AAR and the next schedule (§7).
 9. **Morale/fatigue update.**
 10. **Finances** — daily accruals; on the 1st: payroll, overhead, HQ upkeep,
     contract payments, loan payments, monthly per-company P&L report.
@@ -419,7 +439,7 @@ has a set of **elements** (lance/flight/platoon). Per round:
    morale, days-since-hot-food (mess), scouting/recon quality, commander
    tactics skill, terrain & scenario type, attached support and air cover.
    P2h artillery applies one ready, physically present loaded salvo before the
-   opposed roll: a hit temporarily suppresses enemy power, without permanent BV
+   phase rolls (the contact phase): a hit temporarily suppresses enemy power, without permanent BV
    destruction or kill credit. Battle armor holding objectives remains deferred.
 3. Exchange fire: opposed 2d6 rolls per element pair vs. target numbers built
    from the ratio of effective power; margins map to a **damage table**
@@ -435,8 +455,8 @@ has a set of **elements** (lance/flight/platoon). Per round:
 Post-battle flows straight into the existing systems: wounded → medical,
 damage → tech queues + parts demand, salvage → inventory/market, XP → skills.
 
-As built (Stage 7 → 12D) the rounds collapse into **one opposed roll** per
-engagement; step 4 survives as a company standing order — **rules of
+As built (Stage 7 → P5b.1) the rounds collapse into **named phases**
+(below); step 4 survives as a company standing order — **rules of
 engagement** (12D.4: hold / standard / cautious), which trade roll odds
 against losses on a lost fight and recovery of wrecks. The opposition is a
 **force of its own** (12D.5): lances off the enemy house's RAT at a rolled
@@ -452,6 +472,65 @@ on gunnery/piloting, a vehicle on gunnery_vee/driving_vee. Escape,
 recovery, `experience()` and the roster text use the same pair. Only
 operational hulls (`GameState.unitOperational`, §9.3) stand in the line or
 count toward fieldable BV.
+
+**The phased engagement** (P5b.1; rules in `src/sim/battle_phases.zig`,
+records in `src/domain/battle_phase.zig`). A due engagement is fought in
+phases, **contact → decisive → pursuit or withdrawal**, each a slice of the
+one battle model — the power ratio, the scenario and conditions, the ROE
+roll and `tuning.battle.outcome_at`; there is no second engine.
+
+- **Fixed dice.** Preparation is unchanged (player side, OpFor pool draw,
+  weather, the artillery snapshot, the scenario and the salvo). At a fixed
+  position of the `.battle` stream, before any draw that depends on
+  orders, the engagement draws its phase dice once: contact, decisive, the
+  decisive Edge re-roll and pursuit, four 2d6 (`Dice.draw`). Every course
+  of orders consumes exactly that prefix; OpFor hull outcomes, hits,
+  recovery, salvage and prisoners follow in their existing order. An
+  earlier phase is never re-rolled.
+- **Contact** (`contactVerdict`): contact die + ratio + conditions + the ROE
+  roll in force; its margin over `tuning.battle.phases.par` bands into won,
+  even or lost, which sets the contact hits (a share of the line) and the
+  momentum carried into the decisive roll.
+- **Decisive** (`decisiveVerdict`, `decisiveHits`): decisive die + ratio +
+  conditions + the ROE roll in force + momentum, banded by `outcome_at`; a
+  losing roll is re-rolled on the Edge die when a pilot can spend Edge. The
+  line takes the larger of the contact hits and the outcome's share
+  (`hit_pct`, ROE and reserve clamp as before). A cautious draw gives up the
+  field (`cautiousWithdrawal`).
+- **Pursuit or withdrawal.** A held field may be pursued (the pursuit die
+  adds an enemy-loss bonus, widening the pool path's destroyed band, at the
+  risk of hits) or consolidated; a lost field may be covered (wrecks roll
+  `phases.cover.recovery_mod` better in `battle_recovery.situation`, at the
+  risk of hits) or left now under the usual recovery rolls.
+- **Tactical withdrawal after contact**: the battle ends as a draw with the
+  field given up (`withdrew`), only the contact hits land,
+  `loss.roe.withdrawal_score` applies and the wrecks roll under cautious
+  recovery.
+
+Between phases the turn pauses on a **phase report**: the margin, the hits
+taken so far (nothing lands until the battle ends), the momentum, the ROE
+for the next phase and the exact odds of each band of the next phase
+(`nextPhaseOdds`, every 2d6 result enumerated, Edge included; no RNG). The
+legal orders at each pause are `battle_phases.legalOrders`: engage; press on,
+withdraw or an ROE change at contact; pursue or consolidate after a held
+field, cover the recovery or withdraw after a lost one. An ROE change is
+recorded on the battle, never written to the company's standing ROE, and is
+refused (`RoeReservedByEmployer`) when integrated command holds the ROE. An
+engagement's outcome is a pure function of the campaign state at engagement
+start, its fixed dice and its ordered orders (`battle_phases.run`).
+
+The battle record (`GameState.battles_in_progress`, at most one) keeps the
+contract, the pause and each order with the report it reached; it holds no
+RNG state and no input snapshot. Each order replays the engagement from
+live state in a discarded workspace; only the order that ends the battle
+publishes it through the isolated `Engagement` workspace with its next
+schedule, then removes the record. Concession and forfeit finish on the
+first order as one-step battles. The AAR and the campaign log name each
+phase and the order given at it (`BattleReport.phases`,
+`after_action.phaseText`). Engagements a decision's "fight" option starts
+(`.engagement`) fight through the same phases with the unattended orders
+(`battle_phases.defaultOrder`) in one publication. Reserve commitment, air
+cover and the command-capacity interventions mid-battle are P5b.2.
 
 An engagement with nobody fit to put in the line is **conceded**
 (`battle.concede`): a defeat `BattleReport` that holds the turn like any
@@ -510,10 +589,10 @@ Each engagement resolves in an isolated operation workspace, including concessio
 forfeit, casualties, salvage, prisoners, completion, reports, decisions, automatic
 field repair and combat history. Explicit nested-copy and promotion owners prepare
 all retained payloads and live capacities before infallible publication. Failure
-preserves complete gameplay state, RNG and identities. Daily battle scheduling
-stages its next-gap draw with that contract's engagement; earlier completed
-contracts remain committed and are skipped on same-day retry. This is a
-per-contract battle-phase retry unit, not whole-day rollback. Artillery details
+preserves complete gameplay state, RNG and identities. The order that ends a
+battle stages the next-gap draw with that engagement and publishes both
+together; an order that pauses changes only the battle record, its capacity
+reserved before the append. Artillery details
 use typed fixed seat/slot snapshots and normalized report tables with a required
 parent presence marker; existing AAR/query panes render captured names and rounds.
 
@@ -1025,9 +1104,9 @@ identical hash, and identical evolution after load and executable restart;
 a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
-**Current P2h format boundary.** New empty stores
-initialize schema 63 transactionally. Existing store and campaign versions
-must both be 63; older formats are refused intact and newer formats retain
+**Current P5b.1 format boundary.** New empty stores
+initialize schema 64 transactionally. Existing store and campaign versions
+must both be 64; older formats (63 included) are refused intact and newer formats retain
 their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
 missing tables or rows. No automatic reset, deletion, rewrite, backfill or
@@ -1046,6 +1125,15 @@ markup-safe (`validateStoredStrings`) returns `CorruptSave` — nothing is
 skipped or defaulted. Loading an unknown campaign id, or saving over a
 deleted one, is `NoSuchCampaign`; a first save takes its `campaign_id`
 only after COMMIT.
+
+**A battle in progress is saved** (schema 64): `battle_in_progress` (the
+contract and its pause) and `battle_in_progress_order` (each order with the
+pause report it reached, odds included), and each report's fought phases in
+`battle_report_phase`. The loader refuses an unknown phase or order, a
+record for a missing or inactive contract, more than one record, orders out
+of sequence or orphaned, a malformed integer, and a course of orders that
+`battle_phases.recordConsistent` rejects. Saving mid-battle, loading and
+finishing gives the same digest as finishing without the save.
 
 **RNG state is saved per stream**: the campaign seed plus one
 `rng_stream` row per named stream (format 1: the generator's words,

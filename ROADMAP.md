@@ -1961,6 +1961,13 @@ command level.
 stake, and a player can lose a mek because they held when they should have
 pulled back.
 
+**Delivered in P5b.1:** P5b.1 in full; from P5b.2 the pause, the phase report
+with recomputed odds, the ROE change and tactical withdrawal; from P5b.3 the
+phase narration in the AAR and campaign log and the employer's ROE lock; from
+P5b.4 the phase-one withdrawal fixed-seed test. **Pending (P5b.2):** reserve
+commit, air cover and the command-capacity interventions with their costs and
+refusals, the operation record naming them, and the reserve-commit test.
+
 ### P5c — Situations, not events
 
 The contract event decks (`contract_events.zig`) apply flat stat deltas that

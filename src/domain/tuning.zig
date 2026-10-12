@@ -437,6 +437,36 @@ pub const Tuning = struct {
         /// Maximum days `advance_until_stop` will run before stopping with
         /// `cap_reached`. 0 in the command means "use this value".
         auto_advance_cap_days: u32, // TUNE
+        /// The phased engagement (ARCH §7 "The phased engagement").
+        /// Placeholders the playtest after P5c settles. // TUNE
+        phases: struct {
+            /// A phase's margin is its roll less this (the 2d6 mean).
+            par: i32,
+            /// Contact: a margin at or above `won_margin` wins it, at or
+            /// below `lost_margin` loses it, anything between is even. Each
+            /// band hits `*_hit_pct` of the engaged line and carries
+            /// `*_momentum` into the decisive roll.
+            contact: struct {
+                won_margin: i32,
+                lost_margin: i32,
+                won_hit_pct: i32,
+                even_hit_pct: i32,
+                lost_hit_pct: i32,
+                won_momentum: i32,
+                even_momentum: i32,
+                lost_momentum: i32,
+            },
+            /// Pursuit after a held field, on its 2d6: at or above
+            /// `clean_at` the enemy is run down for `enemy_loss_bonus_pct`
+            /// more of its force; at or above `costly_at` the same, at
+            /// `extra_hit_pct` of the line in hits; below it the pursuit is
+            /// repulsed and only the hits land.
+            pursuit: struct { clean_at: i32, costly_at: i32, enemy_loss_bonus_pct: u8, extra_hit_pct: i32 },
+            /// Covering the recovery after a lost field, on its 2d6: the
+            /// wrecks roll `recovery_mod` better; below `clean_at` the
+            /// rearguard takes `extra_hit_pct` of the line in hits.
+            cover: struct { clean_at: i32, extra_hit_pct: i32, recovery_mod: i32 },
+        },
         /// Per-drawn-OpFor-hull outcome by engagement band (destroyed first, then
         /// combat_ineffective; remainder survive). Percentages. // TUNE
         /// combat_ineffective is an engagement outcome, NOT a HullStatus member.
@@ -893,6 +923,8 @@ const signed_knobs = [_][]const u8{
     "battle.morale.defeat",
     "battle.morale.draw",
     "battle.morale.rout",
+    "battle.phases.contact.lost_margin",
+    "battle.phases.contact.lost_momentum",
     "battle.score.concede",
     "battle.score.rout",
     "contract.failure_reputation",
@@ -992,9 +1024,18 @@ test "data: 2d6 roll thresholds are reachable and in order" {
     const g = t.generation;
     try std.testing.expect(on2d6(g.weight_light_max) and on2d6(g.weight_medium_max) and on2d6(g.weight_heavy_max));
     try std.testing.expect(g.weight_light_max < g.weight_medium_max and g.weight_medium_max < g.weight_heavy_max);
+    // Battle phases: contact bands in order around par; pursuit and cover
+    // bands on the die, a costly pursuit below a clean one.
+    const p = t.battle.phases;
+    try std.testing.expect(p.contact.lost_margin < 0 and p.contact.won_margin > 0);
+    try std.testing.expect(p.contact.won_hit_pct <= p.contact.even_hit_pct and p.contact.even_hit_pct <= p.contact.lost_hit_pct);
+    try std.testing.expect(p.contact.lost_momentum <= p.contact.even_momentum and p.contact.even_momentum <= p.contact.won_momentum);
+    try std.testing.expect(p.pursuit.costly_at >= 2 and p.pursuit.costly_at < p.pursuit.clean_at and p.pursuit.clean_at <= 12);
+    try std.testing.expect(p.cover.clean_at >= 2 and p.cover.clean_at <= 12);
 }
 
 fn fieldExists(comptime T: type, comptime path: []const u8) bool {
+    @setEvalBranchQuota(10_000);
     const dot = std.mem.indexOfScalar(u8, path, '.');
     const head = if (dot) |d| path[0..d] else path;
     if (!@hasField(T, head)) return false;

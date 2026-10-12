@@ -189,7 +189,7 @@ filters to the active context (see the Keys description above).
 
 | Key | Pane | Does |
 |---|---|---|
-| `Enter` | checklist | go where the warning points (a contact warning opens its battle orders) |
+| `Enter` | checklist | go where the warning points (a contact warning opens its battle orders, a due engagement its battle screen) |
 | `Enter` | inbox | open the decision under the cursor |
 | `Enter` | log | read the whole log entry under the cursor |
 | `Enter` | reports | open the selected report (read-only; Esc closes) |
@@ -465,6 +465,18 @@ filters to the active context (see the Keys description above).
 |---|---|
 | `1-9` | choose |
 
+### Battle
+
+| Key | Does |
+|---|---|
+| `e` | fight the contact phase |
+| `p` | fight the decisive phase |
+| `w` | give up the field: after contact only the hits so far land; after a lost decisive phase the wrecks take their usual recovery rolls |
+| `u` | after a held field: run the enemy down, at the risk of hits |
+| `c` | after a held field: end the battle as it stands |
+| `v` | after a lost field: cover the recovery of the wrecks, at the risk of hits |
+| `r` | at the contact pause: step the ROE for the next phase (standard → cautious → hold) |
+
 ### Contract log
 
 | Key | Does |
@@ -682,9 +694,20 @@ medbay or restless crew stay on the Desk) ·
 no contract runs and nothing is building, and every log row the advance
 produced (`queries.logSpan`), oldest first, in front of the screen the stop
 is about — the tab where it is acted on, or the after-action, battle
-decision or battle orders it waits on, which Enter or Esc then opens; an
-outfit that folds goes to the saved GAME OVER instead) ·
+decision, battle screen or battle orders it waits on, which Enter or Esc
+then opens; an outfit that folds goes to the saved GAME OVER instead) ·
 **Decision** (options with effects, default marked) ·
+**Battle** (`queries.battlePhaseReport`: opens on an engagement that has
+come due or is being fought — from an advance that stops on it, the stop
+screen, the Desk's warning, or after an after-action is read. The head is
+the stored phase report: the orders given, the phase fought and its margin,
+the hits taken so far, the ROE for the next phase, and the next phase's
+odds by band. The rows are the orders legal at the pause, each carrying the
+typed order its command sends; ↑/↓ and Enter give the highlighted one, and
+the battle keys give each order directly. An order the employer reserves
+shows why, and still sends its command for the canonical refusal. A pause
+keeps the screen on its new report; the order that ends the battle opens
+the after-action; `Esc` leaves it, and the turn waits) ·
 **Battle orders** (the situation and odds; ←/→ step the ROE and each
 lance's role with the odds recomputed, Enter buys the emergency resupply,
 recalls behind a confirm, or confirms the orders, which clears the

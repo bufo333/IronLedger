@@ -189,15 +189,16 @@ pub fn applyExposure(gs: *GameState, result: *?report.ArtilleryResult, hit_pct: 
     return loss;
 }
 
-/// Combined recovery counts ordinary and carrier wrecks once. Lost-field terminal
-/// crew escape follows conventional recovery, in canonical seat order. Source: combat design.
-pub fn recover(gs: *GameState, result: *?report.ArtilleryResult, c: *const contract.Contract, battle_scenario: *const scenario.Scenario, outcome: autoresolve.Outcome, roe: force.Roe, held_field: bool, has_salvage: bool, trucks: i64, combined_wrecks: i64) !Loss {
+/// Combined recovery counts ordinary and carrier wrecks once, rolling under the
+/// same situation (`covered` included) as the hulls. Lost-field terminal crew
+/// escape follows conventional recovery, in canonical seat order. Source: combat design.
+pub fn recover(gs: *GameState, result: *?report.ArtilleryResult, c: *const contract.Contract, battle_scenario: *const scenario.Scenario, outcome: autoresolve.Outcome, roe: force.Roe, covered: bool, held_field: bool, has_salvage: bool, trucks: i64, combined_wrecks: i64) !Loss {
     const r = if (result.*) |*value| value else return .{};
     if (!r.physical_participation) return .{};
     const f = gs.artillery_formations.getPtr(r.formation).?;
     var loss: Loss = .{};
     if (r.damage == .recoverable and !held_field) {
-        const roll = @as(i32, gs.rng.roll2d6(.battle)) + recovery.situation(gs, c, battle_scenario, outcome, roe, has_salvage, trucks, combined_wrecks);
+        const roll = @as(i32, gs.rng.roll2d6(.battle)) + recovery.situation(gs, c, battle_scenario, outcome, roe, covered, has_salvage, trucks, combined_wrecks);
         r.recovery = .{ .roll = roll, .target = tuning.loss.recovery_target };
         if (roll >= tuning.loss.recovery_target) r.damage = .recovered else {
             r.damage = .scuttled;
@@ -292,7 +293,7 @@ test "salvo consumes canonical loaded round and preview consumes no stream or wa
     try std.testing.expectEqual(expected, gs.rng);
     try std.testing.expectEqual(@as(u16, 2), f.slots[@intFromEnum(slots.Slot.long_tom_bin_2)].rounds);
     try std.testing.expectEqual(@as(i64, 10000) - result.?.suppressed_power, reduced);
-    _ = try recover(&gs, &result, &c, scenario.roll(&expected, .battle, c.kind), .victory, .standard, true, false, 0, 0);
+    _ = try recover(&gs, &result, &c, scenario.roll(&expected, .battle, c.kind), .victory, .standard, false, true, false, 0, 0);
     try reward(&gs, &result, 1);
     try recordHistory(&gs, result, @enumFromInt(1), c.id);
     try std.testing.expectEqual(@as(u16, 1), result.?.fired_rounds[0]);
@@ -350,7 +351,7 @@ test "terminal loss closes provenance clears service and retains escaped crew id
     result.?.newly_wrecked = true;
     result.?.cause = .ammo;
     var random = gs.rng;
-    const loss = try recover(&gs, &result, &c, scenario.roll(&random, .battle, c.kind), .victory, .standard, true, false, 0, 0);
+    const loss = try recover(&gs, &result, &c, scenario.roll(&random, .battle, c.kind), .victory, .standard, false, true, false, 0, 0);
     try std.testing.expectEqual(@as(u32, 1), loss.lost);
     try std.testing.expectEqual(@as(u16, 5), result.?.lost_rounds[0]);
     try std.testing.expectEqual(formation.Placement.destroyed, f.placement);
@@ -422,7 +423,7 @@ test "seeded carrier hits recovery terminal evacuation and casualty snapshots sa
         _ = try applyExposure(&gs, &captured, rules.percent_scale * rules.exposure_divisor, false);
         var random = gs.rng;
         const held = seed % 3 == 0;
-        _ = try recover(&gs, &captured, &c, scenario.roll(&random, .battle, c.kind), .defeat, .standard, held, false, 0, 1);
+        _ = try recover(&gs, &captured, &c, scenario.roll(&random, .battle, c.kind), .defeat, .standard, false, held, false, 0, 1);
         const a = captured.?;
         seen[@intFromEnum(a.damage)] = true;
         for (a.seats) |seat| {

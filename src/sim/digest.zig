@@ -438,6 +438,81 @@ test "every artillery operational field checkpoint and bay target affects the co
     try std.testing.expect(queued != stateHash(&gs));
 }
 
+test "every battle-in-progress field and every report phase field affects the complete digest" {
+    const phase = @import("../domain/battle_phase.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const empty = stateHash(&gs);
+    var steps: std.ArrayListUnmanaged(phase.Step) = .empty;
+    try steps.append(gs.allocator(), .{ .order = .engage, .report = .{ .pause = .contact, .margin = 1, .hits = 1, .momentum = 0, .roe = .standard, .odds = .{ .counts = .{ 1, 1, 1, 1, 0 }, .total = 4 } } });
+    try gs.battles_in_progress.append(gs.allocator(), .{ .contract = @enumFromInt(1), .phase = .contact, .steps = steps });
+    const base = stateHash(&gs);
+    try std.testing.expect(base != empty);
+    const record = &gs.battles_in_progress.items[0];
+    const step = &record.steps.items[0];
+    const original = step.*;
+    record.contract = @enumFromInt(2);
+    try std.testing.expect(base != stateHash(&gs));
+    record.contract = @enumFromInt(1);
+    record.phase = .decisive;
+    try std.testing.expect(base != stateHash(&gs));
+    record.phase = .contact;
+    step.order = .{ .roe = .hold };
+    try std.testing.expect(base != stateHash(&gs));
+    step.* = original;
+    step.order = .{ .roe = .cautious };
+    const roe_order = stateHash(&gs);
+    step.order = .{ .roe = .hold };
+    try std.testing.expect(roe_order != stateHash(&gs));
+    inline for (.{ "margin", "hits", "momentum" }) |field| {
+        step.* = original;
+        @field(step.report, field) += 1;
+        try std.testing.expect(base != stateHash(&gs));
+    }
+    step.* = original;
+    step.report.roe = .hold;
+    try std.testing.expect(base != stateHash(&gs));
+    step.* = original;
+    step.report.outcome = .rout;
+    try std.testing.expect(base != stateHash(&gs));
+    step.* = original;
+    step.report.held_field = true;
+    try std.testing.expect(base != stateHash(&gs));
+    step.* = original;
+    step.report.odds.counts[4] = 1;
+    try std.testing.expect(base != stateHash(&gs));
+    step.* = original;
+    step.report.odds.total += 1;
+    try std.testing.expect(base != stateHash(&gs));
+    step.* = original;
+    step.report.odds.next = .cover;
+    try std.testing.expect(base != stateHash(&gs));
+    step.* = original;
+    try std.testing.expectEqual(base, stateHash(&gs));
+    // A report's fought phases, each field.
+    const records = [_]phase.PhaseRecord{.{ .phase = .contact, .order = .engage, .roe = .standard }};
+    try gs.battle_reports.record(gs.allocator(), .{ .id = @enumFromInt(1), .day = 0, .contract = .none, .company = .none, .kind = "", .enemy_key = "", .scenario = "", .terrain = "", .weather = "", .outcome = .draw, .phases = &records });
+    const reported = stateHash(&gs);
+    var changed = records;
+    gs.battle_reports.kept.items[0].phases = &changed;
+    inline for (.{ "ratio_bonus", "scenario_mod", "roe_roll", "momentum", "margin", "hits" }) |field| {
+        changed = records;
+        @field(changed[0], field) += 1;
+        try std.testing.expect(reported != stateHash(&gs));
+    }
+    changed = records;
+    changed[0].phase = .decisive;
+    try std.testing.expect(reported != stateHash(&gs));
+    changed = records;
+    changed[0].order = .press_on;
+    try std.testing.expect(reported != stateHash(&gs));
+    changed = records;
+    changed[0].roe = .cautious;
+    try std.testing.expect(reported != stateHash(&gs));
+    changed = records;
+    try std.testing.expectEqual(reported, stateHash(&gs));
+}
+
 test "captured artillery combat payload and terminal placement affect the complete digest" {
     const operations = @import("artillery_operations.zig");
     const battle = @import("artillery_battle.zig");

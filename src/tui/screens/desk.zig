@@ -134,7 +134,7 @@ pub fn move(self: *App, delta: i32) anyerror!void {
 const Action = enum { go_to, decide, read_entry, open_report, battles, emblem };
 
 pub const bindings = [_]app.keys.Binding(Action){
-    .{ .match = .{ .key = .enter }, .action = .go_to, .label = "go to", .group = .act, .pane = 0, .help = "go where the warning points (a contact warning opens its battle orders)" },
+    .{ .match = .{ .key = .enter }, .action = .go_to, .label = "go to", .group = .act, .pane = 0, .help = "go where the warning points (a contact warning opens its battle orders, a due engagement its battle screen)" },
     .{ .match = .{ .key = .enter }, .action = .decide, .label = "decide", .group = .act, .pane = 1, .help = "open the decision under the cursor" },
     .{ .match = .{ .key = .enter }, .action = .read_entry, .label = "read entry", .group = .act, .pane = 2, .help = "read the whole log entry under the cursor" },
     .{ .match = .{ .key = .enter }, .action = .open_report, .label = "open report", .group = .act, .pane = 3, .help = "open the selected report (read-only; Esc closes)" },
@@ -152,9 +152,12 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             const view = try q.desk(al, g, q.desk_log_rows);
             if (view.checklist.len == 0) return true;
             const w = view.checklist[@min(self.cur(0).*, view.checklist.len - 1)];
-            // A contact warning opens that engagement's battle orders.
+            // A contact warning opens that engagement's battle orders, a due
+            // engagement its battle screen.
             if (w.kind == .contact_imminent and w.contract != .none) {
                 self.openOrders(w.contract);
+            } else if (w.kind == .engagement_due and w.contract != .none) {
+                self.openModal(.{ .battle = w.contract });
             } else self.switchTab(@enumFromInt(w.jump));
         },
         .decide => {
@@ -259,6 +262,8 @@ test "Enter on a checklist warning goes where the warning says; e opens the embl
         try app.pressForTest(c, .enter);
         if (w.kind == .contact_imminent) {
             try std.testing.expect(c.app.modal == .battle_orders);
+        } else if (w.kind == .engagement_due) {
+            try std.testing.expect(c.app.modal == .battle);
         } else try std.testing.expectEqual(@as(app.Tab, @enumFromInt(w.jump)), c.app.tab);
         try app.pressForTest(c, .escape);
         try toTab(c, .desk);

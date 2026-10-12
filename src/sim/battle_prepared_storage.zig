@@ -7,6 +7,7 @@ const GameState = state.GameState;
 const person = @import("../domain/person.zig");
 const unit = @import("../domain/unit.zig");
 const report = @import("../domain/battle_report.zig");
+const battle_phase = @import("../domain/battle_phase.zig");
 const events = @import("../domain/events.zig");
 
 fn copiedList(alloc: std.mem.Allocator, original: anytype) !@TypeOf(original) {
@@ -141,6 +142,7 @@ fn promotedReport(alloc: std.mem.Allocator, value: report.BattleReport) !report.
     result.terrain = try ownedText(alloc, value.terrain);
     result.weather = try ownedText(alloc, value.weather);
     result.edge_spent_by = try ownedText(alloc, value.edge_spent_by);
+    result.phases = try alloc.dupe(battle_phase.PhaseRecord, value.phases);
     result.command_rights = try ownedText(alloc, value.command_rights);
     result.operation = try ownedText(alloc, value.operation);
     result.operation_interventions = try ownedText(alloc, value.operation_interventions);

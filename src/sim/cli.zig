@@ -154,6 +154,30 @@ fn takeRest(tokens: *std.mem.TokenIterator(u8, .scalar)) []const u8 {
     return rest;
 }
 
+/// The `battle` verb's order words: one spelling per order (rule 10), read
+/// by the parser and by `battleCommandText`.
+pub const battle_order_words = [_]struct { []const u8, game.battle_phase.Order.Kind }{
+    .{ "engage", .engage },
+    .{ "on", .press_on },
+    .{ "withdraw", .withdraw },
+    .{ "pursue", .pursue },
+    .{ "consolidate", .consolidate },
+    .{ "cover", .cover_recovery },
+    .{ "roe", .roe },
+};
+
+/// The command line that gives `order` on a contract's battle:
+/// "battle 3 roe cautious".
+pub fn battleCommandText(alloc: std.mem.Allocator, contract: types.ContractId, order: game.battle_phase.Order) ![]const u8 {
+    const word = for (battle_order_words) |w| {
+        if (w[1] == std.meta.activeTag(order)) break w[0];
+    } else unreachable;
+    return switch (order) {
+        .roe => |r| std.fmt.allocPrint(alloc, "battle {d} {s} {s}", .{ @intFromEnum(contract), word, @tagName(r) }),
+        else => std.fmt.allocPrint(alloc, "battle {d} {s}", .{ @intFromEnum(contract), word }),
+    };
+}
+
 /// A verb and its tokens → a command, or null when the verb is not a
 /// command verb. Every token must be used: anything left over after a
 /// complete command is `BadArguments`, never silently dropped.
@@ -425,6 +449,20 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
     if (eq(u8, verb, "activate")) return .{ .reactivate = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "complete")) return .{ .complete_contract = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "confirm")) return .{ .confirm_orders = @enumFromInt(try num(u32, tokens.next())) };
+    if (eq(u8, verb, "battle")) {
+        // battle <contract> <order word> [roe] — bare `battle <contract>` is
+        // the REPL's battle screen.
+        const contract: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
+        const word = try need(tokens.next());
+        const kind = for (battle_order_words) |w| {
+            if (eq(u8, w[0], word)) break w[1];
+        } else return error.BadArguments;
+        const order: game.battle_phase.Order = switch (kind) {
+            .roe => .{ .roe = std.meta.stringToEnum(game.force.Roe, try need(tokens.next())) orelse return error.BadArguments },
+            inline else => |k| @unionInit(game.battle_phase.Order, @tagName(k), {}),
+        };
+        return .{ .battle_order = .{ .contract = contract, .order = order } };
+    }
     if (eq(u8, verb, "rush")) return .{ .emergency_resupply = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "recall")) {
         const site = try parseSite(try need(tokens.next()));
@@ -788,6 +826,11 @@ pub fn errorText(err: anyerror) []const u8 {
         error.NoSuchBattle => "no engagement on record with that id — `battles` lists them",
         error.ReportUnread => "an after-action report is waiting — read it (`battles` lists them, `read <id>` clears one; the Desk opens the sheet on [b])",
         error.DecisionPending => "a battle decision is waiting — answer it (`inbox` lists them, `resolve <id> <n>` answers one; the Desk opens it on [i])",
+        error.EngagementDue => "an engagement waits on your orders — fight it (`battle <contract>` shows it, `battle <contract> engage` joins contact; the client opens the battle screen)",
+        error.BattleInProgress => "a battle is being fought — only its orders can be given until it ends (`battle <contract>` shows it)",
+        error.NoEngagementDue => "that contract has no engagement due or being fought",
+        error.OrderNotLegal => "that order cannot be given at this point of the battle — `battle <contract>` lists the ones that can",
+        error.RoeReservedByEmployer => "the employer's integrated command sets the rules of engagement — the ROE cannot be changed",
         error.NoSuchDecision => "no pending decision with that id — `inbox` lists them, each with the id to answer it by",
         error.NoSuchEvent => "no such event — kinds read as the log names them, e.g. smuggler_offer (`sop` lists the ones with a history)",
         error.NoSuchListing => "that listing is gone",
@@ -848,7 +891,7 @@ pub fn advanceStopText(stopped: @FieldType(game.commands.Result, "stopped")) []c
         .insolvent => errorText(error.Insolvent),
         .bankrupt => errorText(error.Bankrupt),
         .cap_reached => "advance limit reached — use `next` again to continue",
-        .hold => "the turn waits on an after-action or a battle decision",
+        .hold => "the turn waits on an after-action, a battle decision or an engagement's battle orders",
         .contact => "contact ahead — give battle orders",
         .decision_due => "a decision is waiting in your inbox",
         .employer_notice => "the employer has served notice: combat-ineffective, breach follows the grace window",
@@ -926,6 +969,7 @@ pub const verbs = [_][]const u8{
     "activate",
     "complete",
     "confirm",
+    "battle",
     "rush",
     "recall",
     "commit",
@@ -1026,6 +1070,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "activate", "activate <unit>" },
         .{ "complete", "complete <contract id>" },
         .{ "confirm", "confirm <contract id>   (battle orders given; see `briefing <contract id>`)" },
+        .{ "battle", "battle <contract id> [engage|on|withdraw|pursue|consolidate|cover|roe hold|standard|cautious]   (bare: the battle screen)" },
         .{ "rush", "rush <contract id>   (emergency resupply on the contract world before contact)" },
         .{ "recall", "recall co:N" },
         .{ "commit", "commit <contract-id> <operation-id> <intent>   (commit an available operation; intent: preserve_force, secure_objective, break_enemy, protect_assets, secure_intelligence, recover)" },
@@ -1151,6 +1196,44 @@ fn parseLine(line: []const u8) ParseError!?Command {
     var it = std.mem.tokenizeScalar(u8, line, ' ');
     const verb = it.next() orelse return null;
     return parseCommand(verb, &it);
+}
+
+test "battle parses every order word strictly, and each order prints back as the line that gives it" {
+    const battle_phase = game.battle_phase;
+    const cases = [_]struct { []const u8, battle_phase.Order }{
+        .{ "battle 3 engage", .engage },
+        .{ "battle 3 on", .press_on },
+        .{ "battle 3 withdraw", .withdraw },
+        .{ "battle 3 pursue", .pursue },
+        .{ "battle 3 consolidate", .consolidate },
+        .{ "battle 3 cover", .cover_recovery },
+        .{ "battle 3 roe cautious", .{ .roe = .cautious } },
+        .{ "battle 3 roe hold", .{ .roe = .hold } },
+    };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    for (cases) |case| {
+        const cmd = (try parseLine(case[0])).?;
+        try std.testing.expectEqual(@as(u32, 3), @intFromEnum(cmd.battle_order.contract));
+        try std.testing.expectEqualDeep(case[1], cmd.battle_order.order);
+        try std.testing.expectEqualStrings(case[0], try battleCommandText(arena.allocator(), cmd.battle_order.contract, cmd.battle_order.order));
+    }
+    // Every order kind has exactly one word.
+    for (std.enums.values(battle_phase.Order.Kind)) |kind| {
+        var words: usize = 0;
+        for (battle_order_words) |w| words += @intFromBool(w[1] == kind);
+        try std.testing.expectEqual(@as(usize, 1), words);
+    }
+    try std.testing.expectError(error.BadArguments, parseLine("battle 3"));
+    try std.testing.expectError(error.BadArguments, parseLine("battle 3 charge"));
+    try std.testing.expectError(error.BadArguments, parseLine("battle 3 roe bold"));
+    try std.testing.expectError(error.BadArguments, parseLine("battle 3 roe"));
+    try std.testing.expectError(error.BadArguments, parseLine("battle 3 engage now"));
+    try std.testing.expectError(error.BadNumber, parseLine("battle x engage"));
+    // Each refusal the command gives has its own sentence.
+    for ([_]anyerror{ error.EngagementDue, error.BattleInProgress, error.NoEngagementDue, error.OrderNotLegal, error.RoeReservedByEmployer }) |err| {
+        try std.testing.expect(!std.mem.eql(u8, errorText(err), errorText(error.Unexpected)));
+    }
 }
 
 test "a token left over after a complete command is refused, not dropped" {

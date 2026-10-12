@@ -124,10 +124,11 @@ fn printTable(al: std.mem.Allocator, cols: []const game.table.Col, rows: anytype
     printLines(al, t.render(al) catch return, indent) catch |err| showError(err);
 }
 
-/// Clear whatever is holding the turn: read the
-/// after-action, answer the battle decision with its default. The demo
-/// is an unattended run, so it takes the default every time — the point
-/// is that it never advances past a fight without acknowledging it.
+/// Clear whatever is holding the turn: fight the due engagement with the
+/// unattended orders, read the after-action, answer the battle decision
+/// with its default. The demo is an unattended run, so it takes the default
+/// every time — the point is that it never advances past a fight without
+/// fighting and acknowledging it.
 fn clearTurnHolds(gs: *game.state.GameState, al: std.mem.Allocator) !void {
     while (true) switch (q.turnHold(gs)) {
         .none => return,
@@ -141,6 +142,11 @@ fn clearTurnHolds(gs: *game.state.GameState, al: std.mem.Allocator) !void {
             const ev = try q.pendingDecision(al, gs, id) orelse return;
             std.debug.print("        battle decision: taking the default — \"{s}\"\n", .{ev.default_option});
             _ = try game.commands.execute(gs, .{ .resolve_decision = .{ .event = id, .choice = ev.default_choice } });
+        },
+        .engagement => |id| {
+            const view = try q.battlePhaseReport(al, gs, id) orelse return;
+            std.debug.print("        battle: {s}\n", .{view.default_order.label()});
+            _ = try game.commands.execute(gs, .{ .battle_order = .{ .contract = id, .order = view.default_order } });
         },
     };
 }
@@ -727,6 +733,18 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                 continue;
             };
             printLines(al, try q.logLines(al, gs, n, filter), "  ") catch |err| showError(err);
+        } else if (std.mem.eql(u8, verb, "battle") and bareBattle(tokens)) {
+            // battle <contract> — the battle screen; with an order word it
+            // is the command (cli.parseCommand below).
+            const id = std.fmt.parseInt(u32, tokens.next() orelse "", 10) catch {
+                std.debug.print("usage: {s}\n", .{game.cli.usage("battle").?});
+                continue;
+            };
+            const view = (try q.battlePhaseReport(al, gs, @enumFromInt(id))) orelse {
+                std.debug.print("{s}\n", .{game.cli.errorText(error.NoEngagementDue)});
+                continue;
+            };
+            printBattle(al, view) catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "sop") and tokens.peek() == null) {
             printLines(al, try q.standingOrders(al, gs), "") catch |err| showError(err);
         } else if (std.mem.eql(u8, verb, "treasuries")) {
@@ -906,6 +924,26 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
     }
 }
 
+/// `battle` with at most a contract after it is the screen, not a command.
+fn bareBattle(tokens: std.mem.TokenIterator(u8, .scalar)) bool {
+    var probe = tokens;
+    _ = probe.next();
+    return probe.next() == null;
+}
+
+/// The battle screen in the REPL: the phase report and each legal order
+/// with the command line that gives it.
+fn printBattle(al: std.mem.Allocator, view: q.BattlePhaseView) !void {
+    std.debug.print("{s}\n", .{q.stripMarks(al, view.title) catch view.title});
+    for (view.lines) |line| std.debug.print("  {s}\n", .{q.stripMarks(al, line) catch line});
+    std.debug.print("  orders:\n", .{});
+    for (view.orders) |o| std.debug.print("    {s: <28} {s}{s}{s}\n", .{
+        try game.cli.battleCommandText(al, o.contract, o.order), q.stripMarks(al, o.text) catch o.text,
+        if (o.locked.len > 0) " — " else "",
+        o.locked,
+    });
+}
+
 fn refitUnit(cmd: Command) ?game.types.UnitId {
     return switch (cmd) {
         .refit_install => |x| x.unit,
@@ -937,6 +975,11 @@ fn printResult(gs: *game.state.GameState, al: std.mem.Allocator, cmd: Command, r
         },
         .refit_install, .refit_remove, .refit_clear, .refit_commit => printLab(gs, al, refitUnit(cmd).?) catch |err| showError(err),
         .complete_contract, .recall_company => printContracts(gs, al) catch |err| showError(err),
+        .battle_order => |o| if (r.battle_pause != null) {
+            if (try q.battlePhaseReport(al, gs, o.contract)) |view| printBattle(al, view) catch |err| showError(err);
+        } else if (try q.battleReport(al, gs, r.battle_report)) |lines| {
+            printLines(al, lines, "") catch |err| showError(err);
+        },
         .found_hq, .link, .assign_company => printHqs(gs, al) catch |err| showError(err),
         .auto_assign => |co| printLines(al, q.companyRoster(al, gs, co) catch &.{}, "") catch |err| showError(err),
         .autostaff => |hq| printLines(al, q.hqRoster(al, gs, hq) catch &.{}, "") catch |err| showError(err),

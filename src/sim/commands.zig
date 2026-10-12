@@ -50,6 +50,9 @@ const artillery_service = @import("artillery_service.zig");
 const artillery_operations = @import("artillery_operations.zig");
 const artillery_rules = @import("../domain/artillery_operations.zig");
 const held_hulls = @import("held_hulls.zig");
+const battle = @import("battle.zig");
+const battle_phases = @import("battle_phases.zig");
+const battle_phase = @import("../domain/battle_phase.zig");
 
 pub const Command = union(enum) {
     buy_artillery: struct { offer: types.ArtilleryOfferId, hq: types.HqId },
@@ -291,6 +294,10 @@ pub const Command = union(enum) {
     /// Battle orders for the engagement in view are given; the contact
     /// warning clears.
     confirm_orders: types.ContractId,
+    /// An order in the contract's due or in-progress engagement: engage,
+    /// press on, withdraw, pursue, consolidate, cover the recovery, or an
+    /// ROE change for the next phase (ARCH §7 "The phased engagement").
+    battle_order: struct { contract: types.ContractId, order: battle_phase.Order },
     /// Buy the short munitions and armour on the contract world, delivered
     /// today (`field_supply.rushQuote`).
     emergency_resupply: types.ContractId,
@@ -353,6 +360,16 @@ pub const Error = error{
     ReportUnread,
     /// A battle decision is unanswered, and the turn waits on it.
     DecisionPending,
+    /// An engagement has come due, and the turn waits on the commander's orders.
+    EngagementDue,
+    /// A battle is in progress: only its orders may be given (the battle lock).
+    BattleInProgress,
+    /// The contract has no engagement due or in progress.
+    NoEngagementDue,
+    /// That order cannot be given at this point of the battle.
+    OrderNotLegal,
+    /// The employer's integrated command sets the rules of engagement.
+    RoeReservedByEmployer,
     NoSuchChoice,
     NotADecision,
     CommanderExists,
@@ -553,6 +570,10 @@ pub const Result = struct {
     /// advance: the contract whose contact warning stopped a multi-day
     /// advance early.
     contact: types.ContractId = .none,
+    /// battle_order: the pause the order reached, or null when it ended the
+    /// battle and `battle_report` names the published engagement.
+    battle_pause: ?battle_phase.Pause = null,
+    battle_report: types.BattleId = .none,
     /// transfer_unit: the hull travels (else it was placed at once).
     in_transit: bool = false,
     /// depot: the HQ whose bay took the job.
@@ -593,7 +614,9 @@ pub const Result = struct {
     fraud: bool = false,
     /// `cover_shortfall`: the bay makes it (a job), not the market.
     fabricated: bool = false,
-    /// `accept_contract`: the ContractId of the accepted contract.
+    /// `accept_contract`: the ContractId of the accepted contract;
+    /// `advance_until_stop` stopped on an engagement hold: the contract whose
+    /// engagement waits on battle orders.
     contract: types.ContractId = .none,
     /// `take_loan`: the LoanId of the new loan.
     loan: types.LoanId = .none,
@@ -617,7 +640,9 @@ pub const Result = struct {
 pub const hull_fraud_text = "the black-market fence vanished with the money — no hull";
 
 pub fn execute(gs: *GameState, cmd: Command) Error!Result {
+    if (battle_phases.inProgress(gs) != null and !battle_phases.commandAllowedDuringBattle(cmd)) return Error.BattleInProgress;
     switch (cmd) {
+        .battle_order => |o| return battle.execBattleOrder(gs, o),
         .advance_day => return tick.advance(gs, 1),
         .advance_days => |n| return tick.advance(gs, n),
         .advance_until_stop => |cap| return tick.advanceUntilStop(gs, cap),
