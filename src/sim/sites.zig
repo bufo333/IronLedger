@@ -311,13 +311,23 @@ pub fn shipStock(gs: *GameState, part_key: []const u8, quantity: u32, from: type
     const freight = try freightQuote(gs, arena.allocator(), from, to, quantity * part_mod.tons(part_key));
     const payer = state_mod.Treasury.ofSite(from);
     const tags = payer.tags();
+    // The sending site pays; the freight lands in the books of the company
+    // at either end, the receiving one first (ARCH §11).
+    const books = treasury.attributionFor(gs, switch (to) {
+        .company => |id| id,
+        .hq, .outfit => switch (from) {
+            .company => |id| id,
+            .hq, .outfit => .none,
+        },
+    });
     if (freight.cost > 0) {
         try treasury.debit(gs, payer, .{
             .day = gs.clock.day_index,
             .amount = -freight.cost,
             .category = .freight,
-            .company = tags.company,
+            .company = books.company,
             .hq = tags.hq,
+            .contract = books.contract,
             .note = part_key,
         });
     }
@@ -488,11 +498,18 @@ fn singleOrderAcquire(
         });
         return false;
     }
+    // An order for a company's site lands in that company's books (ARCH §11).
+    const books = treasury.attributionFor(gs, switch (site) {
+        .company => |id| id,
+        .hq, .outfit => .none,
+    });
     gs.postTreasury(.{ .hq = hq_id }, .{
         .day = gs.clock.day_index,
         .amount = -od.cost,
         .category = .parts,
+        .company = books.company,
         .hq = hq_id,
+        .contract = books.contract,
         .note = od.def.name,
     }) catch unreachable; // ledger reserved by caller; treasury validated in prepare
     if (site == .company) commitFreight(gs, od.onward);
@@ -1151,6 +1168,66 @@ test "freight discount follows from_hq, not the seat (C10-B2, ARCH §9.4)" {
     gs.force(co).?.location_planet = "alkaid"; // field site
     const field_quote = try freightQuote(&gs, arena.allocator(), .{ .company = co }, .{ .hq = plain_id }, tons);
     _ = field_quote;
+}
+
+test "freight and orders for a company land in its books, and its contract's while it is out on one" {
+    const finance = @import("../econ/finance.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7772 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const hq = gs.seat();
+    gs.hqs.getPtr(hq).?.funds = 50_000_000;
+    // Alpha is out on a contract; Bravo idles afield on no contract. Both
+    // carry trucks to receive stock.
+    const alpha = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const bravo = try @import("starter_company.zig").generateInto(&gs, "Bravo");
+    gs.force(bravo).?.location_planet = "alkaid";
+    gs.force(bravo).?.local_funds = 1_000_000;
+    const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 }, .status = .active, .assigned_company = alpha, .monthly_net = 300_000 });
+    try gs.addStock(.{ .hq = hq }, "armor", 4);
+    try gs.addStock(.{ .company = bravo }, "armor", 2);
+    // Bravo is supplied from a second HQ, so stock it sends to the seat
+    // travels the link and pays freight.
+    const far = try @import("founding.zig").foundHq(&gs, "Remote", .regional, "skye");
+    try gs.hq_links.append(gs.allocator(), .{ .a = hq, .b = far, .level = 2, .established_day = 0 });
+    gs.force(bravo).?.supplying_hq = far;
+
+    const Tags = struct { company: types.ForceId, hq: types.HqId, contract: types.ContractId };
+    const shipments = [_]struct { from: types.Site, to: types.Site, tags: Tags }{
+        // To a company: the receiving company's books; the HQ still pays.
+        .{ .from = .{ .hq = hq }, .to = .{ .company = alpha }, .tags = .{ .company = alpha, .hq = hq, .contract = cid } },
+        .{ .from = .{ .hq = hq }, .to = .{ .company = bravo }, .tags = .{ .company = bravo, .hq = hq, .contract = .none } },
+        // From a company to an HQ: the sending company's books.
+        .{ .from = .{ .company = bravo }, .to = .{ .hq = hq }, .tags = .{ .company = bravo, .hq = .none, .contract = .none } },
+    };
+    for (shipments) |s| {
+        const from = gs.ledger.transactions.items.len;
+        try shipStock(&gs, "armor", 1, s.from, s.to);
+        const rows = gs.ledger.transactions.items[from..];
+        try std.testing.expectEqual(@as(usize, 1), rows.len);
+        try std.testing.expectEqual(finance.Category.freight, rows[0].category);
+        try std.testing.expectEqual(s.tags, Tags{ .company = rows[0].company, .hq = rows[0].hq, .contract = rows[0].contract });
+    }
+
+    // An order for Alpha's site is Alpha's and its contract's; one for the HQ is the HQ's.
+    for ([_]struct { dest: types.Site, tags: Tags }{
+        .{ .dest = .{ .company = alpha }, .tags = .{ .company = alpha, .hq = hq, .contract = cid } },
+        .{ .dest = .{ .hq = hq }, .tags = .{ .company = .none, .hq = hq, .contract = .none } },
+    }) |o| {
+        var tries: usize = 0;
+        while (true) : (tries += 1) {
+            try std.testing.expect(tries < 50);
+            const from = gs.ledger.transactions.items.len;
+            if (!(try orderPart(&gs, "armor", 1, o.dest)).sourced) continue;
+            const rows = gs.ledger.transactions.items[from..];
+            try std.testing.expectEqual(@as(usize, 1), rows.len);
+            try std.testing.expectEqual(finance.Category.parts, rows[0].category);
+            try std.testing.expectEqual(o.tags, Tags{ .company = rows[0].company, .hq = rows[0].hq, .contract = rows[0].contract });
+            break;
+        }
+    }
 }
 
 test "companyTruckCounts: storage counts standsInLine, salvage needs operational crew (C15b)" {

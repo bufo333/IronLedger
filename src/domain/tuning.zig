@@ -304,7 +304,7 @@ pub const Tuning = struct {
         /// Shares (AtB shares system): a combat or tech hand holds
         /// `shares_base` after `shares_tenure_months`, a founder (on the
         /// books day 0) `shares_founder`, plus one per rank above sergeant;
-        /// `share_profit_default_bp` of contract income is paid out pro rata
+        /// `share_profit_default_bp` of contract profit is paid out pro rata
         /// at completion (the owner sets the live figure with `shares`).
         /// Every `shares_per_restless` shares cancel one restless flag, and
         /// shareholders take half severance.

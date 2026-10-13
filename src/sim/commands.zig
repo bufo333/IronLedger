@@ -249,7 +249,7 @@ pub const Command = union(enum) {
     set_auto_admit: bool,
     /// Difficulty: green | regular | veteran | elite — logged, takes effect at once.
     set_difficulty: @import("../domain/difficulty.zig").Level,
-    /// Share of contract income paid to shareholders at completion,
+    /// Share of contract profit paid to shareholders at completion,
     /// in percent 0–100.
     set_shares_pct: u8,
     /// Sell part of a warehouse line for its resale value (into the HQ's

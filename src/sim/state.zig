@@ -270,7 +270,7 @@ pub const GameState = struct {
     /// The medbay admits the wounded itself each morning instead of waiting for the commander's signature (an untreated-wounded
     /// warning never blocks the turn while this is on).
     auto_admit: bool = false,
-    /// Share of contract income paid out to shareholders at completion
+    /// Share of contract profit paid out to shareholders at completion
     /// (AtB shares); the owner sets it with `shares <pct>`.
     share_profit_bp: types.Bp = @import("../domain/tuning.zig").t.person.share_profit_default_bp,
     ledger: finance_mod.Ledger = .{},

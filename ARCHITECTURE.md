@@ -1204,6 +1204,22 @@ board provenance and terminal order destinations keep their original identities;
 active destinations require live HQs. See the
 [HQ retirement policy](docs/p2-artillery-acquisition-design.md).
 
+**Cost attribution and profit shares.** A company's own operating costs carry
+its tag, and also its contract's tag while it is out on one (in transit or on
+station). These are its payroll and hardship pay, hull upkeep (with its attached
+artillery's carry), weekly maintenance consumables and repair labour, the
+service of its attached artillery, freight shipped to it (or from it to an HQ),
+orders for its site, charter and local supplies. Staff and hulls in no company
+are outfit overhead. Shared costs never carry a contract tag: HQ upkeep, HQ
+depot bay work, supply-link upkeep, and loan interest and principal. Neither do
+fund transfers, severance, retirement payouts or ransoms, which keep only their
+company tag. A contract's net is the sum of every row tagged with it, from
+signing through completion. Profit shares (`shares`, AtB) are `shares%` of that
+net plus any early-completion bonus, paid at completion and floored at zero. A
+contract that lost money pays nothing, and the log says what it netted. When a
+company is disbanded, its ledger rows become outfit overhead. They keep their
+HQ and contract tags.
+
 **Breach clause** (Stage 9E). Failing or abandoning a contract — recall, or
 combat-ineffectiveness with no affordable local replacements — costs a
 pro-rated slice of the advance back, forfeits remaining payments, −2

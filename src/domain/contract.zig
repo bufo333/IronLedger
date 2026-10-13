@@ -346,7 +346,27 @@ pub const Contract = struct {
     pub fn objectivesMet(self: *const Contract) bool {
         return self.objective == .attrition and self.poolDestroyedPct() >= @import("tuning.zig").t.contract.attrition_met_pct;
     }
+
+    /// Whether the payday on `payday_day` pays this contract its monthly
+    /// net, projected through the day's order (ARCH §6): the contract phase
+    /// runs before finances, so a term ending on the payday completes unpaid
+    /// and a company arriving by the payday is on station and paid. It sees
+    /// only the scheduled lifecycle: breaches, combat completion and arrival
+    /// delays not yet rolled are not projected.
+    pub fn paidOnPayday(self: *const Contract, payday_day: u32) bool {
+        return switch (self.status) {
+            .active => if (self.end_day) |end| end > payday_day else true,
+            .transit => if (self.arrive_day) |arrive| arrive <= payday_day and arrive + termDays(self.terms.length_months) > payday_day else false,
+            .offer, .accepted, .completed, .breached, .failed => false,
+        };
+    }
 };
+
+/// Length of a contract's term on station, in days: the months the terms
+/// run on the campaign's month length (`types.days_per_month`).
+pub fn termDays(length_months: u8) u32 {
+    return @as(u32, length_months) * types.days_per_month;
+}
 
 pub const ObjectiveKind = enum { duration, attrition };
 
@@ -438,6 +458,44 @@ test "negotiated steps move one term and stop at the named cap" {
     try std.testing.expect(t3.improve(.support));
     try std.testing.expectEqual(nc.negotiate_overhead_cap_pct, t3.overhead_pct);
     try std.testing.expect(!t3.improve(.support));
+}
+
+test "a payday pays the contracts on station that day, after arrivals and term ends" {
+    const payday: u32 = 31;
+    var c: Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 1, .base_pay_month = 100_000 },
+        .status = .active,
+    };
+    c.end_day = payday + 1;
+    try std.testing.expect(c.paidOnPayday(payday)); // ends after the payday
+    c.end_day = payday;
+    try std.testing.expect(!c.paidOnPayday(payday)); // completes first, unpaid
+    c.end_day = null;
+    try std.testing.expect(c.paidOnPayday(payday));
+
+    c.status = .transit;
+    c.arrive_day = payday;
+    try std.testing.expect(c.paidOnPayday(payday)); // on station first, paid; a one-month term too
+    c.arrive_day = payday + 1;
+    try std.testing.expect(!c.paidOnPayday(payday));
+    c.arrive_day = null;
+    try std.testing.expect(!c.paidOnPayday(payday));
+    // A term that would already have run out by the payday is not paid.
+    c.arrive_day = payday - termDays(1);
+    try std.testing.expect(!c.paidOnPayday(payday));
+
+    c.end_day = null;
+    for ([_]ContractStatus{ .completed, .breached, .failed, .offer, .accepted }) |status| {
+        c.status = status;
+        c.arrive_day = payday;
+        try std.testing.expect(!c.paidOnPayday(payday));
+    }
+    try std.testing.expectEqual(@as(u32, 6 * types.days_per_month), termDays(6));
 }
 
 test "gradeOf maps victory_points to the correct grade; objectivesMet fires at the threshold" {

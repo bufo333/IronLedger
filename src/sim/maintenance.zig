@@ -26,6 +26,7 @@ const artillery_operations = @import("artillery_operations.zig");
 const artillery_crew = @import("artillery_crew.zig");
 const artillery_service = @import("artillery_service.zig");
 const personnel = @import("personnel.zig");
+const treasury = @import("treasury.zig");
 
 /// Hours a field repair costs the hull's tech (tuning.maintenance).
 const hours_damaged_slot = tuning.maintenance.hours_damaged_slot;
@@ -42,13 +43,16 @@ pub fn slotLabour(part_key: []const u8, wrecked: bool) types.CBills {
     return @divTrunc(part_mod.cost(part_key), if (wrecked) tuning.maintenance.labour_destroyed_divisor else tuning.maintenance.labour_damaged_divisor);
 }
 
-/// Bill repair labour and materials, scaled by the commander's bonus.
-fn postRepairLabour(gs: *GameState, labour: types.CBills) !void {
+/// Bill repair labour and materials to the books they belong to, scaled
+/// by the commander's bonus.
+fn postRepairLabour(gs: *GameState, labour: types.CBills, books: treasury.Attribution) !void {
     if (labour <= 0) return;
     try gs.postTransaction(.{
         .day = gs.clock.day_index,
         .amount = -types.applyBp(labour, commander_mod.costMultBp(gs.commander, .repair)),
         .category = .maintenance,
+        .company = books.company,
+        .contract = books.contract,
         .note = "repair labor & materials",
     });
 }
@@ -239,6 +243,12 @@ pub fn runWeeklyMaintenance(gs: *GameState) !void {
 
 fn runWeeklyMaintenanceWithBook(gs: *GameState, book: *HourBook) !void {
     var upkeep_cost: types.CBills = 0;
+    // Consumables bill to each hull's company (ARCH §11). The rows are
+    // reserved before the loop rolls and drifts any hull (rule 17).
+    var split_arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer split_arena.deinit();
+    const by_company = try treasury.companyBuckets(split_arena.allocator(), gs);
+    try gs.reserveLedger(by_company.len + 1);
 
     var it = gs.units.iterator();
     while (it.next()) |entry| {
@@ -316,18 +326,13 @@ fn runWeeklyMaintenanceWithBook(gs: *GameState, book: *HourBook) !void {
 
         if (covered) {
             u.last_maintenance_day = gs.clock.day_index;
-            upkeep_cost += weeklyConsumables(u);
+            const consumables = weeklyConsumables(u);
+            upkeep_cost += consumables;
+            treasury.addToBucket(by_company, gs.companyOf(u.force), consumables);
         }
     }
 
-    if (upkeep_cost > 0) {
-        try gs.postTransaction(.{
-            .day = gs.clock.day_index,
-            .amount = -types.applyBp(upkeep_cost, commander_mod.costMultBp(gs.commander, .repair)),
-            .category = .maintenance,
-            .note = "weekly maintenance consumables",
-        });
-    }
+    try treasury.postAttributedCharge(gs, .maintenance, "weekly maintenance consumables", commander_mod.costMultBp(gs.commander, .repair), upkeep_cost, by_company);
 }
 
 /// One weekly orchestration owner carries ordinary spending and the combined
@@ -433,9 +438,13 @@ fn runWeeklyRepairsWithBook(gs: *GameState, book: *HourBook) !void {
     while (hqit.next()) |entry| {
         if (entry.value_ptr.supportsStructuralRepair()) depot_ok = true;
     }
-    // Reserve the labour ledger entry before the repair loop mutates any
-    // slot or armor (rule 17): postRepairLabour can then never fail.
-    try gs.reserveLedger(1);
+    // Labour bills to each hull's company (ARCH §11). Reserve its rows
+    // before the repair loop mutates any slot or armor (rule 17): the
+    // posting can then never fail.
+    var split_arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer split_arena.deinit();
+    const by_company = try treasury.companyBuckets(split_arena.allocator(), gs);
+    try gs.reserveLedger(by_company.len + 1);
 
     var labor_cost: types.CBills = 0;
     var it = gs.units.iterator();
@@ -446,6 +455,7 @@ fn runWeeklyRepairsWithBook(gs: *GameState, book: *HourBook) !void {
         const base_load = techWeeklyLoadHours(gs, tech.id);
         const at_home = posture.isCompanyHome(gs, gs.companyOf(u.force)); // not merely off contract: a company returning or idling afield is away too
         const site = sites.siteForForce(gs, u.force);
+        const labor_before = labor_cost;
 
         for (u.slots.items) |*slot| {
             const tier = unit_mod.repairTier(slot.class, slot.condition) orelse continue;
@@ -490,9 +500,10 @@ fn runWeeklyRepairsWithBook(gs: *GameState, book: *HourBook) !void {
                 labor_cost += tuning.maintenance.armor_patch_labour;
             }
         }
+        treasury.addToBucket(by_company, gs.companyOf(u.force), labor_cost - labor_before);
     }
 
-    try postRepairLabour(gs, labor_cost);
+    try treasury.postAttributedCharge(gs, .maintenance, "repair labor & materials", commander_mod.costMultBp(gs.commander, .repair), labor_cost, by_company);
 }
 
 // ── The field repair push ────────────────────────────────────────────
@@ -779,7 +790,7 @@ pub fn repairPush(gs: *GameState, alloc: std.mem.Allocator, company: types.Force
             labour += tuning.maintenance.armor_patch_labour * @as(types.CBills, h.patches);
         }
     }
-    try postRepairLabour(gs, labour);
+    try postRepairLabour(gs, labour, treasury.attributionFor(gs, company));
     return plan;
 }
 
@@ -890,6 +901,69 @@ test "vehicle maintenance and field repair use mechanic hours and shared repair 
     try std.testing.expectEqual(@as(usize, 1), needs.len);
     const budget = try repairBudget(&gs, arena.allocator(), company, needs);
     try std.testing.expect(budget.hours > 0);
+}
+
+test "weekly consumables and repair labour bill each hull's company, and its contract only while out on it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1218 });
+    defer gs.deinit();
+    const deployed = try gs.createForce("Alpha", .company, .none);
+    const home = try gs.createForce("Bravo", .company, .none);
+    const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 }, .status = .active, .assigned_company = deployed, .monthly_net = 300_000 });
+    // One crewed hull each for Alpha, Bravo and the pool, each with a damaged weapon.
+    const owners = [_]types.ForceId{ deployed, home, .none };
+    var hulls: [owners.len]types.UnitId = undefined;
+    var labour: [owners.len]types.CBills = undefined;
+    for (owners, &hulls, &labour) |owner, *hull, *cost| {
+        hull.* = try gs.addUnit("SHD-2H");
+        if (owner != .none) try toe.assignUnit(&gs, hull.*, owner, .none);
+        const tech = try gs.hirePerson("Hull", "Tech", .tech_mek);
+        try gs.person(tech).?.skills.put(gs.allocator(), .tech_mek, 4);
+        gs.person(tech).?.assigned_force = owner;
+        try crew.assignSlot(&gs, hull.*, .tech, tech);
+        for (gs.unit(hull.*).?.slots.items) |*slot| if (slot.class == .weapon) {
+            slot.condition = .damaged;
+            cost.* = slotLabour(slot.part_key, false);
+            break;
+        };
+    }
+    const Row = struct { company: types.ForceId, contract: types.ContractId, amount: types.CBills };
+    const expected_tags = [_]struct { types.ForceId, types.ContractId }{ .{ deployed, cid }, .{ home, .none }, .{ .none, .none } };
+
+    var from = gs.ledger.transactions.items.len;
+    try runWeeklyMaintenance(&gs);
+    var rows = gs.ledger.transactions.items[from..];
+    try std.testing.expectEqual(@as(usize, owners.len), rows.len);
+    for (rows, expected_tags, hulls) |t, tags, hull| {
+        try std.testing.expectEqualStrings("weekly maintenance consumables", t.note);
+        try std.testing.expectEqual(Row{ .company = tags[0], .contract = tags[1], .amount = -weeklyConsumables(gs.unit(hull).?) }, Row{ .company = t.company, .contract = t.contract, .amount = t.amount });
+    }
+
+    from = gs.ledger.transactions.items.len;
+    try runWeeklyRepairs(&gs);
+    rows = gs.ledger.transactions.items[from..];
+    try std.testing.expectEqual(@as(usize, owners.len), rows.len);
+    for (rows, expected_tags, labour) |t, tags, cost| {
+        try std.testing.expectEqualStrings("repair labor & materials", t.note);
+        try std.testing.expectEqual(Row{ .company = tags[0], .contract = tags[1], .amount = -cost }, Row{ .company = t.company, .contract = t.contract, .amount = t.amount });
+    }
+}
+
+test "the field repair push bills the company and its contract" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7402 });
+    defer gs.deinit();
+    const f = try @import("contract_events.zig").damagedCompanyForTest(&gs, 2);
+    const co = f.c.assigned_company;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const from = gs.ledger.transactions.items.len;
+    _ = try repairPush(&gs, arena.allocator(), co, .worst_first);
+    const rows = gs.ledger.transactions.items[from..];
+    try std.testing.expectEqual(@as(usize, 1), rows.len);
+    try std.testing.expect(rows[0].amount < 0);
+    try std.testing.expectEqual(co, rows[0].company);
+    try std.testing.expectEqual(f.c.id, rows[0].contract);
 }
 
 test "aero tech repairs fighter field damage while structure remains depot work" {

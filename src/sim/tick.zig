@@ -34,6 +34,7 @@ const sites = @import("sites.zig");
 const toe = @import("toe.zig");
 const commands = @import("commands.zig");
 const campaign_backup = @import("campaign_backup.zig");
+const commander_mod = @import("../domain/commander.zig");
 
 /// The ordered phases of one campaign day. Order is part of the spec:
 /// e.g. shipments must arrive (travel) before supply consumption, and
@@ -573,7 +574,7 @@ fn runContracts(gs: *GameState) !void {
             .transit => if (c.arrive_day != null and gs.clock.day_index >= c.arrive_day.?) {
                 c.status = .active;
                 c.start_day = gs.clock.day_index;
-                c.end_day = gs.clock.day_index + @as(u32, c.terms.length_months) * types.days_per_month;
+                c.end_day = gs.clock.day_index + contract_mod.termDays(c.terms.length_months);
                 if (gs.force(c.assigned_company)) |f| f.location_planet = c.planet_key;
                 try gs.log(.contract, .{ .company = c.assigned_company, .contract = c.id }, "[{s}] company on station at {s} — contract active", .{ c.kind.label(), c.planet_key });
                 // The contract world's hull board opens on arrival.
@@ -684,26 +685,14 @@ fn runFinances(gs: *GameState) !void {
     _ = try @import("medical.zig").runMonthlyTurnover(gs);
     @import("contract_control.zig").driftStanding(gs);
 
-    const payroll = treasury.monthlyPayroll(gs);
-    if (payroll != 0) {
-        try gs.postTransaction(.{
-            .day = gs.clock.day_index,
-            .amount = -payroll,
-            .category = .payroll,
-            .note = "monthly payroll",
-        });
-    }
-
-    // The hangar ledger (ARCH §9.8): every hull bills, running or not.
-    const hull_bill = treasury.monthlyHullUpkeep(gs);
-    if (hull_bill != 0) {
-        try gs.postTransaction(.{
-            .day = gs.clock.day_index,
-            .amount = -hull_bill,
-            .category = .hull_upkeep,
-            .note = "hangar & hull upkeep",
-        });
-    }
+    // Payroll and the hangar ledger (ARCH §9.8: every hull bills, running
+    // or not) land in each company's books and its contract's (ARCH §11).
+    var split_arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer split_arena.deinit();
+    const payroll = try treasury.payrollSplit(split_arena.allocator(), gs);
+    try treasury.postAttributedCharge(gs, .payroll, "monthly payroll", commander_mod.costMultBp(gs.commander, .payroll), payroll.raw_total, payroll.per_company);
+    const hulls = try treasury.hullUpkeepSplit(split_arena.allocator(), gs);
+    try treasury.postAttributedCharge(gs, .hull_upkeep, "hangar & hull upkeep", types.full_bp, hulls.raw_total, hulls.per_company);
 
     // HQ upkeep draws each HQ's own treasury; running dry is
     // allowed but flagged — obligations don't wait for the courier.
@@ -818,6 +807,170 @@ test "payday fires on the 1st and only on the 1st" {
     try std.testing.expectEqual(@as(i64, 998_350), gs.funds);
     try std.testing.expectEqual(@as(usize, 1), gs.ledger.transactions.items.len);
     try std.testing.expectEqual(@as(u32, monthly_service_xp), gs.people.values()[0].xp);
+}
+
+test "profit shares are a cut of the contract's net, including its company's own costs" {
+    const founding = @import("founding.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7781 });
+    defer gs.deinit();
+    // A paymaster's payroll discount, a founding HQ with upkeep and
+    // unassigned staff, a supply link to a second HQ and an open loan.
+    const home = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const alpha = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const bravo = try gs.createForce("Bravo", .company, .none);
+    const bravo_hand = try gs.hirePerson("Bravo", "Hand", .mekwarrior);
+    gs.person(bravo_hand).?.assigned_force = bravo;
+    gs.funds = 20_000_000;
+    _ = try commands.execute(&gs, .{ .found_hq = .{ .name = "Far", .planet_key = "zebebelgenubi" } });
+    const far = gs.hqs.keys()[gs.hqs.count() - 1];
+    try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = far, .level = 1, .established_day = 0 });
+    _ = try commands.execute(&gs, .{ .take_loan = .{ .principal = 500_000, .term_months = 6 } });
+    // Every hull is Alpha's, so all maintenance in the window is Alpha's.
+    for (gs.units.values()) |u| try std.testing.expectEqual(alpha, gs.companyOf(u.force));
+
+    const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = alpha,
+        .start_day = gs.clock.day_index,
+        .end_day = gs.clock.day_index + 6 * types.days_per_month,
+        .monthly_net = 300_000,
+    });
+    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = 600_000, .category = .advance, .company = alpha, .contract = cid, .note = "contract advance + signing bonus" });
+
+    // A payday.
+    gs.clock.date = .{ .year = 3025, .month = 2, .day = 1 };
+    gs.clock.day_index = 31;
+    try runFinances(&gs);
+    const mult = commander_mod.costMultBp(gs.commander, .payroll);
+    var alpha_salaries: types.CBills = 0;
+    for (gs.people.values()) |p| if (p.isOnBooks() and gs.companyOf(p.assigned_force) == alpha) {
+        alpha_salaries += p.monthlySalary();
+    };
+    const alpha_payroll = types.applyBp(alpha_salaries, mult);
+    var alpha_hulls: types.CBills = 0;
+    for (gs.units.values()) |u| alpha_hulls += u.monthlyBill();
+    try std.testing.expect(alpha_payroll > 0 and alpha_hulls > 0);
+
+    // A weekly service, then stock shipped to Alpha in the field.
+    gs.clock.day_index = 35;
+    const service_from = gs.ledger.transactions.items.len;
+    try maintenance.runWeeklyService(&gs);
+    var alpha_maintenance: types.CBills = 0;
+    for (gs.ledger.transactions.items[service_from..]) |t| if (t.category == .maintenance) {
+        alpha_maintenance += t.amount;
+    };
+    try gs.addStock(.{ .hq = home }, "armor", 4);
+    const ship_from = gs.ledger.transactions.items.len;
+    try sites.shipStock(&gs, "armor", 2, .{ .hq = home }, .{ .company = alpha });
+    var alpha_freight: types.CBills = 0;
+    for (gs.ledger.transactions.items[ship_from..]) |t| if (t.category == .freight) {
+        alpha_freight += t.amount;
+    };
+    try std.testing.expect(alpha_maintenance < 0 and alpha_freight < 0);
+
+    // The pool, built from the contract's income and charges plus Alpha's
+    // own payroll, hull upkeep, maintenance and freight.
+    var expected_pool: types.CBills = 0;
+    for (gs.ledger.transactions.items) |t| if (t.contract == cid) switch (t.category) {
+        .payroll, .hull_upkeep, .maintenance, .freight => {},
+        else => expected_pool += t.amount,
+    };
+    expected_pool += -alpha_payroll - alpha_hulls + alpha_maintenance + alpha_freight;
+    try std.testing.expect(expected_pool > 0);
+
+    // One shareholder holding one share takes the whole cut.
+    for (gs.people.values()) |*p| p.shares = 0;
+    gs.person(bravo_hand).?.shares = 1;
+    gs.share_profit_bp = 3_000;
+    gs.clock.day_index = 40;
+    const done_from = gs.ledger.transactions.items.len;
+    try contract_control.complete(&gs, gs.contracts.getPtr(cid).?, false);
+    var paid: types.CBills = 0;
+    for (gs.ledger.transactions.items[done_from..]) |t| if (std.mem.eql(u8, t.note, "profit shares")) {
+        paid -= t.amount;
+    };
+    try std.testing.expectEqual(types.applyBp(expected_pool, gs.share_profit_bp), paid);
+
+    // Shared overhead, other companies and unassigned staff stay out.
+    for (gs.ledger.transactions.items[0..done_from]) |t| {
+        switch (t.category) {
+            .hq_upkeep, .loan_interest, .loan_principal, .fund_transfer => try std.testing.expectEqual(types.ContractId.none, t.contract),
+            .transport_charter => if (std.mem.eql(u8, t.note, "supply link upkeep")) try std.testing.expectEqual(types.ContractId.none, t.contract),
+            else => {},
+        }
+        if (t.company == bravo or t.company == .none) try std.testing.expectEqual(types.ContractId.none, t.contract);
+    }
+    var bravo_payroll = false;
+    var unassigned_payroll = false;
+    for (gs.ledger.transactions.items[0..done_from]) |t| if (std.mem.eql(u8, t.note, "monthly payroll")) {
+        if (t.company == bravo) bravo_payroll = true;
+        if (t.company == .none) unassigned_payroll = true;
+    };
+    try std.testing.expect(bravo_payroll and unassigned_payroll);
+}
+
+test "the payday bills payroll and hull upkeep to each company, its contract only while it runs" {
+    const founding = @import("founding.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7782 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const alpha = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const bravo = try gs.createForce("Bravo", .company, .none);
+    const bravo_lance = try gs.createForce("1st Lance", .lance, bravo);
+    const bravo_hand = try gs.hirePerson("Bravo", "Hand", .mekwarrior);
+    gs.person(bravo_hand).?.assigned_force = bravo_lance;
+    const bravo_hull = try gs.addUnit("SHD-2H");
+    gs.unit(bravo_hull).?.force = bravo_lance;
+    _ = try gs.addUnit("CGT-3"); // in the HQ pool
+    const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 }, .status = .transit, .assigned_company = alpha, .arrive_day = 90, .monthly_net = 300_000 });
+
+    gs.clock.date = .{ .year = 3025, .month = 2, .day = 1 };
+    gs.clock.day_index = 31;
+    const from = gs.ledger.transactions.items.len;
+    try runFinances(&gs);
+    const mult = commander_mod.costMultBp(gs.commander, .payroll);
+    var alpha_hulls: types.CBills = 0;
+    for (gs.units.values()) |u| if (gs.companyOf(u.force) == alpha) {
+        alpha_hulls += u.monthlyBill();
+    };
+    // Each charge: Alpha's row (it is in transit, so its contract's too),
+    // Bravo's row (home, so Bravo's alone) and the unassigned overhead.
+    const Expected = struct { company: types.ForceId, contract: types.ContractId, amount: types.CBills };
+    const charges = [_]struct { note: []const u8, total: types.CBills, rows: [2]Expected }{
+        .{ .note = "monthly payroll", .total = treasury.monthlyPayroll(&gs), .rows = .{
+            .{ .company = alpha, .contract = cid, .amount = types.applyBp(treasury.companyMonthlyPayroll(&gs, alpha), mult) },
+            .{ .company = bravo, .contract = .none, .amount = types.applyBp(gs.person(bravo_hand).?.monthlySalary(), mult) },
+        } },
+        .{ .note = "hangar & hull upkeep", .total = treasury.monthlyHullUpkeep(&gs), .rows = .{
+            .{ .company = alpha, .contract = cid, .amount = alpha_hulls },
+            .{ .company = bravo, .contract = .none, .amount = gs.unit(bravo_hull).?.monthlyBill() },
+        } },
+    };
+    for (charges) |charge| {
+        var rows: std.ArrayListUnmanaged(Expected) = .empty;
+        defer rows.deinit(std.testing.allocator);
+        var total: types.CBills = 0;
+        for (gs.ledger.transactions.items[from..]) |t| if (std.mem.eql(u8, t.note, charge.note)) {
+            try rows.append(std.testing.allocator, .{ .company = t.company, .contract = t.contract, .amount = -t.amount });
+            total -= t.amount;
+        };
+        try std.testing.expectEqual(@as(usize, 3), rows.items.len);
+        try std.testing.expectEqual(charge.rows[0], rows.items[0]);
+        try std.testing.expectEqual(charge.rows[1], rows.items[1]);
+        try std.testing.expectEqual(Expected{ .company = .none, .contract = .none, .amount = charge.total - charge.rows[0].amount - charge.rows[1].amount }, rows.items[2]);
+        // The rows add up to the single posting the outfit treasury pays.
+        try std.testing.expectEqual(charge.total, total);
+    }
 }
 
 test "phases are in spec order" {

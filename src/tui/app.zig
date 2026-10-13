@@ -2541,7 +2541,7 @@ pub const App = struct {
             try rows.append(al, .{ .key = .auto_admit, .active = true, .text = try std.fmt.allocPrint(al, "  medbay       auto-admit the wounded {s}      {{d}}off: you admit each casualty (m on People) and the turn waits{{/}}", .{if (cfg.auto_admit) "{g}on{/}" else "{c}off{/}"}) });
             try rows.append(al, .{ .key = .difficulty, .active = true, .text = try std.fmt.allocPrint(al, "  difficulty   {{a}}{s}{{/}} — {s}", .{ cfg.difficulty_name, cfg.difficulty_blurb }) });
             try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}             {s}{{/}}", .{cfg.multipliers}));
-            try rows.append(al, .{ .key = .shares, .active = true, .text = try std.fmt.allocPrint(al, "  shares       {{a}}{d}%{{/}} of contract income to shareholders at completion      {{d}}{s} · {s} · founders, veterans and officers hold shares{{/}}", .{ cfg.shares_pct, try keyHint(FormAction, al, &form_bindings, .less, "±5"), try keyHint(FormAction, al, &form_bindings, .act, "type a figure") }) });
+            try rows.append(al, .{ .key = .shares, .active = true, .text = try std.fmt.allocPrint(al, "  shares       {{a}}{d}%{{/}} of contract profit to shareholders at completion      {{d}}{s} · {s} · founders, veterans and officers hold shares{{/}}", .{ cfg.shares_pct, try keyHint(FormAction, al, &form_bindings, .less, "±5"), try keyHint(FormAction, al, &form_bindings, .act, "type a figure") }) });
             try info.add(&rows, al, "");
             selectable += 3;
         }
@@ -2584,7 +2584,7 @@ pub const App = struct {
             .difficulty => try self.cycleDifficulty(if (dir > 0) 1 else -1),
             .shares => if (self.session != null) {
                 const res = self.execResult(.{ .adjust_shares_pct = if (dir > 0) 5 else -5 }) orelse return;
-                self.say(.good, "shareholders take {d}% of contract income at completion", .{res.shares_pct});
+                self.say(.good, "shareholders take {d}% of contract profit at completion", .{res.shares_pct});
             },
             .info => {},
         }
@@ -2597,7 +2597,7 @@ pub const App = struct {
             return;
         }
         switch (form.rows[self.settings_cursor].key) {
-            .shares => if (self.stateOrNull()) |gs| self.openAmount("SHAREHOLDERS' CUT OF CONTRACT INCOME", .shares, &.{
+            .shares => if (self.stateOrNull()) |gs| self.openAmount("SHAREHOLDERS' CUT OF CONTRACT PROFIT", .shares, &.{
                 .{ .label = "percent", .value = (try q.settings(self.a(), gs)).shares_pct, .min = 0, .max = 100, .step = 5 },
             }),
             .volume => try self.adjustVolume(10),

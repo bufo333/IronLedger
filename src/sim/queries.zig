@@ -1502,7 +1502,7 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
         break :blk "  {d}hulls at " ++ std.fmt.comptimePrint("{d}%", .{tn.unit.sale_bp / 100}) ++ " value × condition · HQs at " ++ std.fmt.comptimePrint("{d}%", .{tn.hq.sale_pct}) ++ " of build cost{/}";
     });
     try extras.append(alloc, "");
-    try extras.append(alloc, "next 30 days (estimate)");
+    try extras.append(alloc, try std.fmt.allocPrint(alloc, "next payday d{d} (estimate)", .{treasury.nextPayday(gs)}));
     const payroll = treasury.monthlyPayroll(gs);
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "  payroll        {s: >14}", .{try money(alloc, -payroll)}));
     const hull_upkeep = treasury.monthlyHullUpkeep(gs);
@@ -1511,11 +1511,7 @@ pub fn ledger(alloc: Alloc, gs: *GameState, selected: state_mod.Treasury, period
     var hit = gs.hqs.iterator();
     while (hit.next()) |e| upkeep += e.value_ptr.monthly_upkeep;
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "  HQ upkeep      {s: >14}", .{try money(alloc, -upkeep)}));
-    var income: types.CBills = 0;
-    var cit = gs.contracts.iterator();
-    while (cit.next()) |e| if (e.value_ptr.status == .active) {
-        income += e.value_ptr.terms.base_pay_month;
-    };
+    const income = treasury.nextPaydayContractPay(gs);
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "  contract pay   {s: >14}", .{try money(alloc, income)}));
     const net = income - payroll - hull_upkeep - upkeep;
     try extras.append(alloc, try std.fmt.allocPrint(alloc, "  net            {s}{s: >14}{{/}}", .{ if (net < 0) "{c}" else "{g}", try money(alloc, net) }));
@@ -3647,7 +3643,7 @@ pub fn personRecord(alloc: Alloc, gs: *GameState, id: types.PersonId) ![]const [
         const l = p.loyalty(day);
         if (l.count() > 0) try out.append(alloc, try std.fmt.allocPrint(alloc, "loyalty     {s} — cancels {d} restless flag{s} on payday{s}", .{ try l.text(alloc), l.count(), if (l.count() == 1) "" else "s", if (l.founder) "; founders never roll while morale holds" else "" }));
     }
-    if (p.shares > 0 or p.isFounder()) try out.append(alloc, try std.fmt.allocPrint(alloc, "shares      {d} share{s}{s} · {d}% of contract income is split among shareholders at completion", .{ p.shares, if (p.shares == 1) "" else "s", if (p.isFounder()) " · founder" else "", types.bpPercent(gs.share_profit_bp) }));
+    if (p.shares > 0 or p.isFounder()) try out.append(alloc, try std.fmt.allocPrint(alloc, "shares      {d} share{s}{s} · {d}% of contract profit is split among shareholders at completion", .{ p.shares, if (p.shares == 1) "" else "s", if (p.isFounder()) " · founder" else "", types.bpPercent(gs.share_profit_bp) }));
     try out.append(alloc, try std.fmt.allocPrint(alloc, "record      {d} kill{s} ({d} BV) · {d} battle{s} · {d} tour{s}{s}", .{ p.kills, if (p.kills == 1) "" else "s", p.kill_bv, p.battles, if (p.battles == 1) "" else "s", p.tours, if (p.tours == 1) "" else "s", if (p.outstanding_tours > 0) try std.fmt.allocPrint(alloc, " ({d} outstanding)", .{p.outstanding_tours}) else "" }));
     if (p.awards.items.len > 0) {
         var line: std.ArrayListUnmanaged(u8) = .empty;
@@ -5109,6 +5105,40 @@ test "desk and ledger queries build on a fresh campaign" {
     try std.testing.expect(rows.len > 10);
     const c = try contracts(a, &gs, .none);
     try std.testing.expect(c.board.len > 0);
+}
+
+test "the ledger forecast shows the next payday's net contract pay" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7 });
+    defer gs.deinit();
+    const commands = @import("commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "Test", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha Company" })).created_force;
+    // Base 400,000 a month with the default 25% advance: each payday pays 300,000.
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "PER",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+    });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const l = try ledger(arena.allocator(), &gs, .outfit, 31, 20);
+    var pay_line: ?[]const u8 = null;
+    for (l.extras) |line| if (std.mem.startsWith(u8, line, "  contract pay")) {
+        pay_line = line;
+    };
+    try std.testing.expect(std.mem.endsWith(u8, pay_line.?, " 300,000"));
+    // The block is the coming payday's charges: day 0 is 3025-01-01, so d31.
+    var heading = false;
+    for (l.extras) |line| if (std.mem.eql(u8, line, "next payday d31 (estimate)")) {
+        heading = true;
+    };
+    try std.testing.expect(heading);
 }
 
 test "a wounded pilot: the TO&E marks the hull sitting out, the Desk notes it, the end-turn prompt does not ask" {

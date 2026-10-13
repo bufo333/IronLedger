@@ -142,6 +142,108 @@ pub fn courierEtaDays(gs: *GameState, to: Treasury) u32 {
     return logistics.daysBetween(home, dest);
 }
 
+// --------------------------------------------------------- attribution
+
+/// The books a cost lands in (ARCH §11): a company's own operating cost
+/// carries its tag, and its contract's tag while the company is out on it.
+/// `.none`/`.none` is shared outfit overhead.
+pub const Attribution = struct {
+    company: types.ForceId = .none,
+    contract: types.ContractId = .none,
+};
+
+/// The attribution of a cost one company incurs today: the company, plus
+/// the contract it is out on (in transit or on station), if any.
+pub fn attributionFor(gs: *GameState, company: types.ForceId) Attribution {
+    if (company == .none) return .{};
+    return .{
+        .company = company,
+        .contract = if (gs.deploymentContract(company)) |c| c.id else .none,
+    };
+}
+
+/// One company's share of an outfit charge, before the charge's multiplier.
+pub const CompanyAmount = struct {
+    company: types.ForceId,
+    amount: types.CBills,
+};
+
+/// An outfit charge split by company: the whole before its multiplier, and
+/// each company's part of it in `gs.forces` order. What no company holds is
+/// shared overhead.
+pub const CompanySplit = struct {
+    raw_total: types.CBills,
+    per_company: []CompanyAmount,
+};
+
+/// One zero bucket per company, in `gs.forces` order, allocated from `alloc`.
+pub fn companyBuckets(alloc: std.mem.Allocator, gs: *GameState) ![]CompanyAmount {
+    var out: std.ArrayListUnmanaged(CompanyAmount) = .empty;
+    for (gs.forces.values()) |f| if (f.echelon == .company) try out.append(alloc, .{ .company = f.id, .amount = 0 });
+    return out.toOwnedSlice(alloc);
+}
+
+/// Add `amount` to `company`'s bucket. A force outside every company
+/// (`.none`) adds nothing: its share stays overhead.
+pub fn addToBucket(buckets: []CompanyAmount, company: types.ForceId, amount: types.CBills) void {
+    if (company == .none) return;
+    for (buckets) |*b| if (b.company == company) {
+        b.amount += amount;
+        return;
+    };
+}
+
+/// Post an outfit-treasury charge split by company (ARCH §11). Each
+/// company with a nonzero part gets one row of `−applyBp(part, mult_bp)`
+/// tagged by `attributionFor`, in `per_company` order; one untagged row
+/// carries the rest of `applyBp(raw_total, mult_bp)`: the unassigned share
+/// and the truncation remainder. The rows sum to the single-row charge, so
+/// outfit funds move exactly as one posting of the whole would. Every row's
+/// ledger capacity is reserved before the first append: on error nothing
+/// is posted. Each part and `raw_total` are non-negative, and the parts sum
+/// to at most `raw_total`.
+pub fn postAttributedCharge(
+    gs: *GameState,
+    category: finance_mod.Category,
+    note: []const u8,
+    mult_bp: types.Bp,
+    raw_total: types.CBills,
+    per_company: []const CompanyAmount,
+) !void {
+    var rows: usize = 0;
+    var attributed: types.CBills = 0;
+    for (per_company) |part| {
+        const amount = types.applyBp(part.amount, mult_bp);
+        if (amount == 0) continue;
+        rows += 1;
+        attributed += amount;
+    }
+    const overhead = types.applyBp(raw_total, mult_bp) - attributed;
+    std.debug.assert(overhead >= 0);
+    if (overhead != 0) rows += 1;
+    try gs.reserveLedger(rows);
+
+    for (per_company) |part| {
+        const amount = types.applyBp(part.amount, mult_bp);
+        if (amount == 0) continue;
+        const tags = attributionFor(gs, part.company);
+        gs.commitTreasuryPosting(.{ .treasury = .outfit, .txn = .{
+            .day = gs.clock.day_index,
+            .amount = -amount,
+            .category = category,
+            .company = tags.company,
+            .contract = tags.contract,
+            .note = note,
+        } });
+    }
+    if (overhead != 0) gs.commitTreasuryPosting(.{ .treasury = .outfit, .txn = .{
+        .day = gs.clock.day_index,
+        .amount = -overhead,
+        .category = category,
+        .note = note,
+    } });
+}
+
 // ------------------------------------------------------ monthly costs
 
 /// The hangar ledger (ARCH §9.8): every hull bills, running or not.
@@ -154,16 +256,41 @@ pub fn monthlyHullUpkeep(gs: *GameState) types.CBills {
     return total;
 }
 
+/// `monthlyHullUpkeep` split by company: each hull bills to the company it
+/// serves in and each artillery carrier to the company it is attached to;
+/// hulls and carriers in an HQ pool or on the road are overhead.
+pub fn hullUpkeepSplit(alloc: std.mem.Allocator, gs: *GameState) !CompanySplit {
+    const buckets = try companyBuckets(alloc, gs);
+    var it = gs.units.iterator();
+    while (it.next()) |entry| addToBucket(buckets, gs.companyOf(entry.value_ptr.force), entry.value_ptr.monthlyBill());
+    for (buckets) |*b| b.amount += artillery.companyMonthlyCarry(gs, b.company);
+    return .{ .raw_total = monthlyHullUpkeep(gs), .per_company = buckets };
+}
+
 /// Sum of monthly salaries for everyone on the books (active or wounded),
 /// after the paymaster's discount if the commander has one.
 pub fn monthlyPayroll(gs: *GameState) types.CBills {
+    return types.applyBp(monthlySalaries(gs), commander_mod.costMultBp(gs.commander, .payroll));
+}
+
+/// Sum of monthly salaries for everyone on the books, before any discount.
+fn monthlySalaries(gs: *GameState) types.CBills {
     var total: types.CBills = 0;
     var it = gs.people.iterator();
     while (it.next()) |entry| {
         const p = entry.value_ptr;
         if (p.isOnBooks()) total += p.monthlySalary();
     }
-    return types.applyBp(total, commander_mod.costMultBp(gs.commander, .payroll));
+    return total;
+}
+
+/// Payroll split by company before the paymaster's discount: each
+/// company's `companyMonthlyPayroll`; staff outside every company are
+/// overhead. With that discount applied the whole is `monthlyPayroll`.
+pub fn payrollSplit(alloc: std.mem.Allocator, gs: *GameState) !CompanySplit {
+    const buckets = try companyBuckets(alloc, gs);
+    for (buckets) |*b| b.amount = companyMonthlyPayroll(gs, b.company);
+    return .{ .raw_total = monthlySalaries(gs), .per_company = buckets };
 }
 
 /// Monthly payroll for everyone assigned under one company's subtree.
@@ -174,6 +301,24 @@ pub fn companyMonthlyPayroll(gs: *GameState, company_id: types.ForceId) types.CB
         const p = entry.value_ptr;
         if (!p.isOnBooks() or !toe.personInCompany(gs, p, company_id)) continue;
         total += p.monthlySalary();
+    }
+    return total;
+}
+
+/// The day index of the coming payday. Today's payday, if today is one,
+/// has already been paid.
+pub fn nextPayday(gs: *GameState) u32 {
+    return gs.clock.day_index + gs.clock.date.daysUntilNextPayday();
+}
+
+/// What the coming payday pays in contract money: the monthly net (base
+/// pay less the advance's share) of every contract
+/// `Contract.paidOnPayday` holds paid on that day.
+pub fn nextPaydayContractPay(gs: *GameState) types.CBills {
+    const payday = nextPayday(gs);
+    var total: types.CBills = 0;
+    for (gs.contracts.values()) |*c| {
+        if (c.paidOnPayday(payday)) total += c.monthly_net;
     }
     return total;
 }
@@ -322,7 +467,7 @@ pub fn execTakeLoan(gs: *GameState, l: @FieldType(Command, "take_loan")) Error!R
 pub fn execSetSharesPct(gs: *GameState, pct: @FieldType(Command, "set_shares_pct")) Error!Result {
     if (pct > 100) return Error.BadPercent;
     gs.share_profit_bp = @as(types.Bp, pct) * 100;
-    try gs.log(.decision, .{}, "[shares] profit share set to {d}% of contract income", .{pct});
+    try gs.log(.decision, .{}, "[shares] profit share set to {d}% of contract profit", .{pct});
     return .{};
 }
 
@@ -331,6 +476,121 @@ pub fn execAdjustSharesPct(gs: *GameState, delta: @FieldType(Command, "adjust_sh
     const next: i64 = std.math.clamp(pct + delta, 0, 100);
     _ = try commands.execute(gs, .{ .set_shares_pct = @intCast(next) });
     return .{ .shares_pct = @intCast(next) };
+}
+
+/// Two companies, only the first out on a running contract (rule 71's
+/// asymmetric fixture for attribution).
+fn attributionFixture(gs: *GameState) !struct { deployed: types.ForceId, home: types.ForceId, contract: types.ContractId } {
+    const deployed = try gs.createForce("Alpha", .company, .none);
+    const home = try gs.createForce("Bravo", .company, .none);
+    const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 }, .status = .active, .assigned_company = deployed, .monthly_net = 300_000 });
+    return .{ .deployed = deployed, .home = home, .contract = cid };
+}
+
+test "an attributed charge posts one row per company plus the overhead, and moves funds as one posting would" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1301 });
+    defer gs.deinit();
+    const fx = try attributionFixture(&gs);
+    const idle = try gs.createForce("Charlie", .company, .none);
+    try std.testing.expectEqual(Attribution{ .company = fx.deployed, .contract = fx.contract }, attributionFor(&gs, fx.deployed));
+    try std.testing.expectEqual(Attribution{ .company = fx.home }, attributionFor(&gs, fx.home));
+    try std.testing.expectEqual(Attribution{}, attributionFor(&gs, .none));
+
+    const funds = gs.funds;
+    const parts = [_]CompanyAmount{
+        .{ .company = fx.deployed, .amount = 1_000 },
+        .{ .company = fx.home, .amount = 333 },
+        .{ .company = idle, .amount = 0 },
+    };
+    // A 2% discount: 1_000 → 980, 333 → 326, and the whole 2_000 → 1_960.
+    try postAttributedCharge(&gs, .payroll, "monthly payroll", 9_800, 2_000, &parts);
+    const rows = gs.ledger.transactions.items;
+    try std.testing.expectEqual(@as(usize, 3), rows.len);
+    try std.testing.expectEqualDeep(finance_mod.Transaction{ .day = 0, .amount = -980, .category = .payroll, .company = fx.deployed, .contract = fx.contract, .note = "monthly payroll" }, rows[0]);
+    try std.testing.expectEqualDeep(finance_mod.Transaction{ .day = 0, .amount = -326, .category = .payroll, .company = fx.home, .note = "monthly payroll" }, rows[1]);
+    try std.testing.expectEqualDeep(finance_mod.Transaction{ .day = 0, .amount = -654, .category = .payroll, .note = "monthly payroll" }, rows[2]);
+    try std.testing.expectEqual(funds - types.applyBp(2_000, 9_800), gs.funds);
+
+    // Every part held by a company: no overhead row.
+    try postAttributedCharge(&gs, .hull_upkeep, "hangar & hull upkeep", types.full_bp, 500, &.{.{ .company = fx.home, .amount = 500 }});
+    try std.testing.expectEqual(@as(usize, 4), gs.ledger.transactions.items.len);
+    // Nothing owed: nothing posted.
+    try postAttributedCharge(&gs, .hull_upkeep, "hangar & hull upkeep", types.full_bp, 0, parts[2..]);
+    try std.testing.expectEqual(@as(usize, 4), gs.ledger.transactions.items.len);
+}
+
+test "a failed attributed charge posts no row and moves no funds" {
+    const digest = @import("digest.zig");
+    var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer outer.deinit();
+    var gs = GameState.init(outer.allocator(), .{ .seed = 1302 });
+    const fx = try attributionFixture(&gs);
+    try std.testing.expectEqual(@as(usize, 0), gs.ledger.transactions.capacity);
+    const before = digest.stateHash(&gs);
+    gs.arena.state.used_list = null;
+    gs.arena.state.free_list = null;
+    gs.arena.child_allocator = std.testing.failing_allocator;
+    const parts = [_]CompanyAmount{ .{ .company = fx.deployed, .amount = 700 }, .{ .company = fx.home, .amount = 200 } };
+    try std.testing.expectError(error.OutOfMemory, postAttributedCharge(&gs, .payroll, "monthly payroll", types.full_bp, 1_000, &parts));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "the payday split owners bill each company its own staff and hulls" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1303 });
+    defer gs.deinit();
+    const fx = try attributionFixture(&gs);
+    const lance = try gs.createForce("1st Lance", .lance, fx.deployed);
+    const hand = try gs.hirePerson("Alpha", "Hand", .mekwarrior);
+    gs.person(hand).?.assigned_force = lance;
+    const loose = try gs.hirePerson("Pool", "Hand", .astech);
+    const hull = try gs.addUnit("SHD-2H");
+    gs.unit(hull).?.force = lance;
+    _ = try gs.addUnit("CGT-3"); // in the pool: overhead
+
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const payroll = try payrollSplit(arena.allocator(), &gs);
+    try std.testing.expectEqual(gs.person(hand).?.monthlySalary() + gs.person(loose).?.monthlySalary(), payroll.raw_total);
+    try std.testing.expectEqual(@as(usize, 2), payroll.per_company.len);
+    try std.testing.expectEqual(CompanyAmount{ .company = fx.deployed, .amount = gs.person(hand).?.monthlySalary() }, payroll.per_company[0]);
+    try std.testing.expectEqual(CompanyAmount{ .company = fx.home, .amount = 0 }, payroll.per_company[1]);
+    const hulls = try hullUpkeepSplit(arena.allocator(), &gs);
+    try std.testing.expectEqual(monthlyHullUpkeep(&gs), hulls.raw_total);
+    try std.testing.expectEqual(gs.unit(hull).?.monthlyBill(), hulls.per_company[0].amount);
+    try std.testing.expectEqual(@as(types.CBills, 0), hulls.per_company[1].amount);
+}
+
+test "the forecast's contract pay is what the coming payday posts" {
+    const tick = @import("tick.zig");
+    const founding = @import("founding.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1304 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .paymaster);
+    const fx = try attributionFixture(&gs);
+    const ending = try gs.createForce("Charlie", .company, .none);
+    // Read on 3025-01-31 (day 30): the payday is day 31.
+    gs.clock.date = .{ .year = 3025, .month = 1, .day = 31 };
+    gs.clock.day_index = 30;
+    gs.contracts.getPtr(fx.contract).?.end_day = 200;
+    const arriving: types.ContractId = @enumFromInt(gs.next_contract_id);
+    const finishing: types.ContractId = @enumFromInt(gs.next_contract_id + 1);
+    gs.next_contract_id += 2;
+    try gs.contracts.put(gs.allocator(), arriving, .{ .id = arriving, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 3, .base_pay_month = 200_000 }, .status = .transit, .assigned_company = fx.home, .arrive_day = 31, .monthly_net = 150_000 });
+    try gs.contracts.put(gs.allocator(), finishing, .{ .id = finishing, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 1, .base_pay_month = 100_000 }, .status = .active, .assigned_company = ending, .end_day = 31, .monthly_net = 75_000 });
+    try std.testing.expectEqual(@as(u32, 31), nextPayday(&gs));
+    const forecast = nextPaydayContractPay(&gs);
+    try std.testing.expectEqual(@as(types.CBills, 300_000 + 150_000), forecast);
+
+    const from = gs.ledger.transactions.items.len;
+    try tick.advanceDay(&gs);
+    try std.testing.expect(gs.clock.date.isPayday());
+    var posted: types.CBills = 0;
+    for (gs.ledger.transactions.items[from..]) |t| if (t.category == .contract_payment) {
+        posted += t.amount;
+    };
+    try std.testing.expectEqual(forecast, posted);
 }
 
 test "the credit line is backed by what the outfit could sell, less what it owes" {

@@ -5354,6 +5354,45 @@ test "dangling cross-entity references reject the load" {
     try std.testing.expectError(error.CorruptSave, loadAfterTampering("UPDATE person SET assigned_force = 99999 WHERE assigned_force != 0"));
 }
 
+test "a disbanded company's ledger rows load as outfit overhead, keeping their contract tags" {
+    const commands = @import("../sim/commands.zig");
+    const treasury = @import("../sim/treasury.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 4510 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const truck = try gs.addUnit("CGT-3");
+    _ = try commands.execute(&gs, .{ .transfer_unit = .{ .unit = truck, .to_company = co } });
+    const hand = try gs.hirePerson("Alpha", "Hand", .mekwarrior);
+    gs.person(hand).?.assigned_force = co;
+    // A company-tagged row, and one also tagged with a contract the company
+    // never held (the contract record outlives the company either way).
+    try treasury.transferFunds(&gs, .outfit, .{ .company = co }, 1_000, 0);
+    const other = try gs.createForce("Bravo", .company, .none);
+    const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 }, .status = .completed, .assigned_company = other });
+    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -500, .category = .supplies, .company = co, .contract = cid, .note = "tagged" });
+
+    _ = try commands.execute(&gs, .{ .disband_company = co });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    var retagged = false;
+    for (loaded.ledger.transactions.items) |t| {
+        try std.testing.expect(t.company != co);
+        if (std.mem.eql(u8, t.note, "tagged")) {
+            try std.testing.expectEqual(types.ForceId.none, t.company);
+            try std.testing.expectEqual(cid, t.contract);
+            retagged = true;
+        }
+    }
+    try std.testing.expect(retagged);
+}
+
 test "an orphan stock row rejects the load as corrupt, not UnknownSite" {
     // stock.owner_id names a site (hq or company) that is not in the live maps;
     // loadStock must surface this as error.CorruptSave (not the internal error.UnknownSite).
@@ -5592,8 +5631,8 @@ test "a played current campaign round trips and its downgraded store is refused 
     try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("UPDATE setting SET value = 36 WHERE key = 'schema_version'");
     defer raw.close();
-    try std.testing.expectEqual(@as(u64, 5020649500626899030), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 12048552543560690271), hash_before);
+    try std.testing.expectEqual(@as(u64, 14648742197069686759), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 17182843811130526815), hash_before);
     try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
@@ -6017,8 +6056,8 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     // service requires available, physically local technicians and local pool
     // teams (docs/p2-artillery-operations-design.md,
     // Condition, maintenance, repairs and shared hours).
-    try std.testing.expectEqual(@as(u64, 5020649500626899030), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 12048552543560690271), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 14648742197069686759), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 17182843811130526815), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -9989,7 +10028,7 @@ test "operational save continues through shared service injury repair reload and
     defer continued.deinit();
     try std.testing.expectEqual(digest.stateHash(&loaded), digest.stateHash(&continued));
     // Pin the complete operational command script, including service and injury streams.
-    try std.testing.expectEqual(@as(u64, 893828880482059325), digest.stateHash(&continued));
+    try std.testing.expectEqual(@as(u64, 3502470723956715159), digest.stateHash(&continued));
 }
 
 test "artillery bay targets round trip and malformed mutually exclusive targets reject loading" {

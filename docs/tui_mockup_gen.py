@@ -552,7 +552,7 @@ def ledger():
         "loans",
         "  none",
         "",
-        "next 30 days",
+        "next payday d182 (estimate)",
         "  payroll          −742,000",
         "  HQ upkeep        −310,000",
         "  hull upkeep      −128,000",

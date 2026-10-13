@@ -691,9 +691,14 @@ pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_compa
     }
     // Remove sub-forces.
     for (fids.items) |fid| _ = gs.forces.orderedRemove(fid);
-    // Nothing may keep pointing at a company that no longer exists:
-    // its standing orders, its resupply plan, the goods on the road
-    // to it and the hulls on their way to join it.
+    // Nothing may keep pointing at a company that no longer exists: its
+    // ledger rows (severance included) become outfit overhead, keeping
+    // their HQ and contract tags (ARCH §11); its standing orders, its
+    // resupply plan, the goods on the road to it and the hulls on their
+    // way to join it.
+    for (gs.ledger.transactions.items) |*t| {
+        if (std.mem.indexOfScalar(types.ForceId, fids.items, t.company) != null) t.company = .none;
+    }
     var pi: usize = 0;
     while (pi < gs.policies.items.len) {
         if (std.meta.eql(gs.policies.items[pi].entity, .{ .company = co })) _ = gs.policies.orderedRemove(pi) else pi += 1;

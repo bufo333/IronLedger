@@ -1037,7 +1037,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "cycleroe", "cycleroe co:N" },
         .{ "cyclerole", "cyclerole <lance id>" },
         .{ "cycledifficulty", "cycledifficulty [+|-]" },
-        .{ "shares", "shares <percent>|+|-  (share of contract income paid to shareholders at completion)" },
+        .{ "shares", "shares <percent>|+|-  (share of contract profit paid to shareholders at completion)" },
         .{ "day", "day [n] [force]  (1-365 days; force skips the end-turn checklist)" },
         .{ "next", "next [cap]  (advance until the next stop; cap defaults to tuning.auto_advance_cap_days)" },
         .{ "manning", "manning co:N" },

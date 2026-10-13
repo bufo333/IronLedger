@@ -52,6 +52,12 @@ pub const Date = struct {
         return self.day == 1;
     }
 
+    /// Days from this date to the next 1st of the month. On a payday it is
+    /// the following month's: today's payday has already been paid.
+    pub fn daysUntilNextPayday(self: Date) u32 {
+        return @as(u32, daysInMonth(self.year, self.month)) - self.day + 1;
+    }
+
     /// True when the date values are calendar-legal for a BattleTech
     /// campaign (rule 47). Guards the `unreachable` branch in
     /// `daysInMonth` so a tampered month-13 row is rejected before it
@@ -118,6 +124,16 @@ test "one date rendering, zero-padded" {
     try std.testing.expectEqualStrings("3025-01-01", Date.campaign_default.text(&buf));
     const d: Date = .{ .year = 3026, .month = 12, .day = 9 };
     try std.testing.expectEqualStrings("3026-12-09", d.text(&buf));
+}
+
+test "the next payday is the coming 1st, never today" {
+    try std.testing.expectEqual(@as(u32, 31), (Date{ .year = 3025, .month = 1, .day = 1 }).daysUntilNextPayday());
+    try std.testing.expectEqual(@as(u32, 1), (Date{ .year = 3025, .month = 1, .day = 31 }).daysUntilNextPayday());
+    try std.testing.expectEqual(@as(u32, 28), (Date{ .year = 3025, .month = 2, .day = 1 }).daysUntilNextPayday());
+    // Stepping that many days lands on a payday.
+    var d: Date = .{ .year = 3025, .month = 2, .day = 10 };
+    for (0..d.daysUntilNextPayday()) |_| d = d.next();
+    try std.testing.expectEqual(Date{ .year = 3025, .month = 3, .day = 1 }, d);
 }
 
 test "isPayday fires on day 1 only; tick.zig gates payroll here" {

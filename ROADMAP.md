@@ -780,9 +780,10 @@ item: tests green, both smokes, ROADMAP tick, one commit.
 - ✅ 12C.3 **Shares** (AtB shares system). `Person.shares` refreshed each
   payday: a founder (on the books day 0) holds 2, every combat/tech hand 1
   after a year, +1 per rank above sergeant. `shares <pct>` (Settings shows
-  it; default 30%) is the share of a contract's income paid out pro rata
-  to every shareholder at completion as payroll "profit shares" (+3
-  morale, log line with the split). Three shares cancel a restless flag;
+  it; default 30%) is the share of a contract's profit (its net, floored
+  at zero, ARCHITECTURE §11) paid out pro rata to every shareholder at
+  completion as payroll "profit shares" (+3 morale, log line with the
+  split). Three shares cancel a restless flag;
   shareholders take half severance. Record shows the stake. Schema v15.
 - ✅ 12C.4 **Ages and career arcs** (MekHQ `birthday`, AtB age-based
   retirement). `Person.born_day` (days relative to campaign start, null

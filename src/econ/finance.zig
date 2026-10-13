@@ -86,6 +86,16 @@ pub const Ledger = struct {
     }
 };
 
+/// A contract's net (ARCH §11): every row tagged with it, income and
+/// charges alike, from signing through completion.
+pub fn contractNet(ledger: *const Ledger, contract: types.ContractId) types.CBills {
+    var total: types.CBills = 0;
+    for (ledger.transactions.items) |t| {
+        if (t.contract == contract) total += t.amount;
+    }
+    return total;
+}
+
 /// Per-category totals over a period — the P&L view (GAMEPLAY.md's monthly
 /// heartbeat). Income and expenses are kept separate so the report reads
 /// like a statement, not a number.
@@ -176,6 +186,22 @@ test "ledger balance and company P&L" {
     try std.testing.expectEqual(@as(types.CBills, -150_000), ledger.balance());
     try std.testing.expectEqual(@as(types.CBills, 600_000), ledger.companyNet(alpha, 1, 31));
     try std.testing.expectEqual(@as(types.CBills, -700_000), ledger.companyNet(bravo, 1, 31));
+}
+
+test "a contract's net sums only the rows tagged with it" {
+    const alloc = std.testing.allocator;
+    var ledger: Ledger = .{};
+    defer ledger.deinit(alloc);
+
+    const raid: types.ContractId = @enumFromInt(3);
+    const other: types.ContractId = @enumFromInt(4);
+    try ledger.post(alloc, .{ .day = 1, .amount = 600_000, .category = .advance, .contract = raid });
+    try ledger.post(alloc, .{ .day = 31, .amount = -120_000, .category = .payroll, .contract = raid });
+    try ledger.post(alloc, .{ .day = 31, .amount = -80_000, .category = .payroll });
+    try ledger.post(alloc, .{ .day = 31, .amount = 300_000, .category = .contract_payment, .contract = other });
+
+    try std.testing.expectEqual(@as(types.CBills, 480_000), contractNet(&ledger, raid));
+    try std.testing.expectEqual(@as(types.CBills, 0), contractNet(&ledger, @enumFromInt(5)));
 }
 
 test "loan interest owner: monthlyInterest and totalInterest agree with the draw-time formula" {

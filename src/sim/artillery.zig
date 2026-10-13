@@ -269,6 +269,19 @@ pub fn monthlyCarry(gs: *const GameState) types.CBills {
     return total;
 }
 
+/// The part of `monthlyCarry` billed to one company: its attached
+/// carriers. Pooled and freighted carriers are outfit overhead.
+pub fn companyMonthlyCarry(gs: *const GameState, company: types.ForceId) types.CBills {
+    var total: types.CBills = 0;
+    for (gs.artillery_formations.values()) |f| switch (f.placement) {
+        .company => |id| if (id == company) {
+            total += unit.monthlyCarryCost(.vehicle);
+        },
+        else => {},
+    };
+    return total;
+}
+
 /// Sale from an HQ pool credits that treasury, retains the carrier identity and
 /// appends explicit market ownership. All fallible work precedes the commit.
 pub fn sell(gs: *GameState, id: types.ArtilleryFormationId) commands.Error!commands.Result {

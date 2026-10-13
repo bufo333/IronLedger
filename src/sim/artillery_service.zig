@@ -20,6 +20,7 @@ const operations = @import("artillery_operations.zig");
 const maintenance = @import("maintenance.zig");
 const hq_ops = @import("hq_ops.zig");
 const sites = @import("sites.zig");
+const treasury = @import("treasury.zig");
 
 /// The shared maintenance table for the carrier's verified tonnage and quality.
 pub fn baseHours(f: *const dom.Formation) u32 {
@@ -200,6 +201,15 @@ fn damageGear(gs: *GameState, f: *dom.Formation, intact_only: bool) !void {
     }
 }
 
+/// The books a formation's service costs land in (ARCH §11): its company's
+/// while attached to one, shared overhead in an HQ pool or on the road.
+fn formationBooks(gs: *GameState, f: *const dom.Formation) treasury.Attribution {
+    return switch (f.placement) {
+        .company => |id| treasury.attributionFor(gs, id),
+        .hq_pool, .freight, .sold, .destroyed => .{},
+    };
+}
+
 fn prepareMaintenance(gs: *GameState, f: *dom.Formation, book: *maintenance.HourBook) !void {
     const site = operations.operationSite(gs, f) orelse return;
     if (operations.hasJob(gs, f.id)) return;
@@ -216,7 +226,8 @@ fn prepareMaintenance(gs: *GameState, f: *dom.Formation, book: *maintenance.Hour
     if (f.quality != before) try gs.log(.construction, .{}, "[artillery] formation {d} quality {s} -> {s}", .{ @intFromEnum(f.id), @tagName(before), @tagName(f.quality) });
     if (covered) {
         f.last_maintenance_day = gs.clock.day_index;
-        try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -types.applyBp(@divTrunc(artillery.purchasePrice(), tuning.maintenance.consumables_divisor), commander.costMultBp(gs.commander, .repair)), .category = .maintenance, .note = "artillery maintenance consumables" });
+        const books = formationBooks(gs, f);
+        try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -types.applyBp(@divTrunc(artillery.purchasePrice(), tuning.maintenance.consumables_divisor), commander.costMultBp(gs.commander, .repair)), .category = .maintenance, .company = books.company, .contract = books.contract, .note = "artillery maintenance consumables" });
         if (raw == 2 and gs.rng.roll2d6(.maintenance) <= tuning.maintenance.accident_target) try maintenance.injureTechPrepared(gs, tech.?.id, tuning.maintenance.accident_days_base + gs.rng.roll2d6(.medical), "artillery maintenance accident");
     }
 }
@@ -242,7 +253,8 @@ fn prepareFieldRepairs(gs: *GameState, f: *dom.Formation, book: *maintenance.Hou
         f.armor_pct = @min(100, f.armor_pct + tuning.maintenance.armor_patch_pct);
         labor += tuning.maintenance.armor_patch_labour;
     }
-    if (labor > 0) try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -types.applyBp(labor, commander.costMultBp(gs.commander, .repair)), .category = .maintenance, .note = "artillery field repair labor" });
+    const books = formationBooks(gs, f);
+    if (labor > 0) try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -types.applyBp(labor, commander.costMultBp(gs.commander, .repair)), .category = .maintenance, .company = books.company, .contract = books.contract, .note = "artillery field repair labor" });
     if (f.slots[@intFromEnum(rules.Slot.chassis)].condition != .ok and site == .hq) {
         _ = queueRepair(gs, f.id) catch |err| switch (err) {
             error.ArtilleryNoMechanic, error.ArtilleryBayJob, error.ArtilleryWrongLocation, error.NoBay, error.BayTooSmall, error.MissingComponents, error.NothingToRepair => {
@@ -381,6 +393,28 @@ test "one mechanic shares exact conventional artillery hours and actual HQ teams
     const checkpoint = digest.stateHash(&gs);
     try runWeekly(&gs, &book, &repairs);
     try std.testing.expectEqual(checkpoint, digest.stateHash(&gs));
+}
+
+test "an attached formation's service bills its company; a pooled one's is overhead" {
+    for ([_]bool{ true, false }) |attached| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 626 });
+        defer gs.deinit();
+        const id = try operations.fixtureForTest(&gs, attached);
+        const f = gs.artillery_formations.getPtr(id).?;
+        f.slots[@intFromEnum(rules.Slot.communications)].condition = .damaged;
+        const books: types.ForceId = if (attached) f.placement.company else .none;
+        gs.clock.day_index = 7;
+        const from = gs.ledger.transactions.items.len;
+        try maintenance.runWeeklyService(&gs);
+        var seen: usize = 0;
+        for (gs.ledger.transactions.items[from..]) |t| {
+            if (!std.mem.eql(u8, t.note, "artillery maintenance consumables") and !std.mem.eql(u8, t.note, "artillery field repair labor")) continue;
+            seen += 1;
+            try std.testing.expectEqual(books, t.company);
+            try std.testing.expectEqual(types.ContractId.none, t.contract);
+        }
+        try std.testing.expectEqual(@as(usize, 2), seen);
+    }
 }
 
 fn depotFixtureForTest(gs: *GameState) !types.ArtilleryFormationId {

@@ -7,6 +7,7 @@
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
+const finance_mod = @import("../econ/finance.zig");
 const person_mod = @import("../domain/person.zig");
 const rank_mod = @import("../domain/rank.zig");
 const award_mod = @import("../domain/award.zig");
@@ -163,16 +164,22 @@ pub const PreparedProfitShare = struct {
     }
 };
 
-/// Prepare the profit-share payout from recorded contract income plus an
-/// already-prepared completion bonus. The returned operation owns no state and
-/// commits without allocation.
+/// Prepare the profit-share payout from the contract's profit (ARCH §11):
+/// its ledger net, every row tagged with it from signing on, plus an
+/// already-prepared completion bonus, floored at zero. A share above zero
+/// with nothing to share prepares one log line saying what the contract
+/// netted. The returned operation owns no state and commits without
+/// allocation.
 pub fn prepareProfitShare(alloc: std.mem.Allocator, gs: *GameState, contract_id: types.ContractId, company: types.ForceId, completion_bonus: types.CBills) !PreparedProfitShare {
-    var income: types.CBills = 0;
-    for (gs.ledger.transactions.items) |t| if (t.contract == contract_id) {
-        income += t.amount;
-    };
-    income += completion_bonus;
-    if (income <= 0 or gs.share_profit_bp == 0) return .{ .holders = &.{}, .paid = 0, .posting = null, .log_line = null };
+    if (gs.share_profit_bp == 0) return .{ .holders = &.{}, .paid = 0, .posting = null, .log_line = null };
+    var date_buf: [10]u8 = undefined;
+    const net = finance_mod.contractNet(&gs.ledger, contract_id) + completion_bonus;
+    const profit = @max(0, net);
+    if (profit == 0) {
+        try gs.reserveLog(1);
+        const line = try std.fmt.allocPrint(gs.allocator(), "{s} [shares] no profit shares — the contract netted {s}", .{ gs.clock.date.text(&date_buf), try types.moneyText(gs.allocator(), net) });
+        return .{ .holders = &.{}, .paid = 0, .posting = null, .log_line = line };
+    }
     var total_shares: u32 = 0;
     var it = gs.people.iterator();
     while (it.next()) |e| {
@@ -181,7 +188,7 @@ pub fn prepareProfitShare(alloc: std.mem.Allocator, gs: *GameState, contract_id:
         total_shares += p.shares;
     }
     if (total_shares == 0) return .{ .holders = &.{}, .paid = 0, .posting = null, .log_line = null };
-    const pool = types.applyBp(income, gs.share_profit_bp);
+    const pool = types.applyBp(profit, gs.share_profit_bp);
     const per_share = @divTrunc(pool, @as(types.CBills, total_shares));
     if (per_share <= 0) return .{ .holders = &.{}, .paid = 0, .posting = null, .log_line = null };
     var paid: types.CBills = 0;
@@ -197,11 +204,10 @@ pub fn prepareProfitShare(alloc: std.mem.Allocator, gs: *GameState, contract_id:
     }
     const posting = try gs.prepareTreasuryPosting(.outfit, .{ .day = gs.clock.day_index, .amount = -paid, .category = .payroll, .company = company, .contract = contract_id, .note = "profit shares" });
     try gs.reserveLog(1);
-    var date_buf: [10]u8 = undefined;
-    const log_line = try std.fmt.allocPrint(gs.allocator(), "{s} [shares] {s} c-bills of {s} contract income ({d}%) paid to {d} shareholders — {d} shares at {s} each (morale +{d})", .{
+    const log_line = try std.fmt.allocPrint(gs.allocator(), "{s} [shares] {s} c-bills of {s} contract profit ({d}%) paid to {d} shareholders — {d} shares at {s} each (morale +{d})", .{
         gs.clock.date.text(&date_buf),
         try types.moneyText(gs.allocator(), paid),
-        try types.moneyText(gs.allocator(), income),
+        try types.moneyText(gs.allocator(), profit),
         types.bpPercent(gs.share_profit_bp),
         holders,
         total_shares,
@@ -225,9 +231,9 @@ pub fn commitProfitShare(gs: *GameState, contract_id: types.ContractId, company:
     });
 }
 
-/// Contract completed: `gs.share_profit_bp` of what the contract brought in,
-/// split pro rata across every shareholder on the books and paid as payroll.
-/// Returns the pool paid.
+/// Contract completed: `gs.share_profit_bp` of the contract's profit
+/// (`prepareProfitShare`), split pro rata across every shareholder on the
+/// books and paid as payroll. Returns the pool paid.
 pub fn payShares(gs: *GameState, contract_id: types.ContractId, company: types.ForceId) !types.CBills {
     var scratch_arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer scratch_arena.deinit();
@@ -921,7 +927,7 @@ test "severance is a month per year served, capped; a firing pays half; under a 
     try std.testing.expectEqual(person_mod.Status.resigned, gs.person(vet).?.status);
 }
 
-test "shares are paid pro rata from contract income at the configured share" {
+test "shares are paid pro rata from the contract's net at the configured share" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 123 });
     defer gs.deinit();
     const a = try gs.hirePerson("Two", "Shares", .mekwarrior);
@@ -982,36 +988,71 @@ test "prepared profit shares and tour awards leave no partial personnel effects 
 
 test "prepared profit shares leave morale, ledger, and log unchanged on every allocation failure" {
     const digest = @import("digest.zig");
-    var i: usize = 0;
-    var failed = false;
-    while (true) : (i += 1) {
-        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer outer.deinit();
-        var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
-        const holder = try gs.hirePerson("Share", "Holder", .mekwarrior);
-        gs.person(holder).?.shares = 1;
-        const contract: types.ContractId = @enumFromInt(1);
-        try gs.postTransaction(.{ .day = 0, .amount = 100_000, .category = .contract_payment, .contract = contract });
-        const before = digest.stateHash(&gs);
-        gs.arena.state.used_list = null;
-        gs.arena.state.free_list = null;
-        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
-        gs.arena.child_allocator = failing.allocator();
-        var scratch = std.heap.ArenaAllocator.init(gs.scratch());
-        defer scratch.deinit();
-        if (prepareProfitShare(scratch.allocator(), &gs, contract, .none, 0)) |prepared| {
-            commitProfitShare(&gs, contract, .none, prepared);
-            try std.testing.expect(gs.person(holder).?.morale > 50);
-            try std.testing.expectEqual(@as(usize, 2), gs.ledger.transactions.items.len);
-            try std.testing.expectEqual(@as(usize, 1), gs.event_log.items.len);
-            break;
-        } else |err| {
-            try std.testing.expectEqual(error.OutOfMemory, err);
-            try std.testing.expectEqual(before, digest.stateHash(&gs));
-            failed = true;
+    // A profit pays and logs; a loss only logs that nothing was shared.
+    for ([_]types.CBills{ 100_000, -100_000 }) |net| {
+        const pays = net > 0;
+        var i: usize = 0;
+        var failed = false;
+        while (true) : (i += 1) {
+            var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+            defer outer.deinit();
+            var gs = GameState.init(outer.allocator(), .{ .start_funds = 1_000_000 });
+            const holder = try gs.hirePerson("Share", "Holder", .mekwarrior);
+            gs.person(holder).?.shares = 1;
+            const contract: types.ContractId = @enumFromInt(1);
+            try gs.postTransaction(.{ .day = 0, .amount = net, .category = .contract_payment, .contract = contract });
+            const before = digest.stateHash(&gs);
+            gs.arena.state.used_list = null;
+            gs.arena.state.free_list = null;
+            var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
+            gs.arena.child_allocator = failing.allocator();
+            var scratch = std.heap.ArenaAllocator.init(gs.scratch());
+            defer scratch.deinit();
+            if (prepareProfitShare(scratch.allocator(), &gs, contract, .none, 0)) |prepared| {
+                commitProfitShare(&gs, contract, .none, prepared);
+                try std.testing.expectEqual(pays, gs.person(holder).?.morale > 50);
+                try std.testing.expectEqual(@as(usize, if (pays) 2 else 1), gs.ledger.transactions.items.len);
+                try std.testing.expectEqual(@as(usize, 1), gs.event_log.items.len);
+                break;
+            } else |err| {
+                try std.testing.expectEqual(error.OutOfMemory, err);
+                try std.testing.expectEqual(before, digest.stateHash(&gs));
+                failed = true;
+            }
         }
+        try std.testing.expect(failed);
     }
-    try std.testing.expect(failed);
+}
+
+test "a contract that netted a loss pays no shares and says so; a zero share is silent" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 124 });
+    defer gs.deinit();
+    const holder = try gs.hirePerson("Share", "Holder", .mekwarrior);
+    gs.person(holder).?.shares = 2;
+    const cid: types.ContractId = @enumFromInt(7);
+    // Income 400,000 against 550,000 of the company's own costs.
+    try gs.postTransaction(.{ .day = 0, .amount = 400_000, .category = .advance, .contract = cid });
+    try gs.postTransaction(.{ .day = 0, .amount = -550_000, .category = .payroll, .contract = cid });
+    gs.share_profit_bp = 3_000;
+    const funds = gs.funds;
+    const morale = gs.person(holder).?.morale;
+    const rows = gs.ledger.transactions.items.len;
+    try std.testing.expectEqual(@as(types.CBills, 0), try payShares(&gs, cid, .none));
+    try std.testing.expectEqual(funds, gs.funds);
+    try std.testing.expectEqual(rows, gs.ledger.transactions.items.len);
+    try std.testing.expectEqual(morale, gs.person(holder).?.morale);
+    try std.testing.expectEqual(@as(usize, 1), gs.event_log.items.len);
+    try std.testing.expectEqualStrings("3025-01-01 [shares] no profit shares — the contract netted -150,000", gs.event_log.items[0].text);
+
+    // A bonus that lifts the net above zero pays on the remainder only.
+    var scratch = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer scratch.deinit();
+    const lifted = try prepareProfitShare(scratch.allocator(), &gs, cid, .none, 250_000);
+    try std.testing.expectEqual(types.applyBp(100_000, 3_000), lifted.paid);
+
+    gs.share_profit_bp = 0;
+    try std.testing.expectEqual(@as(types.CBills, 0), try payShares(&gs, cid, .none));
+    try std.testing.expectEqual(@as(usize, 1), gs.event_log.items.len);
 }
 
 test "a raised company is an empty skeleton; hulls bought for it land in a lance or ship with the map transit; halls crew it" {
