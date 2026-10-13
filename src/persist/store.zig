@@ -3350,7 +3350,7 @@ pub const Store = struct {
 
     fn loadPendingEvent(self: Store, gs: *GameState, cid: i64, saved_version: u32) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT kind, day, contract, company, default_choice, deadline, chosen, person, id, battle, situation, actor, situation IS NULL OR typeof(situation)='text' FROM pending_event WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT kind, day, contract, company, default_choice, deadline, chosen, person, id, battle, situation, actor, (situation IS NULL OR typeof(situation)='text') AND typeof(actor)='integer' FROM pending_event WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -11009,6 +11009,9 @@ test "situation records, situation decisions and flags fail closed on every malf
         "UPDATE pending_event SET situation=NULL WHERE kind='situation'",
         "UPDATE pending_event SET situation='no_such_situation' WHERE kind='situation'",
         "UPDATE pending_event SET actor=0 WHERE kind='situation'",
+        // Owners that are not integers but convert to the record's actor.
+        "UPDATE pending_event SET actor=actor+0.5 WHERE kind='situation'",
+        "UPDATE pending_event SET actor=CAST(actor AS TEXT)||'x' WHERE kind='situation'",
         "UPDATE pending_event SET default_choice=0 WHERE kind='situation'",
         "UPDATE pending_event SET chosen=0 WHERE kind='situation'",
         "UPDATE pending_event SET contract=999 WHERE kind='situation'",
@@ -11016,6 +11019,9 @@ test "situation records, situation decisions and flags fail closed on every malf
         // Another decision names no situation and no actor.
         "UPDATE pending_event SET situation='drill_the_militia' WHERE kind='notice_given'",
         "UPDATE pending_event SET actor=1 WHERE kind='notice_given'",
+        // Non-integer actors that convert to no actor.
+        "UPDATE pending_event SET actor='invalid' WHERE kind='notice_given'",
+        "UPDATE pending_event SET actor=0.5 WHERE kind='notice_given'",
     };
     for (tampers) |tamper| try expectUncheckedTamperRefusedForTest(store, &gs, tamper);
     // An owner that is the contract's actor of another archetype.
@@ -11024,6 +11030,8 @@ test "situation records, situation decisions and flags fail closed on every malf
     // A situation raised twice on one contract, past the table's own
     // uniqueness (rebuilt without it, so the loader alone must refuse).
     try expectUncheckedTamperRefusedForTest(store, &gs, "CREATE TABLE cs AS SELECT * FROM contract_situation; DROP TABLE contract_situation; CREATE TABLE contract_situation AS SELECT * FROM cs; DROP TABLE cs; INSERT INTO contract_situation SELECT cid, contract, 2, situation, day, actor, choice FROM contract_situation WHERE ord=0");
+    // A NULL actor, past the column's NOT NULL (rebuilt without it).
+    try expectUncheckedTamperRefusedForTest(store, &gs, "CREATE TABLE pe AS SELECT * FROM pending_event; DROP TABLE pending_event; CREATE TABLE pending_event AS SELECT * FROM pe; DROP TABLE pe; UPDATE pending_event SET actor=NULL WHERE kind='notice_given'");
 }
 
 /// Run `tamper` in a transaction whose COMMIT the schema must refuse, and
