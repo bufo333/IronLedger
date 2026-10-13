@@ -45,7 +45,8 @@ references through typed owners within P2g. Battle armor remains deferred beyond
   no company's books. Travellers are on leave until the carrier's ETA, as
   transferred pilots are, and join the company's books on arrival (HQ postings
   cleared). A diversion moves their leave to the return leg's ETA and they
-  arrive back still seated on unchanged books. HQ freight clears pool crew and
+  arrive back still seated on unchanged books. Neither leg lets a seat or the
+  mechanic be cleared by order before arrival. HQ freight clears pool crew and
   the mechanic, who stay behind on their books.
 - A person occupies at most one operating seat across artillery and ordinary
   Unit pilots. Reject an already seated person; require explicit unassignment

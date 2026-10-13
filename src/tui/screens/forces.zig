@@ -782,6 +782,22 @@ test "artillery pickers act on the typed row under the cursor, and a dimmed row 
     try app.pressForTest(c, .enter);
     try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "seat cleared") != null);
     try std.testing.expectEqual(game.types.PersonId.none, c.app.state().artillery_formations.get(fid).?.crew[@intFromEnum(top.artillery_seat.?)]);
+    // On a field leg the clear rows are dimmed; Enter shows the canonical
+    // refusal and the seat keeps its traveller.
+    _ = c.app.execResult(.{ .assign_artillery_crew = .{ .formation = fid, .seat = top.artillery_seat.?, .person = top.sel.person } }).?;
+    const f = c.app.state().artillery_formations.getPtr(fid).?;
+    const pooled = f.placement;
+    const day = c.app.state().clock.day_index;
+    f.placement = .{ .field_return = .{ .to_hq = pooled.hq_pool, .dispatch_day = day, .eta_day = day + 5, .paid_cost = 0 } };
+    try app.pressForTest(c, .{ .char = 'u' });
+    try std.testing.expectEqual(fid, c.app.modal.pick_arty_unassign);
+    try std.testing.expect(!(try q.artilleryUnassignChoices(c.app.frame.allocator(), c.app.state(), fid))[0].eligible);
+    const held = game.digest.stateHash(c.app.state());
+    try app.pressForTest(c, .enter);
+    var refusal: [256]u8 = undefined;
+    try std.testing.expectEqualStrings(try std.fmt.bufPrint(&refusal, "refused: {s}", .{game.cli.errorText(error.ArtilleryNoServiceSite)}), c.app.msg.slice());
+    try std.testing.expectEqual(held, game.digest.stateHash(c.app.state()));
+    f.placement = pooled;
     // A travelling company's row is dimmed; Enter still sends the command and
     // shows the canonical refusal, changing nothing.
     var co: game.types.ForceId = .none;

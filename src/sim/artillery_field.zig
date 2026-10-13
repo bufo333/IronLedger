@@ -587,6 +587,57 @@ test "travelling crew and mechanics stay with their carrier and its HQ endpoints
     try artillery.validate(&gs);
 }
 
+/// Clearing any traveller from a carrier on either field leg is refused with
+/// the whole campaign unchanged, and the traveller still cannot be posted away
+/// or transferred.
+fn expectTravellersHeldForTest(gs: *GameState, fx: FieldFixture, other: types.ForceId) !void {
+    for (@import("../domain/artillery_operations.zig").seats) |seat| try expectRefusedForTest(gs, .{ .unassign_artillery_crew = .{ .formation = fx.formation, .seat = seat } }, error.ArtilleryNoServiceSite);
+    try expectRefusedForTest(gs, .{ .unassign_artillery_tech = fx.formation }, error.ArtilleryNoServiceSite);
+    for (travellersForTest(fx)) |id| {
+        try expectRefusedForTest(gs, .{ .post_person = .{ .person = id, .hq = fx.home } }, error.PersonDeployed);
+        try expectRefusedForTest(gs, .{ .transfer_person = .{ .person = id, .to_force = other } }, error.PersonDeployed);
+    }
+    const f = gs.artillery_formations.get(fx.formation).?;
+    try std.testing.expectEqual(fx.crew, f.crew);
+    try std.testing.expectEqual(fx.mechanic, f.tech);
+}
+
+test "travellers on either field leg cannot be cleared from their carrier, so arrival and diversion still carry them" {
+    for ([_]enum { arrive, divert }{ .arrive, .divert }) |ending| {
+        var gs = GameState.init(std.testing.allocator, .{});
+        defer gs.deinit();
+        const fx = try fixtureForTest(&gs);
+        const other = try gs.createForce("Other", .company, .none);
+        const result = try commands.execute(&gs, shipForTest(fx));
+        try expectTravellersHeldForTest(&gs, fx, other);
+        switch (ending) {
+            .arrive => {
+                gs.clock.day_index = result.artillery_eta_day;
+                try artillery.runArrivals(&gs);
+                try std.testing.expectEqual(dom.Placement{ .company = fx.company }, gs.artillery_formations.get(fx.formation).?.placement);
+                for (travellersForTest(fx)) |id| try std.testing.expectEqual(fx.company, gs.person(id).?.assigned_force);
+            },
+            .divert => {
+                gs.contracts.getPtr(fx.contract).?.status = .completed;
+                gs.clock.day_index = 1;
+                try artillery.runArrivals(&gs);
+                const leg = gs.artillery_formations.get(fx.formation).?.placement.field_return;
+                for (travellersForTest(fx)) |id| try std.testing.expectEqual(@as(?u32, leg.eta_day), gs.person(id).?.leave_until_day);
+                try expectTravellersHeldForTest(&gs, fx, other);
+                gs.clock.day_index = leg.eta_day;
+                try artillery.runArrivals(&gs);
+                const f = gs.artillery_formations.get(fx.formation).?;
+                try std.testing.expectEqual(dom.Placement{ .hq_pool = fx.home }, f.placement);
+                try std.testing.expectEqual(fx.crew, f.crew);
+                try std.testing.expectEqual(fx.mechanic, f.tech);
+                // Back in the pool, the seats clear again.
+                _ = try commands.execute(&gs, .{ .unassign_artillery_tech = fx.formation });
+            },
+        }
+        try artillery.validate(&gs);
+    }
+}
+
 test "invalid field placements and pool books are corrupt" {
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();

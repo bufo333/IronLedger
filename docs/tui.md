@@ -606,7 +606,8 @@ Every Forces key acts on the carrier under the cursor or says why it does
 not. Enter (wide), `a` and `f` open the crew picker: one row per empty seat
 and vehicle crew member, eligible people first, the rest dimmed with the seat
 owner's reason. `g` opens the mechanic picker, `u` the clear picker (each
-occupied seat, then the mechanic). `x` — and `e` on a pooled carrier — opens
+occupied seat, then the mechanic, dimmed while the carrier is on field freight
+or its return leg). `x` — and `e` on a pooled carrier — opens
 the send picker: every combat company, `attach now` for one home at the
 carrier's HQ or `ship: N days, cost` for one in the field, at the field-freight
 quote, dimmed with the reason when refused. `e` on an attached carrier

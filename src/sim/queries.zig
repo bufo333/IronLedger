@@ -6134,6 +6134,7 @@ pub fn unassignChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]P
 
 pub const artillery_crew_pick_cols: []const table.Col = &.{ .{ .name = "seat" }, .{ .name = "person" }, .{ .name = "skill", .justify = .right }, .{ .name = "" } };
 pub const artillery_tech_pick_cols: []const table.Col = &.{ .{ .name = "mechanic" }, .{ .name = "skill", .justify = .right }, .{ .name = "hours" }, .{ .name = "" } };
+pub const artillery_unassign_pick_cols: []const table.Col = &.{ .{ .name = "slot" }, .{ .name = "person" }, .{ .name = "" } };
 pub const artillery_send_pick_cols: []const table.Col = &.{ .{ .name = "company" }, .{ .name = "stands" }, .{ .name = "action" }, .{ .name = "" } };
 
 const ArtilleryError = @import("commands.zig").Error;
@@ -6230,15 +6231,24 @@ pub fn artilleryTechChoices(alloc: Alloc, gs: *GameState, id: types.ArtilleryFor
 }
 
 /// What can be cleared from a carrier: each occupied seat, then the mechanic.
+/// Eligibility and the dim reason come from `artillery_crew.unassignCheck`.
 pub fn artilleryUnassignChoices(alloc: Alloc, gs: *GameState, id: types.ArtilleryFormationId) ![]PickRow {
     var rows: std.ArrayListUnmanaged(PickRow) = .empty;
     const f = gs.artillery_formations.getPtr(id) orelse return rows.toOwnedSlice(alloc);
+    const why = try artilleryWhy(artillery_crew_q.unassignCheck(f));
+    const eligible = why.len == 0;
     for (artillery_rules_q.seats, f.crew) |seat, occupant| {
         if (occupant == .none) continue;
-        try rows.append(alloc, .{ .sel = .{ .person = occupant }, .eligible = true, .artillery_seat = seat, .cells = try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{@tagName(seat)}), try personName(alloc, gs, occupant) }) });
+        try rows.append(alloc, .{ .sel = .{ .person = occupant }, .eligible = eligible, .why = why, .artillery_seat = seat, .cells = try artilleryClearCells(alloc, @tagName(seat), try personName(alloc, gs, occupant), why) });
     }
-    if (f.tech != .none) try rows.append(alloc, .{ .sel = .{ .person = f.tech }, .eligible = true, .artillery_tech = true, .cells = try table.row(alloc, &.{ "{a}mechanic{/}", try personName(alloc, gs, f.tech) }) });
+    if (f.tech != .none) try rows.append(alloc, .{ .sel = .{ .person = f.tech }, .eligible = eligible, .why = why, .artillery_tech = true, .cells = try artilleryClearCells(alloc, "mechanic", try personName(alloc, gs, f.tech), why) });
     return rows.toOwnedSlice(alloc);
+}
+
+/// One clear-picker row: the slot accented, or every cell dimmed with the reason.
+fn artilleryClearCells(alloc: Alloc, slot: []const u8, name: []const u8, why: []const u8) !table.Row {
+    if (why.len == 0) return table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{slot}), name, "" });
+    return table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{slot}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{name}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{why}) });
 }
 
 /// Where a pooled carrier can go: every combat company, attached now when the
@@ -6316,6 +6326,7 @@ test "artillery pickers carry typed seats, mechanics and send kinds with their o
     try std.testing.expectEqual(@as(usize, 2), clear_rows.len);
     try std.testing.expect(clear_rows[0].artillery_seat.? == .driver and clear_rows[0].sel.person == local and !clear_rows[0].artillery_tech);
     try std.testing.expect(clear_rows[1].artillery_tech and clear_rows[1].sel.person == mechanic);
+    for (clear_rows) |row| try std.testing.expect(row.eligible and row.why.len == 0);
 
     // Home company: attach; afield company: ship at the quote; travelling:
     // dimmed. Each company's home is the seat HQ, where the carrier is pooled.
@@ -6349,6 +6360,14 @@ test "artillery pickers carry typed seats, mechanics and send kinds with their o
     var travelling = false;
     for (try artilleryDetailLines(al, &gs, id)) |line| travelling = travelling or std.mem.indexOf(u8, line, try std.fmt.allocPrint(al, "travelling until d{d}", .{quote.eta_day})) != null;
     try std.testing.expect(travelling);
+    // On the road the seats and the mechanic are dimmed with the owner's reason.
+    const held_rows = try artilleryUnassignChoices(al, &gs, id);
+    try std.testing.expectEqual(@as(usize, 2), held_rows.len);
+    for (held_rows) |row| {
+        try std.testing.expect(!row.eligible);
+        try std.testing.expectEqualStrings(artillery_crew_q.eligibilityText(error.ArtilleryNoServiceSite), row.why);
+    }
+    try std.testing.expectError(error.ArtilleryNoServiceSite, artillery_crew_q.unassignCheck(f));
 
     // Queries propagate allocation failure.
     try std.testing.expectError(error.OutOfMemory, artilleryCrewChoices(std.testing.failing_allocator, &gs, id));

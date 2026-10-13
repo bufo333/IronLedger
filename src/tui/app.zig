@@ -2743,7 +2743,7 @@ pub const App = struct {
             },
             .pick_arty_unassign => |fid| .{
                 .title = try listTitle(al, try std.fmt.allocPrint(al, "CLEAR FROM ARTILLERY #{d}", .{@intFromEnum(fid)}), "clear", "cancel", false),
-                .cols = q.unassign_pick_cols,
+                .cols = q.artillery_unassign_pick_cols,
                 .rows = try q.artilleryUnassignChoices(al, g, fid),
                 .empty = "nobody is seated on this carrier and it has no mechanic",
             },

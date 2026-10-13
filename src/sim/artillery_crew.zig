@@ -137,10 +137,22 @@ pub fn assign(gs: *GameState, request: @FieldType(commands.Command, "assign_arti
     return .{ .artillery_formation = f.id, .artillery_person = p.id };
 }
 
+/// Whether a carrier's seats and mechanic can be cleared by order. Field
+/// freight and its return leg keep their travellers until arrival; a disposed
+/// carrier has nothing to clear. Source: docs/p2-artillery-operations-design.md,
+/// Crew and personnel policy.
+pub fn unassignCheck(f: *const dom.Formation) commands.Error!void {
+    return switch (f.placement) {
+        .sold, .destroyed => error.ArtilleryUnavailable,
+        .field_freight, .field_return => error.ArtilleryNoServiceSite,
+        .hq_pool, .company, .freight => {},
+    };
+}
+
 /// Explicit unassignment preserves personnel books, availability and location.
 pub fn unassign(gs: *GameState, request: @FieldType(commands.Command, "unassign_artillery_crew")) commands.Error!commands.Result {
     const f = gs.artillery_formations.getPtr(request.formation) orelse return error.NoSuchArtilleryFormation;
-    if (f.placement == .sold or f.placement == .destroyed) return error.ArtilleryUnavailable;
+    try unassignCheck(f);
     const id = f.crew[@intFromEnum(request.seat)];
     const log = try gs.prepareLog(.rotation, .{}, "[artillery] formation {d} {s} unassigned", .{ @intFromEnum(f.id), @tagName(request.seat) });
     f.crew[@intFromEnum(request.seat)] = .none;
@@ -163,7 +175,7 @@ pub fn assignTech(gs: *GameState, request: @FieldType(commands.Command, "assign_
 /// Remove a technician reference without changing that person's company or post.
 pub fn unassignTech(gs: *GameState, id: types.ArtilleryFormationId) commands.Error!commands.Result {
     const f = gs.artillery_formations.getPtr(id) orelse return error.NoSuchArtilleryFormation;
-    if (f.placement == .sold or f.placement == .destroyed) return error.ArtilleryUnavailable;
+    try unassignCheck(f);
     const person_id = f.tech;
     const log = try gs.prepareLog(.rotation, .{}, "[artillery] formation {d} mechanic unassigned", .{@intFromEnum(f.id)});
     f.tech = .none;
