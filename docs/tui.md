@@ -681,8 +681,9 @@ the turn ends anyway; an **unread after-action** refuses with
 dropping the player into its sheet; it also stops once on the day an
 engagement's contact window opens, dropping the player into its battle
 orders, and the next advance goes ahead; `advance` refuses with
-`Insolvent` until a loan or sale covers it, and `Bankrupt` (game over
-modal, campaign saved as it ended) once nothing could.
+`Insolvent` until a loan or sale covers it. An advance on which the outfit
+folds stops with the game over modal, campaign saved as it ended, and
+`Bankrupt` refuses every advance after that.
 
 Modals: **End turn** (the checklist rows that prompt, with jump targets;
 opens for `.` (one day) and `N` (seven days) advances while a row prompts,

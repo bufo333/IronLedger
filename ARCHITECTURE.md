@@ -146,7 +146,10 @@ section explains the shape, the contract states the rules.
   (rule 15).  Daily-tick phases — courier credit, part-order delivery,
   `completeJob`, `runWeeklyRepairs`, `applyRefit` — prepare all fallible work
   (list capacity, string buffers) before the first mutation or RNG draw, so a
-  retried tick applies each unit of work exactly once (rule 17).
+  retried tick applies each unit of work exactly once (rule 17). No
+  preparation can undo a day already committed, so the multi-day advance
+  commands take a whole-campaign backup (`campaign_backup`) at their start
+  and restore it on any error (rule 11's rollback fallback).
 - **The campaign log is structured** (Stage 9A): every entry carries day,
   category, and company/HQ/contract tags, so any entity's complete history —
   battles, decisions and their outcomes, deliveries, construction, medical —
@@ -372,11 +375,12 @@ An auto advance never crosses a decision deadline. Before its first day
 repeated `next` waits with zero days; the default lands only when the
 player advances past it with `advance_days`. Money stops share
 `tick.settleSolvency` with `advance`: an outfit that folds before the
-first day is a typed `.bankrupt` success for `advance_until_stop` and the
-`Bankrupt` error for `advance`, both after the bankruptcy commits. An
-error inside a day, or in the solvency check or watch between days, leaves
-the earlier days committed (docs/contract-exceptions.md, "Advance commits
-partial days").
+first day is a typed `.bankrupt` success with zero days for both
+commands, the bankruptcy committed; an outfit already bankrupt is refused
+with `Bankrupt`. An error anywhere in an advance (before, inside or
+between days) leaves the campaign exactly as it was before the command,
+restored from the campaign backup taken at its start (`campaign_backup`),
+so retrying the command reruns it from that campaign.
 
 Before an engagement's day there is no hold, only a **stop**. When a scheduled
 engagement comes within `tuning.battle.contact_warning_days`, a multi-day

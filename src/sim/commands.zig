@@ -543,10 +543,12 @@ pub const Result = struct {
     days_advanced: u32 = 0,
     /// advance: why a multi-day advance stopped before the requested count;
     /// `.none` when the full count ran. A zero-day refusal is an error, not a
-    /// Result. advance_until_stop always names its stop: `.cap_reached`, a
-    /// money stop, or the `checklist.StopReason` of the same name. It may
+    /// Result; an outfit that folds before the first day is not a refusal,
+    /// and either advance succeeds with zero days and `.bankrupt`.
+    /// advance_until_stop always names its stop: `.cap_reached`, a money
+    /// stop, or the `checklist.StopReason` of the same name. It may also
     /// succeed with zero days for `.decision_due` (a decision defaults
-    /// tomorrow) and `.bankrupt` (the outfit folded before the first day).
+    /// tomorrow).
     /// Ephemeral — not persisted, not in the digest (rule 45 applies to
     /// state fields only).
     stopped: enum {

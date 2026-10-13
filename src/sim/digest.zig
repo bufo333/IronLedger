@@ -195,17 +195,18 @@ fn updateArrayHashMap(h: *Hasher, map: anytype) void {
 
 /// Array hash maps (`AutoArrayHashMapUnmanaged`, `StringArrayHashMapUnmanaged`,
 /// and their managed variants): have `KV`, `iterator`, and an `entries` field.
-fn isArrayHashMap(comptime T: type) bool {
+pub fn isArrayHashMap(comptime T: type) bool {
     return @hasDecl(T, "KV") and @hasDecl(T, "iterator") and @hasField(T, "entries");
 }
 
 /// Open-addressing hash maps (`AutoHashMapUnmanaged`, etc.): have `KV`,
 /// `iterator`, and a `metadata` field (no `entries`).
-fn isHashMap(comptime T: type) bool {
+pub fn isHashMap(comptime T: type) bool {
     return @hasDecl(T, "KV") and @hasDecl(T, "iterator") and @hasField(T, "metadata") and !@hasField(T, "entries");
 }
 
-fn isArrayList(comptime T: type) bool {
+/// `std.ArrayListUnmanaged`: exactly the fields `items` and `capacity`.
+pub fn isArrayList(comptime T: type) bool {
     return @hasField(T, "items") and @hasField(T, "capacity") and @typeInfo(T).@"struct".fields.len == 2;
 }
 

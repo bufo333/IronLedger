@@ -2876,14 +2876,15 @@ pub const App = struct {
             try self.handleGameOver();
             return;
         };
-        if (res.days_advanced == 0) return; // refused — the message says why
-        // A multi-day advance may reach insolvency or bankruptcy after at least
-        // one day has committed (C5p).  Bankruptcy gets the save path; insolvent
-        // gets the reason sentence.
+        // Whether the outfit folds before the first day or after some days,
+        // the bankruptcy is committed and gets the save path.
         if (res.stopped == .bankrupt) {
             try self.handleGameOver();
             return;
         }
+        if (res.days_advanced == 0) return; // refused — the message says why
+        // A multi-day advance may reach insolvency after at least one day:
+        // the reason sentence.
         if (res.stopped == .insolvent) {
             const st = try q.status(self.a(), g);
             self.say(.amber, "day {d} · {s} — {s}", .{ st.day, st.date, game.cli.advanceStopText(.insolvent) });
@@ -5428,6 +5429,15 @@ test "a stop on an unread after-action leads to it, and an outfit that folds bef
         defer deinitForTest(c, al);
         c.app.state().funds = -100_000_000;
         try pressForTest(c, .{ .char = 'n' });
+        try std.testing.expect(c.app.modal == .game_over_saved);
+        try std.testing.expect((try q.status(c.app.a(), c.app.state())).bankrupt);
+    }
+    {
+        // The one-day advance folds the same way.
+        const c = try clientForTest(al);
+        defer deinitForTest(c, al);
+        c.app.state().funds = -100_000_000;
+        try c.app.runCommandLine("day 1 force");
         try std.testing.expect(c.app.modal == .game_over_saved);
         try std.testing.expect((try q.status(c.app.a(), c.app.state())).bankrupt);
     }

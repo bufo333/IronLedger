@@ -453,10 +453,13 @@ test "insolvency holds the turn; bankruptcy ends the campaign" {
     _ = try commands.execute(&gs, .{ .sell_unit = uid });
     try std.testing.expect(gs.funds > before);
     try std.testing.expect(gs.unit(uid) == null);
-    // Beyond everything: game over.
+    // Beyond everything: game over, and the next advance refuses.
     gs.funds = -1_000_000_000;
-    try std.testing.expectError(commands.Error.Bankrupt, commands.execute(&gs, .advance_day));
+    const folded = try commands.execute(&gs, .advance_day);
+    try std.testing.expectEqual(@as(u32, 0), folded.days_advanced);
+    try std.testing.expectEqual(.bankrupt, folded.stopped);
     try std.testing.expect(gs.bankrupt);
+    try std.testing.expectError(commands.Error.Bankrupt, commands.execute(&gs, .advance_day));
 }
 
 test "a policy the outfit cannot fund is skipped, and the day still advances" {

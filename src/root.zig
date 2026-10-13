@@ -101,6 +101,7 @@ pub const commands = @import("sim/commands.zig");
 pub const cli = @import("sim/cli.zig");
 pub const rng = @import("sim/rng.zig");
 pub const digest = @import("sim/digest.zig");
+pub const campaign_backup = @import("sim/campaign_backup.zig");
 pub const clock = @import("domain/clock.zig");
 pub const contract_events = @import("sim/contract_events.zig");
 pub const battle = @import("sim/battle.zig");
