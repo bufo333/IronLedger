@@ -233,7 +233,8 @@ cheap, copyable, and impossible to mix up.
   `queries.zig`; nine REPL verbs (`buyarty`, `attacharty`, `detacharty`,
   `shiparty`, `sellarty`, `seat`, `artytech`, `reloadarty`, `repairarty`) in
   `cli.zig`; an artillery panel as the last F3 Forces view (`]`/`[` wraps to
-  it); and an ARTILLERY OFFERS pane on F10 Market (`B` to buy).
+  it); and each HQ's offer as the last row of its F10 Market board, bought
+  with Enter.
   A pooled carrier can be crewed at its HQ (crew stay off company books) and
   either attached at home or sent by field freight to a company in the field
   (`ship_artillery_to_company`, `shiparty <id> co:<id>`; `artillery_field`

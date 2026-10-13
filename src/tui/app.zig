@@ -2389,7 +2389,7 @@ pub const App = struct {
         .{ .tab = .hq, .name = "F7 HQ", .draw = screens.hq.draw, .move = screens.hq.move, .handle = screens.hq.handle, .legend = &screens.hq.legend, .pane_names = &.{ "HQ", "hiring hall" }, .panes = 2, .narrow_panes = 2 },
         .{ .tab = .lab, .name = "F8 Lab", .draw = screens.lab.draw, .move = screens.lab.move, .handle = screens.lab.handle, .legend = &screens.lab.legend, .pane_names = &.{"mounts"}, .panes = 1, .narrow_panes = 1 },
         .{ .tab = .people, .name = "F9 People", .draw = screens.people.draw, .move = screens.people.move, .handle = screens.people.handle, .legend = &screens.people.legend, .pane_names = &.{"roster"}, .panes = 1, .narrow_panes = 1 },
-        .{ .tab = .market, .name = "F10 Market", .draw = screens.market.draw, .move = screens.market.move, .handle = screens.market.handle, .legend = &screens.market.legend, .pane_names = &.{ "board", "catalog", "demand", "keep stocked", "artillery offers" }, .panes = 5, .narrow_panes = 2 },
+        .{ .tab = .market, .name = "F10 Market", .draw = screens.market.draw, .move = screens.market.move, .handle = screens.market.handle, .legend = &screens.market.legend, .pane_names = &.{ "board", "catalog", "demand", "keep stocked" }, .panes = 4, .narrow_panes = 2 },
     };
 
     comptime {

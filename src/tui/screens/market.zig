@@ -42,19 +42,8 @@ pub fn draw(self: *App) anyerror!void {
         const inner3 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h, .w = b.w - cw, .h = dem_h }, .{ .title = "DEMAND · damaged slots", .focused = self.paneFocused(2), .right_title = try app.keys.paneTitle(al, &legend, 2) });
         try self.tableOrNote(inner3, try q.tableOf(al, q.demand_cols, view.demand), 2, self.focus == 2, "{g}nothing damaged{/}");
         const pol = try q.stockPolicies(al, g, hq_id);
-        const remaining_h = side_h - dem_h;
-        const keep_h: u16 = layout.half.of(remaining_h);
-        const arty_h: u16 = remaining_h - keep_h;
-        const inner4 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h, .w = b.w - cw, .h = keep_h }, .{ .title = try std.fmt.allocPrint(al, "KEEP STOCKED · {s} · checked daily", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.paneFocused(3), .right_title = try app.keys.paneTitle(al, &legend, 3) });
+        const inner4 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h, .w = b.w - cw, .h = side_h - dem_h }, .{ .title = try std.fmt.allocPrint(al, "KEEP STOCKED · {s} · checked daily", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.paneFocused(3), .right_title = try app.keys.paneTitle(al, &legend, 3) });
         try self.tableOrNote(inner4, try q.tableOf(al, q.stock_policy_cols, pol), 3, self.focus == 3, "{d}none — keep a catalogue row stocked to add a line here{/}");
-        const arty_offer_rows = try q.artilleryOfferRows(al, g);
-        const c4 = self.cur(4);
-        App.clampIdx(c4, arty_offer_rows.len);
-        const inner5 = self.screen.pane(.{ .x = b.x + cw, .y = b.y + top_h + dem_h + keep_h, .w = b.w - cw, .h = arty_h }, .{ .title = try std.fmt.allocPrint(al, "ARTILLERY OFFERS · {s}", .{try q.hqName(self.a(), g, hq_id)}), .focused = self.paneFocused(4), .right_title = try app.keys.paneTitle(al, &legend, 4) });
-        const arty_cursor: ?usize = if (self.focus == 4 and arty_offer_rows.len > 0) c4.* else null;
-        var arty_texts = try al.alloc([]const u8, arty_offer_rows.len);
-        for (arty_offer_rows, 0..) |r, i| arty_texts[i] = r.text;
-        self.screen.lines(inner5, arty_texts, App.firstRow(c4.*, inner5.h), arty_cursor);
     }
 }
 
@@ -71,26 +60,24 @@ pub fn move(self: *App, delta: i32) anyerror!void {
         0 => self.moveCursor(0, delta, board_rows.len),
         1 => self.moveCursor(1, delta, view.catalog.len),
         2 => self.moveCursor(2, delta, view.demand.len),
-        3 => self.moveCursor(3, delta, (try q.stockPolicies(al, g, @enumFromInt(try self.hqSelId(g)))).len),
-        else => self.moveCursor(4, delta, (try q.artilleryOfferRows(al, g)).len),
+        else => self.moveCursor(3, delta, (try q.stockPolicies(al, g, @enumFromInt(try self.hqSelId(g)))).len),
     }
 }
 
-const Action = enum { prev_hq, next_hq, filter_next, filter_prev, buy, order, cover_shortfall, edit_keep, fabricate, keep, remove_keep, buy_arty };
+const Action = enum { prev_hq, next_hq, filter_next, filter_prev, buy, order, cover_shortfall, edit_keep, fabricate, keep, remove_keep };
 
 pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('['), .action = .prev_hq, .label = "market board", .group = .navigate, .shown = "[ ]", .title = 0, .help = "previous / next HQ or deployed-company market board" },
     .{ .match = app.keys.Match.char(']'), .action = .next_hq, .label = "next market board", .group = .navigate, .show_footer = false, .show_help = false },
     .{ .match = app.keys.Match.char('/'), .action = .filter_next, .label = "filter", .group = .navigate, .shown = "/ ,", .title = 0, .help = "next / previous market filter" },
     .{ .match = app.keys.Match.char(','), .action = .filter_prev, .label = "previous filter", .group = .navigate, .show_footer = false, .show_help = false },
-    .{ .match = .{ .key = .enter }, .action = .buy, .label = "buy", .group = .act, .pane = 0, .help = "buy the board listing under the cursor" },
+    .{ .match = .{ .key = .enter }, .action = .buy, .label = "buy", .group = .act, .pane = 0, .help = "buy the board listing or artillery offer under the cursor" },
     .{ .match = .{ .key = .enter }, .action = .order, .label = "order", .group = .act, .pane = 1, .help = "order the catalogue part under the cursor" },
     .{ .match = .{ .key = .enter }, .action = .cover_shortfall, .label = "order shortfall", .group = .act, .pane = 2, .help = "order (or fabricate) what a damaged slot is short" },
     .{ .match = .{ .key = .enter }, .action = .edit_keep, .label = "edit", .group = .act, .pane = 3, .help = "edit the keep-stocked line under the cursor" },
     .{ .match = app.keys.Match.char('b'), .action = .fabricate, .label = "fabricate", .group = .act, .pane = 1, .help = "fabricate the structural component under the cursor at this HQ's bay" },
     .{ .match = app.keys.Match.char('K'), .action = .keep, .label = "keep stocked", .group = .act, .pane = 1, .help = "keep the catalogue part under the cursor stocked at this HQ" },
     .{ .match = app.keys.Match.char('x'), .action = .remove_keep, .label = "remove", .group = .act, .pane = 3, .help = "remove the keep-stocked line under the cursor" },
-    .{ .match = app.keys.Match.char('B'), .action = .buy_arty, .label = "buy artillery", .group = .act, .pane = 4, .help = "buy the artillery offer under the cursor (delivers to the selected HQ)" },
 };
 pub const legend = app.keys.entries(Action, &bindings);
 
@@ -108,16 +95,21 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             };
             if (board_rows.len > 0) {
                 const l = board_rows[@min(self.cur(0).*, board_rows.len - 1)];
-                const buyer: types.Site = switch (board) {
-                    .hq => |id| .{ .hq = id },
-                    .company => |id| .{ .company = id },
-                };
-                const cmd: game.commands.Command = .{ .buy_listing = .{ .listing = l.id, .buyer = buyer } };
-                const res = self.execResult(cmd) orelse return true;
-                if (res.fraud) {
-                    self.say(.crit, "{s}", .{game.cli.hull_fraud_text});
-                } else {
-                    self.say(.good, "{s}", .{try q.resultText(self.a(), g, cmd, res)});
+                switch (l.item) {
+                    .listing => |listing| {
+                        const buyer: types.Site = switch (board) {
+                            .hq => |id| .{ .hq = id },
+                            .company => |id| .{ .company = id },
+                        };
+                        const cmd: game.commands.Command = .{ .buy_listing = .{ .listing = listing, .buyer = buyer } };
+                        const res = self.execResult(cmd) orelse return true;
+                        if (res.fraud) {
+                            self.say(.crit, "{s}", .{game.cli.hull_fraud_text});
+                        } else {
+                            self.say(.good, "{s}", .{try q.resultText(self.a(), g, cmd, res)});
+                        }
+                    },
+                    .artillery_offer => |offer| try self.execReport(.{ .buy_artillery = .{ .hq = l.hq, .offer = offer } }),
                 }
             }
         },
@@ -213,18 +205,6 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
                 self.cur(0).* = 0;
             }
         },
-        .buy_arty => {
-            const offer_rows = try q.artilleryOfferRows(al, g);
-            if (offer_rows.len == 0) {
-                self.say(.dim, "no artillery offers available", .{});
-                return true;
-            }
-            const c4 = self.cur(4).*;
-            const offer_id = offer_rows[@min(c4, offer_rows.len - 1)].id;
-            const cmd: game.commands.Command = .{ .buy_artillery = .{ .hq = hq_id, .offer = offer_id } };
-            const res = self.execResult(cmd) orelse return true;
-            self.say(.good, "{s}", .{try q.resultText(self.a(), g, cmd, res)});
-        },
     }
     return true;
 }
@@ -291,96 +271,133 @@ test "brackets step from an HQ board to an active company's local board" {
     }
 }
 
-test "market: B on artillery-offers pane buys when funded" {
-    const c = try app.clientForTest(std.testing.allocator);
-    defer app.deinitForTest(c, std.testing.allocator);
-    const al = c.app.frame.allocator();
-    const hq_rows = try q.hqList(al, c.app.state());
-    try std.testing.expect(hq_rows.len > 0);
-    const home = hq_rows[0].id;
-    try std.testing.expect(try c.app.exec(.{ .transfer = .{ .from = .outfit, .to = .{ .hq = home }, .amount = 4_000_000 } }));
-    try std.testing.expect(try c.app.exec(.{ .advance_days = 4 })); // courier arrives
-    const offer_rows_before = try q.artilleryOfferRows(al, c.app.state());
-    try std.testing.expect(offer_rows_before.len > 0);
-    const offer_id_before = offer_rows_before[0].id;
-    const before_count = (try q.artilleryFormationRows(al, c.app.state())).len;
-    try toTab(c, .market);
-    // Navigate to artillery-offers pane (pane 4) via Tab × 4 (0→1→2→3→4)
-    try app.pressForTest(c, .tab);
-    try app.pressForTest(c, .tab);
-    try app.pressForTest(c, .tab);
-    try app.pressForTest(c, .tab);
-    try std.testing.expectEqual(@as(u8, 4), c.app.focus);
-    const visible_offers = try q.artilleryOfferRows(al, c.app.state());
-    try std.testing.expect(visible_offers.len > 0);
-    // The offer text is rendered on screen (plain text, no markup).
-    const offer_text = visible_offers[0].text;
-    try std.testing.expect(screenHasText(&c.app.screen, if (offer_text.len > 10) offer_text[0..10] else offer_text));
-    try app.pressForTest(c, .{ .char = 'B' });
-    // A formation was created
-    try std.testing.expectEqual(before_count + 1, (try q.artilleryFormationRows(al, c.app.state())).len);
-    // The offer was consumed
-    const offer_rows_after = try q.artilleryOfferRows(al, c.app.state());
-    try std.testing.expectEqual(offer_rows_before.len - 1, offer_rows_after.len);
-    // The consumed offer ID no longer appears
-    for (offer_rows_after) |r| try std.testing.expect(r.id != offer_id_before);
-    // Status bar reports the purchase
-    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "Mobile Long Tom") != null);
-    // Populate offers for the next month by advancing past January (31 days).
-    try std.testing.expect(try c.app.exec(.{ .advance_days = 28 }));
-    var offers_arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer offers_arena.deinit();
-    const refreshed_offers = try q.artilleryOfferRows(offers_arena.allocator(), c.app.state());
-    try std.testing.expect(refreshed_offers.len > 0);
-    const refreshed_offer_text = refreshed_offers[0].text;
-    const offer_check = if (refreshed_offer_text.len > 10) refreshed_offer_text[0..10] else refreshed_offer_text;
-    // Navigate to artillery-offers pane (pane 4) at wide viewport; verify offer is rendered.
-    // Focus is still 4 from the earlier buy; Tab × 5 cycles back to 4 (4→0→1→2→3→4).
-    try app.pressForTest(c, .tab);
-    try app.pressForTest(c, .tab);
-    try app.pressForTest(c, .tab);
-    try app.pressForTest(c, .tab);
-    try app.pressForTest(c, .tab);
-    try std.testing.expectEqual(@as(u8, 4), c.app.focus);
-    try std.testing.expect(screenHasText(&c.app.screen, offer_check));
-    // Narrow resize: artillery-offers pane is wide-only (market.zig:39); narrow_panes=2
-    // clamps focus to 1 on next pressForTest → drawGame → clampFocus.
-    try c.app.screen.resize(80, 24);
-    try app.pressForTest(c, .down);
-    try std.testing.expectEqual(@as(u8, 1), c.app.focus);
-    // Wide resize: offers pane renders again.
-    try c.app.screen.resize(200, 50);
-    try app.pressForTest(c, .down);
-    try std.testing.expect(screenHasText(&c.app.screen, offer_check));
+/// The index of the board row that sells an artillery offer, if any.
+fn artilleryRow(rows: []const q.ListingRow) ?usize {
+    for (rows, 0..) |r, i| if (r.item == .artillery_offer) return i;
+    return null;
 }
 
-test "market: B on artillery-offers pane with no offers says so without crash" {
+/// Opens F10 on the first HQ's board and returns that HQ. With `funds`, the
+/// outfit sends them and the courier is waited out first.
+fn openHomeBoard(c: *app.ClientForTest, al: std.mem.Allocator, funds: types.CBills) !types.HqId {
+    const home = (try q.hqList(al, c.app.state()))[0].id;
+    if (funds > 0) {
+        try std.testing.expect(try c.app.exec(.{ .transfer = .{ .from = .outfit, .to = .{ .hq = home }, .amount = funds } }));
+        try std.testing.expect(try c.app.exec(.{ .advance_days = 4 }));
+    }
+    c.app.hq_sel = home;
+    c.app.market_board = .{ .hq = home };
+    try toTab(c, .market);
+    return home;
+}
+
+test "Enter on the board's artillery offer buys it for that HQ and clamps the cursor" {
     const c = try app.clientForTest(std.testing.allocator);
     defer app.deinitForTest(c, std.testing.allocator);
-    const al = c.app.frame.allocator();
-    const hq_rows = try q.hqList(al, c.app.state());
-    try std.testing.expect(hq_rows.len > 0);
-    const home = hq_rows[0].id;
-    // Transfer funds and consume the offer so none remain when 'B' is pressed.
-    try std.testing.expect(try c.app.exec(.{ .transfer = .{ .from = .outfit, .to = .{ .hq = home }, .amount = 4_000_000 } }));
-    try std.testing.expect(try c.app.exec(.{ .advance_days = 4 }));
-    const offer_rows = try q.artilleryOfferRows(al, c.app.state());
-    try std.testing.expect(offer_rows.len > 0);
-    try std.testing.expect(try c.app.exec(.{ .buy_artillery = .{ .hq = home, .offer = offer_rows[0].id } }));
-    try toTab(c, .market);
-    // Navigate to artillery-offers pane (pane 4) via Tab × 4
-    try app.pressForTest(c, .tab);
-    try app.pressForTest(c, .tab);
-    try app.pressForTest(c, .tab);
-    try app.pressForTest(c, .tab);
-    try std.testing.expectEqual(@as(u8, 4), c.app.focus);
-    try app.pressForTest(c, .{ .char = 'B' });
-    // Did not crash and no modal was opened
-    try std.testing.expect(c.app.modal == .none);
-    // Status bar says no offers
-    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "no artillery offers") != null);
-    // Narrow resize: Tab wraps within narrow_panes = 2 (focus < 2)
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const g = c.app.state();
+    const home = try openHomeBoard(c, al, 4_000_000);
+    const before = (try q.market(al, g, .all, home)).board;
+    const i = artilleryRow(before) orelse return error.NoArtilleryOffer;
+    const offer = before[i].item.artillery_offer;
+    const formations = (try q.artilleryFormationRows(al, g)).len;
+    c.app.cur(0).* = i;
+    try app.pressForTest(c, .enter);
+    try std.testing.expectEqual(formations + 1, (try q.artilleryFormationRows(al, g)).len);
+    for (try q.artilleryOfferRows(al, g)) |r| try std.testing.expect(r.id != offer);
+    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "bought Mobile Long Tom #") != null);
+    const after = (try q.market(al, g, .all, home)).board;
+    try std.testing.expectEqual(before.len - 1, after.len);
+    try std.testing.expect(artilleryRow(after) == null);
+    try std.testing.expect(c.app.cur(0).* < after.len);
+}
+
+test "Enter on the artillery offer of an unfunded HQ shows the canonical refusal and buys nothing" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const g = c.app.state();
+    const home = try openHomeBoard(c, al, 0);
+    const held = q.balance(g, .{ .hq = home });
+    if (held > 0) try std.testing.expect(try c.app.exec(.{ .transfer = .{ .from = .{ .hq = home }, .to = .outfit, .amount = held } }));
+    try std.testing.expectEqual(@as(types.CBills, 0), q.balance(g, .{ .hq = home }));
+    const before = (try q.market(al, g, .all, home)).board;
+    const i = artilleryRow(before) orelse return error.NoArtilleryOffer;
+    const formations = (try q.artilleryFormationRows(al, g)).len;
+    c.app.cur(0).* = i;
+    try app.pressForTest(c, .enter);
+    const refusal = try std.fmt.allocPrint(al, "refused: {s}", .{game.cli.errorText(error.InsufficientTreasury)});
+    try std.testing.expectEqualStrings(refusal, c.app.msg.slice());
+    try std.testing.expectEqual(formations, (try q.artilleryFormationRows(al, g)).len);
+    const after = (try q.market(al, g, .all, home)).board;
+    try std.testing.expectEqual(before[i].item, after[artilleryRow(after) orelse return error.OfferConsumed].item);
+}
+
+test "Enter on a board listing buys it from that board's treasury" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const g = c.app.state();
+    const home = try openHomeBoard(c, al, 4_000_000);
+    const before = (try q.market(al, g, .all, home)).board;
+    // An open-market part (no fraud roll) that the funded treasury covers.
+    const i = for (before, 0..) |r, idx| {
+        if (r.item == .listing and std.mem.eql(u8, r.cells[1], "part") and std.mem.indexOf(u8, r.cells[7], "fence") == null) break idx;
+    } else return error.NoPartListing;
+    const held = q.balance(g, .{ .hq = home });
+    c.app.cur(0).* = i;
+    try app.pressForTest(c, .enter);
+    try std.testing.expect(!std.mem.startsWith(u8, c.app.msg.slice(), "refused:"));
+    // This HQ paid the row's price: buy_listing ran with this board as buyer.
+    try std.testing.expectEqualStrings(before[i].cells[4], try q.money(al, held - q.balance(g, .{ .hq = home })));
+}
+
+test "at 80x24 the board shows the artillery offer and Enter buys it" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const g = c.app.state();
+    const home = try openHomeBoard(c, al, 4_000_000);
     try c.app.screen.resize(80, 24);
-    try app.pressForTest(c, .tab);
-    try std.testing.expect(c.app.focus < 2);
+    const before = (try q.market(al, g, .all, home)).board;
+    const i = artilleryRow(before) orelse return error.NoArtilleryOffer;
+    try std.testing.expectEqual(before.len - 1, i);
+    c.app.cur(0).* = i;
+    try app.pressForTest(c, .down); // a frame at 80x24; the last row keeps the cursor
+    try std.testing.expectEqual(i, c.app.cur(0).*);
+    try std.testing.expect(screenHasText(&c.app.screen, before[i].cells[2]));
+    const formations = (try q.artilleryFormationRows(al, g)).len;
+    try app.pressForTest(c, .enter);
+    try std.testing.expectEqual(formations + 1, (try q.artilleryFormationRows(al, g)).len);
+}
+
+test "F10 has four panes and B is unbound on every one" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const g = c.app.state();
+    const home = try openHomeBoard(c, al, 4_000_000);
+    const formations = (try q.artilleryFormationRows(al, g)).len;
+    const offers = (try q.artilleryOfferRows(al, g)).len;
+    for (0..4) |pane| {
+        try std.testing.expectEqual(@as(u8, @intCast(pane)), c.app.focus);
+        try app.pressForTest(c, .{ .char = 'B' });
+        try std.testing.expect(c.app.modal == .none);
+        try std.testing.expect(!screenHasText(&c.app.screen, "ARTILLERY OFFERS"));
+        try app.pressForTest(c, .tab);
+    }
+    try std.testing.expectEqual(@as(u8, 0), c.app.focus);
+    try std.testing.expectEqual(formations, (try q.artilleryFormationRows(al, g)).len);
+    try std.testing.expectEqual(offers, (try q.artilleryOfferRows(al, g)).len);
+    try std.testing.expect(artilleryRow((try q.market(al, g, .all, home)).board) != null);
 }

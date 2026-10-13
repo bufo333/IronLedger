@@ -2679,8 +2679,15 @@ pub fn upgrades(alloc: Alloc, gs: *GameState, hq_id: types.HqId) ![]UpgradeRow {
 
 // ------------------------------------------------------------------ market
 
+/// What a market board row sells, by typed identity (rule 32): a listing
+/// is the `buy_listing` argument, an artillery offer the `buy_artillery` one.
+pub const BoardItem = union(enum) {
+    listing: types.ListingId,
+    artillery_offer: types.ArtilleryOfferId,
+};
+
 pub const ListingRow = struct {
-    id: types.ListingId, // typed identity — the `buy_listing` argument
+    item: BoardItem,
     cells: table.Row,
     /// The HQ whose board this is — and whose treasury pays.
     hq: types.HqId,
@@ -2833,7 +2840,7 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
             cond_base;
         const name: []const u8 = if (l.kind == .unit) (if (chassis_mod.find(l.item_key)) |c| c.name else l.item_key) else (if (@import("../domain/part.zig").find(l.item_key)) |p| p.name else l.item_key);
         const transport = l.kind == .unit and chassis_mod.find(l.item_key) != null and chassis_mod.find(l.item_key).?.kind.isTransport();
-        try board.append(alloc, .{ .id = l.id, .hq = l.hq, .transport = transport, .cells = try table.row(alloc, &.{
+        try board.append(alloc, .{ .item = .{ .listing = l.id }, .hq = l.hq, .transport = transport, .cells = try table.row(alloc, &.{
             try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(l.id)}),
             @tagName(l.kind),
             l.item_key,
@@ -2846,6 +2853,24 @@ pub fn market(alloc: Alloc, gs: *GameState, filter: MarketFilter, hq: types.HqId
             if (l.black_market) try std.fmt.allocPrint(alloc, "{{c}}black market{{/}} — no questions, maybe a fraud (2d6 ≤ {d}); the house frowns, the pirates smile · {s}", .{ @import("../domain/tuning.zig").t.market.black_market_fraud_target, cond }) else cond,
         }) });
     }
+    // This HQ's monthly artillery offer, bought from the board it pays from
+    // (artillery.buy refuses another HQ's offer). The carrier is a combat
+    // vehicle, so the vehicle filter decides whether it shows.
+    if (filter.matchesUnit(.vehicle)) for (gs.artillery_offers.items) |o| {
+        if (o.hq != hq or !o.available) continue;
+        try board.append(alloc, .{ .item = .{ .artillery_offer = o.id }, .hq = hq, .cells = try table.row(alloc, &.{
+            try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(o.id)}),
+            "artillery",
+            artillery.carrier().key,
+            artillery.carrier().name,
+            try money(alloc, artillery.purchasePrice()),
+            "x1",
+            "",
+            "",
+            try artilleryOfferPeriod(alloc, o),
+            "monthly offer · joins this HQ's artillery pool",
+        }) });
+    };
     var catalog: std.ArrayListUnmanaged(CatalogRow) = .empty;
     const part_mod = @import("../domain/part.zig");
     for (part_mod.catalog) |p| {
@@ -2940,7 +2965,7 @@ pub fn companyMarket(alloc: Alloc, gs: *GameState, filter: MarketFilter, company
             "";
         const name: []const u8 = if (l.kind == .unit) (if (chassis_mod.find(l.item_key)) |c| c.name else l.item_key) else (if (@import("../domain/part.zig").find(l.item_key)) |p| p.name else l.item_key);
         const transport = l.kind == .unit and chassis_mod.find(l.item_key) != null and chassis_mod.find(l.item_key).?.kind.isTransport();
-        try board.append(alloc, .{ .id = l.id, .hq = hq, .company = company, .transport = transport, .cells = try table.row(alloc, &.{
+        try board.append(alloc, .{ .item = .{ .listing = l.id }, .hq = hq, .company = company, .transport = transport, .cells = try table.row(alloc, &.{
             try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(l.id)}),
             try std.fmt.allocPrint(alloc, "{{a}}@{s}{{/}}", .{planetName(contract.planet_key)}),
             l.item_key,
@@ -4962,6 +4987,15 @@ test "the campaign summary reads counters, ledger and history" {
     try std.testing.expect(std.mem.indexOf(u8, joined.items, "CONTRACTS") != null);
 }
 
+/// The listing rows of a board; an HQ board appends its artillery offer after them.
+fn listingCount(board: []const ListingRow) usize {
+    var n: usize = 0;
+    for (board) |r| if (r.item == .listing) {
+        n += 1;
+    };
+    return n;
+}
+
 test "each HQ's market board shows only its own listings" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 72 });
     defer gs.deinit();
@@ -4980,12 +5014,12 @@ test "each HQ's market board shows only its own listings" {
     defer arena.deinit();
     const a = arena.allocator();
     const mine = try market(a, &gs, .all, home);
-    try std.testing.expectEqual(@as(usize, 1), mine.board.len);
-    try std.testing.expectEqual(lid_home, mine.board[0].id);
+    try std.testing.expectEqual(@as(usize, 1), listingCount(mine.board));
+    try std.testing.expectEqual(lid_home, mine.board[0].item.listing);
     try std.testing.expectEqual(home, mine.board[0].hq);
     const theirs = try market(a, &gs, .all, far);
     try std.testing.expectEqual(@as(usize, 1), theirs.board.len);
-    try std.testing.expectEqual(lid_far, theirs.board[0].id); // typed id the buy_listing command takes
+    try std.testing.expectEqual(lid_far, theirs.board[0].item.listing); // typed id the buy_listing command takes
 }
 
 test "market board hides delayed and unreachable dispersed black-market listings" {
@@ -5011,9 +5045,9 @@ test "market board hides delayed and unreachable dispersed black-market listings
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const result = try market(arena.allocator(), &gs, .all, hq);
-    try std.testing.expectEqual(@as(usize, 2), result.board.len);
-    try std.testing.expectEqual(local_fence, result.board[0].id);
-    try std.testing.expectEqual(reachable, result.board[1].id);
+    try std.testing.expectEqual(@as(usize, 2), listingCount(result.board));
+    try std.testing.expectEqual(local_fence, result.board[0].item.listing);
+    try std.testing.expectEqual(reachable, result.board[1].item.listing);
 }
 
 test "a dispersed listing appears on each co-located HQ board" {
@@ -5030,7 +5064,7 @@ test "a dispersed listing appears on each co-located HQ board" {
     try gs.market_listings.append(gs.allocator(), .{ .id = listing, .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .black_market = true, .planet_key = world });
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    try std.testing.expectEqual(@as(usize, 1), (try market(arena.allocator(), &gs, .all, home)).board.len);
+    try std.testing.expectEqual(@as(usize, 1), listingCount((try market(arena.allocator(), &gs, .all, home)).board));
     try std.testing.expectEqual(@as(usize, 1), (try market(arena.allocator(), &gs, .all, other)).board.len);
 }
 
@@ -5065,9 +5099,9 @@ test "a deployed company's local board shows its dispersed listings without unre
     defer arena.deinit();
     const board = try companyMarket(arena.allocator(), &gs, .all, company);
     try std.testing.expectEqual(@as(usize, 2), board.len);
-    try std.testing.expectEqual(local, board[0].id);
-    try std.testing.expectEqual(dispersed, board[1].id);
-    try std.testing.expectEqual(@as(usize, 1), (try market(arena.allocator(), &gs, .all, gs.seat())).board.len);
+    try std.testing.expectEqual(local, board[0].item.listing);
+    try std.testing.expectEqual(dispersed, board[1].item.listing);
+    try std.testing.expectEqual(@as(usize, 1), listingCount((try market(arena.allocator(), &gs, .all, gs.seat())).board));
 }
 
 test "market boards retain HQ boards and add active deployed company boards" {
@@ -8321,15 +8355,21 @@ pub fn artilleryDetailLines(alloc: Alloc, gs: *GameState, id: types.ArtilleryFor
     return lines.toOwnedSlice(alloc);
 }
 
-/// Offers view: one typed row per available offer for the REPL `offers` view and TUI market pane.
+/// The calendar month an artillery offer stands for, as `year-mm`.
+fn artilleryOfferPeriod(alloc: Alloc, o: @import("../domain/artillery_formation.zig").Offer) ![]const u8 {
+    return std.fmt.allocPrint(alloc, "{d}-{d:0>2}", .{ o.year, o.month });
+}
+
+/// Offers view: one typed row per available offer of every HQ, for the REPL
+/// `offers` view. The TUI shows each HQ's offer on that HQ's `market` board.
 pub fn artilleryOfferRows(alloc: Alloc, gs: *GameState) ![]ArtilleryOfferRow {
     var rows: std.ArrayListUnmanaged(ArtilleryOfferRow) = .empty;
     for (gs.artillery_offers.items) |o| {
         if (!o.available) continue;
         const hq_text = try hqName(alloc, gs, o.hq);
         const price = try money(alloc, artillery.purchasePrice());
-        const line = try std.fmt.allocPrint(alloc, "offer #{d}  {s}  {d}-{d:0>2}  Mobile Long Tom  {s}", .{
-            @intFromEnum(o.id), hq_text, o.year, o.month, price,
+        const line = try std.fmt.allocPrint(alloc, "offer #{d}  {s}  {s}  Mobile Long Tom  {s}", .{
+            @intFromEnum(o.id), hq_text, try artilleryOfferPeriod(alloc, o), price,
         });
         try rows.append(alloc, .{ .id = o.id, .text = line });
     }
@@ -10962,4 +11002,92 @@ test "artillery query views propagate OutOfMemory" {
     const fid = buy_result.artillery_formation;
     try std.testing.expectError(error.OutOfMemory, artilleryFormationRows(std.testing.failing_allocator, &gs));
     try std.testing.expectError(error.OutOfMemory, artilleryDetailLines(std.testing.failing_allocator, &gs, fid));
+}
+
+/// A founded campaign with a second, regional HQ on the seat's world, both
+/// holding this month's artillery offer.
+fn twoOfferHqs(gs: *GameState) !struct { home: types.HqId, other: types.HqId } {
+    _ = try founding.createCommander(gs, "T", .LC, .quartermaster);
+    const home = gs.seat();
+    const other: types.HqId = @enumFromInt(99);
+    try gs.hqs.put(gs.allocator(), other, .{ .id = other, .name = "Other", .tier = .regional, .planet_key = gs.hqs.getPtr(home).?.planet_key });
+    try artillery.syncMarkets(gs);
+    return .{ .home = home, .other = other };
+}
+
+fn boardOffer(board: []const ListingRow) ?types.ArtilleryOfferId {
+    for (board) |r| switch (r.item) {
+        .artillery_offer => |id| return id,
+        .listing => {},
+    };
+    return null;
+}
+
+fn offerOf(gs: *GameState, hq: types.HqId) types.ArtilleryOfferId {
+    for (gs.artillery_offers.items) |o| if (o.hq == hq) return o.id;
+    unreachable;
+}
+
+test "an HQ market board ends with that HQ's artillery offer, priced as the purchase" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const hqs = try twoOfferHqs(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const board = (try market(a, &gs, .all, hqs.home)).board;
+    try std.testing.expect(board.len > 0);
+    const last = board[board.len - 1];
+    try std.testing.expectEqual(BoardItem{ .artillery_offer = offerOf(&gs, hqs.home) }, last.item);
+    try std.testing.expectEqual(hqs.home, last.hq);
+    try std.testing.expectEqualStrings(try money(a, artillery.purchasePrice()), last.cells[4]);
+    try std.testing.expectEqualStrings(artillery.carrier().key, last.cells[2]);
+    for (board[0 .. board.len - 1]) |r| try std.testing.expect(r.item == .listing);
+}
+
+test "an HQ market board shows only its own artillery offer" {
+    // Rule 71: two eligible HQs; once the home offer is sold only the other
+    // HQ holds one, and the home board must not show it (artillery.buy would
+    // refuse it there with ArtilleryWrongLocation).
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const hqs = try twoOfferHqs(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectEqual(offerOf(&gs, hqs.home), boardOffer((try market(a, &gs, .all, hqs.home)).board).?);
+    try std.testing.expectEqual(offerOf(&gs, hqs.other), boardOffer((try market(a, &gs, .all, hqs.other)).board).?);
+    gs.hqs.getPtr(hqs.home).?.funds = artillery.purchasePrice();
+    _ = try @import("commands.zig").execute(&gs, .{ .buy_artillery = .{ .hq = hqs.home, .offer = offerOf(&gs, hqs.home) } });
+    try std.testing.expectEqual(@as(?types.ArtilleryOfferId, null), boardOffer((try market(a, &gs, .all, hqs.home)).board));
+    try std.testing.expectEqual(offerOf(&gs, hqs.other), boardOffer((try market(a, &gs, .all, hqs.other)).board).?);
+}
+
+test "the artillery offer shows under the all and vehicles filters only, and never on a company board" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const hqs = try twoOfferHqs(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expect(boardOffer((try market(a, &gs, .all, hqs.home)).board) != null);
+    try std.testing.expect(boardOffer((try market(a, &gs, .vehicles, hqs.home)).board) != null);
+    try std.testing.expect(boardOffer((try market(a, &gs, .weapons, hqs.home)).board) == null);
+    const company = (try @import("commands.zig").execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const contract_id: types.ContractId = @enumFromInt(77);
+    try gs.contracts.put(gs.allocator(), contract_id, .{ .id = contract_id, .kind = .objective_raid, .employer_key = "MOC", .enemy_key = "DC", .planet_key = "canopus4", .status = .active, .assigned_company = company, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } });
+    gs.force(company).?.location_planet = "canopus4";
+    try std.testing.expect(boardOffer(try companyMarket(a, &gs, .all, company)) == null);
+}
+
+test "market propagates OutOfMemory while listing the artillery offer" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const hqs = try twoOfferHqs(&gs);
+    // With no listings, the offer row is the board's first allocation.
+    gs.market_listings.clearRetainingCapacity();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try std.testing.expectEqual(@as(usize, 1), (try market(arena.allocator(), &gs, .all, hqs.home)).board.len);
+    try std.testing.expectError(error.OutOfMemory, market(std.testing.failing_allocator, &gs, .all, hqs.home));
 }

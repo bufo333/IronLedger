@@ -157,7 +157,7 @@ no room.
 | F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall |
 | F8 | Lab | Budget/plan (wide) · Spatial mech diagram: 8 per-location crit boxes (HD / CT / LT / RT / LA / RA / LL / RL) · Selected-slot detail |
 | F9 | People | Personnel (pinned header, role filter) · Person-detail modal (Enter or `r` opens it: file, skills, status, assignment and eligible actions) · Open seats |
-| F10 | Market | Boards · Order catalog · Demand · Keep stocked · Artillery offers (wide) |
+| F10 | Market | Boards (an HQ board ends with that HQ's monthly artillery offer) · Order catalog · Demand · Keep stocked |
 
 ## Keys
 
@@ -329,14 +329,13 @@ filters to the active context (see the Keys description above).
 |---|---|---|
 | `[ ]` | any | previous / next HQ or deployed-company market board |
 | `/ ,` | any | next / previous market filter |
-| `Enter` | board | buy the board listing under the cursor |
+| `Enter` | board | buy the board listing or artillery offer under the cursor |
 | `Enter` | catalog | order the catalogue part under the cursor |
 | `Enter` | demand | order (or fabricate) what a damaged slot is short |
 | `Enter` | keep stocked | edit the keep-stocked line under the cursor |
 | `b` | catalog | fabricate the structural component under the cursor at this HQ's bay |
 | `K` | catalog | keep the catalogue part under the cursor stocked at this HQ |
 | `x` | keep stocked | remove the keep-stocked line under the cursor |
-| `B` | artillery offers | buy the artillery offer under the cursor (delivers to the selected HQ) |
 
 ### Welcome
 
@@ -809,7 +808,12 @@ and the TUI:
   `artillery_crew.eligibilityText` of the owners' refusals; send rows show the
   field-freight quote's days and cost)
 - `artilleryOfferRows` (typed `ArtilleryOfferRow` list: `.id` + `.text`;
-  used by the Market artillery-offers pane and the `buyarty` REPL verb)
+  every HQ's available offer, for the REPL `offers` view whose ids the
+  `buyarty` verb takes)
+- `market(filter, hq)` and `companyMarket(filter, company)` board rows
+  (`ListingRow`) carry a typed `BoardItem`: a `.listing` (Enter sends
+  `buy_listing`) or, on an HQ board only and last, that HQ's available
+  `.artillery_offer` (Enter sends `buy_artillery` for the board's HQ)
 
 Every query is pure and allocator-parameterized so the TUI can rebuild its
 view model each frame from an arena.
