@@ -5365,32 +5365,35 @@ test "a disbanded company's ledger rows load as outfit overhead, keeping their c
     _ = try commands.execute(&gs, .{ .transfer_unit = .{ .unit = truck, .to_company = co } });
     const hand = try gs.hirePerson("Alpha", "Hand", .mekwarrior);
     gs.person(hand).?.assigned_force = co;
-    // A company-tagged row, and one also tagged with a contract the company
-    // never held (the contract record outlives the company either way).
+    // A company-tagged row, and a closed contract the company held with its
+    // contract-tagged rows (the contract record outlives the company).
     try treasury.transferFunds(&gs, .outfit, .{ .company = co }, 1_000, 0);
-    const other = try gs.createForce("Bravo", .company, .none);
     const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
     gs.next_contract_id += 1;
-    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 }, .status = .completed, .assigned_company = other });
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 }, .status = .completed, .assigned_company = co });
+    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = 600_000, .category = .advance, .company = co, .contract = cid, .note = "advance" });
     try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = -500, .category = .supplies, .company = co, .contract = cid, .note = "tagged" });
 
     _ = try commands.execute(&gs, .{ .disband_company = co });
+    try std.testing.expectEqual(types.ForceId.none, gs.contracts.get(cid).?.assigned_company);
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
     var loaded = try store.load(std.testing.allocator, gs.campaign_id);
     defer loaded.deinit();
     try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
-    var retagged = false;
+    try std.testing.expectEqual(contract_mod.ContractStatus.completed, loaded.contracts.get(cid).?.status);
+    try std.testing.expectEqual(types.ForceId.none, loaded.contracts.get(cid).?.assigned_company);
+    var retagged: usize = 0;
     for (loaded.ledger.transactions.items) |t| {
         try std.testing.expect(t.company != co);
-        if (std.mem.eql(u8, t.note, "tagged")) {
+        if (std.mem.eql(u8, t.note, "tagged") or std.mem.eql(u8, t.note, "advance")) {
             try std.testing.expectEqual(types.ForceId.none, t.company);
             try std.testing.expectEqual(cid, t.contract);
-            retagged = true;
+            retagged += 1;
         }
     }
-    try std.testing.expect(retagged);
+    try std.testing.expectEqual(@as(usize, 2), retagged);
 }
 
 test "an orphan stock row rejects the load as corrupt, not UnknownSite" {

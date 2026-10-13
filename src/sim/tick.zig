@@ -930,6 +930,16 @@ test "the payday bills payroll and hull upkeep to each company, its contract onl
     const bravo_hull = try gs.addUnit("SHD-2H");
     gs.unit(bravo_hull).?.force = bravo_lance;
     _ = try gs.addUnit("CGT-3"); // in the HQ pool
+    // Artillery carriers: the one attached to Alpha bills to Alpha; the
+    // pooled and the freighted one are overhead.
+    const placements = [_]@import("../domain/artillery_formation.zig").Placement{
+        .{ .company = alpha },
+        .{ .hq_pool = gs.seat() },
+        .{ .freight = .{ .from_hq = gs.seat(), .to_hq = gs.seat(), .dispatch_day = 0, .eta_day = 90, .paid_cost = 0 } },
+    };
+    for (placements, 1..) |placement, n| {
+        try gs.artillery_formations.put(gs.allocator(), @enumFromInt(n), .{ .id = @enumFromInt(n), .hull = .none, .acquisition_day = 0, .paid_price = 0, .placement = placement });
+    }
     const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
     gs.next_contract_id += 1;
     try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 }, .status = .transit, .assigned_company = alpha, .arrive_day = 90, .monthly_net = 300_000 });
@@ -939,7 +949,8 @@ test "the payday bills payroll and hull upkeep to each company, its contract onl
     const from = gs.ledger.transactions.items.len;
     try runFinances(&gs);
     const mult = commander_mod.costMultBp(gs.commander, .payroll);
-    var alpha_hulls: types.CBills = 0;
+    // Alpha's hulls plus its one attached carrier's vehicle carry.
+    var alpha_hulls: types.CBills = tuning.unit.carry.vehicle;
     for (gs.units.values()) |u| if (gs.companyOf(u.force) == alpha) {
         alpha_hulls += u.monthlyBill();
     };
@@ -971,6 +982,10 @@ test "the payday bills payroll and hull upkeep to each company, its contract onl
         // The rows add up to the single posting the outfit treasury pays.
         try std.testing.expectEqual(charge.total, total);
     }
+    // That hull charge bills every hull and each of the three carriers once.
+    var all_hulls: types.CBills = 3 * tuning.unit.carry.vehicle;
+    for (gs.units.values()) |u| all_hulls += u.monthlyBill();
+    try std.testing.expectEqual(all_hulls, charges[1].total);
 }
 
 test "phases are in spec order" {

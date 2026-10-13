@@ -1218,7 +1218,8 @@ signing through completion. Profit shares (`shares`, AtB) are `shares%` of that
 net plus any early-completion bonus, paid at completion and floored at zero. A
 contract that lost money pays nothing, and the log says what it netted. When a
 company is disbanded, its ledger rows become outfit overhead. They keep their
-HQ and contract tags.
+HQ and contract tags, and its closed contracts keep their records with no
+company.
 
 **Breach clause** (Stage 9E). Failing or abandoning a contract — recall, or
 combat-ineffectiveness with no affordable local replacements — costs a

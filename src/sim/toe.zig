@@ -23,6 +23,7 @@ const market_mod = @import("../econ/market.zig");
 const personnel = @import("personnel.zig");
 const sites = @import("sites.zig");
 const hq_mod = @import("../domain/hq.zig");
+const contract_mod = @import("../domain/contract.zig");
 
 /// Combat companies currently assigned to an HQ.
 pub fn companiesAtHq(gs: *GameState, hq_id: types.HqId) u32 {
@@ -693,11 +694,17 @@ pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_compa
     for (fids.items) |fid| _ = gs.forces.orderedRemove(fid);
     // Nothing may keep pointing at a company that no longer exists: its
     // ledger rows (severance included) become outfit overhead, keeping
-    // their HQ and contract tags (ARCH §11); its standing orders, its
-    // resupply plan, the goods on the road to it and the hulls on their
-    // way to join it.
+    // their HQ and contract tags (ARCH §11); its closed contracts keep
+    // their records with no company; its standing orders, its resupply
+    // plan, the goods on the road to it and the hulls on their way to join
+    // it.
     for (gs.ledger.transactions.items) |*t| {
         if (std.mem.indexOfScalar(types.ForceId, fids.items, t.company) != null) t.company = .none;
+    }
+    for ([_][]contract_mod.Contract{ gs.contracts.values(), gs.contract_offers.items }) |list| {
+        for (list) |*c| if (c.assigned_company == co) {
+            c.assigned_company = .none;
+        };
     }
     var pi: usize = 0;
     while (pi < gs.policies.items.len) {
@@ -957,6 +964,12 @@ test "disbanding a company leaves state whole when an allocation fails" {
     const truck = try gs.addUnit("CGT-3");
     _ = try commands.execute(&gs, .{ .transfer_unit = .{ .unit = truck, .to_company = co } });
     _ = try contract_market.hireRoleFromHall(&gs, .mekwarrior, co); // best-effort crew
+    // A closed contract the company held, with its contract-tagged row: a
+    // failed disband keeps both pointing at the company.
+    const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 }, .status = .completed, .assigned_company = co });
+    try gs.postTransaction(.{ .day = gs.clock.day_index, .amount = 600_000, .category = .advance, .company = co, .contract = cid, .note = "advance" });
     try std.testing.expect(posture.isCompanyHome(&gs, co));
 
     const before = digest.stateHash(&gs);
@@ -968,6 +981,7 @@ test "disbanding a company leaves state whole when an allocation fails" {
 
     try std.testing.expectError(error.OutOfMemory, execDisbandCompany(&gs, co));
     try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(co, gs.contracts.get(cid).?.assigned_company);
 }
 
 test "disbandProceeds equals the gs.funds delta from execDisbandCompany" {
