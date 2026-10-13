@@ -94,7 +94,9 @@ overlay of each family and checks that every one fails; CI runs it.
   `fatigue`, `morale`, `employer_standing`, `score`, `escalation`), or free —
   every option must take something from the company. Flags are
   `domain/actor.zig` `ActorFlag` and `domain/world_state.zig` `WorldFlag`
-  tags; an unknown one fails the build.
+  tags; an unknown one fails the build, and so does an option setting both
+  flags of an exclusive pair (`did_business` and `informed_on`;
+  `black_market_open` and `black_market_closed`).
 - Every string must be safe to show as it is: valid UTF-8, no `{`
   anywhere (braces start the screens' colour tags, and there is no escape
   for a literal one in data), and no control characters — no tabs,

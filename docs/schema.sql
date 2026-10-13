@@ -751,7 +751,8 @@ CREATE TABLE contract_situation (
                                                      -- the option applied; NULL while it awaits an answer
     PRIMARY KEY (cid, contract, ord),
     UNIQUE (cid, contract, situation),
-    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, actor) REFERENCES actor(cid, id) DEFERRABLE INITIALLY DEFERRED
 );
 
 -- One row per decision kind: when it last fired and how it was answered.
@@ -1097,8 +1098,9 @@ CREATE TABLE actor (
     last_cause      TEXT    NOT NULL DEFAULT '', -- short markup-safe label for last rel change
     last_cause_day  INTEGER NOT NULL DEFAULT 0,  -- day_index of last rel change
     recurring       INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)),
-    flags           INTEGER NOT NULL CHECK (typeof(flags)='integer' AND flags BETWEEN 0 AND 15),
-                                      -- domain/actor.zig ActorFlag set: bit = the flag's value
+    flags           INTEGER NOT NULL CHECK (typeof(flags)='integer' AND flags BETWEEN 0 AND 15 AND (flags & 3) != 3),
+                                      -- domain/actor.zig ActorFlag set: bit = the flag's value;
+                                      -- did_business (1) and informed_on (2) exclude each other
     PRIMARY KEY (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
@@ -1119,8 +1121,9 @@ CREATE TABLE world_state (
     enemy_influence         INTEGER NOT NULL DEFAULT 0, -- clamped −100…100
     last_cause              TEXT    NOT NULL DEFAULT '', -- short markup-safe label for last change
     last_cause_day          INTEGER NOT NULL DEFAULT 0,  -- day_index of last change
-    flags                   INTEGER NOT NULL CHECK (typeof(flags)='integer' AND flags BETWEEN 0 AND 7),
-                                              -- domain/world_state.zig WorldFlag set: bit = the flag's value
+    flags                   INTEGER NOT NULL CHECK (typeof(flags)='integer' AND flags BETWEEN 0 AND 7 AND (flags & 3) != 3),
+                                              -- domain/world_state.zig WorldFlag set: bit = the flag's value;
+                                              -- black_market_open (1) and black_market_closed (2) exclude each other
     PRIMARY KEY (cid, planet_key),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );

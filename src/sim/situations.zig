@@ -153,6 +153,25 @@ pub fn resolve(gs: *GameState, event_id: types.EventId, choice: usize, how: How)
     _ = gs.event_queue.pending.orderedRemove(at);
 }
 
+// ---- Validation (rule 58) --------------------------------------------------
+
+/// The first row of `t` with an option whose flags hold both of an
+/// exclusive pair (`actors.flagsConflict`, `world_state.flagsConflict`),
+/// or null. The build refuses a table with one (the comptime block below);
+/// the table's other checks are `situation.defect`.
+pub fn flagDefect(t: situation_mod.Table) ?situation_mod.Defect {
+    for (t.situations) |s| for (s.options) |*o| {
+        if (actors.flagsConflict(o.actorFlags())) return .{ .what = "an option sets actor flags that exclude each other", .key = s.key };
+        if (world_state.flagsConflict(o.worldFlags())) return .{ .what = "an option sets world flags that exclude each other", .key = s.key };
+    };
+    return null;
+}
+
+comptime {
+    @setEvalBranchQuota(200_000);
+    if (flagDefect(situation_mod.table)) |d| @compileError("situations.zon: " ++ d.what ++ ": " ++ d.key);
+}
+
 // ---- Tests -----------------------------------------------------------------
 
 const testing = std.testing;
@@ -237,6 +256,24 @@ fn pendingForTest(gs: *GameState, key: []const u8) ?types.EventId {
 
 fn lastLogForTest(gs: *GameState) []const u8 {
     return gs.event_log.items[gs.event_log.items.len - 1].text;
+}
+
+test "the build refuses an option that sets both flags of an exclusive pair" {
+    try testing.expect(flagDefect(situation_mod.table) == null);
+    const Option = situation_mod.Option;
+    const ok: Option = .{ .label = "buy", .costs = &.{.{ .cash = -1 }}, .set_actor_flags = &.{ .did_business, .cut_ties }, .set_world_flags = &.{ .black_market_open, .militia_trained }, .remembers = "r" };
+    var row: situation_mod.Situation = .{ .key = "s", .arc = "fracturing_garrison", .owner = "black_market", .min_beat = "beginning", .title = "t", .default_choice = 0, .options = &.{ ok, ok } };
+    try testing.expect(flagDefect(.{ .situations = &.{row} }) == null);
+    var actor_pair = ok;
+    actor_pair.set_actor_flags = &.{ .did_business, .informed_on };
+    row.options = &.{ ok, actor_pair };
+    const actor_defect = flagDefect(.{ .situations = &.{row} }) orelse return error.TestExpectedDefect;
+    try testing.expectEqualStrings("an option sets actor flags that exclude each other", actor_defect.what);
+    var world_pair = ok;
+    world_pair.set_world_flags = &.{ .black_market_closed, .black_market_open };
+    row.options = &.{ ok, world_pair };
+    const world_defect = flagDefect(.{ .situations = &.{row} }) orelse return error.TestExpectedDefect;
+    try testing.expectEqualStrings("an option sets world flags that exclude each other", world_defect.what);
 }
 
 test "nextDue: beat gate, flag gate, an attached owner, once per contract — and no dice" {

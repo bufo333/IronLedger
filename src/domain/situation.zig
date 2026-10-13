@@ -129,8 +129,9 @@ const event_options: [table.situations.len][]const events.Option = blk: {
 pub const Defect = struct { what: []const u8, key: []const u8 };
 
 /// The first defect in `t`, or null. The build refuses a table with one
-/// (the comptime block below); string markup safety is checked by the
-/// data walker in `sim/table.zig`.
+/// (the comptime block below); flags that exclude each other are refused
+/// by `sim/situations.flagDefect`, beside their owners, and string markup
+/// safety is checked by the data walker in `sim/table.zig`.
 pub fn defect(t: Table) ?Defect {
     for (t.situations, 0..) |s, i| {
         if (s.key.len == 0) return .{ .what = "empty key", .key = s.key };

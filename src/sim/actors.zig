@@ -19,14 +19,24 @@ pub const RelDelta = actor_mod.RelDelta;
 /// Rule owner: the actor's flags after the company's answer sets `set`
 /// (ARCHITECTURE.md §8 "Situations"). `informed_on` and `did_business`
 /// exclude each other, the later answer winning; `cut_ties` ends any
-/// business. Pure; the caller stores the result in its commit phase.
+/// business. `set` never holds both of an exclusive pair: the build
+/// refuses such an answer (`situations.flagDefect`). Pure; the caller
+/// stores the result in its commit phase.
 pub fn setFlags(current: actor_mod.ActorFlags, set: actor_mod.ActorFlags) actor_mod.ActorFlags {
+    std.debug.assert(!flagsConflict(set));
     var out = current;
     if (set.contains(.informed_on)) out.remove(.did_business);
     if (set.contains(.did_business)) out.remove(.informed_on);
     out.setUnion(set);
     if (set.contains(.cut_ties)) out.remove(.did_business);
     return out;
+}
+
+/// Rule owner: does `flags` hold both of an exclusive pair? No actor's
+/// flags and no answer's flag set may; the build refuses such an answer
+/// and the loader such a save.
+pub fn flagsConflict(flags: actor_mod.ActorFlags) bool {
+    return flags.contains(.informed_on) and flags.contains(.did_business);
 }
 
 /// Generate actor names using the `.actors` RNG stream (rule 57).
@@ -395,6 +405,35 @@ test "setFlags: informing and buying exclude each other, the later winning; cutt
     try std.testing.expect(flags.contains(.cut_ties) and !flags.contains(.did_business) and flags.contains(.drilled_together));
     // Nothing set changes nothing.
     try std.testing.expectEqual(flags, setFlags(flags, .{}));
+}
+
+test "flagsConflict: only informing and buying together conflict, and no answer can leave them together" {
+    const F = actor_mod.ActorFlags;
+    var both: F = .{};
+    both.insert(.did_business);
+    both.insert(.informed_on);
+    try std.testing.expect(flagsConflict(both));
+    both.insert(.cut_ties);
+    try std.testing.expect(flagsConflict(both));
+    var ended: F = .{};
+    ended.insert(.did_business);
+    ended.insert(.cut_ties);
+    try std.testing.expect(!flagsConflict(ended));
+    // Every consistent answer on every consistent actor stays consistent.
+    const flags = std.enums.values(actor_mod.ActorFlag);
+    const of = struct {
+        fn bits(b: usize) F {
+            var out: F = .{};
+            for (flags) |f| if ((b >> @intFromEnum(f)) & 1 != 0) out.insert(f);
+            return out;
+        }
+    }.bits;
+    for (0..1 << flags.len) |c| for (0..1 << flags.len) |s| {
+        const current = of(c);
+        const set = of(s);
+        if (flagsConflict(current) or flagsConflict(set)) continue;
+        try std.testing.expect(!flagsConflict(setFlags(current, set)));
+    };
 }
 
 test "conversionAllowed: returns .none for every actor" {

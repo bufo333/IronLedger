@@ -269,7 +269,9 @@ cheap, copyable, and impossible to mix up.
   remember the company's answers to its situations. Actors are keyed by
   `ActorId`; the same faction/archetype pair recurring in a later contract
   surfaces the prior relationship and flags. Owned by `sim/actors.zig`
-  (P4i); `actors.setFlags` decides which flags exclude each other.
+  (P4i); `actors.setFlags` and `actors.flagsConflict` decide which flags
+  exclude each other, so the build refuses an answer setting both and the
+  loader a save holding both.
 - **Rival** — a persistent opposing or allied mercenary company introduced by a
   contract arc. Each rival carries a single standing dimension (−100…100) that
   shifts on operation outcomes and the finale. Rivals are keyed by `RivalId`.
@@ -290,10 +292,12 @@ cheap, copyable, and impossible to mix up.
   militia trained) keyed by `planet_key` in `GameState.world_states`. Changed
   only by `operation_control.resolveDueOperations`,
   `operation_control.resolveFinale` and `situations.resolve` via
-  `sim/world_state.zig` owners (`world_state.setFlags` decides which flags
-  exclude each other). The flags stay on the planet across contracts; local
-  pricing (§9.6) and the arc finale read them. Surfaced read-only on the Map
-  and Contracts screens (P4h.4).
+  `sim/world_state.zig` owners (`world_state.setFlags` and
+  `world_state.flagsConflict` decide which flags exclude each other; the
+  build refuses an answer setting both and the loader a save holding both).
+  The flags stay on the planet across contracts; local pricing (§9.6) and the
+  arc finale read them. Surfaced read-only on the Map and Contracts screens
+  (P4h.4).
 - **Situation** — a `data/tables/situations.zon` row: an actor-owned decision
   on an arc contract (owner archetype, arc, earliest beat, optional actor-flag
   requirement for a callback, 2–3 options each naming its costs, deltas and

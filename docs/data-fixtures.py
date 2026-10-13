@@ -53,6 +53,8 @@ CASES = [
     ("a situation option that costs nothing", lambda: {"tables/situations.zon": mutate("tables/situations.zon", r"\.costs = \.\{\.\{ \.morale = -2 \}\}", ".costs = .{.{ .morale = 2 }}")}, True),
     ("a situation cost outside the cost subset", lambda: {"tables/situations.zon": mutate("tables/situations.zon", r"\.\{ \.escalation = 3 \}", ".{ .xp_all = 3 }")}, True),
     ("a situation callback without its note", lambda: {"tables/situations.zon": mutate("tables/situations.zon", r'\n\s*\.callback_note = "[^"]*",', "")}, True),
+    ("a situation option both buying from and informing on its owner", lambda: {"tables/situations.zon": mutate("tables/situations.zon", r"\.set_actor_flags = \.\{\.did_business\}", ".set_actor_flags = .{ .did_business, .informed_on }")}, True),
+    ("a situation option leaving the black market both open and closed", lambda: {"tables/situations.zon": mutate("tables/situations.zon", r"\.set_world_flags = \.\{\.black_market_open\}", ".set_world_flags = .{ .black_market_open, .black_market_closed }")}, True),
     ("a situation leaving an unknown world flag", lambda: {"tables/situations.zon": mutate("tables/situations.zon", r"\.set_world_flags = \.\{\.militia_trained\}", ".set_world_flags = .{.__bad_flag__}")}, True),
     ("a situation owned by an archetype off its arc", lambda: {"tables/situations.zon": mutate("tables/situations.zon", r'\.owner = "militia_commander"', '.owner = "relief_liaison"')}, True),
     ("a situation from a beat its arc does not have", lambda: {"tables/situations.zon": mutate("tables/situations.zon", r'\.min_beat = "complication"', '.min_beat = "__no_such_beat__"')}, True),

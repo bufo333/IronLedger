@@ -45,8 +45,9 @@ pub const WorldDelta = struct {
 };
 
 /// What a world remembers of the company's answers to situations on it
-/// (ARCHITECTURE.md §8 "Situations"). `sim/world_state.setFlags` owns which
-/// flags exclude each other; local pricing and the arc finale read them.
+/// (ARCHITECTURE.md §8 "Situations"). `sim/world_state.setFlags` and
+/// `flagsConflict` own which flags exclude each other; local pricing and
+/// the arc finale read them.
 /// Each value is its bit in a save (schema 66): never reuse or renumber one.
 pub const WorldFlag = enum(u5) {
     /// The black market trades openly with the company.

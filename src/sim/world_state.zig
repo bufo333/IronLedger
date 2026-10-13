@@ -24,13 +24,23 @@ pub const WorldDelta = world_state_dom.WorldDelta;
 /// Rule owner: the world's flags after the company's answer sets `set`
 /// (ARCHITECTURE.md §8 "Situations"). `black_market_open` and
 /// `black_market_closed` exclude each other, the later answer winning.
-/// Pure; the caller stores the result in its commit phase.
+/// `set` never holds both: the build refuses such an answer
+/// (`situations.flagDefect`). Pure; the caller stores the result in its
+/// commit phase.
 pub fn setFlags(current: world_state_dom.WorldFlags, set: world_state_dom.WorldFlags) world_state_dom.WorldFlags {
+    std.debug.assert(!flagsConflict(set));
     var out = current;
     if (set.contains(.black_market_open)) out.remove(.black_market_closed);
     if (set.contains(.black_market_closed)) out.remove(.black_market_open);
     out.setUnion(set);
     return out;
+}
+
+/// Rule owner: does `flags` hold both of an exclusive pair? No world's
+/// flags and no answer's flag set may; the build refuses such an answer
+/// and the loader such a save.
+pub fn flagsConflict(flags: world_state_dom.WorldFlags) bool {
+    return flags.contains(.black_market_open) and flags.contains(.black_market_closed);
 }
 
 /// Rule owner: the local supplies valve's price adjustment, in basis
@@ -230,6 +240,33 @@ test "setFlags: an open and a closed black market exclude each other; the militi
     try std.testing.expect(flags.contains(.black_market_closed) and !flags.contains(.black_market_open) and flags.contains(.militia_trained));
     flags = setFlags(flags, open);
     try std.testing.expect(flags.contains(.black_market_open) and !flags.contains(.black_market_closed));
+}
+
+test "flagsConflict: only an open and a closed market together conflict, and no answer can leave them together" {
+    const F = world_state_dom.WorldFlags;
+    var both: F = .{};
+    both.insert(.black_market_open);
+    both.insert(.black_market_closed);
+    try std.testing.expect(flagsConflict(both));
+    var open_trained: F = .{};
+    open_trained.insert(.black_market_open);
+    open_trained.insert(.militia_trained);
+    try std.testing.expect(!flagsConflict(open_trained));
+    // Every consistent answer on every consistent world stays consistent.
+    const flags = std.enums.values(world_state_dom.WorldFlag);
+    const of = struct {
+        fn bits(b: usize) F {
+            var out: F = .{};
+            for (flags) |f| if ((b >> @intFromEnum(f)) & 1 != 0) out.insert(f);
+            return out;
+        }
+    }.bits;
+    for (0..1 << flags.len) |c| for (0..1 << flags.len) |s| {
+        const current = of(c);
+        const set = of(s);
+        if (flagsConflict(current) or flagsConflict(set)) continue;
+        try std.testing.expect(!flagsConflict(setFlags(current, set)));
+    };
 }
 
 test "localPriceAdjustBp: an open market undercuts the valve, a closed one dearer, otherwise unchanged" {

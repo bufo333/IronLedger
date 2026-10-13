@@ -83,9 +83,9 @@ pub const RelDelta = struct {
 };
 
 /// What an actor remembers of the company's answers to its situations
-/// (ARCHITECTURE.md §8 "Situations"). `sim/actors.setFlags` owns which
-/// flags exclude each other. Each value is its bit in a save (schema 66):
-/// never reuse or renumber one.
+/// (ARCHITECTURE.md §8 "Situations"). `sim/actors.setFlags` and
+/// `flagsConflict` own which flags exclude each other. Each value is its
+/// bit in a save (schema 66): never reuse or renumber one.
 pub const ActorFlag = enum(u5) {
     /// The company bought from them.
     did_business = 0,

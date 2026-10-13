@@ -43,6 +43,8 @@ const rival_mod = @import("../domain/rival.zig");
 const merc_company_mod = @import("../domain/merc_company.zig");
 const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
+const world_state_rules = @import("../sim/world_state.zig");
+const actor_rules = @import("../sim/actors.zig");
 const situation_mod = @import("../domain/situation.zig");
 
 const artillery_store = @import("artillery_store.zig");
@@ -109,9 +111,9 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS battle_report_lever (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord BETWEEN 0 AND 4), kind TEXT NOT NULL CHECK (kind IN ('commit_reserve','emergency_recon','reinforce','air_cover','field_repair')), cost INTEGER NOT NULL CHECK (typeof(cost)='integer' AND cost BETWEEN 0 AND 255), roll_mod INTEGER NOT NULL CHECK (typeof(roll_mod)='integer' AND roll_mod BETWEEN -2147483648 AND 2147483647), PRIMARY KEY (cid, report_ord, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_in_progress (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), contract_id INTEGER NOT NULL CHECK (typeof(contract_id)='integer' AND contract_id BETWEEN 1 AND 4294967295), phase TEXT NOT NULL CHECK (phase IN ('contact','decisive')), orders INTEGER NOT NULL CHECK (typeof(orders)='integer' AND orders >= 1), PRIMARY KEY (cid, contract_id), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_in_progress_order (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), order_kind TEXT NOT NULL CHECK (order_kind IN ('engage','press_on','withdraw','pursue','consolidate','cover_recovery','roe','commit_reserve','intervene')), order_roe TEXT CHECK (order_roe IS NULL OR order_roe IN ('hold','standard','cautious')), order_intervention TEXT CHECK (order_intervention IS NULL OR order_intervention IN ('emergency_recon','reinforce','air_cover','field_repair')), pause TEXT NOT NULL CHECK (pause IN ('contact','decisive')), margin INTEGER NOT NULL CHECK (typeof(margin)='integer' AND margin BETWEEN -2147483648 AND 2147483647), hits INTEGER NOT NULL CHECK (typeof(hits)='integer' AND hits BETWEEN 0 AND 4294967295), momentum INTEGER NOT NULL CHECK (typeof(momentum)='integer' AND momentum BETWEEN -2147483648 AND 2147483647), roe TEXT NOT NULL CHECK (roe IN ('hold','standard','cautious')), outcome TEXT CHECK (outcome IS NULL OR outcome IN ('decisive_victory','victory','draw','defeat','rout')), held_field INTEGER NOT NULL CHECK (held_field IN (0,1)), odds_next TEXT NOT NULL CHECK (odds_next IN ('decisive','pursuit','cover')), odds_0 INTEGER NOT NULL CHECK (typeof(odds_0)='integer' AND odds_0 BETWEEN 0 AND 65535), odds_1 INTEGER NOT NULL CHECK (typeof(odds_1)='integer' AND odds_1 BETWEEN 0 AND 65535), odds_2 INTEGER NOT NULL CHECK (typeof(odds_2)='integer' AND odds_2 BETWEEN 0 AND 65535), odds_3 INTEGER NOT NULL CHECK (typeof(odds_3)='integer' AND odds_3 BETWEEN 0 AND 65535), odds_4 INTEGER NOT NULL CHECK (typeof(odds_4)='integer' AND odds_4 BETWEEN 0 AND 65535), odds_total INTEGER NOT NULL CHECK (typeof(odds_total)='integer' AND odds_total BETWEEN 1 AND 65535), lever_mod INTEGER NOT NULL CHECK (typeof(lever_mod)='integer' AND lever_mod BETWEEN -2147483648 AND 2147483647), reserve_committed INTEGER NOT NULL CHECK (reserve_committed IN (0,1)), capacity_spent INTEGER NOT NULL CHECK (typeof(capacity_spent)='integer' AND capacity_spent BETWEEN 0 AND 255), PRIMARY KEY (cid, contract_id, ord), CHECK ((order_roe IS NULL) = (order_kind != 'roe')), CHECK ((order_intervention IS NULL) = (order_kind != 'intervene')), CHECK ((outcome IS NULL) = (pause = 'contact')), CHECK (pause = 'decisive' OR held_field = 0), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, contract_id) REFERENCES battle_in_progress(cid, contract_id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS actor (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, first_name TEXT NOT NULL, last_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, trust INTEGER NOT NULL DEFAULT 0, debt INTEGER NOT NULL DEFAULT 0, respect INTEGER NOT NULL DEFAULT 0, hostility INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), flags INTEGER NOT NULL CHECK (typeof(flags)='integer' AND flags BETWEEN 0 AND 15), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS world_state (cid INTEGER NOT NULL, ord INTEGER NOT NULL, planet_key TEXT NOT NULL, security INTEGER NOT NULL DEFAULT 0, civilian_support INTEGER NOT NULL DEFAULT 0, infrastructure_strain INTEGER NOT NULL DEFAULT 0, employer_control INTEGER NOT NULL DEFAULT 0, enemy_influence INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, flags INTEGER NOT NULL CHECK (typeof(flags)='integer' AND flags BETWEEN 0 AND 7), PRIMARY KEY (cid, planet_key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS contract_situation (cid INTEGER NOT NULL, contract INTEGER NOT NULL CHECK (typeof(contract)='integer' AND contract BETWEEN 1 AND 4294967295), ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), situation TEXT NOT NULL CHECK (typeof(situation)='text'), day INTEGER NOT NULL CHECK (typeof(day)='integer' AND day BETWEEN 0 AND 4294967295), actor INTEGER NOT NULL CHECK (typeof(actor)='integer' AND actor BETWEEN 1 AND 4294967295), choice INTEGER CHECK (choice IS NULL OR (typeof(choice)='integer' AND choice BETWEEN 0 AND 2)), PRIMARY KEY (cid, contract, ord), UNIQUE (cid, contract, situation), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS actor (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, first_name TEXT NOT NULL, last_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, trust INTEGER NOT NULL DEFAULT 0, debt INTEGER NOT NULL DEFAULT 0, respect INTEGER NOT NULL DEFAULT 0, hostility INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), flags INTEGER NOT NULL CHECK (typeof(flags)='integer' AND flags BETWEEN 0 AND 15 AND (flags & 3) != 3), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS world_state (cid INTEGER NOT NULL, ord INTEGER NOT NULL, planet_key TEXT NOT NULL, security INTEGER NOT NULL DEFAULT 0, civilian_support INTEGER NOT NULL DEFAULT 0, infrastructure_strain INTEGER NOT NULL DEFAULT 0, employer_control INTEGER NOT NULL DEFAULT 0, enemy_influence INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, flags INTEGER NOT NULL CHECK (typeof(flags)='integer' AND flags BETWEEN 0 AND 7 AND (flags & 3) != 3), PRIMARY KEY (cid, planet_key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS contract_situation (cid INTEGER NOT NULL, contract INTEGER NOT NULL CHECK (typeof(contract)='integer' AND contract BETWEEN 1 AND 4294967295), ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), situation TEXT NOT NULL CHECK (typeof(situation)='text'), day INTEGER NOT NULL CHECK (typeof(day)='integer' AND day BETWEEN 0 AND 4294967295), actor INTEGER NOT NULL CHECK (typeof(actor)='integer' AND actor BETWEEN 1 AND 4294967295), choice INTEGER CHECK (choice IS NULL OR (typeof(choice)='integer' AND choice BETWEEN 0 AND 2)), PRIMARY KEY (cid, contract, ord), UNIQUE (cid, contract, situation), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, actor) REFERENCES actor(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS rival (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, standing INTEGER NOT NULL DEFAULT 0, encounters INTEGER NOT NULL DEFAULT 1, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), merc_company_id INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS officer_arc (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, person INTEGER NOT NULL, contract INTEGER NOT NULL DEFAULT 0, seat TEXT NOT NULL, performance INTEGER NOT NULL DEFAULT 0, encounters INTEGER NOT NULL DEFAULT 1, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hull_instance (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, base_key TEXT, name TEXT, nickname TEXT, status TEXT NOT NULL DEFAULT 'active', intro_year INTEGER NOT NULL DEFAULT 0, pre_campaign INTEGER NOT NULL DEFAULT 0 CHECK (pre_campaign IN (0,1)), owner_type TEXT NOT NULL DEFAULT 'player', owner_faction_key TEXT NOT NULL DEFAULT '', owner_merc_company_id INTEGER NOT NULL DEFAULT 0, catalogue TEXT NOT NULL DEFAULT 'chassis' CHECK (catalogue IN ('chassis','artillery')), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
@@ -1480,6 +1482,8 @@ pub const Store = struct {
             if (hostility < actor_mod.rel_min or hostility > actor_mod.rel_max) return error.CorruptSave;
             const contract_raw = st.int(6);
             const contract_id: types.ContractId = @enumFromInt(std.math.cast(u32, contract_raw) orelse return error.CorruptSave);
+            const flags = if (st.int(15) == 1) try flagSet(actor_mod.ActorFlag, st.int(14)) else return error.CorruptSave;
+            if (actor_rules.flagsConflict(flags)) return error.CorruptSave;
             const a: actor_mod.Actor = .{
                 .id = try toId(types.ActorId, st.int(0)),
                 .archetype_key = archetype_key,
@@ -1495,7 +1499,7 @@ pub const Store = struct {
                 .last_cause = try st.text(11, alloc),
                 .last_cause_day = try st.intAs(u32, 12),
                 .recurring = st.int(13) != 0,
-                .flags = if (st.int(15) == 1) try flagSet(actor_mod.ActorFlag, st.int(14)) else return error.CorruptSave,
+                .flags = flags,
             };
             const gop = try gs.actors.getOrPut(alloc, a.id);
             if (gop.found_existing) return error.CorruptSave;
@@ -1565,6 +1569,8 @@ pub const Store = struct {
             if (infrastructure_strain < world_state_dom.world_min or infrastructure_strain > world_state_dom.world_max) return error.CorruptSave;
             if (employer_control < world_state_dom.world_min or employer_control > world_state_dom.world_max) return error.CorruptSave;
             if (enemy_influence < world_state_dom.world_min or enemy_influence > world_state_dom.world_max) return error.CorruptSave;
+            const flags = if (st.int(9) == 1) try flagSet(world_state_dom.WorldFlag, st.int(8)) else return error.CorruptSave;
+            if (world_state_rules.flagsConflict(flags)) return error.CorruptSave;
             const ws: world_state_dom.WorldState = .{
                 .security = security,
                 .civilian_support = civilian_support,
@@ -1573,7 +1579,7 @@ pub const Store = struct {
                 .enemy_influence = enemy_influence,
                 .last_cause = try st.text(6, alloc),
                 .last_cause_day = try st.intAs(u32, 7),
-                .flags = if (st.int(9) == 1) try flagSet(world_state_dom.WorldFlag, st.int(8)) else return error.CorruptSave,
+                .flags = flags,
             };
             const gop = try gs.world_states.getOrPut(alloc, planet_key);
             if (gop.found_existing) return error.CorruptSave;
@@ -10973,12 +10979,18 @@ test "situation records, situation decisions and flags fail closed on every malf
     try expectCurrentRoundTripForTest(store, &gs);
     var buf: [256:0]u8 = undefined;
     const tampers = [_][*:0]const u8{
-        // Flags: an unknown bit, a negative or non-integer value.
+        // Flags: an unknown bit, a negative or non-integer value, both of
+        // an exclusive pair (did_business and informed_on; an open and a
+        // closed black market).
         "UPDATE actor SET flags=16",
         "UPDATE actor SET flags=-1",
         "UPDATE actor SET flags='x'",
+        "UPDATE actor SET flags=3",
+        "UPDATE actor SET flags=11",
         "UPDATE world_state SET flags=8",
         "UPDATE world_state SET flags='y'",
+        "UPDATE world_state SET flags=3",
+        "UPDATE world_state SET flags=7",
         // Records: unknown key, another arc, out of range, duplicate, out of order, from the future.
         "UPDATE contract_situation SET situation='no_such_situation' WHERE ord=0",
         "UPDATE contract_situation SET situation=X'6162' WHERE ord=0",
@@ -11012,6 +11024,60 @@ test "situation records, situation decisions and flags fail closed on every malf
     // A situation raised twice on one contract, past the table's own
     // uniqueness (rebuilt without it, so the loader alone must refuse).
     try expectUncheckedTamperRefusedForTest(store, &gs, "CREATE TABLE cs AS SELECT * FROM contract_situation; DROP TABLE contract_situation; CREATE TABLE contract_situation AS SELECT * FROM cs; DROP TABLE cs; INSERT INTO contract_situation SELECT cid, contract, 2, situation, day, actor, choice FROM contract_situation WHERE ord=0");
+}
+
+/// Run `tamper` in a transaction whose COMMIT the schema must refuse, and
+/// show the store unchanged afterwards.
+fn expectCommitRefusedForTest(store: Store, tamper: [*:0]const u8) !void {
+    const before = try databaseFingerprintForTest(store.db);
+    try store.db.exec("BEGIN");
+    store.db.exec(tamper) catch |err| {
+        try store.db.exec("ROLLBACK");
+        try std.testing.expectEqual(error.ConstraintViolation, err);
+        try std.testing.expectEqual(before, try databaseFingerprintForTest(store.db));
+        return;
+    };
+    try std.testing.expectError(error.ConstraintViolation, store.db.exec("COMMIT"));
+    try store.db.exec("ROLLBACK");
+    try std.testing.expectEqual(before, try databaseFingerprintForTest(store.db));
+}
+
+test "the schema refuses a situation record without its campaign's actor, and flags that exclude each other" {
+    // The provoked constraint failures are expected; keep their warnings out of stderr.
+    const saved_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_log_level;
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6204 });
+    defer gs.deinit();
+    _ = try situationCampaignForTest(&gs);
+    var other = GameState.init(std.testing.allocator, .{ .seed = 6205 });
+    defer other.deinit();
+    _ = try founding.createCommander(&other, "T", .LC, .line_officer);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    // A first save, an overwrite and a second campaign beside it commit.
+    try store.save(&gs);
+    try store.save(&gs);
+    try store.save(&other);
+    try expectCurrentRoundTripForTest(store, &gs);
+    var buf: [512:0]u8 = undefined;
+    // An actor that does not exist, one that exists only in the other
+    // campaign, and the actor deleted from under its record.
+    try expectCommitRefusedForTest(store, try std.fmt.bufPrintZ(&buf, "UPDATE contract_situation SET actor=999 WHERE cid={d}", .{gs.campaign_id}));
+    try expectCommitRefusedForTest(store, try std.fmt.bufPrintZ(&buf, "INSERT INTO actor (cid, ord, id, archetype_key, first_name, last_name, faction_key, side, flags) VALUES ({d}, 0, 999, 'black_market', 'A', 'B', 'f', 'enemy', 0); UPDATE contract_situation SET actor=999 WHERE cid={d}", .{ other.campaign_id, gs.campaign_id }));
+    try expectCommitRefusedForTest(store, try std.fmt.bufPrintZ(&buf, "DELETE FROM actor WHERE cid={d}", .{gs.campaign_id}));
+    // Both of an exclusive pair, among other flags or alone.
+    try expectCommitRefusedForTest(store, "UPDATE actor SET flags=3");
+    try expectCommitRefusedForTest(store, "UPDATE actor SET flags=11");
+    try expectCommitRefusedForTest(store, "UPDATE world_state SET flags=3");
+    try expectCommitRefusedForTest(store, "UPDATE world_state SET flags=7");
+    // A save retried after the refusals, and deleting the campaign, commit;
+    // the other campaign still loads.
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+    try store.deleteCampaign(gs.campaign_id);
+    var loaded = try store.load(std.testing.allocator, other.campaign_id);
+    loaded.deinit();
 }
 
 test "a store or a campaign at format 65 is refused before any change, situations pending or not" {
