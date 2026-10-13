@@ -227,7 +227,7 @@ send("e", 0.3)                 # arty_attach with no formation
 assert "no artillery formation selected" in plain()[-30000:], plain()[-3000:]
 # Colon-line sellarty with unknown id: TUI command line routes to the artillery sell handler.
 send(":"); send("sellarty 999\r", 0.5)
-assert "no artillery formation has that id" in plain()[-30000:], plain()[-3000:]
+assert wait_for("no artillery formation has that id", tail=30000), plain()[-3000:]
 send("[", 0.6)                 # one more back: the hangar ranking
 assert "hangar: cost vs contribution" in plain()[-30000:] and "cost index" in plain()[-30000:], plain()[-3000:]
 send("]", 0.6)                 # hangar → artillery panel
