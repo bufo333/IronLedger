@@ -715,10 +715,11 @@ they include committing the reserve and each intervention with its capacity
 cost, its decisive-roll modifier and what it needs. ↑/↓ and Enter give the
 highlighted one, `i` steps the cursor through the interventions, and the
 battle keys give each order directly. An order likely refused (the employer
-reserves it, its asset is not ready, it is spent, or the capacity is short)
-shows why, from `battle_phases.leverAllowed`, and still sends its command
-for the canonical refusal; grounded air cover is known only to the command,
-which fights the weather. A pause
+reserves it, the weather grounds the fighters, its asset is not ready, it is
+spent, or the capacity is short) shows why, from
+`battle_phases.leverAllowed` on the engagement's own availability
+(`battle.inProgressAvailability`, weather included), and still sends its
+command for the canonical refusal. A pause
 keeps the screen on its new report; the order that ends the battle opens
 the after-action; `Esc` leaves it, and the turn waits) ·
 **Battle orders** (the situation and odds; ←/→ step the ROE and each

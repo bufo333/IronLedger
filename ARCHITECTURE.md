@@ -544,6 +544,10 @@ and changes only the decisive phase (`Order.commit_reserve`,
   `field repair`). The decisive roll gains exactly what the intervention's
   profile adds before battle (`operations.interventionProfile`), here to the
   decisive phase alone, for `operations.interventionCost` command capacity.
+- **Bounded modifiers.** Every lever adds `0..battle_phases.max_lever_mod`
+  decisive-roll points, the 2d6 span; a `data:` check refuses a
+  `commit_roll` outside it on every build, so the summed decisive roll is
+  defined (rules 25, 58).
 - **Owners.** `battle_phases.leverCost`, `leverMod` and `decisiveMod` own the
   cost and modifiers; `battle_phases.leverAllowed` owns availability.
   `battle.leverAvailability` reads it from live state at engagement start
@@ -555,6 +559,9 @@ and changes only the decisive phase (`Order.commit_reserve`,
   command reserves `reinforce` and `air_cover` mid-battle; pre-battle
   `apply_intervention` does not consult it) and the capacity the commander
   may spend (`commandCapacityAvailable`, less earlier calls in this battle).
+  `battle.inProgressAvailability` gives the battle screen the same
+  availability, weather included, by replaying the battle in progress in a
+  discarded workspace; it consumes no live RNG and changes nothing live.
 - **Refusals**, each consuming nothing, with one `cli.errorText` sentence:
   no operational reserve (`ReserveUnavailable`), the reserve already
   committed (`OrderNotLegal`), the employer's lock

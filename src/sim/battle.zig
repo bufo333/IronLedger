@@ -241,14 +241,39 @@ pub fn validateInProgress(gs: *GameState) error{ CorruptSave, OutOfMemory }!void
 /// The pause `orders` reach from live state, fought in a discarded
 /// workspace; `error.OrderNotLegal` when they end the battle instead.
 fn replayPause(gs: *GameState, id: types.ContractId, orders: []const battle_phase.Order) !battle_phase.PhaseReport {
-    var engagement = try battle_preparation.Engagement.init(gs, gs.scratch());
+    return replayObserved(gs, id, orders, gs.scratch(), null);
+}
+
+/// `replayPause` in a workspace backed by `backing`, reporting what the
+/// engagement brought to its phases through `observed`.
+fn replayObserved(gs: *GameState, id: types.ContractId, orders: []const battle_phase.Order, backing: std.mem.Allocator, observed: ?*?Observed) !battle_phase.PhaseReport {
+    var engagement = try battle_preparation.Engagement.init(gs, backing);
     defer engagement.deinit();
     const staged = &engagement.view;
     const contract = staged.contracts.getPtr(id) orelse return error.UnknownContract;
-    return switch (try fightStaged(staged, contract, .{ .given = orders }, gs.scratch())) {
+    return switch (try fightStagedObserved(staged, contract, .{ .given = orders }, backing, observed)) {
         .paused => |report| report,
         .finished => error.OrderNotLegal,
     };
+}
+
+/// The contact-pause lever availability of the contract's battle in
+/// progress, exactly as the battle order command reaches it: the engagement
+/// is replayed from live state under the orders given so far in a discarded
+/// workspace backed by `alloc`, so its weather is the engagement's own.
+/// Null when the contract has no battle in progress. Consumes no live RNG
+/// and changes nothing live (rules 31, 34).
+pub fn inProgressAvailability(gs: *GameState, id: types.ContractId, alloc: std.mem.Allocator) !?battle_phases.Availability {
+    const record = for (gs.battles_in_progress.items) |*r| {
+        if (r.contract == id) break r;
+    } else return null;
+    const orders = try alloc.alloc(battle_phase.Order, record.steps.items.len);
+    defer alloc.free(orders);
+    for (record.steps.items, orders) |step, *o| o.* = step.order;
+    var observed: ?Observed = null;
+    _ = try replayObserved(gs, id, orders, alloc, &observed);
+    // A paused course has observed its inputs.
+    return observed.?.inputs.avail;
 }
 
 /// Fights `orders` from live state in a discarded workspace. A pause is
@@ -975,7 +1000,7 @@ const Setup = struct {
 /// lock, and the command capacity the commander may spend. With no
 /// committed combat operation no lever is available. The battle lock keeps
 /// every input unchanged until the battle publishes. Pure.
-pub fn leverAvailability(gs: *GameState, c: *const contract_mod.Contract, air_grounded: bool) battle_phases.Availability {
+fn leverAvailability(gs: *GameState, c: *const contract_mod.Contract, air_grounded: bool) battle_phases.Availability {
     var avail: battle_phases.Availability = .{ .capacity = operations_m.commandCapacityAvailable(c), .air_grounded = air_grounded };
     const op = operations_m.committedCombatOp(c) orelse return avail;
     for (op.tasks.items) |lt| {
@@ -5785,6 +5810,18 @@ pub fn leverEngagementForTest(gs: *GameState, armor: u8, capacity: u8) !types.Co
     return id;
 }
 
+/// Stands up an air wing on the contract's company with one operational,
+/// piloted fighter, so the air-cover gate is met
+/// (`readiness.companyHasOperationalFighter`).
+pub fn fighterForTest(gs: *GameState, id: types.ContractId) !void {
+    const company = gs.contracts.getPtr(id).?.assigned_company;
+    const wing = try gs.createForce("Air Wing", .air_company, company);
+    const air_lance = try gs.createForce("Sky Lance", .air_lance, wing);
+    const fighter = try gs.addUnit("SPR-H5");
+    const pilot = try gs.hirePerson("Av", "Avi", .aero_pilot);
+    try @import("toe.zig").assignUnit(gs, fighter, air_lance, pilot);
+}
+
 /// Fights a fresh lever fixture under `orders`, finished unattended, and
 /// returns its last report.
 fn leverFoughtForTest(gs: *GameState, seed: u64, orders: []const battle_phase.Order) !*const battle_report.BattleReport {
@@ -6300,6 +6337,27 @@ test "a withdrawal after a lever spends its capacity, records it and lands only 
     defer arena.deinit();
     const line = try after_action.leverText(arena.allocator(), w.levers[0], false);
     try std.testing.expect(std.mem.indexOf(u8, line, "before the decisive phase") != null);
+}
+
+test "the in-progress lever availability is the command's own, weather included, and reading it changes nothing" {
+    const digest = @import("digest.zig");
+    // Seed 5's engagement weather grounds aircraft; seed 3's lets them fly.
+    for ([_]struct { seed: u64, grounded: bool }{ .{ .seed = 5, .grounded = true }, .{ .seed = 3, .grounded = false } }) |case| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = case.seed });
+        defer gs.deinit();
+        const id = try leverEngagementForTest(&gs, 30, 4);
+        try fighterForTest(&gs, id);
+        try std.testing.expect((try inProgressAvailability(&gs, id, gs.scratch())) == null);
+        _ = try orderForTest(&gs, id, .engage);
+        const before = digest.stateHash(&gs);
+        const rng_before = gs.rng;
+        const avail = (try inProgressAvailability(&gs, id, gs.scratch())).?;
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+        try std.testing.expect(std.meta.eql(rng_before, gs.rng));
+        try std.testing.expectEqual(case.grounded, avail.air_grounded);
+        try std.testing.expect(avail.interventions.get(.air_cover).gate);
+        try std.testing.expectEqualDeep((try observeEngagementForTest(&gs, id)).inputs.avail, avail);
+    }
 }
 
 test "every lever refusal consumes nothing" {

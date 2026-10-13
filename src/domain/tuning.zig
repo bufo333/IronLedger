@@ -468,7 +468,8 @@ pub const Tuning = struct {
             cover: struct { clean_at: i32, extra_hit_pct: i32, recovery_mod: i32 },
             /// Committing the reserve at the contact pause adds
             /// `commit_roll` roll points to the decisive roll, and the
-            /// reserve no longer clamps a lost fight's hits.
+            /// reserve no longer clamps a lost fight's hits. At most
+            /// `battle_phases.max_lever_mod`, the 2d6 span.
             reserve: struct { commit_roll: i32 },
         },
         /// Per-drawn-OpFor-hull outcome by engagement band (destroyed first, then

@@ -312,10 +312,17 @@ pub fn leverCost(lever: Lever) u8 {
     };
 }
 
-/// The decisive-roll points a lever adds: `tuning.battle.phases.reserve
-/// .commit_roll` for the reserve; for an intervention, exactly what its
-/// profile adds before battle (`operations.interventionProfile`), here to
-/// the decisive phase alone.
+/// The most decisive-roll points one lever may add: the span of the 2d6 it
+/// modifies (2..12). Every lever's `leverMod` lies in `0..max_lever_mod`, a
+/// `data:` check every build runs, so `decisiveMod` stays within
+/// `max_levers * max_lever_mod` and every decisive-roll sum is defined
+/// (rules 25, 58).
+pub const max_lever_mod: i32 = 12 - 2;
+
+/// The decisive-roll points a lever adds, in `0..max_lever_mod`:
+/// `tuning.battle.phases.reserve.commit_roll` for the reserve; for an
+/// intervention, exactly what its profile adds before battle
+/// (`operations.interventionProfile`), here to the decisive phase alone.
 pub fn leverMod(lever: Lever) i32 {
     return switch (lever) {
         .commit_reserve => tuning.battle.phases.reserve.commit_roll,
@@ -968,6 +975,13 @@ test "leverCost and leverMod are the interventions' own cost and profile; the re
     try std.testing.expectEqual(leverMod(.commit_reserve) + leverMod(.reinforce), decisiveMod(&orders));
     try std.testing.expectEqual(leverCost(.reinforce), capacitySpent(&orders));
     try std.testing.expect(reserveCommitted(&orders) and !reserveCommitted(orders[3..]));
+}
+
+test "data: every contact-pause lever adds decisive-roll points on the 2d6 scale" {
+    for (std.enums.values(Lever)) |lever| {
+        const points = leverMod(lever);
+        try std.testing.expect(points >= 0 and points <= max_lever_mod);
+    }
 }
 
 test "leverAllowed refuses each lever for its own reason, and the course refuses it the same way" {

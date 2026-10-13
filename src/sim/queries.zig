@@ -535,9 +535,9 @@ pub fn battlePhaseReport(alloc: Alloc, gs: *GameState, id: types.ContractId) !?B
     var rows: std.ArrayListUnmanaged(BattleOrderRow) = .empty;
     const pause: ?battle_phase.Pause = if (latest) |r| r.pause else null;
     const held = if (latest) |r| r.held_field else false;
-    // The levers' availability from live state; the weather is the
-    // replay's, so grounded air cover is the command's to refuse (rule 34).
-    const avail = battle.leverAvailability(gs, c, false);
+    // Levers are listed only at the contact pause, where a battle is in
+    // progress and its replay gives the engagement's own weather.
+    const avail: ?battle_phases.Availability = if (pause == .contact) try battle.inProgressAvailability(gs, id, alloc) else null;
     const given = try alloc.alloc(battle_phase.Order, if (record) |r| r.steps.items.len else 0);
     if (record) |r| for (r.steps.items, given) |step, *o| {
         o.* = step.order;
@@ -560,7 +560,7 @@ pub fn battlePhaseReport(alloc: Alloc, gs: *GameState, id: types.ContractId) !?B
             .contract = id,
             .order = .commit_reserve,
             .text = try std.fmt.allocPrint(alloc, "commit the reserve — {s} to the decisive roll; the reserve no longer steadies a lost fight", .{try signed(alloc, battle_phases.leverMod(.commit_reserve))}),
-            .locked = leverLock(avail, given, .commit_reserve),
+            .locked = leverLock(avail.?, given, .commit_reserve),
         }),
         .intervene => for (std.enums.values(operation_mod.Intervention)) |kind_iv| {
             const order: battle_phase.Order = .{ .intervene = kind_iv };
@@ -571,7 +571,7 @@ pub fn battlePhaseReport(alloc: Alloc, gs: *GameState, id: types.ContractId) !?B
                 .text = try std.fmt.allocPrint(alloc, "{s} — {d} command capacity, {s} to the decisive roll; needs {s}", .{
                     order.label(), battle_phases.leverCost(lever), try signed(alloc, battle_phases.leverMod(lever)), interventionNeeds(kind_iv),
                 }),
-                .locked = leverLock(avail, given, order),
+                .locked = leverLock(avail.?, given, order),
             });
         },
     };
@@ -5307,6 +5307,7 @@ test "the battle screen lists every lever at the contact pause with its cost, an
     const id = try battle.leverEngagementForTest(&gs, 30, 4);
     for ([_]battle_phase.Order{ .engage, .{ .intervene = .reinforce } }) |o| _ = try commands.execute(&gs, .{ .battle_order = .{ .contract = id, .order = o } });
     const view = (try battlePhaseReport(a, &gs, id)).?;
+    const avail = (try battle.inProgressAvailability(&gs, id, a)).?;
     // One row per lever, each carrying its contract and its typed order.
     var shown = std.EnumSet(battle_phase.Lever).initEmpty();
     for (view.orders) |row| if (battle_phase.Lever.of(row.order)) |lever| {
@@ -5314,7 +5315,7 @@ test "the battle screen lists every lever at the contact pause with its cost, an
         try std.testing.expect(!shown.contains(lever));
         shown.insert(lever);
         // Its lock is exactly what the command would refuse, or nothing.
-        const refused = if (battle_phases.leverAllowed(battle.leverAvailability(&gs, gs.contracts.getPtr(id).?, false), &.{ .engage, .{ .intervene = .reinforce } }, row.order)) |_| false else |_| true;
+        const refused = if (battle_phases.leverAllowed(avail, &.{ .engage, .{ .intervene = .reinforce } }, row.order)) |_| false else |_| true;
         try std.testing.expectEqual(refused, row.locked.len > 0);
         if (lever != .commit_reserve) try std.testing.expect(std.mem.indexOf(u8, row.text, try std.fmt.allocPrint(a, "{d} command capacity", .{battle_phases.leverCost(lever)})) != null);
     };
@@ -5334,6 +5335,39 @@ test "the battle screen lists every lever at the contact pause with its cost, an
     var levers_line = false;
     for (view.lines) |line| levers_line = levers_line or std.mem.startsWith(u8, line, "levers: decisive roll +2 · 2 command capacity spent");
     try std.testing.expect(levers_line);
+}
+
+test "the battle screen's air cover row shows the engagement's own weather, as the command refuses it" {
+    const battle = @import("battle.zig");
+    const commands = @import("commands.zig");
+    const digest = @import("digest.zig");
+    // Seed 5's engagement weather grounds aircraft; seed 3's lets them fly.
+    for ([_]struct { seed: u64, grounded: bool }{ .{ .seed = 5, .grounded = true }, .{ .seed = 3, .grounded = false } }) |case| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = case.seed });
+        defer gs.deinit();
+        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena.deinit();
+        const id = try battle.leverEngagementForTest(&gs, 30, 4);
+        try battle.fighterForTest(&gs, id);
+        _ = try commands.execute(&gs, .{ .battle_order = .{ .contract = id, .order = .engage } });
+        const before = digest.stateHash(&gs);
+        const rng_before = gs.rng;
+        const view = (try battlePhaseReport(arena.allocator(), &gs, id)).?;
+        // Reading the screen replays nothing live.
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+        try std.testing.expect(std.meta.eql(rng_before, gs.rng));
+        const row = for (view.orders) |row| {
+            if (std.meta.eql(row.order, battle_phase.Order{ .intervene = .air_cover })) break row;
+        } else return error.TestExpectedEqual;
+        const order: commands.Command = .{ .battle_order = .{ .contract = id, .order = .{ .intervene = .air_cover } } };
+        if (case.grounded) {
+            try std.testing.expectEqualStrings("the weather grounds the fighters", row.locked);
+            try std.testing.expectError(error.AirCoverGrounded, commands.execute(&gs, order));
+        } else {
+            try std.testing.expectEqualStrings("", row.locked);
+            _ = try commands.execute(&gs, order);
+        }
+    }
 }
 
 test "oddsPercents totals 100 for every distribution the next phase can have" {

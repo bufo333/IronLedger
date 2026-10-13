@@ -44,6 +44,7 @@ CASES = [
     ("skull bands out of order", lambda: {"tables/skulls.zon": mutate("tables/skulls.zon", r"\.min_ratio_bp = 13_750", ".min_ratio_bp = 16_000")}, True),
     ("an empty skull table", lambda: {"tables/skulls.zon": mutate("tables/skulls.zon", r"\.bands = \.\{.*?\n    \},", ".bands = .{},", re.S)}, True),
     ("hull-condition rolls out of order", lambda: {"tables/tuning.zon": mutate("tables/tuning.zon", r"\.cond_used_roll = 7,", ".cond_used_roll = 11,")}, True),
+    ("a reserve commitment beyond the 2d6 span (decisive-roll overflow)", lambda: {"tables/tuning.zon": mutate("tables/tuning.zon", r"\.commit_roll = 2 \}", ".commit_roll = 2147483647 }")}, True),
     ("a percentage over 100", lambda: {"tables/tuning.zon": mutate("tables/tuning.zon", r"\.advance_pct = 25,", ".advance_pct = 120,")}, True),
     ("an arc with an unknown contract kind", lambda: {"tables/arcs.zon": mutate("tables/arcs.zon", r'"garrison_duty"', '"__bad_kind__"')}, True),
     ("an operation template with an unknown arc key", lambda: {"tables/operations.zon": mutate("tables/operations.zon", r'\.arc_key = "fracturing_garrison"', '.arc_key = "__bad_arc__"')}, True),
