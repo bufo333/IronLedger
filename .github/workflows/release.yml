@@ -160,7 +160,13 @@ jobs:
           }
           bash docs/verify-contract.sh
           bash docs/clean-package.sh ReleaseFast "-Dwindows-sqlite-lib-dir=$sqlite" "-Dwindows-sqlite-dll=$(Join-Path $sqlite 'sqlite3.dll')"
-          python docs/data-fixtures.py
+          try {
+            $env:PATH = "$sqlite;$originalPath"
+            & python docs/data-fixtures.py "-Dwindows-sqlite-lib-dir=$sqlite" "-Dwindows-sqlite-dll=$(Join-Path $sqlite 'sqlite3.dll')"
+            if ($LASTEXITCODE -ne 0) { throw "data fixtures failed with status $LASTEXITCODE" }
+          } finally {
+            $env:PATH = $originalPath
+          }
           pwsh -ExecutionPolicy Bypass -File docs/windows_smoke.ps1 zig-out/bin/game.exe (Join-Path $env:RUNNER_TEMP 'windows-smoke.db')
       - name: Package core ZIP (macOS and Linux)
         if: runner.os != 'Windows'

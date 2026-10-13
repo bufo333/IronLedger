@@ -19,7 +19,9 @@ not product release numbers.
 Every core ZIP contains one native executable in `bin/`, all committed logo PNGs
 in `share/iron-ledger/logos/`, and `LICENSE`, `ASSETS.md`, and
 `THIRD-PARTY-NOTICES.md` at its root. It contains no music, source tree, build
-cache, database, or symlink.
+cache, database, symlink, or debug-symbol file: a release-optimized install
+produces no Windows `game.pdb`, so its `bin/` holds exactly the packaged files.
+Debug installs keep the PDB beside `game.exe`.
 
 macOS and Linux builds link their host SQLite library. The Windows x64 package
 contains `bin/sqlite3.dll` beside `game.exe`. SQLite 3.53.4 comes only from
@@ -78,6 +80,9 @@ python3 scripts/package_release.py validate-music --archive /tmp/iron-ledger-rel
 Use `linux-x64` instead of `macos-arm64` on Linux. The macOS package is Apple Silicon (`aarch64-macos`) only. Windows CI performs its native
 SQLite acquisition, import-library build, PowerShell smoke, and package
 validation. It rejects a deliberately altered SQLite archive before extraction.
+Its gate passes the verified SQLite options (`-Dwindows-sqlite-lib-dir`,
+`-Dwindows-sqlite-dll`) to the data fixtures, as it does to the test and
+clean-package steps, with the verified SQLite directory first on `PATH`.
 
 ## GitHub Actions
 

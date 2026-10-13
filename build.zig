@@ -170,7 +170,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    b.installArtifact(exe);
+    // A release-optimized prefix holds exactly the package layout in
+    // docs/releasing.md, which ships no debug symbols, so it installs no
+    // Windows PDB; a Debug install keeps the PDB beside the executable.
+    // pdb_dir = .default installs it whenever the artifact produces one
+    // (std/Build/Step/InstallArtifact.zig, Options.pdb_dir).
+    b.getInstallStep().dependOn(&b.addInstallArtifact(exe, .{
+        .pdb_dir = if (optimize == .Debug) .default else .disabled,
+    }).step);
 
     // Packaging: the loose runtime files the binary reads at run time (the
     // .zon tables above are compiled in, these are not). The installed
