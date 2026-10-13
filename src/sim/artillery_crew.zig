@@ -6,7 +6,8 @@ const types = @import("../domain/types.zig");
 const rules = @import("../domain/artillery_operations.zig");
 const dom = @import("../domain/artillery_formation.zig");
 const person = @import("../domain/person.zig");
-const GameState = @import("state.zig").GameState;
+const state = @import("state.zig");
+const GameState = state.GameState;
 const commands = @import("commands.zig");
 const posture = @import("posture.zig");
 const operations = @import("artillery_operations.zig");
@@ -45,20 +46,62 @@ pub fn personPresent(gs: *GameState, p: *const person.Person, site: types.Site) 
     return std.meta.eql(physical, site);
 }
 
-/// Complete operating-seat eligibility with typed refusals. A candidate either
-/// belongs to this company or joins it wholly unassigned at its actual home.
+/// Complete operating-seat eligibility with typed refusals. On an attached
+/// carrier a candidate either belongs to its company or joins it wholly
+/// unassigned at its actual home. On a pooled carrier a candidate stays off
+/// company books: posted to that HQ, or wholly unassigned and standing there
+/// (the outfit seat). In transit or disposed there is no seat to take.
+/// Source: docs/p2-artillery-operations-design.md, Crew and personnel policy.
 pub fn crewEligibility(gs: *GameState, f: *const dom.Formation, seat: rules.Seat, p: *const person.Person) commands.Error!void {
-    if (f.placement != .company) return error.ArtilleryWrongLocation;
     const site = operations.operationSite(gs, f) orelse return error.ArtilleryNoServiceSite;
     if (!personnel.availableForDuty(p, gs.clock.day_index)) return error.Unavailable;
     if (!rules.qualified(p, seat)) return error.ArtilleryUnqualified;
-    const company = f.placement.company;
-    const member = gs.companyOf(p.assigned_force);
-    if (member != company and (p.assigned_force != .none or p.posted_hq != .none or site != .hq)) return error.ArtilleryPersonAbsent;
+    switch (f.placement) {
+        .company => |company| {
+            const member = gs.companyOf(p.assigned_force);
+            if (member != company and (p.assigned_force != .none or p.posted_hq != .none or site != .hq)) return error.ArtilleryPersonAbsent;
+        },
+        .hq_pool => |hq| {
+            if (p.assigned_force != .none) return error.ArtilleryPersonInCompany;
+            if (p.posted_hq != .none and p.posted_hq != hq) return error.ArtilleryPersonAbsent;
+        },
+        .freight, .sold, .destroyed, .field_freight, .field_return => return error.ArtilleryNoServiceSite,
+    }
     if (!personPresent(gs, p, site)) return error.ArtilleryPersonAbsent;
     if (isSeated(gs, p.id)) return error.ArtilleryPersonSeated;
     for (gs.units.values()) |u| if (u.tech == p.id) return error.ArtilleryPersonSeated;
     for (gs.artillery_formations.values()) |carrier| if (carrier.tech == p.id) return error.ArtilleryPersonSeated;
+}
+
+/// The short phrase a picker dims an ineligible artillery row with, for each
+/// refusal the seat, mechanic, attachment and field-freight owners return.
+/// `cli.errorText` keeps the full sentences.
+pub fn eligibilityText(err: commands.Error) []const u8 {
+    return switch (err) {
+        error.Unavailable => "unavailable",
+        error.ArtilleryUnqualified => "lacks the seat's skill",
+        error.ArtilleryPersonAbsent => "not here",
+        error.ArtilleryPersonSeated => "already seated or wrenching",
+        error.ArtilleryPersonInCompany => "on a company's books",
+        error.ArtilleryNoServiceSite => "carrier in transit",
+        error.ArtilleryNotPooled => "carrier not in an HQ pool",
+        error.ArtilleryBayJob => "carrier in the bay",
+        error.ArtilleryUnavailable => "carrier gone",
+        error.ArtilleryCompanyHome => "home: attach instead",
+        error.ArtilleryCompanyAfield => "in the field: ship instead",
+        error.ArtilleryCompanyTravelling => "travelling",
+        error.ArtilleryWrongHq => "home at another HQ",
+        error.ArtilleryAttachmentFull => "has its artillery",
+        error.ArtilleryCrewCannotTravel => "crew cannot travel",
+        error.ArtilleryCrewOtherCompany => "crew on a company's books",
+        error.NotACompany => "not a combat company",
+        error.InsufficientTreasury => "HQ cannot pay",
+        error.NoRoute => "no route",
+        error.ThroughputExceeded => "route full this week",
+        error.ArtilleryDateExhausted => "arrival date out of range",
+        error.UnknownPlanet => "world unknown",
+        else => "not possible",
+    };
 }
 
 /// Complete local mechanic eligibility; a mechanic can share local workload.
@@ -75,14 +118,21 @@ pub fn techEligibility(gs: *GameState, f: *const dom.Formation, p: *const person
 }
 
 /// Assignment allocates its log before changing either reference; no RNG or IDs.
+/// An attached seat puts the person on its company's books; a pool seat
+/// leaves books unchanged.
 pub fn assign(gs: *GameState, request: @FieldType(commands.Command, "assign_artillery_crew")) commands.Error!commands.Result {
     const f = gs.artillery_formations.getPtr(request.formation) orelse return error.NoSuchArtilleryFormation;
     const p = gs.person(request.person) orelse return error.UnknownPerson;
     if (f.crew[@intFromEnum(request.seat)] != .none) return error.ArtilleryPersonSeated;
     try crewEligibility(gs, f, request.seat, p);
-    const log = try gs.prepareLog(.rotation, .{ .company = f.placement.company }, "[artillery] formation {d} {s} assigned person {d}", .{ @intFromEnum(f.id), @tagName(request.seat), @intFromEnum(p.id) });
+    const ctx: state.LogCtx = switch (f.placement) {
+        .company => |company| .{ .company = company },
+        .hq_pool => |hq| .{ .hq = hq },
+        else => unreachable, // crewEligibility admits only these placements
+    };
+    const log = try gs.prepareLog(.rotation, ctx, "[artillery] formation {d} {s} assigned person {d}", .{ @intFromEnum(f.id), @tagName(request.seat), @intFromEnum(p.id) });
     f.crew[@intFromEnum(request.seat)] = p.id;
-    p.assigned_force = f.placement.company;
+    if (f.placement == .company) p.assigned_force = f.placement.company;
     gs.commitLog(log);
     return .{ .artillery_formation = f.id, .artillery_person = p.id };
 }
@@ -144,7 +194,7 @@ pub fn autoAssignPrepared(gs: *GameState, company: types.ForceId) !u32 {
             var best_skill: u8 = std.math.maxInt(u8);
             for (gs.people.values()) |*p| {
                 crewEligibility(gs, f, seat, p) catch |err| switch (err) {
-                    error.ArtilleryWrongLocation, error.ArtilleryNoServiceSite, error.Unavailable, error.ArtilleryUnqualified, error.ArtilleryPersonAbsent, error.ArtilleryPersonSeated => continue,
+                    error.ArtilleryNoServiceSite, error.Unavailable, error.ArtilleryUnqualified, error.ArtilleryPersonAbsent, error.ArtilleryPersonSeated => continue,
                     else => unreachable,
                 };
                 const skill = p.skill(rules.seatSkill(seat)).?;
@@ -234,6 +284,64 @@ test "qualification presence and deterministic seat selection use distinct ordin
     gs.force(co).?.location_planet = "galatea";
     try std.testing.expect(!personPresent(&gs, gs.person(ids[0]).?, .{ .hq = gs.seat() }));
     try std.testing.expect(personPresent(&gs, gs.person(ids[0]).?, .{ .company = co }));
+}
+
+fn qualifiedCrewForTest(gs: *GameState, first: []const u8) !types.PersonId {
+    const id = try gs.hirePerson(first, "Crew", .vehicle_crew);
+    try gs.person(id).?.skills.put(gs.allocator(), .gunnery_vee, 4);
+    try gs.person(id).?.skills.put(gs.allocator(), .driving_vee, 4);
+    return id;
+}
+
+/// A regional HQ away from the seat, with one carrier pooled there.
+fn farPoolForTest(gs: *GameState) !struct { home: types.HqId, far: types.HqId, formation: types.ArtilleryFormationId } {
+    const artillery = @import("artillery.zig");
+    const founding = @import("founding.zig");
+    const home = try founding.createCommander(gs, "T", .LC, .quartermaster);
+    const far = try founding.foundHq(gs, "Far", .regional, "skye");
+    gs.hqs.getPtr(far).?.funds = artillery.purchasePrice() * 2;
+    try artillery.syncMarkets(gs);
+    const offer = for (gs.artillery_offers.items) |o| {
+        if (o.hq == far) break o.id;
+    } else return error.TestUnexpectedResult;
+    const bought = try artillery.buy(gs, .{ .hq = far, .offer = offer });
+    return .{ .home = home, .far = far, .formation = bought.artillery_formation };
+}
+
+test "a pool seat takes crew posted at the carrier's own HQ without changing books and refuses everyone else unchanged" {
+    const artillery = @import("artillery.zig");
+    const toe = @import("toe.zig");
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const pool = try farPoolForTest(&gs);
+    const id = pool.formation;
+    const posted = try qualifiedCrewForTest(&gs, "Posted");
+    gs.person(posted).?.posted_hq = pool.far;
+    _ = try commands.execute(&gs, .{ .assign_artillery_crew = .{ .formation = id, .seat = .gunner, .person = posted } });
+    try std.testing.expectEqual(posted, gs.artillery_formations.get(id).?.crew[@intFromEnum(rules.Seat.gunner)]);
+    try std.testing.expectEqual(types.ForceId.none, gs.person(posted).?.assigned_force);
+    try std.testing.expectEqual(pool.far, gs.person(posted).?.posted_hq);
+    try artillery.validate(&gs);
+    // The unassigned stand at the seat HQ, not at this regional HQ.
+    const unassigned = try qualifiedCrewForTest(&gs, "Unassigned");
+    const posted_home = try qualifiedCrewForTest(&gs, "Home");
+    gs.person(posted_home).?.posted_hq = pool.home;
+    const company = try gs.createForce("Company", .company, .none);
+    try toe.assignCompanyToHq(&gs, company, pool.far);
+    const member = try qualifiedCrewForTest(&gs, "Member");
+    gs.person(member).?.assigned_force = company;
+    const unqualified = try qualifiedCrewForTest(&gs, "Unqualified");
+    gs.person(unqualified).?.posted_hq = pool.far;
+    gs.person(unqualified).?.skills.clearRetainingCapacity();
+    const wounded = try qualifiedCrewForTest(&gs, "Wounded");
+    gs.person(wounded).?.posted_hq = pool.far;
+    gs.person(wounded).?.status = .wounded;
+    for ([_]types.PersonId{ unassigned, posted_home, member, unqualified, wounded }, [_]anyerror{ error.ArtilleryPersonAbsent, error.ArtilleryPersonAbsent, error.ArtilleryPersonInCompany, error.ArtilleryUnqualified, error.Unavailable }) |candidate, expected| {
+        const before = digest.stateHash(&gs);
+        try std.testing.expectError(expected, commands.execute(&gs, .{ .assign_artillery_crew = .{ .formation = id, .seat = .commander, .person = candidate } }));
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+    }
 }
 
 test "crew commands reload and lifecycle are unchanged at each allocation failure and retry" {

@@ -17,13 +17,35 @@ pub const Freight = struct {
     paid_cost: types.CBills,
 };
 
-/// Exactly one player placement or terminal ownership history; all payloads persisted.
+/// Field freight from an HQ pool to a company in the field; the carrier holds
+/// that company's attachment slot until it attaches on arrival.
+pub const FieldFreight = struct {
+    from_hq: types.HqId,
+    company: types.ForceId,
+    dispatch_day: u32,
+    eta_day: u32,
+    paid_cost: types.CBills,
+};
+
+/// Field freight turned back to its source HQ pool after its company left the
+/// field; `dispatch_day` and `paid_cost` are the original shipment's.
+pub const FieldReturn = struct {
+    to_hq: types.HqId,
+    dispatch_day: u32,
+    eta_day: u32,
+    paid_cost: types.CBills,
+};
+
+/// Exactly one player placement or terminal ownership history; all payloads
+/// persisted. New tags append, so existing tag ordinals and digests stay fixed.
 pub const Placement = union(enum) {
     hq_pool: types.HqId,
     company: types.ForceId,
     freight: Freight,
     sold,
     destroyed,
+    field_freight: FieldFreight,
+    field_return: FieldReturn,
 };
 
 /// Organizational identity, physical carrier and persisted operational history.

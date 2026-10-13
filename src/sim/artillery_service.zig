@@ -206,7 +206,7 @@ fn damageGear(gs: *GameState, f: *dom.Formation, intact_only: bool) !void {
 fn formationBooks(gs: *GameState, f: *const dom.Formation) treasury.Attribution {
     return switch (f.placement) {
         .company => |id| treasury.attributionFor(gs, id),
-        .hq_pool, .freight, .sold, .destroyed => .{},
+        .hq_pool, .freight, .field_freight, .field_return, .sold, .destroyed => .{},
     };
 }
 

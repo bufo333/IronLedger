@@ -57,6 +57,25 @@ test "artillery acquisition placement freight offers counters and catalogue all 
         if (T == types.HqId) @field(f.placement.freight, field.name) = @enumFromInt(@intFromEnum(@field(freight, field.name)) + 1) else @field(f.placement.freight, field.name) += 1;
         try std.testing.expect(moving != stateHash(&gs));
     }
+    // Every field-freight and return-leg payload field is hashed, and the
+    // two field tags differ from each other and from HQ freight.
+    const dom = @import("../domain/artillery_formation.zig");
+    const field_freight: dom.FieldFreight = .{ .from_hq = home, .company = @enumFromInt(1), .dispatch_day = 0, .eta_day = 3, .paid_cost = 10 };
+    const field_return: dom.FieldReturn = .{ .to_hq = home, .dispatch_day = 0, .eta_day = 3, .paid_cost = 10 };
+    f.placement = .{ .field_freight = field_freight };
+    const shipping = stateHash(&gs);
+    f.placement = .{ .field_return = field_return };
+    const returning = stateHash(&gs);
+    try std.testing.expect(shipping != moving and returning != moving and shipping != returning);
+    inline for (.{ .{ "field_freight", field_freight, shipping }, .{ "field_return", field_return, returning } }) |case| {
+        inline for (@typeInfo(@TypeOf(case[1])).@"struct".fields) |field| {
+            f.placement = @unionInit(dom.Placement, case[0], case[1]);
+            const payload = &@field(f.placement, case[0]);
+            const T = @TypeOf(@field(payload, field.name));
+            if (T == types.HqId or T == types.ForceId) @field(payload, field.name) = @enumFromInt(@intFromEnum(@field(case[1], field.name)) + 1) else @field(payload, field.name) += 1;
+            try std.testing.expect(case[2] != stateHash(&gs));
+        }
+    }
     f.* = original;
     gs.artillery_offers.items[0].available = true;
     try std.testing.expect(hash != stateHash(&gs));

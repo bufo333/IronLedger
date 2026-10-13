@@ -43,6 +43,7 @@ const black_market = @import("black_market.zig");
 const artillery = @import("artillery.zig");
 const artillery_service = @import("artillery_service.zig");
 const artillery_crew_q = @import("artillery_crew.zig");
+const artillery_field_q = @import("artillery_field.zig");
 const artillery_ops_q = @import("artillery_operations.zig");
 const artillery_rules_q = @import("../domain/artillery_operations.zig");
 const hq_operations = @import("hq_ops.zig");
@@ -5908,8 +5909,17 @@ pub const PickRow = struct {
     key: []const u8 = "",
     /// Part pickers: stock of the part at the picker's site.
     on_hand: u32 = 0,
+    /// Artillery crew and unassign pickers: the operating seat the row fills or clears.
+    artillery_seat: ?artillery_rules_q.Seat = null,
+    /// Artillery mechanic rows (the unassign picker's mechanic row included).
+    artillery_tech: bool = false,
+    /// Artillery send picker: whether Enter attaches at home or ships to the field.
+    artillery_send: ?ArtillerySend = null,
     cells: table.Row,
 };
+
+/// The command an artillery send-picker row runs.
+pub const ArtillerySend = enum { attach, ship };
 
 pub const company_pick_cols: []const table.Col = &.{ .{ .name = "company" }, .{ .name = "stands" }, .{ .name = "days", .justify = .right }, .{ .name = "room / need" } };
 pub const hq_pick_cols: []const table.Col = &.{ .{ .name = "hq" }, .{ .name = "tier" }, .{ .name = "world" }, .{ .name = "staff", .justify = .right }, .{ .name = "" } };
@@ -6120,6 +6130,231 @@ pub fn unassignChoices(alloc: Alloc, gs: *GameState, unit_id: types.UnitId) ![]P
     if (gs.person(u.tech)) |t| try out.append(alloc, .{ .sel = .{ .slot = .tech }, .eligible = true, .slot = .tech, .cells = try table.row(alloc, &.{ "{a}tech{/}", try std.fmt.allocPrint(alloc, "{s}", .{try personText(alloc, t)}) }) });
     if (out.items.len == 2) try out.append(alloc, .{ .sel = .{ .slot = .any }, .eligible = true, .slot = .any, .cells = try table.row(alloc, &.{ "{a}both{/}", "" }) });
     return out.toOwnedSlice(alloc);
+}
+
+pub const artillery_crew_pick_cols: []const table.Col = &.{ .{ .name = "seat" }, .{ .name = "person" }, .{ .name = "skill", .justify = .right }, .{ .name = "" } };
+pub const artillery_tech_pick_cols: []const table.Col = &.{ .{ .name = "mechanic" }, .{ .name = "skill", .justify = .right }, .{ .name = "hours" }, .{ .name = "" } };
+pub const artillery_send_pick_cols: []const table.Col = &.{ .{ .name = "company" }, .{ .name = "stands" }, .{ .name = "action" }, .{ .name = "" } };
+
+const ArtilleryError = @import("commands.zig").Error;
+
+/// An artillery owner's refusal as the picker's dim phrase
+/// (`artillery_crew.eligibilityText`). Allocation and invariant failures
+/// propagate (rule 31).
+fn artilleryRefusal(err: ArtilleryError) ArtilleryError![]const u8 {
+    return switch (err) {
+        error.OutOfMemory, error.CorruptSave => err,
+        else => artillery_crew_q.eligibilityText(err),
+    };
+}
+
+/// "" when the owner allows, else its dim refusal phrase.
+fn artilleryWhy(result: ArtilleryError!void) ArtilleryError![]const u8 {
+    result catch |err| return artilleryRefusal(err);
+    return "";
+}
+
+/// Rows in ascending `keys` order, ties in list order, so a picker ranks
+/// without reading its cells back.
+fn orderPickRows(alloc: Alloc, rows: []const PickRow, keys: []const u64) ![]PickRow {
+    const order = try alloc.alloc(usize, rows.len);
+    for (order, 0..) |*o, i| o.* = i;
+    std.mem.sort(usize, order, keys, struct {
+        fn lt(k: []const u64, a: usize, b: usize) bool {
+            return k[a] < k[b] or (k[a] == k[b] and a < b);
+        }
+    }.lt);
+    const sorted = try alloc.alloc(PickRow, rows.len);
+    for (order, 0..) |src, i| sorted[i] = rows[src];
+    return sorted;
+}
+
+/// A picker rank: eligible rows first, then the given order fields, most
+/// significant first (each below 2^16), then the identity.
+fn pickKey(eligible: bool, major: u16, minor: u16, id: u32) u64 {
+    return (@as(u64, @intFromBool(!eligible)) << 63) | (@as(u64, major) << 47) | (@as(u64, minor) << 31) | (id & 0x7fff_ffff);
+}
+
+/// People who could take a carrier's empty operating seats: one row per empty
+/// seat and on-books vehicle crew member. Eligibility and the dim reason come
+/// from `artillery_crew.crewEligibility`; eligible rows first, then seat order,
+/// then the seat's skill (lower is better).
+pub fn artilleryCrewChoices(alloc: Alloc, gs: *GameState, id: types.ArtilleryFormationId) ![]PickRow {
+    var rows: std.ArrayListUnmanaged(PickRow) = .empty;
+    var keys: std.ArrayListUnmanaged(u64) = .empty;
+    const f = gs.artillery_formations.getPtr(id) orelse return rows.toOwnedSlice(alloc);
+    for (artillery_rules_q.seats, f.crew, 0..) |seat, occupant, seat_index| {
+        if (occupant != .none) continue;
+        for (gs.people.values()) |*p| {
+            if (p.role != .vehicle_crew or !p.isOnBooks()) continue;
+            const why = try artilleryWhy(artillery_crew_q.crewEligibility(gs, f, seat, p));
+            const skill = p.skill(artillery_rules_q.seatSkill(seat));
+            const skill_text = if (skill) |s| try std.fmt.allocPrint(alloc, "{d}", .{s}) else "—";
+            const name = try personText(alloc, p);
+            const eligible = why.len == 0;
+            const cells: table.Row = if (eligible)
+                try table.row(alloc, &.{ @tagName(seat), try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{name}), skill_text, "" })
+            else
+                try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{@tagName(seat)}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{name}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{skill_text}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{why}) });
+            try rows.append(alloc, .{ .sel = .{ .person = p.id }, .eligible = eligible, .why = why, .artillery_seat = seat, .cells = cells });
+            try keys.append(alloc, pickKey(eligible, @intCast(seat_index), skill orelse std.math.maxInt(u8), @intFromEnum(p.id)));
+        }
+    }
+    return orderPickRows(alloc, rows.items, keys.items);
+}
+
+/// Mechanics who could serve a carrier: on-books `tech_mechanic` people, with
+/// their shared weekly hours. Eligibility and the dim reason come from
+/// `artillery_crew.techEligibility`; eligible first, then skill.
+pub fn artilleryTechChoices(alloc: Alloc, gs: *GameState, id: types.ArtilleryFormationId) ![]PickRow {
+    var rows: std.ArrayListUnmanaged(PickRow) = .empty;
+    var keys: std.ArrayListUnmanaged(u64) = .empty;
+    const f = gs.artillery_formations.getPtr(id) orelse return rows.toOwnedSlice(alloc);
+    for (gs.people.values()) |*p| {
+        if (p.role != .tech_mechanic or !p.isOnBooks()) continue;
+        const why = try artilleryWhy(artillery_crew_q.techEligibility(gs, f, p));
+        const skill = p.skill(.tech_mechanic);
+        const skill_text = if (skill) |s| try std.fmt.allocPrint(alloc, "{d}", .{s}) else "—";
+        const hours = try std.fmt.allocPrint(alloc, "{d}h of {d}h", .{ maintenance.techWeeklyLoadHours(gs, p.id), maintenance.techWeeklyHoursAvailable(gs, p) });
+        const now: []const u8 = if (f.tech == p.id) "this carrier's mechanic" else "";
+        const name = try personText(alloc, p);
+        const eligible = why.len == 0;
+        const cells: table.Row = if (eligible)
+            try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{name}), skill_text, hours, now })
+        else
+            try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{name}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{skill_text}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{hours}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{why}) });
+        try rows.append(alloc, .{ .sel = .{ .person = p.id }, .eligible = eligible, .why = why, .artillery_tech = true, .cells = cells });
+        try keys.append(alloc, pickKey(eligible, skill orelse std.math.maxInt(u8), 0, @intFromEnum(p.id)));
+    }
+    return orderPickRows(alloc, rows.items, keys.items);
+}
+
+/// What can be cleared from a carrier: each occupied seat, then the mechanic.
+pub fn artilleryUnassignChoices(alloc: Alloc, gs: *GameState, id: types.ArtilleryFormationId) ![]PickRow {
+    var rows: std.ArrayListUnmanaged(PickRow) = .empty;
+    const f = gs.artillery_formations.getPtr(id) orelse return rows.toOwnedSlice(alloc);
+    for (artillery_rules_q.seats, f.crew) |seat, occupant| {
+        if (occupant == .none) continue;
+        try rows.append(alloc, .{ .sel = .{ .person = occupant }, .eligible = true, .artillery_seat = seat, .cells = try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{@tagName(seat)}), try personName(alloc, gs, occupant) }) });
+    }
+    if (f.tech != .none) try rows.append(alloc, .{ .sel = .{ .person = f.tech }, .eligible = true, .artillery_tech = true, .cells = try table.row(alloc, &.{ "{a}mechanic{/}", try personName(alloc, gs, f.tech) }) });
+    return rows.toOwnedSlice(alloc);
+}
+
+/// Where a pooled carrier can go: every combat company, attached now when the
+/// company is home (`artillery.attachCheck`) or shipped to the field with the
+/// days and cost of `artillery_field.fieldFreightQuote`. Ineligible rows are
+/// dimmed with the owner's reason; eligible first, then company identity.
+pub fn artilleryCompanyChoices(alloc: Alloc, gs: *GameState, id: types.ArtilleryFormationId) ![]PickRow {
+    var rows: std.ArrayListUnmanaged(PickRow) = .empty;
+    var keys: std.ArrayListUnmanaged(u64) = .empty;
+    const f = gs.artillery_formations.getPtr(id) orelse return rows.toOwnedSlice(alloc);
+    for (gs.forces.values()) |*co| {
+        if (co.echelon != .company) continue;
+        const send: ArtillerySend = if (posture.isCompanyHome(gs, co.id)) .attach else .ship;
+        var why: []const u8 = "";
+        var action: []const u8 = "attach now";
+        switch (send) {
+            .attach => why = try artilleryWhy(if (artillery.attachCheck(gs, f, co.id)) |_| {} else |err| err),
+            .ship => if (artillery_field_q.fieldFreightQuote(gs, alloc, id, co.id)) |quote| {
+                action = try std.fmt.allocPrint(alloc, "ship: {d} days, {s}", .{ quote.days, try money(alloc, quote.cost) });
+            } else |err| {
+                why = try artilleryRefusal(err);
+                action = "ship";
+            },
+        }
+        const name = try table.plain(alloc, co.name);
+        const stands = try companyStands(alloc, gs, co.id);
+        const eligible = why.len == 0;
+        const cells: table.Row = if (eligible)
+            try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{a}}{s}{{/}}", .{name}), stands, action, "" })
+        else
+            try table.row(alloc, &.{ try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{name}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{stands}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{action}), try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}}", .{why}) });
+        try rows.append(alloc, .{ .sel = .{ .company = co.id }, .eligible = eligible, .why = why, .artillery_send = send, .cells = cells });
+        try keys.append(alloc, pickKey(eligible, 0, 0, @intFromEnum(co.id)));
+    }
+    return orderPickRows(alloc, rows.items, keys.items);
+}
+
+test "artillery pickers carry typed seats, mechanics and send kinds with their owners' reasons and quotes" {
+    const commands = @import("commands.zig");
+    const rules = artillery_rules_q;
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const home = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice() * 4;
+    const id = (try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id })).artillery_formation;
+    const local = try gs.hirePerson("Local", "Crew", .vehicle_crew);
+    try gs.person(local).?.skills.put(gs.allocator(), .gunnery_vee, 4);
+    try gs.person(local).?.skills.put(gs.allocator(), .driving_vee, 4);
+    const absent = try gs.hirePerson("Absent", "Crew", .vehicle_crew);
+    try gs.person(absent).?.skills.put(gs.allocator(), .gunnery_vee, 4);
+    gs.person(absent).?.posted_hq = try founding.foundHq(&gs, "Far", .regional, "skye");
+    const mechanic = try gs.hirePerson("Pool", "Mechanic", .tech_mechanic);
+    const f = gs.artillery_formations.getPtr(id).?;
+
+    const crew_rows = try artilleryCrewChoices(al, &gs, id);
+    try std.testing.expectEqual(@as(usize, rules.seats.len * 2), crew_rows.len);
+    for (crew_rows, 0..) |row, i| {
+        const seat = row.artillery_seat.?;
+        const p = gs.person(row.sel.person).?;
+        try std.testing.expectEqual(row.sel.person == local, row.eligible);
+        // Eligible rows come first, in seat order.
+        if (i < rules.seats.len) try std.testing.expect(row.eligible and seat == rules.seats[i]);
+        if (artillery_crew_q.crewEligibility(&gs, f, seat, p)) |_| try std.testing.expectEqualStrings("", row.why) else |err| try std.testing.expectEqualStrings(artillery_crew_q.eligibilityText(err), row.why);
+    }
+    const tech_rows = try artilleryTechChoices(al, &gs, id);
+    try std.testing.expectEqual(@as(usize, 1), tech_rows.len);
+    try std.testing.expect(tech_rows[0].artillery_tech and tech_rows[0].eligible and tech_rows[0].sel.person == mechanic);
+
+    _ = try commands.execute(&gs, .{ .assign_artillery_crew = .{ .formation = id, .seat = .driver, .person = local } });
+    _ = try commands.execute(&gs, .{ .assign_artillery_tech = .{ .formation = id, .person = mechanic } });
+    const clear_rows = try artilleryUnassignChoices(al, &gs, id);
+    try std.testing.expectEqual(@as(usize, 2), clear_rows.len);
+    try std.testing.expect(clear_rows[0].artillery_seat.? == .driver and clear_rows[0].sel.person == local and !clear_rows[0].artillery_tech);
+    try std.testing.expect(clear_rows[1].artillery_tech and clear_rows[1].sel.person == mechanic);
+
+    // Home company: attach; afield company: ship at the quote; travelling:
+    // dimmed. Each company's home is the seat HQ, where the carrier is pooled.
+    const at_home = try gs.createForce("Home", .company, .none);
+    const afield = try gs.createForce("Afield", .company, .none);
+    gs.force(afield).?.location_planet = "galatea";
+    const away = try gs.createForce("Away", .company, .none);
+    gs.force(away).?.return_eta_day = 30;
+    const quote = try artillery_field_q.fieldFreightQuote(&gs, al, id, afield);
+    const send_rows = try artilleryCompanyChoices(al, &gs, id);
+    try std.testing.expectEqual(@as(usize, 3), send_rows.len);
+    for (send_rows) |row| {
+        const co = row.sel.company;
+        if (co == at_home) try std.testing.expect(row.eligible and row.artillery_send.? == .attach);
+        if (co == afield) {
+            try std.testing.expect(row.eligible and row.artillery_send.? == .ship);
+            try std.testing.expectEqualStrings(try std.fmt.allocPrint(al, "ship: {d} days, {s}", .{ quote.days, try money(al, quote.cost) }), row.cells[2]);
+        }
+        if (co == away) {
+            try std.testing.expect(!row.eligible and row.artillery_send.? == .ship);
+            try std.testing.expectEqualStrings(artillery_crew_q.eligibilityText(error.ArtilleryCompanyTravelling), row.why);
+        }
+    }
+    try std.testing.expect(!send_rows[send_rows.len - 1].eligible);
+
+    // The detail view names the next step and each traveller's state.
+    var next_step = false;
+    for (try artilleryDetailLines(al, &gs, id)) |line| next_step = next_step or std.mem.eql(u8, line, "  next: attach at home (e) or send to a company in the field (x)");
+    try std.testing.expect(next_step);
+    _ = try commands.execute(&gs, .{ .ship_artillery_to_company = .{ .formation = id, .company = afield } });
+    var travelling = false;
+    for (try artilleryDetailLines(al, &gs, id)) |line| travelling = travelling or std.mem.indexOf(u8, line, try std.fmt.allocPrint(al, "travelling until d{d}", .{quote.eta_day})) != null;
+    try std.testing.expect(travelling);
+
+    // Queries propagate allocation failure.
+    try std.testing.expectError(error.OutOfMemory, artilleryCrewChoices(std.testing.failing_allocator, &gs, id));
+    try std.testing.expectError(error.OutOfMemory, artilleryTechChoices(std.testing.failing_allocator, &gs, id));
+    try std.testing.expectError(error.OutOfMemory, artilleryUnassignChoices(std.testing.failing_allocator, &gs, id));
+    try std.testing.expectError(error.OutOfMemory, artilleryCompanyChoices(std.testing.failing_allocator, &gs, id));
 }
 
 test "pickers: crew rows are the right roles, own company and free first; company rows leave out the subject's own" {
@@ -7934,6 +8169,7 @@ pub fn resultText(
             try std.fmt.allocPrint(alloc, "artillery #{d} in transit — {d} days, {s}", .{ @intFromEnum(result.artillery_formation), result.artillery_eta_day -| gs.clock.day_index, try money(alloc, result.artillery_freight_cost) })
         else
             try std.fmt.allocPrint(alloc, "artillery #{d} transferred", .{@intFromEnum(result.artillery_formation)}),
+        .ship_artillery_to_company => |req| return try std.fmt.allocPrint(alloc, "artillery #{d} shipping to {s} — {d} days, {s}; attaches on arrival", .{ @intFromEnum(result.artillery_formation), try forceName(alloc, gs, req.company), result.artillery_eta_day -| gs.clock.day_index, try money(alloc, result.artillery_freight_cost) }),
         .sell_artillery => |fid| return try std.fmt.allocPrint(alloc, "artillery #{d} sold", .{@intFromEnum(fid)}),
         .assign_artillery_crew => return try std.fmt.allocPrint(alloc, "artillery #{d} — {s} seated", .{ @intFromEnum(result.artillery_formation), try personName(alloc, gs, result.artillery_person) }),
         .unassign_artillery_crew => return try std.fmt.allocPrint(alloc, "artillery #{d} — seat cleared", .{@intFromEnum(result.artillery_formation)}),
@@ -7951,16 +8187,22 @@ fn artilleryPlacementText(alloc: Alloc, gs: *GameState, f: *const @import("../do
         .hq_pool => |hq| try std.fmt.allocPrint(alloc, "HQ pool · {s}", .{try hqName(alloc, gs, hq)}),
         .company => |co| try std.fmt.allocPrint(alloc, "attached · {s}", .{try forceName(alloc, gs, co)}),
         .freight => |fr| try std.fmt.allocPrint(alloc, "in transit → {s} (eta d{d})", .{ try hqName(alloc, gs, fr.to_hq), fr.eta_day }),
+        .field_freight => |t| try std.fmt.allocPrint(alloc, "shipping → {s} (eta d{d})", .{ try forceName(alloc, gs, t.company), t.eta_day }),
+        .field_return => |t| try std.fmt.allocPrint(alloc, "diverted → {s} (eta d{d})", .{ try hqName(alloc, gs, t.to_hq), t.eta_day }),
         .sold => "sold",
         .destroyed => "destroyed",
     };
 }
 
-/// Typed list row: one per formation, carrying its identity for selection and commands.
+/// Typed list row: one per formation, carrying its identity for selection and
+/// commands: the formation, its hull, its placement tag and, when attached,
+/// its company. Actions read these, never the text.
 pub const ArtilleryFormationRow = struct {
     id: types.ArtilleryFormationId,
     text: []const u8,
-    attached: bool,
+    hull: types.HullInstanceId,
+    placement: std.meta.Tag(@import("../domain/artillery_formation.zig").Placement),
+    company: types.ForceId = .none,
 };
 
 /// Typed offer row: one per available offer, carrying its identity for purchase commands.
@@ -7993,9 +8235,26 @@ pub fn artilleryFormationRows(alloc: Alloc, gs: *GameState) ![]ArtilleryFormatio
         const line = try std.fmt.allocPrint(alloc, "#{d}  hull #{d}  quality {s}  {s}  armor {d}%  crew {d}/4  tech {s}  LT {d}rds  MG {d}rds  {s}{s}", .{
             @intFromEnum(f.id), @intFromEnum(f.hull), @tagName(f.quality), placement, f.armor_pct, crew_filled, tech_text, lt_rounds, mg_rounds, ready, has_job,
         });
-        try rows.append(alloc, .{ .id = f.id, .text = line, .attached = f.placement == .company });
+        try rows.append(alloc, .{ .id = f.id, .text = line, .hull = f.hull, .placement = std.meta.activeTag(f.placement), .company = if (f.placement == .company) f.placement.company else .none });
     }
     return rows.toOwnedSlice(alloc);
+}
+
+/// A seat's or the mechanic's travel state, from the owners: on a field leg,
+/// travelling until its ETA; on a pooled carrier, why they could not ride
+/// field freight (`artillery_field.travelBlock`); otherwise unavailable when
+/// not available for duty. Empty when nothing needs saying.
+fn artilleryPersonState(alloc: Alloc, gs: *GameState, f: *const @import("../domain/artillery_formation.zig").Formation, id: types.PersonId) ![]const u8 {
+    const p = gs.person(id) orelse return "";
+    switch (f.placement) {
+        .field_freight => |t| return try std.fmt.allocPrint(alloc, "  · travelling until d{d}", .{t.eta_day}),
+        .field_return => |t| return try std.fmt.allocPrint(alloc, "  · travelling until d{d}", .{t.eta_day}),
+        .hq_pool => |hq| if (artillery_field_q.travelBlock(gs, p, hq)) |err| {
+            return try std.fmt.allocPrint(alloc, "  · cannot travel ({s})", .{artillery_crew_q.eligibilityText(err)});
+        },
+        .company, .freight, .sold, .destroyed => {},
+    }
+    return if (personnel_owner.availableForDuty(p, gs.clock.day_index)) "" else "  · unavailable";
 }
 
 /// Detail view: full formation state for the REPL `artillery <id>` verb and TUI pane.
@@ -8008,10 +8267,10 @@ pub fn artilleryDetailLines(alloc: Alloc, gs: *GameState, id: types.ArtilleryFor
     }));
     for (artillery_rules_q.seats, f.crew) |seat, pid| {
         const occupant = if (pid != .none) try personName(alloc, gs, pid) else "—";
-        try lines.append(alloc, try std.fmt.allocPrint(alloc, "  {s:<12} {s}", .{ @tagName(seat), occupant }));
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "  {s:<12} {s}{s}", .{ @tagName(seat), occupant, try artilleryPersonState(alloc, gs, f, pid) }));
     }
     const tech_text = if (f.tech != .none) try personName(alloc, gs, f.tech) else "—";
-    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  tech         {s}", .{tech_text}));
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  tech         {s}{s}", .{ tech_text, try artilleryPersonState(alloc, gs, f, f.tech) }));
     for (artillery_rules_q.descriptors, f.slots) |d, s| {
         const cond = @tagName(s.condition);
         if (d.capacity_rounds > 0) {
@@ -8023,6 +8282,12 @@ pub fn artilleryDetailLines(alloc: Alloc, gs: *GameState, id: types.ArtilleryFor
     const block = artillery_ops_q.readinessBlock(gs, f);
     const readiness_text = if (block) |b| try std.fmt.allocPrint(alloc, "not ready: {s}", .{@tagName(b)}) else "ready";
     try lines.append(alloc, try std.fmt.allocPrint(alloc, "  readiness: {s}", .{readiness_text}));
+    switch (f.placement) {
+        .hq_pool => try lines.append(alloc, "  next: attach at home (e) or send to a company in the field (x)"),
+        .field_freight => try lines.append(alloc, "  next: attaches on arrival"),
+        .field_return => try lines.append(alloc, "  next: returns to the HQ pool"),
+        .company, .freight, .sold, .destroyed => {},
+    }
     if (artillery_ops_q.hasJob(gs, id)) try lines.append(alloc, "  bay job in progress");
     const repair_quote = artillery_service.repairQuote(gs, f) catch |err| blk: {
         switch (err) {

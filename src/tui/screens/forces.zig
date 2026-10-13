@@ -118,126 +118,118 @@ pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('['), .action = .prev_view, .label = "switch view", .group = .navigate, .shown = "[ ]", .title = 0, .help = "previous / next TO&E view: all forces, each company, unassigned hulls, the hangar, artillery" },
     .{ .match = app.keys.Match.char(']'), .action = .next_view, .label = "next view", .group = .navigate, .show_footer = false, .show_help = false },
     .{ .match = app.keys.Match.char('r'), .action = .cycle_pane, .label = "cycle pane", .group = .navigate, .title = 1, .help = "cycle the side pane: readiness, manning, damage" },
-    .{ .match = .{ .key = .enter }, .action = .assign, .label = "assign", .group = .act, .pane = 0, .help = "assign people to the hull under the cursor (narrow: its detail)" },
-    .{ .match = app.keys.Match.char('a'), .action = .seat, .label = "seat", .group = .act, .help = "seat a pilot, crew or tech on the hull under the cursor" },
-    .{ .match = app.keys.Match.char('u'), .action = .unassign, .label = "unassign", .group = .act, .help = "clear a seat or the tech on the hull under the cursor" },
+    .{ .match = .{ .key = .enter }, .action = .assign, .label = "assign", .group = .act, .pane = 0, .help = "assign people to the hull under the cursor (narrow: its detail); artillery: seat crew (narrow: its detail)" },
+    .{ .match = app.keys.Match.char('a'), .action = .seat, .label = "seat", .group = .act, .help = "seat a pilot, crew or tech on the hull under the cursor; artillery: seat crew" },
+    .{ .match = app.keys.Match.char('u'), .action = .unassign, .label = "unassign", .group = .act, .help = "clear a seat or the tech on the hull under the cursor; artillery: clear a seat or the mechanic" },
     .{ .match = app.keys.Match.char('l'), .action = .lance, .label = "lance", .group = .act, .help = "move the hull under the cursor into a lance" },
-    .{ .match = app.keys.Match.char('x'), .action = .transfer, .label = "transfer", .group = .act, .help = "send the hull under the cursor to another company" },
-    .{ .match = app.keys.Match.char('c'), .action = .crew, .label = "crew", .group = .act, .help = "hire from the halls to fill the company's manning table" },
-    .{ .match = app.keys.Match.char('A'), .action = .auto_assign, .label = "auto", .group = .act, .help = "auto-assign the company's people to its hulls" },
+    .{ .match = app.keys.Match.char('x'), .action = .transfer, .label = "transfer", .group = .act, .help = "send the hull under the cursor to another company; artillery: send the carrier to a company" },
+    .{ .match = app.keys.Match.char('c'), .action = .crew, .label = "crew", .group = .act, .help = "hire from the halls to fill the company's manning table; artillery: its company's" },
+    .{ .match = app.keys.Match.char('A'), .action = .auto_assign, .label = "auto", .group = .act, .help = "auto-assign the company's people to its hulls; artillery: its company's" },
     .{ .match = app.keys.Match.char('t'), .action = .train_one, .label = "train one / all", .group = .act, .shown = "t / T", .help = "train one person (the command line); T enrolls the whole company" },
     .{ .match = app.keys.Match.char('T'), .action = .train_all, .label = "train all", .group = .act, .show_footer = false, .show_help = false },
     .{ .match = app.keys.Match.char('o'), .action = .order, .label = "role (lance) / ROE (company)", .group = .act, .help = "cycle a lance's role, or a company's rules of engagement" },
-    .{ .match = app.keys.Match.char('d'), .action = .depot, .label = "depot", .group = .act, .help = "queue the hull under the cursor for depot repair" },
+    .{ .match = app.keys.Match.char('d'), .action = .depot, .label = "depot", .group = .act, .help = "queue the hull under the cursor for depot repair; artillery: as v" },
     .{ .match = app.keys.Match.char('R'), .action = .spares_recall, .label = "spares (hull) / recall (company)", .group = .act, .help = "on a hull: order spares for its broken gear; on a company: recall it home" },
     .{ .match = app.keys.Match.char('m'), .action = .mothball, .label = "mothball", .group = .act, .help = "mothball or reactivate the hull under the cursor" },
     .{ .match = app.keys.Match.char('w'), .action = .air_wing, .label = "air wing", .group = .act, .help = "raise an air wing for the company under the cursor" },
     .{ .match = app.keys.Match.char('+'), .action = .raise, .label = "raise", .group = .act, .help = "raise a new combat company" },
     .{ .match = app.keys.Match.char('='), .action = .raise, .label = "raise", .group = .act, .show_footer = false, .show_help = false },
-    .{ .match = app.keys.Match.char('$'), .action = .sell, .label = "sell", .group = .money, .help = "sell the hull under the cursor" },
+    .{ .match = app.keys.Match.char('$'), .action = .sell, .label = "sell", .group = .money, .help = "sell the hull under the cursor; artillery: as p" },
     .{ .match = app.keys.Match.char('X'), .action = .disband, .label = "disband", .group = .money, .help = "disband the company under the cursor" },
     .{ .match = app.keys.Match.char('b'), .action = .fabricate, .label = "fabricate", .group = .money, .help = "fabricate the structural parts the company's home HQ lacks" },
-    .{ .match = app.keys.Match.char('h'), .action = .mech, .label = "mech record", .group = .act, .help = "open the hull's lifecycle: combat history, maintenance log and ownership chain" },
+    .{ .match = app.keys.Match.char('h'), .action = .mech, .label = "mech record", .group = .act, .help = "open the hull's lifecycle: combat history, maintenance log and ownership chain (artillery too)" },
     // Artillery panel keys (active on the artillery view)
-    .{ .match = app.keys.Match.char('e'), .action = .arty_attach, .label = "attach / detach", .group = .act, .help = "attach or detach the artillery carrier (artillery panel)" },
-    .{ .match = app.keys.Match.char('f'), .action = .arty_seat, .label = "seat crew", .group = .act, .help = "assign an artillery crew seat (artillery panel)" },
-    .{ .match = app.keys.Match.char('g'), .action = .arty_tech, .label = "assign tech", .group = .act, .help = "assign or clear the artillery mechanic (artillery panel)" },
+    .{ .match = app.keys.Match.char('e'), .action = .arty_attach, .label = "attach / detach", .group = .act, .help = "pooled: pick a company to attach to at home or send to in the field; attached: detach at home (artillery panel)" },
+    .{ .match = app.keys.Match.char('f'), .action = .arty_seat, .label = "seat crew", .group = .act, .help = "pick crew for an empty artillery seat (artillery panel)" },
+    .{ .match = app.keys.Match.char('g'), .action = .arty_tech, .label = "assign tech", .group = .act, .help = "pick the artillery mechanic (artillery panel)" },
     .{ .match = app.keys.Match.char('i'), .action = .arty_reload, .label = "reload", .group = .act, .help = "reload artillery magazines (artillery panel)" },
     .{ .match = app.keys.Match.char('v'), .action = .arty_repair, .label = "repair", .group = .act, .help = "queue an artillery depot repair (artillery panel)" },
-    .{ .match = app.keys.Match.char('s'), .action = .arty_ship, .label = "ship to HQ", .group = .act, .help = "transfer artillery to another HQ (artillery panel)" },
+    .{ .match = app.keys.Match.char('s'), .action = .arty_ship, .label = "ship to HQ", .group = .act, .help = "freight a pooled carrier to another HQ (artillery panel)" },
     .{ .match = app.keys.Match.char('p'), .action = .arty_sell, .label = "sell arty", .group = .money, .help = "sell the artillery carrier (artillery panel)" },
 };
+
+/// What the artillery panel says for a key that acts only on TO&E rows.
+const toe_only_note = "that key acts on TO&E rows — here: Enter/a/f seat crew, u clear, g mechanic, e attach/detach, x send, s ship to an HQ, i reload, v repair, p sell, h record, A/c its company · [ ] back to the TO&E";
+
+/// Step to the previous or next Forces view (the artillery panel is the last
+/// of `views_len + 1`). The new view opens on its first row with its list
+/// focused, so a pane focused in the old view never hides the new cursor.
+fn stepView(self: *App, views_len: usize, forward: bool) void {
+    self.forces_view = if (forward) (self.forces_view + 1) % (views_len + 1) else (self.forces_view + views_len) % (views_len + 1);
+    self.cur(0).* = 0;
+    self.focus = 0;
+}
+
+/// The formation under the panel's cursor, or null after saying none is.
+fn selectedArtillery(self: *App, rows: []const q.ArtilleryFormationRow) ?q.ArtilleryFormationRow {
+    const cur = self.cur(0).*;
+    if (cur < rows.len) return rows[cur];
+    self.say(.dim, "no artillery formation selected", .{});
+    return null;
+}
+
+/// Raise a combat company at an HQ with a free slot (the selected one if it
+/// has room); with none free, at the selected HQ, and `raise_company` says why.
+fn openRaise(self: *App, g: *app.GameState) !void {
+    const selected: app.types.HqId = @enumFromInt(try self.hqSelId(g));
+    const pick = q.hqWithCompanySlot(g, selected);
+    self.raise.hq = if (pick == .none) selected else pick;
+    self.input.len = 0;
+    self.modal = .{ .input = .raise_name };
+}
+
+fn autoAssignCompany(self: *App, g: *app.GameState, co: app.types.ForceId) !void {
+    _ = try self.execSay(.{ .auto_assign = co }, .good, "auto-assigned {s}", .{try q.forceName(self.a(), g, co)});
+}
+
+fn crewCompany(self: *App, g: *app.GameState, co: app.types.ForceId) !void {
+    const res = self.execResult(.{ .crew_company = co }) orelse return;
+    self.say(if (res.still_open == 0) .good else .amber, "{s}: {d} hired to fill the manning table · {d} lines still open (no candidates on the boards yet)", .{ try q.forceName(self.a(), g, co), res.hired_count, res.still_open });
+}
 pub const legend = app.keys.entries(Action, &bindings);
 
+/// The artillery panel: every Forces action either acts on the formation under
+/// the cursor or says why it does not (docs/tui.md, F3 Forces).
 fn handleArty(self: *App, action: Action, al: std.mem.Allocator, g: *app.GameState) anyerror!bool {
     const views = try q.toeViews(al, g);
     const arty_rows = try q.artilleryFormationRows(al, g);
-    const cur = self.cur(0).*;
     var buf: [64]u8 = undefined;
     switch (action) {
-        .next_view => {
-            self.forces_view = (self.forces_view + 1) % (views.len + 1);
-            self.cur(0).* = 0;
+        .next_view => stepView(self, views.len, true),
+        .prev_view => stepView(self, views.len, false),
+        .raise => try openRaise(self, g),
+        .cycle_pane, .lance, .train_one, .train_all, .order, .spares_recall, .mothball, .air_wing, .disband, .fabricate => self.say(.dim, toe_only_note, .{}),
+        .assign => if (selectedArtillery(self, arty_rows)) |r| {
+            // Narrow terminals have no side pane: Enter opens the detail.
+            if (self.narrow()) self.modal = .{ .arty_detail = r.id } else self.openModal(.{ .pick_arty_crew = r.id });
         },
-        .prev_view => {
-            self.forces_view = (self.forces_view + views.len) % (views.len + 1);
-            self.cur(0).* = 0;
+        .seat, .arty_seat => if (selectedArtillery(self, arty_rows)) |r| self.openModal(.{ .pick_arty_crew = r.id }),
+        .unassign => if (selectedArtillery(self, arty_rows)) |r| self.openModal(.{ .pick_arty_unassign = r.id }),
+        .arty_tech => if (selectedArtillery(self, arty_rows)) |r| self.openModal(.{ .pick_arty_tech = r.id }),
+        .transfer => if (selectedArtillery(self, arty_rows)) |r| self.openModal(.{ .pick_arty_send = r.id }),
+        .arty_attach => if (selectedArtillery(self, arty_rows)) |r| {
+            if (r.placement == .hq_pool) self.openModal(.{ .pick_arty_send = r.id }) else try self.execReport(.{ .detach_artillery = r.id });
         },
-        .assign => {
-            // Enter on narrow: open the detail modal for the selected formation.
-            if (self.narrow() and cur < arty_rows.len) {
-                self.modal = .{ .arty_detail = arty_rows[cur].id };
-            }
-        },
-        .arty_attach => {
-            if (cur >= arty_rows.len) {
-                self.say(.dim, "no artillery formation selected", .{});
-                return true;
-            }
-            const row = arty_rows[cur];
-            const fid = @intFromEnum(row.id);
-            if (row.attached) {
-                self.input.set(std.fmt.bufPrint(&buf, "detacharty {d}", .{fid}) catch "detacharty ");
-            } else {
-                self.input.set(std.fmt.bufPrint(&buf, "attacharty {d} co:", .{fid}) catch "attacharty ");
-            }
+        .arty_repair, .depot => if (selectedArtillery(self, arty_rows)) |r| try self.execReport(.{ .repair_artillery = r.id }),
+        .arty_ship => if (selectedArtillery(self, arty_rows)) |r| {
+            self.input.set(std.fmt.bufPrint(&buf, "shiparty {d} hq:", .{@intFromEnum(r.id)}) catch "shiparty ");
             self.modal = .{ .input = .command };
         },
-        .arty_seat => {
-            if (cur >= arty_rows.len) {
-                self.say(.dim, "no artillery formation selected", .{});
-                return true;
-            }
-            const fid = @intFromEnum(arty_rows[cur].id);
-            self.input.set(std.fmt.bufPrint(&buf, "seat {d} ", .{fid}) catch "seat ");
+        .arty_reload => if (selectedArtillery(self, arty_rows)) |r| {
+            self.input.set(std.fmt.bufPrint(&buf, "reloadarty {d} ", .{@intFromEnum(r.id)}) catch "reloadarty ");
             self.modal = .{ .input = .command };
         },
-        .arty_tech => {
-            if (cur >= arty_rows.len) {
-                self.say(.dim, "no artillery formation selected", .{});
-                return true;
-            }
-            const fid = @intFromEnum(arty_rows[cur].id);
-            self.input.set(std.fmt.bufPrint(&buf, "artytech {d} ", .{fid}) catch "artytech ");
+        .arty_sell, .sell => if (selectedArtillery(self, arty_rows)) |r| {
+            self.input.set(std.fmt.bufPrint(&buf, "sellarty {d}", .{@intFromEnum(r.id)}) catch "sellarty ");
             self.modal = .{ .input = .command };
         },
-        .arty_reload => {
-            if (cur >= arty_rows.len) {
-                self.say(.dim, "no artillery formation selected", .{});
-                return true;
-            }
-            const fid = @intFromEnum(arty_rows[cur].id);
-            self.input.set(std.fmt.bufPrint(&buf, "reloadarty {d} ", .{fid}) catch "reloadarty ");
-            self.modal = .{ .input = .command };
+        .mech => if (selectedArtillery(self, arty_rows)) |r| self.openModal(.{ .mech = .{ .id = r.hull } }),
+        .auto_assign => if (selectedArtillery(self, arty_rows)) |r| {
+            if (r.company == .none) self.say(.dim, "the carrier is not attached — A acts on its company once it is", .{}) else try autoAssignCompany(self, g, r.company);
         },
-        .arty_repair => {
-            if (cur >= arty_rows.len) {
-                self.say(.dim, "no artillery formation selected", .{});
-                return true;
-            }
-            const cmd = app.game.commands.Command{ .repair_artillery = arty_rows[cur].id };
-            const res = self.execResult(cmd) orelse return true;
-            self.say(.good, "{s}", .{try q.resultText(self.a(), g, cmd, res)});
+        .crew => if (selectedArtillery(self, arty_rows)) |r| {
+            if (r.company == .none) self.say(.dim, "the carrier is not attached — c hires for its company once it is", .{}) else try crewCompany(self, g, r.company);
         },
-        .arty_ship => {
-            if (cur >= arty_rows.len) {
-                self.say(.dim, "no artillery formation selected", .{});
-                return true;
-            }
-            const fid = @intFromEnum(arty_rows[cur].id);
-            self.input.set(std.fmt.bufPrint(&buf, "shiparty {d} hq:", .{fid}) catch "shiparty ");
-            self.modal = .{ .input = .command };
-        },
-        .arty_sell => {
-            if (cur >= arty_rows.len) {
-                self.say(.dim, "no artillery formation selected", .{});
-                return true;
-            }
-            const fid = @intFromEnum(arty_rows[cur].id);
-            self.input.set(std.fmt.bufPrint(&buf, "sellarty {d}", .{fid}) catch "sellarty ");
-            self.modal = .{ .input = .command };
-        },
-        else => {}, // TO&E-specific actions do not apply in the artillery panel
     }
     return true;
 }
@@ -279,17 +271,10 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             self.openModal(.{ .pick_unassign = r.unit });
         },
         .auto_assign => if (row) |r| {
-            const co = r.company;
-            if (co != .none) {
-                _ = try self.execSay(.{ .auto_assign = co }, .good, "auto-assigned {s}", .{try q.forceName(self.a(), g, co)});
-            }
+            if (r.company != .none) try autoAssignCompany(self, g, r.company);
         },
         .crew => if (row) |r| {
-            const co = r.company;
-            if (co != .none) {
-                const res = self.execResult(.{ .crew_company = co }) orelse return true;
-                self.say(if (res.still_open == 0) .good else .amber, "{s}: {d} hired to fill the manning table · {d} lines still open (no candidates on the boards yet)", .{ try q.forceName(self.a(), g, co), res.hired_count, res.still_open });
-            }
+            if (r.company != .none) try crewCompany(self, g, r.company);
         },
         .train_one => self.openCommand("train "),
         .train_all => if (row) |r| {
@@ -333,26 +318,9 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             }
             self.openModal(.{ .lance_pick = r.unit });
         },
-        .raise => {
-            // Aim at an HQ with a free combat-company slot (the selected
-            // one if it has room); with none free, at the selected HQ,
-            // and `raise_company` says why it refuses.
-            const selected: app.types.HqId = @enumFromInt(try self.hqSelId(g));
-            const pick = q.hqWithCompanySlot(g, selected);
-            self.raise.hq = if (pick == .none) selected else pick;
-            self.input.len = 0;
-            self.modal = .{ .input = .raise_name };
-        },
-        .next_view => {
-            const views = try q.toeViews(al, g);
-            self.forces_view = (self.forces_view + 1) % (views.len + 1);
-            self.cur(0).* = 0;
-        },
-        .prev_view => {
-            const views = try q.toeViews(al, g);
-            self.forces_view = (self.forces_view + views.len) % (views.len + 1);
-            self.cur(0).* = 0;
-        },
+        .raise => try openRaise(self, g),
+        .next_view => stepView(self, (try q.toeViews(al, g)).len, true),
+        .prev_view => stepView(self, (try q.toeViews(al, g)).len, false),
         .fabricate => if (row) |r| {
             const co = r.company;
             if (co == .none) {
@@ -429,8 +397,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
                 self.say(.dim, "no lifecycle record for this hull", .{});
             }
         },
-        // Artillery panel actions — only reachable via handleArty; never reached here.
-        .arty_attach, .arty_seat, .arty_tech, .arty_reload, .arty_repair, .arty_ship, .arty_sell => {},
+        .arty_attach, .arty_seat, .arty_tech, .arty_reload, .arty_repair, .arty_ship, .arty_sell => self.say(.dim, "that key acts on the artillery panel — [ from all forces reaches it", .{}),
     }
     return true;
 }
@@ -514,20 +481,17 @@ test "artillery panel: with a formation, cursor, controls and detail" {
     // Down clamps at 0 (only one row)
     try app.pressForTest(c, .down);
     try std.testing.expectEqual(@as(usize, 0), c.app.cur(0).*);
-    // 'e' (arty_attach) prefills attacharty for an unattached formation
+    // 'e' (arty_attach) on a pooled carrier opens the send picker for it
     try app.pressForTest(c, .{ .char = 'e' });
-    try std.testing.expect(c.app.modal == .input);
-    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "attacharty") != null);
+    try std.testing.expectEqual(bought_id, c.app.modal.pick_arty_send);
     try app.pressForTest(c, .escape);
-    // 'f' (arty_seat) prefills seat command
+    // 'f' (arty_seat) opens the crew picker
     try app.pressForTest(c, .{ .char = 'f' });
-    try std.testing.expect(c.app.modal == .input);
-    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "seat") != null);
+    try std.testing.expectEqual(bought_id, c.app.modal.pick_arty_crew);
     try app.pressForTest(c, .escape);
-    // 'g' (arty_tech) prefills artytech command
+    // 'g' (arty_tech) opens the mechanic picker
     try app.pressForTest(c, .{ .char = 'g' });
-    try std.testing.expect(c.app.modal == .input);
-    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "artytech") != null);
+    try std.testing.expectEqual(bought_id, c.app.modal.pick_arty_tech);
     try app.pressForTest(c, .escape);
     // 'i' (arty_reload) prefills reloadarty command
     try app.pressForTest(c, .{ .char = 'i' });
@@ -544,28 +508,17 @@ test "artillery panel: with a formation, cursor, controls and detail" {
     try std.testing.expect(c.app.modal == .input);
     try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "sellarty") != null);
     try app.pressForTest(c, .escape);
-    // 'e' after attaching should prefill "detacharty N"
-    const toe_rows = try q.toeFiltered(al, c.app.state(), .all);
-    var co: ?game.types.ForceId = null;
-    for (toe_rows) |r| if (r.is_company) {
-        co = r.force;
-        break;
-    };
-    try std.testing.expect(co != null);
-    // 'e' opens input with attacharty prefill; complete and submit to actually attach
+    // 'e' then Enter on the home company's row attaches the carrier to it
     try app.pressForTest(c, .{ .char = 'e' });
-    try std.testing.expect(c.app.modal == .input);
-    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "attacharty") != null);
-    var attach_buf: [64]u8 = undefined;
-    c.app.input.set(std.fmt.bufPrint(&attach_buf, "attacharty {d} co:{d}", .{ @intFromEnum(bought_id), @intFromEnum(co.?) }) catch "");
+    const send_rows = try q.artilleryCompanyChoices(c.app.frame.allocator(), c.app.state(), bought_id);
+    try std.testing.expect(send_rows.len > 0 and send_rows[0].eligible and send_rows[0].artillery_send.? == .attach);
+    const home_company = send_rows[0].sel.company;
     try app.pressForTest(c, .enter);
     try std.testing.expect(c.app.modal == .none);
     try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "attached") != null);
-    // 'e' while attached prefills "detacharty N"; submit to detach
+    try std.testing.expectEqual(home_company, c.app.state().artillery_formations.get(bought_id).?.placement.company);
+    // 'e' while attached detaches at home and says so
     try app.pressForTest(c, .{ .char = 'e' });
-    try std.testing.expect(c.app.modal == .input);
-    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), "detacharty") != null);
-    try app.pressForTest(c, .enter);
     try std.testing.expect(c.app.modal == .none);
     try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "detached") != null);
     // 'v' (arty_repair) executes directly: no qualified local mechanic assigned, modal stays .none
@@ -627,9 +580,8 @@ test "artillery panel: two formations, cursor targets correct row" {
     try navToArty(c);
     // Cursor starts at 0 — targets first formation
     try std.testing.expectEqual(@as(usize, 0), c.app.cur(0).*);
-    var buf: [64]u8 = undefined;
     try app.pressForTest(c, .{ .char = 'e' });
-    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), std.fmt.bufPrint(&buf, "attacharty {d}", .{@intFromEnum(id0)}) catch "") != null);
+    try std.testing.expectEqual(id0, c.app.modal.pick_arty_send);
     try app.pressForTest(c, .escape);
     // Rendered selection agrees with activated identity: detail pane shows id0's formation.
     var id_buf: [32]u8 = undefined;
@@ -638,7 +590,7 @@ test "artillery panel: two formations, cursor targets correct row" {
     try app.pressForTest(c, .down);
     try std.testing.expectEqual(@as(usize, 1), c.app.cur(0).*);
     try app.pressForTest(c, .{ .char = 'e' });
-    try std.testing.expect(std.mem.indexOf(u8, c.app.input.slice(), std.fmt.bufPrint(&buf, "attacharty {d}", .{@intFromEnum(id1)}) catch "") != null);
+    try std.testing.expectEqual(id1, c.app.modal.pick_arty_send);
     try app.pressForTest(c, .escape);
     // Rendered selection agrees with activated identity: detail pane shows id1's formation.
     try std.testing.expect(screenHasText(&c.app.screen, std.fmt.bufPrint(&id_buf, "Artillery #{d}", .{@intFromEnum(id1)}) catch ""));
@@ -720,6 +672,144 @@ test "artillery panel: narrow Enter with no formations is a no-op" {
     try navToArty(c);
     try app.pressForTest(c, .enter);
     try std.testing.expect(c.app.modal == .none);
+}
+
+/// Whether the last key visibly did something: a modal, the campaign, the
+/// view or the status line changed.
+fn keyActed(c: *app.ClientForTest, view: usize, digest_before: u64) bool {
+    return c.app.modal != .none or c.app.msg.len > 0 or c.app.forces_view != view or digest_before != game.digest.stateHash(c.app.state());
+}
+
+test "every Forces key acts or explains itself on the artillery panel, and artillery keys explain themselves on the TO&E" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try std.testing.expect(try buyTestFormation(c));
+    try toTab(c, .forces);
+    var ignored: usize = 0;
+    // Wide (two panes) and the narrow minimum, with one pooled carrier.
+    for ([_][2]u16{ .{ 200, 50 }, .{ 80, 24 } }) |size| {
+        try c.app.screen.resize(size[0], size[1]);
+        for (bindings) |b| {
+            try navToArty(c);
+            c.app.focus = 0;
+            c.app.modal = .none;
+            c.app.msg.len = 0;
+            const view = c.app.forces_view;
+            const before = game.digest.stateHash(c.app.state());
+            try app.pressForTest(c, b.match.key);
+            if (!keyActed(c, view, before)) {
+                std.debug.print("artillery panel ignores '{s}' ({s}) at {d}x{d}\n", .{ b.shown orelse b.label, @tagName(b.action), size[0], size[1] });
+                ignored += 1;
+            }
+            c.app.modal = .none;
+        }
+        // On a TO&E view the artillery-panel keys say where they work.
+        for (bindings) |b| {
+            if (!std.mem.startsWith(u8, @tagName(b.action), "arty_")) continue;
+            c.app.forces_view = 0;
+            c.app.cur(0).* = 0;
+            c.app.focus = 0;
+            c.app.modal = .none;
+            c.app.msg.len = 0;
+            const before = game.digest.stateHash(c.app.state());
+            try app.pressForTest(c, b.match.key);
+            if (!keyActed(c, 0, before)) {
+                std.debug.print("TO&E view ignores artillery key '{s}' ({s}) at {d}x{d}\n", .{ b.label, @tagName(b.action), size[0], size[1] });
+                ignored += 1;
+            }
+            c.app.modal = .none;
+        }
+    }
+    try std.testing.expectEqual(@as(usize, 0), ignored);
+}
+
+/// The style of the first cell of `needle` on screen, or null when not shown.
+fn screenTextStyle(screen: *const app.Screen, needle: []const u8) ?@TypeOf(screen.get(0, 0).style) {
+    for (0..screen.rows) |y| {
+        if (screen.cols < needle.len) continue;
+        for (0..screen.cols - needle.len) |x| {
+            var matched = true;
+            for (needle, 0..) |ch, i| if (screen.get(@intCast(x + i), @intCast(y)).ch != ch) {
+                matched = false;
+                break;
+            };
+            if (matched) return screen.get(@intCast(x), @intCast(y)).style;
+        }
+    }
+    return null;
+}
+
+test "switching Forces views focuses the list, so the artillery panel opens with its cursor on the carrier" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try std.testing.expect(try buyTestFormation(c));
+    try toTab(c, .forces);
+    c.app.forces_view = 0;
+    try app.pressForTest(c, .tab);
+    try std.testing.expectEqual(@as(u8, 1), c.app.focus);
+    try app.pressForTest(c, .{ .char = '[' });
+    try std.testing.expectEqual(@as(u8, 0), c.app.focus);
+    try std.testing.expect(screenTextStyle(&c.app.screen, "#1  hull #").? == .sel);
+    // And back to a TO&E view: the TO&E list has the focus.
+    try app.pressForTest(c, .tab);
+    try app.pressForTest(c, .{ .char = ']' });
+    try std.testing.expectEqual(@as(u8, 0), c.app.focus);
+}
+
+test "artillery pickers act on the typed row under the cursor, and a dimmed row shows the owner's refusal" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    try std.testing.expect(try buyTestFormation(c));
+    const fid = (try q.artilleryFormationRows(c.app.frame.allocator(), c.app.state()))[0].id;
+    const hired = c.app.execResult(.{ .hire = .{ .first = "Pool", .last = "Gunner", .role = .vehicle_crew } }).?.hired;
+    try toTab(c, .forces);
+    try navToArty(c);
+    // Wide Enter: the crew picker; Enter seats the highlighted row's person in its seat.
+    try app.pressForTest(c, .enter);
+    try std.testing.expectEqual(fid, c.app.modal.pick_arty_crew);
+    const top = (try q.artilleryCrewChoices(c.app.frame.allocator(), c.app.state(), fid))[0];
+    try std.testing.expect(top.eligible);
+    var hired_eligible = false;
+    for (try q.artilleryCrewChoices(c.app.frame.allocator(), c.app.state(), fid)) |row| hired_eligible = hired_eligible or (row.sel.person == hired and row.eligible);
+    try std.testing.expect(hired_eligible);
+    try app.pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .none);
+    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "seated") != null);
+    try std.testing.expectEqual(top.sel.person, c.app.state().artillery_formations.get(fid).?.crew[@intFromEnum(top.artillery_seat.?)]);
+    // u: the clear picker's row clears that seat.
+    try app.pressForTest(c, .{ .char = 'u' });
+    try std.testing.expectEqual(fid, c.app.modal.pick_arty_unassign);
+    try app.pressForTest(c, .enter);
+    try std.testing.expect(std.mem.indexOf(u8, c.app.msg.slice(), "seat cleared") != null);
+    try std.testing.expectEqual(game.types.PersonId.none, c.app.state().artillery_formations.get(fid).?.crew[@intFromEnum(top.artillery_seat.?)]);
+    // A travelling company's row is dimmed; Enter still sends the command and
+    // shows the canonical refusal, changing nothing.
+    var co: game.types.ForceId = .none;
+    for (try q.toeFiltered(c.app.frame.allocator(), c.app.state(), .all)) |r| if (r.is_company) {
+        co = r.force;
+    };
+    try std.testing.expect(co != .none);
+    c.app.state().forces.getPtr(co).?.return_eta_day = c.app.state().clock.day_index + 30;
+    try app.pressForTest(c, .{ .char = 'x' });
+    try std.testing.expectEqual(fid, c.app.modal.pick_arty_send);
+    const rows = try q.artilleryCompanyChoices(c.app.frame.allocator(), c.app.state(), fid);
+    const at = for (rows, 0..) |row, i| {
+        if (row.sel.company == co) break i;
+    } else return error.TestUnexpectedResult;
+    try std.testing.expect(!rows[at].eligible);
+    c.app.modal_cursor = at;
+    const before = game.digest.stateHash(c.app.state());
+    try app.pressForTest(c, .enter);
+    var want: [256]u8 = undefined;
+    try std.testing.expectEqualStrings(try std.fmt.bufPrint(&want, "refused: {s}", .{game.cli.errorText(error.ArtilleryCompanyTravelling)}), c.app.msg.slice());
+    try std.testing.expectEqual(before, game.digest.stateHash(c.app.state()));
+    // Narrow: the pickers draw at the minimum size.
+    try c.app.screen.resize(80, 24);
+    try app.pressForTest(c, .{ .char = 'f' });
+    try std.testing.expectEqual(fid, c.app.modal.pick_arty_crew);
+    try app.pressForTest(c, .escape);
+    try app.pressForTest(c, .{ .char = 'g' });
+    try std.testing.expectEqual(fid, c.app.modal.pick_arty_tech);
 }
 
 test "arty_detail modal is wired into drawList and listKey dispatch" {

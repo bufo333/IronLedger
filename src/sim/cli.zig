@@ -691,11 +691,13 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         return .{ .detach_artillery = @enumFromInt(try num(u32, tokens.next())) };
     }
     if (eq(u8, verb, "shiparty")) {
-        // shiparty <formation-id> hq:N
+        // shiparty <formation-id> hq:N|co:N — HQ freight, or field freight to a company
         const fid: types.ArtilleryFormationId = @enumFromInt(try num(u32, tokens.next()));
-        const site = try parseSite(try need(tokens.next()));
-        if (site != .hq) return error.BadSite;
-        return .{ .transfer_artillery = .{ .formation = fid, .to_hq = site.hq } };
+        return switch (try parseSite(try need(tokens.next()))) {
+            .hq => |hq| .{ .transfer_artillery = .{ .formation = fid, .to_hq = hq } },
+            .company => |co| .{ .ship_artillery_to_company = .{ .formation = fid, .company = co } },
+            .outfit => error.BadSite,
+        };
     }
     if (eq(u8, verb, "sellarty")) {
         // sellarty <formation-id>
@@ -775,6 +777,14 @@ pub fn errorText(err: anyerror) []const u8 {
         error.ArtilleryIdExhausted => "no artillery IDs remain — nothing was changed",
         error.ArtilleryDateExhausted => "the artillery arrival date cannot be represented — nothing was changed",
         error.ArtilleryFundsExhausted => "the artillery sale would exceed the treasury range — nothing was changed",
+        error.ArtilleryNotPooled => "the artillery carrier is not in an HQ pool — detach it at home or wait for its freight to land",
+        error.ArtilleryCompanyHome => "that company is home — attach the carrier at its home HQ instead (attacharty)",
+        error.ArtilleryCompanyAfield => "that company is in the field — send the carrier to it with field freight (x, or shiparty <id> co:<id>)",
+        error.ArtilleryCompanyTravelling => "that company is travelling — wait until it is home or in the field",
+        error.ArtilleryWrongHq => "the carrier is pooled at another HQ — ship it to the company's home HQ first (shiparty <id> hq:<id>)",
+        error.ArtilleryCrewCannotTravel => "a seated crew member or the mechanic is unavailable or not at the carrier's HQ — clear the seat or wait",
+        error.ArtilleryCrewOtherCompany => "a seated crew member or the mechanic is on a company's books — clear the seat or the mechanic first",
+        error.ArtilleryPersonInCompany => "that person is on a company's books — attach the carrier to that company at home, then seat them",
         error.UnknownHq => "no HQ has that id",
         error.NotAComponent => "that part is not a structural component (comp_*)",
         error.NoSuchCandidate => "no hall candidate with that number",
@@ -1117,7 +1127,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "buyarty", "buyarty <offer-id> hq:N" },
         .{ "attacharty", "attacharty <formation-id> co:N" },
         .{ "detacharty", "detacharty <formation-id>" },
-        .{ "shiparty", "shiparty <formation-id> hq:N" },
+        .{ "shiparty", "shiparty <formation-id> hq:N|co:N" },
         .{ "sellarty", "sellarty <formation-id>" },
         .{ "seat", "seat <formation-id> commander|gunner|driver|loader <person-id|clear>" },
         .{ "artytech", "artytech <formation-id> <person-id|clear>" },
@@ -1417,6 +1427,27 @@ test "unsupported old formats share a truthful refusal distinct from corruption 
     for ([_]anyerror{ error.CorruptSave, error.CorruptStore, error.StoreNewerThanGame, error.SaveNewerThanGame, error.StoreReadOnly }) |err| try std.testing.expect(!std.mem.eql(u8, sentence, errorText(err)));
 }
 
+test "attach refusals for a company in the field or a carrier pooled elsewhere name the remedy" {
+    try std.testing.expect(std.mem.indexOf(u8, errorText(error.ArtilleryCompanyAfield), "send") != null);
+    try std.testing.expect(std.mem.indexOf(u8, errorText(error.ArtilleryWrongHq), "ship") != null);
+}
+
+test "every field-freight and pool-seat refusal has its own sentence" {
+    const cases = [_]struct { err: anyerror, text: []const u8 }{
+        .{ .err = error.ArtilleryNotPooled, .text = "the artillery carrier is not in an HQ pool — detach it at home or wait for its freight to land" },
+        .{ .err = error.ArtilleryCompanyHome, .text = "that company is home — attach the carrier at its home HQ instead (attacharty)" },
+        .{ .err = error.ArtilleryCompanyAfield, .text = "that company is in the field — send the carrier to it with field freight (x, or shiparty <id> co:<id>)" },
+        .{ .err = error.ArtilleryCompanyTravelling, .text = "that company is travelling — wait until it is home or in the field" },
+        .{ .err = error.ArtilleryWrongHq, .text = "the carrier is pooled at another HQ — ship it to the company's home HQ first (shiparty <id> hq:<id>)" },
+        .{ .err = error.ArtilleryCrewCannotTravel, .text = "a seated crew member or the mechanic is unavailable or not at the carrier's HQ — clear the seat or wait" },
+        .{ .err = error.ArtilleryCrewOtherCompany, .text = "a seated crew member or the mechanic is on a company's books — clear the seat or the mechanic first" },
+        .{ .err = error.ArtilleryPersonInCompany, .text = "that person is on a company's books — attach the carrier to that company at home, then seat them" },
+    };
+    for (cases) |case| try std.testing.expectEqualStrings(case.text, errorText(case.err));
+    // The wrong-location sentence stays for detach, sale and HQ freight.
+    try std.testing.expectEqualStrings("the artillery carrier and company must be at the required home HQ pool", errorText(error.ArtilleryWrongLocation));
+}
+
 test "artillery verbs parse their commands and enforce closed choices" {
     const t = std.testing;
     // buyarty
@@ -1436,7 +1467,14 @@ test "artillery verbs parse their commands and enforce closed choices" {
     // shiparty
     try t.expectEqual(@as(u32, 7), @intFromEnum((try parseLine("shiparty 7 hq:2")).?.transfer_artillery.formation));
     try t.expectEqual(@as(u32, 2), @intFromEnum((try parseLine("shiparty 7 hq:2")).?.transfer_artillery.to_hq));
-    try t.expectError(error.BadSite, parseLine("shiparty 7 co:1"));
+    const field = (try parseLine("shiparty 1 co:2")).?.ship_artillery_to_company;
+    try t.expectEqual(@as(u32, 1), @intFromEnum(field.formation));
+    try t.expectEqual(@as(u32, 2), @intFromEnum(field.company));
+    try t.expectError(error.BadArguments, parseLine("shiparty 1"));
+    try t.expectError(error.BadArguments, parseLine("shiparty 1 co:2 x"));
+    try t.expectError(error.BadSite, parseLine("shiparty 1 outfit"));
+    try t.expectError(error.BadSite, parseLine("shiparty 1 lance:2"));
+    try t.expectEqualStrings("shiparty <formation-id> hq:N|co:N", usage("shiparty").?);
     // sellarty
     try t.expectEqual(@as(u32, 4), @intFromEnum((try parseLine("sellarty 4")).?.sell_artillery));
     // seat: assign and clear paths

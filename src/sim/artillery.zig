@@ -16,6 +16,7 @@ const commands = @import("commands.zig");
 const posture = @import("posture.zig");
 const sites = @import("sites.zig");
 const operations = @import("artillery_operations.zig");
+const field_delivery = @import("artillery_field.zig");
 const operation_rules = @import("../domain/artillery_operations.zig");
 const battle_report = @import("../domain/battle_report.zig");
 const combat_rules = @import("../domain/artillery_combat.zig");
@@ -131,6 +132,12 @@ pub fn attachedCount(gs: *const GameState, co: types.ForceId) u32 {
     return count;
 }
 
+/// The company's attachment slots in use: attached carriers plus carriers on
+/// field freight to it. `dom.company_formation_cap` bounds this count.
+pub fn committedCount(gs: *const GameState, co: types.ForceId) u32 {
+    return attachedCount(gs, co) + field_delivery.inboundCount(gs, co);
+}
+
 /// Validate the actual combat company and home locality, with no posture fallback.
 fn companyHome(gs: *GameState, co: types.ForceId) commands.Error!types.HqId {
     const f = gs.forces.getPtr(co) orelse return error.UnknownForce;
@@ -141,16 +148,38 @@ fn companyHome(gs: *GameState, co: types.ForceId) commands.Error!types.HqId {
     return hq;
 }
 
-/// Attach only at the company's actual home pool; the carrier follows parent posture.
-pub fn attach(gs: *GameState, request: @FieldType(commands.Command, "attach_artillery")) commands.Error!commands.Result {
-    const f = try owned(gs, request.formation);
+/// Home attachment eligibility, the one owner the command and the send picker
+/// consume: a pooled carrier with no bay job joins a combat company physically
+/// home at that same HQ, within the attachment cap. Returns that home HQ. A
+/// company in the field takes field freight instead (`artillery_field`).
+/// Source: docs/p2-artillery-acquisition-design.md. Pure; no RNG.
+pub fn attachCheck(gs: *GameState, f: *const dom.Formation, co: types.ForceId) commands.Error!types.HqId {
+    if (!isCarried(f)) return error.ArtilleryUnavailable;
     if (operations.hasJob(gs, f.id)) return error.ArtilleryBayJob;
-    const home = try companyHome(gs, request.company);
-    if (f.placement != .hq_pool or f.placement.hq_pool != home) return error.ArtilleryWrongLocation;
-    if (attachedCount(gs, request.company) >= dom.company_formation_cap) return error.ArtilleryAttachmentFull;
+    const company = gs.forces.getPtr(co) orelse return error.UnknownForce;
+    if (company.echelon != .company) return error.NotACompany;
+    if (f.placement != .hq_pool) return error.ArtilleryNotPooled;
+    switch (posture.companyPosture(gs, co)) {
+        .home => {},
+        .deployed, .idle_afield => return error.ArtilleryCompanyAfield,
+        .en_route, .returning => return error.ArtilleryCompanyTravelling,
+    }
+    const home = gs.homeHqFor(co);
+    if (!gs.hqs.contains(home)) return error.UnknownHq;
+    if (f.placement.hq_pool != home) return error.ArtilleryWrongHq;
+    if (committedCount(gs, co) >= dom.company_formation_cap) return error.ArtilleryAttachmentFull;
+    return home;
+}
+
+/// Attach only at the company's actual home pool; the carrier follows parent
+/// posture. Pool crew join the company's books; the pool mechanic is cleared.
+pub fn attach(gs: *GameState, request: @FieldType(commands.Command, "attach_artillery")) commands.Error!commands.Result {
+    const f = gs.artillery_formations.getPtr(request.formation) orelse return error.NoSuchArtilleryFormation;
+    const home = try attachCheck(gs, f, request.company);
     const log = try gs.prepareLog(.rotation, .{ .hq = home, .company = request.company }, "[artillery] formation {d} attached to company {d}", .{ @intFromEnum(f.id), @intFromEnum(request.company) });
     f.tech = .none;
     f.placement = .{ .company = request.company };
+    field_delivery.joinCompany(gs, f, request.company);
     gs.commitLog(log);
     return .{};
 }
@@ -172,6 +201,7 @@ pub fn detach(gs: *GameState, id: types.ArtilleryFormationId) commands.Error!com
 
 /// Quote and commit explicit HQ freight once. Invalid planets never reach
 /// freightQuote's compatibility fallback; date/funds exhaustion refuses unchanged.
+/// Pool crew and the mechanic stay behind on their books.
 pub fn transfer(gs: *GameState, request: @FieldType(commands.Command, "transfer_artillery")) commands.Error!commands.Result {
     const f = try owned(gs, request.formation);
     if (operations.hasJob(gs, f.id)) return error.ArtilleryBayJob;
@@ -191,30 +221,38 @@ pub fn transfer(gs: *GameState, request: @FieldType(commands.Command, "transfer_
     gs.commitTreasuryPosting(posting);
     sites.commitFreight(gs, quote);
     f.tech = .none;
+    f.crew = @splat(.none);
     f.placement = .{ .freight = .{ .from_hq = from, .to_hq = request.to_hq, .dispatch_day = gs.clock.day_index, .eta_day = eta, .paid_cost = quote.cost } };
     gs.commitLog(log);
     return .{ .artillery_formation = request.formation, .hq = request.to_hq, .artillery_freight_cost = quote.cost, .artillery_eta_day = eta, .in_transit = true };
 }
 
-/// Complete each due freight entity atomically in stored order. Earlier arrivals
-/// may commit before a later OOM; retries see pool placement and never deliver twice.
+/// Complete each due freight entity atomically in stored order, including field
+/// freight arrival and diversion (`artillery_field.arrive`). Each entity's log is
+/// prepared before its mutation; earlier entities may commit before a later OOM,
+/// and a retry sees their new placement and never repeats them.
 pub fn runArrivals(gs: *GameState) !void {
-    for (gs.artillery_formations.values()) |*f| {
-        if (f.placement != .freight or f.placement.freight.eta_day > gs.clock.day_index) continue;
-        const to = f.placement.freight.to_hq;
-        if (!gs.hqs.contains(to)) return error.CorruptSave;
-        const log = try gs.prepareLog(.delivery, .{ .hq = to }, "[artillery] formation {d} delivered to HQ {d}", .{ @intFromEnum(f.id), @intFromEnum(to) });
-        f.placement = .{ .hq_pool = to };
-        gs.commitLog(log);
-    }
+    for (gs.artillery_formations.values()) |*f| switch (f.placement) {
+        .freight => |t| {
+            if (t.eta_day > gs.clock.day_index) continue;
+            if (!gs.hqs.contains(t.to_hq)) return error.CorruptSave;
+            const log = try gs.prepareLog(.delivery, .{ .hq = t.to_hq }, "[artillery] formation {d} delivered to HQ {d}", .{ @intFromEnum(f.id), @intFromEnum(t.to_hq) });
+            f.placement = .{ .hq_pool = t.to_hq };
+            gs.commitLog(log);
+        },
+        .field_freight, .field_return => try field_delivery.arrive(gs, f),
+        .hq_pool, .company, .sold, .destroyed => {},
+    };
 }
 
-/// HQ deletion cannot orphan a pool or either endpoint of committed freight.
+/// HQ deletion cannot orphan a pool or any endpoint of committed freight.
 pub fn hqHasCarriers(gs: *const GameState, hq: types.HqId) bool {
     for (gs.artillery_formations.values()) |f| switch (f.placement) {
         .hq_pool => |id| if (id == hq) return true,
         .freight => |t| if (t.from_hq == hq or t.to_hq == hq) return true,
-        else => {},
+        .field_freight => |t| if (t.from_hq == hq) return true,
+        .field_return => |t| if (t.to_hq == hq) return true,
+        .company, .sold, .destroyed => {},
     };
     for (gs.bay_jobs.items) |job| if (job.hq == hq and job.artillery != .none) return true;
     return false;
@@ -538,51 +576,77 @@ test "purchase freight disposal and arrival failures preserve complete gameplay 
     }
 }
 
-fn twoDueArrivals(gs: *GameState) !void {
+/// Four due arrivals: two HQ freights, field freight whose company is on
+/// station (it attaches) and field freight whose company came home (it
+/// diverts). `field_first` stores the field entities before the HQ freights.
+fn dueArrivals(gs: *GameState, field_first: bool) !void {
     const home = try fixture(gs);
     const far = try @import("founding.zig").foundHq(gs, "Far", .regional, "skye");
     const destination = try @import("founding.zig").foundHq(gs, "Destination", .field, "alkaid");
     gs.hqs.getPtr(far).?.funds = purchasePrice() * 4;
     try syncMarkets(gs);
-    const first = try buyAt(gs, home);
-    const second = try buyAt(gs, far);
+    const earlier = [2]commands.Result{ try buyAt(gs, home), try buyAt(gs, far) };
+    gs.clock.date.month += 1;
+    try syncMarkets(gs);
+    const later = [2]commands.Result{ try buyAt(gs, home), try buyAt(gs, far) };
+    const by_hq = if (field_first) later else earlier;
+    const to_field = if (field_first) earlier else later;
     try gs.hq_links.append(gs.allocator(), .{ .a = home, .b = far, .level = 2, .established_day = 0 });
     try gs.hq_links.append(gs.allocator(), .{ .a = far, .b = destination, .level = 2, .established_day = 0 });
-    const outward = try transfer(gs, .{ .formation = first.artillery_formation, .to_hq = far });
-    const onward = try transfer(gs, .{ .formation = second.artillery_formation, .to_hq = destination });
-    gs.clock.day_index = @max(outward.artillery_eta_day, onward.artillery_eta_day);
+    const outward = try transfer(gs, .{ .formation = by_hq[0].artillery_formation, .to_hq = far });
+    const onward = try transfer(gs, .{ .formation = by_hq[1].artillery_formation, .to_hq = destination });
+    var eta = @max(outward.artillery_eta_day, onward.artillery_eta_day);
+    // Each field carrier ships from its own pool to a company of that HQ.
+    for (to_field, [_][]const u8{ "On station", "Recalled" }, [_]types.HqId{ home, far }) |bought, name, source| {
+        const co = try gs.createForce(name, .company, .none);
+        if (source != home) try @import("toe.zig").assignCompanyToHq(gs, co, source);
+        const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+        gs.next_contract_id += 1;
+        try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .status = .active, .assigned_company = co, .terms = .{ .length_months = 6, .base_pay_month = 400_000 } });
+        const shipped = try commands.execute(gs, .{ .ship_artillery_to_company = .{ .formation = bought.artillery_formation, .company = co } });
+        eta = @max(eta, shipped.artillery_eta_day);
+        if (source == far) gs.contracts.getPtr(cid).?.status = .completed;
+    }
+    gs.clock.day_index = eta;
 }
 
 test "partial artillery arrival allocation failure retries each carrier exactly once" {
+    // The arena reaches its child allocator only for the first entities'
+    // logs, so each stored order puts one kind of entity in those places.
+    for ([_]bool{ false, true }) |field_first| try partialArrivalRetryForTest(field_first);
+}
+
+fn partialArrivalRetryForTest(field_first: bool) !void {
     const digest = @import("digest.zig");
     var clean = GameState.init(std.testing.allocator, .{});
     defer clean.deinit();
-    try twoDueArrivals(&clean);
+    try dueArrivals(&clean, field_first);
     try runArrivals(&clean);
     const complete = digest.stateHash(&clean);
-    var saw_partial_failure = false;
+    const entities = 4;
+    var committed_before_failure = [_]bool{false} ** entities;
     var fail_index: usize = 0;
     while (true) : (fail_index += 1) {
         var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
         defer outer.deinit();
         var gs = GameState.init(outer.allocator(), .{});
         defer gs.deinit();
-        try twoDueArrivals(&gs);
-        const first = gs.artillery_formations.values()[0];
-        const second = gs.artillery_formations.values()[1];
+        try dueArrivals(&gs, field_first);
+        var original: [entities]dom.Formation = undefined;
+        @memcpy(&original, gs.artillery_formations.values());
         const log_count = gs.event_log.items.len;
         const ledger_count = gs.ledger.transactions.items.len;
         const funds = gs.funds;
-        const home_funds = gs.hqs.get(gs.seat()).?.funds;
-        const far_funds = gs.hqs.get(first.placement.freight.to_hq).?.funds;
+        var hq_funds: [3]types.CBills = undefined;
+        for (&hq_funds, gs.hqs.values()) |*kept, h| kept.* = h.funds;
         const reservations = [2]u32{ gs.hq_links.items[0].tons_this_week, gs.hq_links.items[1].tons_this_week };
         const next_formation = gs.next_artillery_formation_id;
         const next_hull = gs.next_hull_instance_id;
         const next_offer = gs.next_artillery_offer_id;
         const before = digest.stateHash(&gs);
-        // One append fits; the second must grow. A fresh arena makes the
+        // One append fits; the next must grow. A fresh arena makes the
         // failing allocator exercise real log preparation allocations.
-        try gs.reserveLog(2);
+        try gs.reserveLog(entities);
         gs.event_log.capacity = log_count + 1;
         gs.arena.state = .{};
         var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index, .resize_fail_index = 0 });
@@ -595,34 +659,32 @@ test "partial artillery arrival allocation failure retries each carrier exactly 
         } else |err| {
             try std.testing.expectEqual(error.OutOfMemory, err);
             try std.testing.expect(failing.has_induced_failure);
-            if (gs.artillery_formations.get(first.id).?.placement == .hq_pool) {
-                saw_partial_failure = true;
-                try std.testing.expectEqual(dom.Placement{ .hq_pool = first.placement.freight.to_hq }, gs.artillery_formations.get(first.id).?.placement);
-                try std.testing.expectEqualDeep(second, gs.artillery_formations.get(second.id).?);
-                try std.testing.expectEqual(log_count + 1, gs.event_log.items.len);
-                try std.testing.expectEqual(first.placement.freight.to_hq, gs.event_log.items[log_count].hq);
-                try std.testing.expectEqual(ledger_count, gs.ledger.transactions.items.len);
-                try std.testing.expectEqual(funds, gs.funds);
-                try std.testing.expectEqual(home_funds, gs.hqs.get(gs.seat()).?.funds);
-                try std.testing.expectEqual(far_funds, gs.hqs.get(first.placement.freight.to_hq).?.funds);
-                try std.testing.expectEqual(reservations, [2]u32{ gs.hq_links.items[0].tons_this_week, gs.hq_links.items[1].tons_this_week });
-                try std.testing.expectEqual(next_formation, gs.next_artillery_formation_id);
-                try std.testing.expectEqual(next_hull, gs.next_hull_instance_id);
-                try std.testing.expectEqual(next_offer, gs.next_artillery_offer_id);
-                try std.testing.expectEqual(first.hull, gs.artillery_formations.get(first.id).?.hull);
-            } else {
-                try std.testing.expectEqual(before, digest.stateHash(&gs));
-            }
+            // Earlier entities committed whole, each with one log; the failed
+            // entity and every later one are untouched.
+            var done: usize = 0;
+            while (done < entities and !std.meta.eql(original[done].placement, gs.artillery_formations.values()[done].placement)) done += 1;
+            for (original[done..], gs.artillery_formations.values()[done..]) |was, now| try std.testing.expectEqualDeep(was, now);
+            try std.testing.expectEqual(log_count + done, gs.event_log.items.len);
+            if (done == 0) try std.testing.expectEqual(before, digest.stateHash(&gs));
+            committed_before_failure[done] = true;
+            try std.testing.expectEqual(ledger_count, gs.ledger.transactions.items.len);
+            try std.testing.expectEqual(funds, gs.funds);
+            for (hq_funds, gs.hqs.values()) |kept, h| try std.testing.expectEqual(kept, h.funds);
+            try std.testing.expectEqual(reservations, [2]u32{ gs.hq_links.items[0].tons_this_week, gs.hq_links.items[1].tons_this_week });
+            try std.testing.expectEqual(next_formation, gs.next_artillery_formation_id);
+            try std.testing.expectEqual(next_hull, gs.next_hull_instance_id);
+            try std.testing.expectEqual(next_offer, gs.next_artillery_offer_id);
             try runArrivals(&gs);
             // Compare all gameplay state with uninterrupted delivery, including
             // log order/tags, charges, reservations, hull history, IDs and RNG.
             try std.testing.expectEqual(complete, digest.stateHash(&gs));
-            try std.testing.expectEqual(log_count + 2, gs.event_log.items.len);
+            try std.testing.expectEqual(log_count + entities, gs.event_log.items.len);
             try runArrivals(&gs);
             try std.testing.expectEqual(complete, digest.stateHash(&gs));
         }
     }
-    try std.testing.expect(saw_partial_failure);
+    // Failures landed at the first entity and after it had committed.
+    try std.testing.expect(committed_before_failure[0] and committed_before_failure[1]);
 }
 
 test "attachment cap actual home and noncombat echelons refuse atomically" {
@@ -636,7 +698,7 @@ test "attachment cap actual home and noncombat echelons refuse atomically" {
     try toe.assignCompanyToHq(&gs, co, other);
     const first = try buyAt(&gs, home);
     const pooled = @import("digest.zig").stateHash(&gs);
-    try std.testing.expectError(error.ArtilleryWrongLocation, attach(&gs, .{ .formation = first.artillery_formation, .company = co }));
+    try std.testing.expectError(error.ArtilleryWrongHq, attach(&gs, .{ .formation = first.artillery_formation, .company = co }));
     try std.testing.expectEqual(pooled, digest.stateHash(&gs));
     try toe.assignCompanyToHq(&gs, co, home);
     _ = try attach(&gs, .{ .formation = first.artillery_formation, .company = co });
@@ -653,6 +715,37 @@ test "attachment cap actual home and noncombat echelons refuse atomically" {
         try std.testing.expectEqual(bad, digest.stateHash(&gs));
     }
     try validate(&gs);
+}
+
+test "attach refusals name a company in the field or a carrier pooled elsewhere and change nothing" {
+    const digest = @import("digest.zig");
+    const toe = @import("toe.zig");
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    const home = try fixture(&gs);
+    const other = try @import("founding.zig").foundHq(&gs, "Other", .regional, "skye");
+    const co = try gs.createForce("Company", .company, .none);
+    try toe.assignCompanyToHq(&gs, co, home);
+    const bought = try buyAt(&gs, home);
+    const request: commands.Command = .{ .attach_artillery = .{ .formation = bought.artillery_formation, .company = co } };
+    const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .status = .active, .assigned_company = co, .terms = .{ .length_months = 6, .base_pay_month = 400_000 } });
+    try std.testing.expect(posture.companyPosture(&gs, co) == .deployed);
+    const deployed = digest.stateHash(&gs);
+    try std.testing.expectError(error.ArtilleryCompanyAfield, commands.execute(&gs, request));
+    try std.testing.expectEqual(deployed, digest.stateHash(&gs));
+    gs.contracts.getPtr(cid).?.status = .completed;
+    gs.force(co).?.location_planet = "galatea";
+    try std.testing.expect(posture.companyPosture(&gs, co) == .idle_afield);
+    const afield = digest.stateHash(&gs);
+    try std.testing.expectError(error.ArtilleryCompanyAfield, commands.execute(&gs, request));
+    try std.testing.expectEqual(afield, digest.stateHash(&gs));
+    gs.force(co).?.location_planet = null;
+    try toe.assignCompanyToHq(&gs, co, other);
+    const elsewhere = digest.stateHash(&gs);
+    try std.testing.expectError(error.ArtilleryWrongHq, commands.execute(&gs, request));
+    try std.testing.expectEqual(elsewhere, digest.stateHash(&gs));
 }
 
 test "freight route funds and date exhaustion refuse without consuming anything" {
@@ -809,15 +902,33 @@ fn validatePlacement(gs: *GameState, f: dom.Formation) error{CorruptSave}!void {
         .hq_pool => |id| if (id == .none or !gs.hqs.contains(id)) return error.CorruptSave,
         .company => |co| {
             const c = gs.forces.getPtr(co) orelse return error.CorruptSave;
-            if (c.echelon != .company or !gs.hqs.contains(gs.homeHqFor(co)) or attachedCount(gs, co) > dom.company_formation_cap) return error.CorruptSave;
+            if (c.echelon != .company or !gs.hqs.contains(gs.homeHqFor(co)) or committedCount(gs, co) > dom.company_formation_cap) return error.CorruptSave;
         },
         .freight => |t| {
             const a = gs.hqs.getPtr(t.from_hq) orelse return error.CorruptSave;
             const b = gs.hqs.getPtr(t.to_hq) orelse return error.CorruptSave;
-            if (t.from_hq == t.to_hq or planet.find(a.planet_key) == null or planet.find(b.planet_key) == null or t.dispatch_day < f.acquisition_day or t.dispatch_day > gs.clock.day_index or t.eta_day <= t.dispatch_day or t.paid_cost < 0) return error.CorruptSave;
+            if (t.from_hq == t.to_hq or planet.find(a.planet_key) == null or planet.find(b.planet_key) == null) return error.CorruptSave;
+            try validateJourney(gs, f, t.dispatch_day, t.eta_day, t.paid_cost);
+        },
+        .field_freight => |t| {
+            const a = gs.hqs.getPtr(t.from_hq) orelse return error.CorruptSave;
+            const c = gs.forces.getPtr(t.company) orelse return error.CorruptSave;
+            if (planet.find(a.planet_key) == null or c.echelon != .company or committedCount(gs, t.company) > dom.company_formation_cap) return error.CorruptSave;
+            try validateJourney(gs, f, t.dispatch_day, t.eta_day, t.paid_cost);
+        },
+        .field_return => |t| {
+            const b = gs.hqs.getPtr(t.to_hq) orelse return error.CorruptSave;
+            if (planet.find(b.planet_key) == null) return error.CorruptSave;
+            try validateJourney(gs, f, t.dispatch_day, t.eta_day, t.paid_cost);
         },
         .sold, .destroyed => {},
     }
+}
+
+/// Every freight leg left after acquisition, no later than today, arrives after
+/// it left and paid a nonnegative charge.
+fn validateJourney(gs: *const GameState, f: dom.Formation, dispatch_day: u32, eta_day: u32, paid_cost: types.CBills) error{CorruptSave}!void {
+    if (dispatch_day < f.acquisition_day or dispatch_day > gs.clock.day_index or eta_day <= dispatch_day or paid_cost < 0) return error.CorruptSave;
 }
 
 fn validateHistory(gs: *const GameState, f: dom.Formation) error{CorruptSave}!void {

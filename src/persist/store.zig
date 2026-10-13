@@ -52,7 +52,7 @@ const artillery_battle_store = @import("artillery_battle_store.zig");
 const artillery = @import("../sim/artillery.zig");
 const artillery_catalogue = @import("../domain/artillery_catalogue.zig");
 
-pub const schema_version = 66;
+pub const schema_version = 67;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -124,7 +124,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS faction_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction_key TEXT NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS merc_company (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, cbills INTEGER NOT NULL DEFAULT 0, founded_day INTEGER NOT NULL DEFAULT 0, dissolved_day INTEGER NOT NULL DEFAULT 0, logo_key TEXT NOT NULL DEFAULT '', PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS merc_company_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, merc_company_id INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, merc_company_id) REFERENCES merc_company(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS artillery_formation (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0), id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295), hull INTEGER NOT NULL CHECK (hull BETWEEN 1 AND 4294967295), acquisition_day INTEGER NOT NULL CHECK (acquisition_day BETWEEN 0 AND 4294967295), paid_price INTEGER NOT NULL CHECK (paid_price > 0), placement TEXT NOT NULL CHECK (placement IN ('hq_pool','company','freight','sold','destroyed')), pool_hq INTEGER, company INTEGER, from_hq INTEGER, to_hq INTEGER, dispatch_day INTEGER, eta_day INTEGER, paid_cost INTEGER, quality TEXT NOT NULL DEFAULT 'c' CHECK(typeof(quality)='text' AND quality IN ('a','b','c','d','e','f')), armor INTEGER NOT NULL DEFAULT 100 CHECK(typeof(armor)='integer' AND armor BETWEEN 0 AND 100), last_maintenance INTEGER CHECK(last_maintenance IS NULL OR (typeof(last_maintenance)='integer' AND last_maintenance BETWEEN 0 AND 4294967295)), tech INTEGER CHECK(tech IS NULL OR (typeof(tech)='integer' AND tech BETWEEN 1 AND 4294967295)), FOREIGN KEY(cid,tech) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED, PRIMARY KEY (cid,id), UNIQUE (cid,ord), UNIQUE (cid,hull), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,hull) REFERENCES hull_instance(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,pool_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,company) REFERENCES force(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,from_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,to_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK ((pool_hq IS NOT NULL) = (placement='hq_pool')), CHECK ((company IS NOT NULL) = (placement='company')), CHECK ((from_hq IS NOT NULL) = (placement='freight')), CHECK ((to_hq IS NOT NULL) = (placement='freight')), CHECK ((dispatch_day IS NOT NULL) = (placement='freight')), CHECK ((eta_day IS NOT NULL) = (placement='freight')), CHECK ((paid_cost IS NOT NULL) = (placement='freight')), CHECK (pool_hq IS NULL OR pool_hq BETWEEN 1 AND 4294967295), CHECK (company IS NULL OR company BETWEEN 1 AND 4294967295), CHECK (from_hq IS NULL OR from_hq BETWEEN 1 AND 4294967295), CHECK (to_hq IS NULL OR to_hq BETWEEN 1 AND 4294967295), CHECK (placement!='freight' OR (from_hq!=to_hq AND dispatch_day BETWEEN 0 AND 4294967295 AND eta_day > dispatch_day AND eta_day <= 4294967295 AND paid_cost >= 0)));
+    \\CREATE TABLE IF NOT EXISTS artillery_formation (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0), id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295), hull INTEGER NOT NULL CHECK (hull BETWEEN 1 AND 4294967295), acquisition_day INTEGER NOT NULL CHECK (acquisition_day BETWEEN 0 AND 4294967295), paid_price INTEGER NOT NULL CHECK (paid_price > 0), placement TEXT NOT NULL CHECK (placement IN ('hq_pool','company','freight','sold','destroyed','field_freight','field_return')), pool_hq INTEGER, company INTEGER, from_hq INTEGER, to_hq INTEGER, dispatch_day INTEGER, eta_day INTEGER, paid_cost INTEGER, quality TEXT NOT NULL DEFAULT 'c' CHECK(typeof(quality)='text' AND quality IN ('a','b','c','d','e','f')), armor INTEGER NOT NULL DEFAULT 100 CHECK(typeof(armor)='integer' AND armor BETWEEN 0 AND 100), last_maintenance INTEGER CHECK(last_maintenance IS NULL OR (typeof(last_maintenance)='integer' AND last_maintenance BETWEEN 0 AND 4294967295)), tech INTEGER CHECK(tech IS NULL OR (typeof(tech)='integer' AND tech BETWEEN 1 AND 4294967295)), FOREIGN KEY(cid,tech) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED, PRIMARY KEY (cid,id), UNIQUE (cid,ord), UNIQUE (cid,hull), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,hull) REFERENCES hull_instance(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,pool_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,company) REFERENCES force(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,from_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,to_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK ((pool_hq IS NOT NULL) = (placement='hq_pool')), CHECK ((company IS NOT NULL) = (placement IN ('company','field_freight'))), CHECK ((from_hq IS NOT NULL) = (placement IN ('freight','field_freight'))), CHECK ((to_hq IS NOT NULL) = (placement IN ('freight','field_return'))), CHECK ((dispatch_day IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK ((eta_day IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK ((paid_cost IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK (pool_hq IS NULL OR pool_hq BETWEEN 1 AND 4294967295), CHECK (company IS NULL OR company BETWEEN 1 AND 4294967295), CHECK (from_hq IS NULL OR from_hq BETWEEN 1 AND 4294967295), CHECK (to_hq IS NULL OR to_hq BETWEEN 1 AND 4294967295), CHECK (placement!='freight' OR from_hq!=to_hq), CHECK (placement NOT IN ('freight','field_freight','field_return') OR (dispatch_day BETWEEN 0 AND 4294967295 AND eta_day > dispatch_day AND eta_day <= 4294967295 AND paid_cost >= 0)));
     \\CREATE TABLE IF NOT EXISTS artillery_crew (cid INTEGER NOT NULL CHECK(typeof(cid)='integer'), formation INTEGER NOT NULL CHECK(typeof(formation)='integer' AND formation BETWEEN 1 AND 4294967295), seat TEXT NOT NULL CHECK(typeof(seat)='text' AND seat IN ('commander','gunner','driver','loader')), person INTEGER CHECK(person IS NULL OR (typeof(person)='integer' AND person BETWEEN 1 AND 4294967295)), PRIMARY KEY(cid,formation,seat), UNIQUE(cid,person), FOREIGN KEY(cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,formation) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,person) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS artillery_slot (cid INTEGER NOT NULL CHECK(typeof(cid)='integer'), formation INTEGER NOT NULL CHECK(typeof(formation)='integer' AND formation BETWEEN 1 AND 4294967295), slot TEXT NOT NULL CHECK(typeof(slot)='text' AND slot IN ('chassis','main_gun','machine_gun_right_1','machine_gun_right_2','machine_gun_left_1','machine_gun_left_2','long_tom_bin_1','long_tom_bin_2','long_tom_bin_3','long_tom_bin_4','machine_gun_bin','communications','hitch')), condition TEXT NOT NULL CHECK(typeof(condition)='text' AND condition IN ('ok','damaged','destroyed','missing')), rounds INTEGER, PRIMARY KEY(cid,formation,slot), FOREIGN KEY(cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,formation) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK((rounds IS NOT NULL)=(slot IN ('long_tom_bin_1','long_tom_bin_2','long_tom_bin_3','long_tom_bin_4','machine_gun_bin'))), CHECK(rounds IS NULL OR (typeof(rounds)='integer' AND rounds >= 0 AND rounds <= CASE WHEN slot='machine_gun_bin' THEN 100 ELSE 5 END)), CHECK(condition NOT IN ('destroyed','missing') OR rounds IS NULL OR rounds=0));
     \\CREATE TABLE IF NOT EXISTS artillery_offer (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0), id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295), hq INTEGER NOT NULL CHECK (hq BETWEEN 1 AND 4294967295), year INTEGER NOT NULL CHECK (year BETWEEN 1 AND 65535), month INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12), available INTEGER NOT NULL CHECK (available IN (0,1)), PRIMARY KEY (cid,id), UNIQUE (cid,ord), UNIQUE (cid,hq), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED);
@@ -9975,7 +9975,8 @@ test "schema 63 operational corruption is never repaired on load" {
         try std.testing.expectEqual(before, digest.stateHash(&gs));
     }
     try store.save(&gs);
-    try store.db.exec("UPDATE campaign SET schema_version=67");
+    var newer: [64:0]u8 = undefined;
+    try store.db.exec(try std.fmt.bufPrintZ(&newer, "UPDATE campaign SET schema_version={d}", .{schema_version + 1}));
     try std.testing.expectError(error.SaveNewerThanGame, store.load(std.testing.allocator, gs.campaign_id));
 }
 
@@ -10296,14 +10297,17 @@ test "store versions require one exact positive integer and current structures a
         try raw.exec(try std.fmt.bufPrintZ(&sql, "INSERT INTO setting VALUES('schema_version',{s})", .{value}));
         try expectStoreRefusedUnchanged(raw, error.CorruptStore);
     }
-    for ([_][*:0]const u8{
-        "CREATE TABLE setting(key,value)",
-        "CREATE TABLE setting(key,value); INSERT INTO setting VALUES('schema_version',66),('schema_version',66)",
-        "CREATE TABLE setting(key,value); INSERT INTO setting VALUES('schema_version',66)",
-    }) |sql| {
+    // No version row, a duplicated current version, and a lone current version
+    // with no tables: each is a nonempty unhealed store.
+    for (0..3) |rows| {
         const raw = try sqlite.Db.open(":memory:");
         defer raw.close();
-        try raw.exec(sql);
+        var sql: [256:0]u8 = undefined;
+        try raw.exec(switch (rows) {
+            0 => "CREATE TABLE setting(key,value)",
+            1 => try std.fmt.bufPrintZ(&sql, "CREATE TABLE setting(key,value); INSERT INTO setting VALUES('schema_version',{d})", .{schema_version}),
+            else => try std.fmt.bufPrintZ(&sql, "CREATE TABLE setting(key,value); INSERT INTO setting VALUES('schema_version',{d}),('schema_version',{d})", .{ schema_version, schema_version }),
+        });
         try expectStoreRefusedUnchanged(raw, error.CorruptStore);
     }
     for ([_][*:0]const u8{ "DROP TABLE artillery_slot", "PRAGMA foreign_keys=OFF; ALTER TABLE bay_job RENAME TO old_bay; CREATE TABLE bay_job(cid,ord,hq,kind); DROP TABLE old_bay" }) |sql| {
@@ -10351,11 +10355,12 @@ test "old and future campaign load and overwrite refuse before gameplay decoding
         .{ .version = 63, .expected = error.SaveOlderThanGame },
         .{ .version = 64, .expected = error.SaveOlderThanGame },
         .{ .version = 65, .expected = error.SaveOlderThanGame },
-        .{ .version = 67, .expected = error.SaveNewerThanGame },
+        .{ .version = 66, .expected = error.SaveOlderThanGame },
+        .{ .version = schema_version + 1, .expected = error.SaveNewerThanGame },
     }) |case| {
-        try store.db.exec("UPDATE campaign SET schema_version=66");
-        try store.save(&gs);
         var sql: [128:0]u8 = undefined;
+        try store.db.exec(try std.fmt.bufPrintZ(&sql, "UPDATE campaign SET schema_version={d}", .{schema_version}));
+        try store.save(&gs);
         try store.db.exec(try std.fmt.bufPrintZ(&sql, "UPDATE campaign SET schema_version={d}; DELETE FROM rng_stream", .{case.version}));
         const storage_before = try databaseFingerprintForTest(store.db);
         const memory_before = digest.stateHash(&gs);
@@ -10787,7 +10792,8 @@ test "a store at format 64 is refused before any change, battle in progress or n
     try raw.exec("UPDATE setting SET value = 64 WHERE key = 'schema_version'");
     try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
     // A campaign row at 64 in a current store is refused the same way.
-    try raw.exec("UPDATE setting SET value = 66 WHERE key = 'schema_version'; UPDATE campaign SET schema_version = 64");
+    var sql: [128:0]u8 = undefined;
+    try raw.exec(try std.fmt.bufPrintZ(&sql, "UPDATE setting SET value = {d} WHERE key = 'schema_version'; UPDATE campaign SET schema_version = 64", .{schema_version}));
     store = try Store.fromDb(raw);
     const memory_before = digest.stateHash(&gs);
     const storage_before = try databaseFingerprintForTest(raw);
@@ -11140,7 +11146,29 @@ test "a store or a campaign at format 65 is refused before any change, situation
     try store.save(&gs);
     try raw.exec("UPDATE setting SET value = 65 WHERE key = 'schema_version'");
     try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
-    try raw.exec("UPDATE setting SET value = 66 WHERE key = 'schema_version'; UPDATE campaign SET schema_version = 65");
+    var sql: [128:0]u8 = undefined;
+    try raw.exec(try std.fmt.bufPrintZ(&sql, "UPDATE setting SET value = {d} WHERE key = 'schema_version'; UPDATE campaign SET schema_version = 65", .{schema_version}));
+    store = try Store.fromDb(raw);
+    const memory_before = digest.stateHash(&gs);
+    const storage_before = try databaseFingerprintForTest(raw);
+    try std.testing.expectError(error.SaveOlderThanGame, store.load(std.testing.allocator, gs.campaign_id));
+    try std.testing.expectError(error.SaveOlderThanGame, store.save(&gs));
+    try std.testing.expectEqual(storage_before, try databaseFingerprintForTest(raw));
+    try std.testing.expectEqual(memory_before, digest.stateHash(&gs));
+}
+
+test "a store or a campaign at format 66 is refused before any change, artillery pooled or not" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6604 });
+    defer gs.deinit();
+    _ = try artilleryCampaignForTest(&gs);
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    var store = try Store.fromDb(raw);
+    try store.save(&gs);
+    try raw.exec("UPDATE setting SET value = 66 WHERE key = 'schema_version'");
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
+    var sql: [128:0]u8 = undefined;
+    try raw.exec(try std.fmt.bufPrintZ(&sql, "UPDATE setting SET value = {d} WHERE key = 'schema_version'; UPDATE campaign SET schema_version = 66", .{schema_version}));
     store = try Store.fromDb(raw);
     const memory_before = digest.stateHash(&gs);
     const storage_before = try databaseFingerprintForTest(raw);

@@ -62,15 +62,56 @@ fn optionalDay(st: sqlite.Stmt, column: c_int) !?u32 {
     return if (st.optInt(column)) |raw| std.math.cast(u32, raw) orelse return error.CorruptSave else null;
 }
 
+/// The nullable placement payload columns, in table order. Each tag owns
+/// exactly its own columns; every other column is NULL.
+const PlacementColumns = struct {
+    pool_hq: ?types.HqId = null,
+    company: ?types.ForceId = null,
+    from_hq: ?types.HqId = null,
+    to_hq: ?types.HqId = null,
+    dispatch_day: ?u32 = null,
+    eta_day: ?u32 = null,
+    paid_cost: ?types.CBills = null,
+};
+
+fn placementColumns(p: dom.Placement) PlacementColumns {
+    return switch (p) {
+        .hq_pool => |hq| .{ .pool_hq = hq },
+        .company => |co| .{ .company = co },
+        .freight => |t| .{ .from_hq = t.from_hq, .to_hq = t.to_hq, .dispatch_day = t.dispatch_day, .eta_day = t.eta_day, .paid_cost = t.paid_cost },
+        .field_freight => |t| .{ .from_hq = t.from_hq, .company = t.company, .dispatch_day = t.dispatch_day, .eta_day = t.eta_day, .paid_cost = t.paid_cost },
+        .field_return => |t| .{ .to_hq = t.to_hq, .dispatch_day = t.dispatch_day, .eta_day = t.eta_day, .paid_cost = t.paid_cost },
+        .sold, .destroyed => .{},
+    };
+}
+
+/// Rebuild a placement from its tag and decoded columns. The tag's columns must
+/// all be present and every other column absent: no defaults (rule 47).
+fn decodePlacement(tag: std.meta.Tag(dom.Placement), c: PlacementColumns) error{CorruptSave}!dom.Placement {
+    const placement: dom.Placement = switch (tag) {
+        .hq_pool => .{ .hq_pool = c.pool_hq orelse return error.CorruptSave },
+        .company => .{ .company = c.company orelse return error.CorruptSave },
+        .freight => .{ .freight = .{ .from_hq = c.from_hq orelse return error.CorruptSave, .to_hq = c.to_hq orelse return error.CorruptSave, .dispatch_day = c.dispatch_day orelse return error.CorruptSave, .eta_day = c.eta_day orelse return error.CorruptSave, .paid_cost = c.paid_cost orelse return error.CorruptSave } },
+        .field_freight => .{ .field_freight = .{ .from_hq = c.from_hq orelse return error.CorruptSave, .company = c.company orelse return error.CorruptSave, .dispatch_day = c.dispatch_day orelse return error.CorruptSave, .eta_day = c.eta_day orelse return error.CorruptSave, .paid_cost = c.paid_cost orelse return error.CorruptSave } },
+        .field_return => .{ .field_return = .{ .to_hq = c.to_hq orelse return error.CorruptSave, .dispatch_day = c.dispatch_day orelse return error.CorruptSave, .eta_day = c.eta_day orelse return error.CorruptSave, .paid_cost = c.paid_cost orelse return error.CorruptSave } },
+        .sold => .sold,
+        .destroyed => .destroyed,
+    };
+    // Re-encoding must reproduce every column, so a stray payload is corruption.
+    const canonical = placementColumns(placement);
+    inline for (@typeInfo(PlacementColumns).@"struct".fields) |field| {
+        if ((@field(canonical, field.name) != null) != (@field(c, field.name) != null)) return error.CorruptSave;
+    }
+    return placement;
+}
+
 /// Encode ordered formations/offers; the caller owns BEGIN/COMMIT and table clearing.
 pub fn save(db: sqlite.Db, gs: *const GameState, cid: i64) !void {
     const fs = try db.prepare("INSERT INTO artillery_formation VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)");
     defer fs.finalize();
     for (gs.artillery_formations.values(), 0..) |f, ord| {
-        const pool: ?types.HqId = if (f.placement == .hq_pool) f.placement.hq_pool else null;
-        const co: ?types.ForceId = if (f.placement == .company) f.placement.company else null;
-        const t: ?dom.Freight = if (f.placement == .freight) f.placement.freight else null;
-        try fs.bindAll(.{ cid, ord, f.id, f.hull, f.acquisition_day, f.paid_price, @tagName(f.placement), pool, co, if (t) |v| @as(?types.HqId, v.from_hq) else null, if (t) |v| @as(?types.HqId, v.to_hq) else null, if (t) |v| @as(?u32, v.dispatch_day) else null, if (t) |v| @as(?u32, v.eta_day) else null, if (t) |v| @as(?types.CBills, v.paid_cost) else null, f.quality, f.armor_pct, f.last_maintenance_day, if (f.tech != .none) @as(?types.PersonId, f.tech) else null });
+        const c = placementColumns(f.placement);
+        try fs.bindAll(.{ cid, ord, f.id, f.hull, f.acquisition_day, f.paid_price, @tagName(f.placement), c.pool_hq, c.company, c.from_hq, c.to_hq, c.dispatch_day, c.eta_day, c.paid_cost, f.quality, f.armor_pct, f.last_maintenance_day, if (f.tech != .none) @as(?types.PersonId, f.tech) else null });
         try fs.run();
     }
     const cs = try db.prepare("INSERT INTO artillery_crew VALUES (?1,?2,?3,?4)");
@@ -138,22 +179,15 @@ pub fn load(db: sqlite.Db, gs: *GameState, cid: i64, version: u32) !void {
         const tag_bytes = try fs.text(4, gs.scratch());
         defer gs.scratch().free(tag_bytes);
         const tag = std.meta.stringToEnum(std.meta.Tag(dom.Placement), tag_bytes) orelse return error.CorruptSave;
-        const pool = try optionalId(types.HqId, fs, 5);
-        const co = try optionalId(types.ForceId, fs, 6);
-        const from = try optionalId(types.HqId, fs, 7);
-        const to = try optionalId(types.HqId, fs, 8);
-        const sent = try optionalDay(fs, 9);
-        const eta = try optionalDay(fs, 10);
-        const cost = fs.optInt(11);
-        const is_freight = tag == .freight;
-        if ((pool != null) != (tag == .hq_pool) or (co != null) != (tag == .company) or (from != null) != is_freight or (to != null) != is_freight or (sent != null) != is_freight or (eta != null) != is_freight or (cost != null) != is_freight) return error.CorruptSave;
-        const placement: dom.Placement = switch (tag) {
-            .hq_pool => .{ .hq_pool = pool.? },
-            .company => .{ .company = co.? },
-            .sold => .sold,
-            .destroyed => .destroyed,
-            .freight => .{ .freight = .{ .from_hq = from.?, .to_hq = to.?, .dispatch_day = sent.?, .eta_day = eta.?, .paid_cost = cost.? } },
-        };
+        const placement = try decodePlacement(tag, .{
+            .pool_hq = try optionalId(types.HqId, fs, 5),
+            .company = try optionalId(types.ForceId, fs, 6),
+            .from_hq = try optionalId(types.HqId, fs, 7),
+            .to_hq = try optionalId(types.HqId, fs, 8),
+            .dispatch_day = try optionalDay(fs, 9),
+            .eta_day = try optionalDay(fs, 10),
+            .paid_cost = fs.optInt(11),
+        });
         const quality_bytes = try fs.text(13, gs.scratch());
         defer gs.scratch().free(quality_bytes);
         const quality = std.meta.stringToEnum(types.Quality, quality_bytes) orelse return error.CorruptSave;
@@ -318,6 +352,8 @@ fn resetCodecFixture(db: sqlite.Db, placement: std.meta.Tag(dom.Placement)) !voi
         .hq_pool => {},
         .company => try db.exec("UPDATE artillery_formation SET placement='company',pool_hq=NULL,company=1"),
         .freight => try db.exec("UPDATE artillery_formation SET placement='freight',pool_hq=NULL,from_hq=1,to_hq=2,dispatch_day=0,eta_day=10,paid_cost=0"),
+        .field_freight => try db.exec("UPDATE artillery_formation SET placement='field_freight',pool_hq=NULL,from_hq=1,company=1,dispatch_day=0,eta_day=10,paid_cost=0"),
+        .field_return => try db.exec("UPDATE artillery_formation SET placement='field_return',pool_hq=NULL,to_hq=2,dispatch_day=0,eta_day=10,paid_cost=0"),
         .sold => try db.exec("UPDATE artillery_formation SET placement='sold',pool_hq=NULL"),
         .destroyed => try db.exec("UPDATE artillery_formation SET placement='destroyed',pool_hq=NULL"),
     }
@@ -392,6 +428,8 @@ test "artillery codec preserves integer and null placements and rejects coerced 
             .hq_pool => |hq| try std.testing.expectEqual(@as(types.HqId, @enumFromInt(1)), hq),
             .company => |company| try std.testing.expectEqual(@as(types.ForceId, @enumFromInt(1)), company),
             .freight => |freight| try std.testing.expectEqualDeep(dom.Freight{ .from_hq = @enumFromInt(1), .to_hq = @enumFromInt(2), .dispatch_day = 0, .eta_day = 10, .paid_cost = 0 }, freight),
+            .field_freight => |t| try std.testing.expectEqualDeep(dom.FieldFreight{ .from_hq = @enumFromInt(1), .company = @enumFromInt(1), .dispatch_day = 0, .eta_day = 10, .paid_cost = 0 }, t),
+            .field_return => |t| try std.testing.expectEqualDeep(dom.FieldReturn{ .to_hq = @enumFromInt(2), .dispatch_day = 0, .eta_day = 10, .paid_cost = 0 }, t),
             .sold, .destroyed => {},
         }
         try std.testing.expectEqual(@as(u32, 0), formation.acquisition_day);
@@ -405,12 +443,39 @@ test "artillery codec preserves integer and null placements and rejects coerced 
         .{ .placement = .freight, .field = "dispatch_day" },
         .{ .placement = .freight, .field = "eta_day" },
         .{ .placement = .freight, .field = "paid_cost" },
+        .{ .placement = .field_freight, .field = "from_hq" },
+        .{ .placement = .field_freight, .field = "company" },
+        .{ .placement = .field_freight, .field = "dispatch_day" },
+        .{ .placement = .field_freight, .field = "eta_day" },
+        .{ .placement = .field_freight, .field = "paid_cost" },
+        .{ .placement = .field_return, .field = "to_hq" },
+        .{ .placement = .field_return, .field = "dispatch_day" },
+        .{ .placement = .field_return, .field = "eta_day" },
+        .{ .placement = .field_return, .field = "paid_cost" },
     };
     for (fields) |field| {
         for ([_][]const u8{ "0.5", "'1'", "'invalid'", "X'31'", "NULL" }) |value| {
             try resetCodecFixture(db, field.placement);
             try expectMalformedCodecValue(db, "artillery_formation", field.field, value);
         }
+    }
+}
+
+/// Columns a field tag does not own, given a payload anyway.
+const foreign_field_columns = [_]struct { placement: std.meta.Tag(dom.Placement), field: []const u8, value: []const u8 }{
+    .{ .placement = .field_freight, .field = "pool_hq", .value = "1" },
+    .{ .placement = .field_freight, .field = "to_hq", .value = "2" },
+    .{ .placement = .field_return, .field = "pool_hq", .value = "1" },
+    .{ .placement = .field_return, .field = "from_hq", .value = "1" },
+    .{ .placement = .field_return, .field = "company", .value = "1" },
+};
+
+test "field placements with a foreign payload column are refused by the loader" {
+    const db = try openCodecFixture();
+    defer db.close();
+    for (foreign_field_columns) |case| {
+        try resetCodecFixture(db, case.placement);
+        try expectMalformedCodecValue(db, "artillery_formation", case.field, case.value);
     }
 }
 
@@ -550,8 +615,30 @@ fn placementCampaignForTest(gs: *GameState, placement: std.meta.Tag(dom.Placemen
     const home = try founding.createCommander(gs, "T", .LC, .quartermaster);
     gs.hqs.getPtr(home).?.funds = artillery.purchasePrice() * 10;
     const bought = try artillery.buy(gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
+    if (placement == .hq_pool or placement == .field_freight or placement == .field_return) {
+        // Pool crew posted at the carrier's HQ, and a pool mechanic; field
+        // freight carries both.
+        const gunner = try gs.hirePerson("Pool", "Gunner", .vehicle_crew);
+        try gs.person(gunner).?.skills.put(gs.allocator(), .gunnery_vee, 4);
+        gs.person(gunner).?.posted_hq = home;
+        @import("../sim/hq_ops.zig").refreshHqStaffing(gs);
+        _ = try @import("../sim/artillery_crew.zig").assign(gs, .{ .formation = bought.artillery_formation, .seat = .gunner, .person = gunner });
+        const mechanic = try gs.hirePerson("Pool", "Mechanic", .tech_mechanic);
+        try gs.person(mechanic).?.skills.put(gs.allocator(), .tech_mechanic, 4);
+        _ = try @import("../sim/artillery_crew.zig").assignTech(gs, .{ .formation = bought.artillery_formation, .person = mechanic });
+    }
     switch (placement) {
         .hq_pool => {},
+        .field_freight, .field_return => {
+            const company = try gs.createForce("Company", .company, .none);
+            try @import("../sim/toe.zig").assignCompanyToHq(gs, company, home);
+            gs.force(company).?.location_planet = "galatea";
+            _ = try @import("../sim/artillery_field.zig").ship(gs, .{ .formation = bought.artillery_formation, .company = company });
+            if (placement == .field_return) {
+                gs.force(company).?.location_planet = null;
+                try artillery.runArrivals(gs);
+            }
+        },
         .company => {
             const company = try gs.createForce("Company", .company, .none);
             try @import("../sim/toe.zig").assignCompanyToHq(gs, company, home);
@@ -566,6 +653,50 @@ fn placementCampaignForTest(gs: *GameState, placement: std.meta.Tag(dom.Placemen
         .destroyed => try artillery.destroy(gs, bought.artillery_formation),
     }
     try artillery.validate(gs);
+}
+
+test "the schema refuses field placements with a foreign or missing payload column" {
+    const store_mod = @import("store.zig");
+    for ([_]std.meta.Tag(dom.Placement){ .field_freight, .field_return }) |placement| {
+        var gs = GameState.init(std.testing.allocator, .{});
+        defer gs.deinit();
+        try placementCampaignForTest(&gs, placement);
+        const store = try store_mod.Store.open(":memory:");
+        defer store.close();
+        try store.save(&gs);
+        var sql: [160:0]u8 = undefined;
+        for (foreign_field_columns) |case| if (case.placement == placement) {
+            const tamper = try std.fmt.bufPrintZ(&sql, "UPDATE artillery_formation SET {s}={s}", .{ case.field, case.value });
+            if (store.db.exec(tamper)) |_| return error.TestExpectedError else |_| {}
+        };
+        const required = if (placement == .field_freight) "company" else "to_hq";
+        const tamper = try std.fmt.bufPrintZ(&sql, "UPDATE artillery_formation SET {s}=NULL", .{required});
+        if (store.db.exec(tamper)) |_| return error.TestExpectedError else |_| {}
+        var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+        defer loaded.deinit();
+        try std.testing.expectEqual(@import("../sim/digest.zig").stateHash(&gs), @import("../sim/digest.zig").stateHash(&loaded));
+    }
+}
+
+test "a campaign saved mid field freight loads and continues to the same arrival as one never saved" {
+    const store_mod = @import("store.zig");
+    const digest = @import("../sim/digest.zig");
+    const commands = @import("../sim/commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6703 });
+    defer gs.deinit();
+    try placementCampaignForTest(&gs, .field_freight);
+    const store = try store_mod.Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    const days = gs.artillery_formations.values()[0].placement.field_freight.eta_day - gs.clock.day_index;
+    for ([_]*GameState{ &gs, &loaded }) |g| {
+        _ = try commands.execute(g, .{ .advance_days = days });
+        try std.testing.expect(g.artillery_formations.values()[0].placement == .company);
+    }
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
 }
 
 test "every artillery placement round trips exact tags and rejects incomplete TEXT" {

@@ -63,6 +63,8 @@ printf '%s\n' \
   'repairarty badid' \
   'repairarty 1' \
   'shiparty 1 hq:1' \
+  'shiparty 1 co:1' \
+  'shiparty 1' \
   'sellarty 1' \
   'candidates 9' \
   'accept 9 1' \
@@ -210,6 +212,10 @@ check 'not enough of that part in stock'
 check 'usage: repairarty'
 check 'refused: the artillery carrier needs'
 check 'required home HQ pool'
+# Field freight to a company at home is refused with its remedy; the verb
+# names both destinations.
+check 'that company is home — attach the carrier at its home HQ instead'
+check 'usage: shiparty <formation-id> hq:N|co:N'
 check '#1 sold'
 # P5b.1: a due engagement holds the turn and is fought in phases through
 # `battle`: an order not legal at the pause and any other command under the

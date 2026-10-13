@@ -70,11 +70,17 @@ pub fn availableForDuty(p: *const person_mod.Person, today: u32) bool {
     return p.isAvailable(today) and !p.isUnfit() and p.training == null;
 }
 
-/// Attached artillery occupants cannot leave their physical company by posting
-/// or transfer while it is away, including return travel and idle afield.
+/// Artillery occupants and mechanics cannot leave their carrier by posting or
+/// transfer while it is away: attached to a company that is not home (return
+/// travel and idle afield included), or on field freight or its return leg.
 pub fn artilleryDepartureBlocked(gs: *GameState, id: types.PersonId) bool {
     for (gs.artillery_formations.values()) |f| {
-        if (f.placement != .company or posture.isCompanyHome(gs, f.placement.company)) continue;
+        const away = switch (f.placement) {
+            .company => |co| !posture.isCompanyHome(gs, co),
+            .field_freight, .field_return => true,
+            .hq_pool, .freight, .sold, .destroyed => false,
+        };
+        if (!away) continue;
         if (f.tech == id) return true;
         for (f.crew) |occupant| if (occupant == id) return true;
     }

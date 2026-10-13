@@ -21,8 +21,39 @@ An unattached carrier occupies an HQ pool. A combat company can attach at most
 one formation, only while physically home at the same HQ. Detaching returns it
 to that home pool. Attached location follows the company's authoritative posture;
 there is no second persisted planet or company ETA. Company disband or changing
-its home HQ requires detachment and explicit freight. Supplier changes do not
-move a physical carrier. No placement grants a battle or support benefit.
+its home HQ requires detachment and explicit freight or field freight. Supplier
+changes do not move a physical carrier. No placement grants a battle or support
+benefit. Attachment refusals name their reason and remedy: a carrier not in a
+pool, a company in the field (send field freight instead), a travelling company,
+and a carrier pooled at another HQ (freight it to the company's home HQ first).
+
+**Field delivery.** A pooled carrier with no bay job can be shipped from its HQ
+to a combat company in the field — on station under contract or idle on a world,
+the company's field site — with `ship_artillery_to_company` (`shiparty <id>
+co:<id>`, or Forces `x`/`e`). `artillery_field.fieldFreightQuote` is the one
+eligibility and price owner the command, the send picker and the detail view
+consume. The price is the existing freight quote from the source HQ to the
+company's field site: the route to the company's home HQ with its weekly
+throughput, then the final charter leg, with the source HQ's transport-staff
+discount. The source HQ pays; the posting is tagged with the company and its
+contract under ARCH §11 "Cost attribution and profit shares", and the route's
+throughput is booked. Seated crew and the mechanic must be able to travel:
+available for duty, present at the source HQ and on no company's books. They
+ride with the carrier on leave until its ETA; the mechanic leaves any other
+technician slot it held. The shipment holds the company's one attachment slot:
+attached plus inbound carriers never exceed the cap.
+
+On the arrival day, with the company still in the field, the carrier attaches
+and its crew and mechanic join the company's books (HQ postings cleared, HQ
+staffing refreshed). Readiness still requires arrival and attachment. If the
+company is no longer in the field — recalled home, returning, or accepted onward
+toward a new contract — the next daily pass diverts the carrier back to its
+source pool. The return leg retraces the days already travelled, never less than
+the existing minimum freight time; there is no refund and no new charge. It
+arrives with its crew and mechanic still seated on their unchanged books.
+Disbanding a company diverts its inbound carriers inside the disband command, so
+no shipment names a removed force; this is the only reading of "comes home" that
+keeps a valid destination. Shipments are never redirected to a new field site.
 
 HQ freight uses the catalogue's 75-ton mass, the existing route, weekly throughput,
 source-HQ transport staff discount, cost and transit owners. Payment and route
@@ -42,8 +73,9 @@ The acquisition boundary grants no crew or ammunition and adds no operating
 charge. [Artillery operations](p2-artillery-operations-design.md) owns individual
 crew, local service, magazines and repairs; cold storage remains unavailable.
 Queued or active depot jobs block attachment, detachment, freight and sale.
-Attachment clears the pool mechanic, detachment clears crew and mechanic, and
-freight clears the mechanic; people remain on their existing books. Condition
+Home attachment clears the pool mechanic and puts pool crew on the company's
+books; detachment clears crew and mechanic; HQ freight clears pool crew and the
+mechanic, who remain on their existing books; field freight carries both. Condition
 and magazines travel with the carrier and remain in sold history. Sale uses
 actual quality and armor, capped at the named chassis-damage valuation limit
 when structure is non-intact, without extracting ammunition or creating stock.
@@ -71,8 +103,9 @@ part-order destinations resolve to exactly one live or retired identity. Sale
 cancels inbound orders, removes unaccepted contract offers and other live boards,
 unposts people, restores removed bay-job unit statuses, removes links/policies,
 redirects fund couriers to the outfit, and moves transport berths to the surviving
-seat. Remaining force supply assignments, pooled artillery and either live
-artillery freight endpoint refuse sale before mutation. Historical identity never
+seat. Remaining force supply assignments, pooled artillery and every live
+artillery freight endpoint (either end of HQ freight, the source of field
+freight, the HQ of a return leg) refuse sale before mutation. Historical identity never
 makes an archived site an actionable supply or transport destination.
 
 Retirement prepares archive capacity, proceeds posting and owned log text/capacity
@@ -81,10 +114,11 @@ Commit installs the archive, removes active children/HQ, credits the unchanged
 HQ-sale proceeds owner and records one HQ-tagged log. The outfit receives the
 sale proceeds, including the disposed treasury, exactly once.
 
-The current P2h boundary supports schema 63 stores and campaigns, as specified
+The current boundary supports format 67 stores and campaigns, as specified
 in [current-format persistence](p2-artillery-operations-design.md#current-format-persistence)
 and [contract rule 51](engineering-contract.md#51-save-format-support-is-explicit).
-Older formats, including schema 59 and 60, are refused intact; no legacy boards,
+Format 67 adds the `field_freight` and `field_return` placements. Older formats,
+including 66 and schema 59 and 60, are refused intact; no legacy boards,
 ownership intervals or archives are synthesized. Historical HQ names, worlds,
 tiers, days and other values may not be reconstructed. Current archives and
 their exact historical identities remain required, including every reference

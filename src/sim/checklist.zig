@@ -254,6 +254,15 @@ pub const DayWatch = struct {
     people: []const PersonState,
 };
 
+/// An artillery carrier on any freight leg; leaving one is a landing (ARCH §6
+/// "The stop model"). A diversion keeps the carrier on the road.
+fn artilleryInTransit(placement: @import("../domain/artillery_formation.zig").Placement) bool {
+    return switch (placement) {
+        .freight, .field_freight, .field_return => true,
+        .hq_pool, .company, .sold, .destroyed => false,
+    };
+}
+
 /// Record the identities `advanceStop` compares after the next tick. Reads
 /// `gs` only; allocates from `alloc`.
 pub fn watchDay(alloc: std.mem.Allocator, gs: *GameState) !DayWatch {
@@ -265,7 +274,7 @@ pub fn watchDay(alloc: std.mem.Allocator, gs: *GameState) !DayWatch {
     var transfers: std.ArrayListUnmanaged(types.UnitId) = .empty;
     for (gs.unit_transfers.items) |t| try transfers.append(alloc, t.unit);
     var freight: std.ArrayListUnmanaged(types.ArtilleryFormationId) = .empty;
-    for (gs.artillery_formations.values()) |f| if (f.placement == .freight) try freight.append(alloc, f.id);
+    for (gs.artillery_formations.values()) |f| if (artilleryInTransit(f.placement)) try freight.append(alloc, f.id);
     var running: std.ArrayListUnmanaged(ContractState) = .empty;
     for (gs.contracts.values()) |*c| if (c.isRunning()) try running.append(alloc, .{ .id = c.id, .status = c.status });
     var structural: std.ArrayListUnmanaged(BayJobKey) = .empty;
@@ -311,7 +320,7 @@ pub fn advanceStop(gs: *GameState, watch: ?*const DayWatch) ?Stop {
     for (w.running) |was| if (gs.contracts.getPtr(was.id)) |c| if (was.status == .transit and c.status == .active) return .{ .reason = .on_world, .contract = c.id };
     for (w.returning) |id| if (gs.force(id)) |f| if (f.return_eta_day == null) return .{ .reason = .arrival };
     for (w.transfers) |unit| if (!transferPending(gs, unit)) return .{ .reason = .arrival };
-    for (w.freight) |id| if (gs.artillery_formations.get(id)) |f| if (f.placement != .freight) return .{ .reason = .arrival };
+    for (w.freight) |id| if (gs.artillery_formations.get(id)) |f| if (!artilleryInTransit(f.placement)) return .{ .reason = .arrival };
     if (insideContract(gs)) return null;
     if (w.courier_lands or deliveredOrders(gs) > w.delivered_orders) return .{ .reason = .arrival };
     for (w.structural) |k| if (!structuralJobQueued(gs, k)) return .{ .reason = .bay_job };

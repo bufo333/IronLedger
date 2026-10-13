@@ -26,7 +26,7 @@ pub fn operationSite(gs: *GameState, f: *const dom.Formation) ?types.Site {
             .deployed, .idle_afield => .{ .company = company },
             .en_route, .returning => null,
         },
-        .freight, .sold, .destroyed => null,
+        .freight, .field_freight, .field_return, .sold, .destroyed => null,
     };
 }
 
@@ -42,7 +42,7 @@ pub fn depotHome(gs: *GameState, f: *const dom.Formation) ?types.HqId {
     const home = switch (f.placement) {
         .hq_pool => |hq| hq,
         .company => |company| if (gs.force(company) != null) gs.homeHqFor(company) else return null,
-        .freight, .sold, .destroyed => return null,
+        .freight, .field_freight, .field_return, .sold, .destroyed => return null,
     };
     return if (gs.hqs.contains(home)) home else null;
 }
@@ -145,19 +145,45 @@ pub fn reload(gs: *GameState, request: @FieldType(commands.Command, "reload_arti
     return .{ .artillery_formation = f.id, .artillery_site = q.site, .artillery_packages = q.packages };
 }
 
+/// The HQ whose posting a pooled or field-freighted carrier's people may keep:
+/// its pool, the source of its field freight or the target of its return.
+/// Null for every other placement.
+fn bookHq(f: *const dom.Formation) ?types.HqId {
+    return switch (f.placement) {
+        .hq_pool => |hq| hq,
+        .field_freight => |t| t.from_hq,
+        .field_return => |t| t.to_hq,
+        .company, .freight, .sold, .destroyed => null,
+    };
+}
+
+/// Off-company books for a pooled or field-freighted carrier's people: on no
+/// company's books, and posted nowhere or to `hq`.
+fn offCompanyBooks(p: *const @import("../domain/person.zig").Person, hq: types.HqId) bool {
+    return p.assigned_force == .none and (p.posted_hq == .none or p.posted_hq == hq);
+}
+
 /// Validate persisted operations without demanding present availability: recovery,
 /// training and company travel preserve references while suppressing capability.
+/// Attached crew belong to the company; pool and field-freight crew and
+/// travelling mechanics stay off company books (`bookHq`).
 pub fn validate(gs: *GameState) error{CorruptSave}!void {
     if (gs.last_artillery_service_day) |day| if (day > gs.clock.day_index) return error.CorruptSave;
-    for (gs.artillery_formations.values()) |f| {
+    for (gs.artillery_formations.values()) |*f| {
         if (f.armor_pct > dom.intact_condition_pct) return error.CorruptSave;
         if (f.last_maintenance_day) |day| if (day > gs.clock.day_index or day < f.acquisition_day) return error.CorruptSave;
         try rules.validateSlots(&f.slots);
         for (rules.seats, f.crew) |seat, id| {
             if (id == .none) continue;
-            if (f.placement != .company or @intFromEnum(id) >= gs.next_person_id) return error.CorruptSave;
+            if (@intFromEnum(id) >= gs.next_person_id) return error.CorruptSave;
             const p = gs.person(id) orelse return error.CorruptSave;
-            if (p.isGone() or !rules.qualified(p, seat) or gs.companyOf(p.assigned_force) != f.placement.company or p.posted_hq != .none or gs.pilotSeat(id) != .none) return error.CorruptSave;
+            if (p.isGone() or !rules.qualified(p, seat) or gs.pilotSeat(id) != .none) return error.CorruptSave;
+            const books_ok = switch (f.placement) {
+                .company => |company| gs.companyOf(p.assigned_force) == company and p.posted_hq == .none,
+                .hq_pool, .field_freight, .field_return => offCompanyBooks(p, bookHq(f).?),
+                .freight, .sold, .destroyed => false,
+            };
+            if (!books_ok) return error.CorruptSave;
             var count: u32 = 0;
             for (gs.artillery_formations.values()) |other| {
                 for (other.crew) |occupant| if (occupant == id) {
@@ -172,7 +198,11 @@ pub fn validate(gs: *GameState) error{CorruptSave}!void {
             if (f.placement == .sold or f.placement == .destroyed or f.placement == .freight or @intFromEnum(f.tech) >= gs.next_person_id) return error.CorruptSave;
             const p = gs.person(f.tech) orelse return error.CorruptSave;
             if (p.isGone() or p.role != .tech_mechanic or p.skill(.tech_mechanic) == null or crew.isSeated(gs, p.id)) return error.CorruptSave;
-            if (f.placement == .company and (gs.companyOf(p.assigned_force) != f.placement.company or p.posted_hq != .none)) return error.CorruptSave;
+            switch (f.placement) {
+                .company => |company| if (gs.companyOf(p.assigned_force) != company or p.posted_hq != .none) return error.CorruptSave,
+                .field_freight, .field_return => if (!offCompanyBooks(p, bookHq(f).?)) return error.CorruptSave,
+                .hq_pool, .freight, .sold, .destroyed => {},
+            }
         }
     }
     for (gs.bay_jobs.items, 0..) |job, index| {

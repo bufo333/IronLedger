@@ -617,6 +617,100 @@ finish(pid)
 print("80x24 + --ascii pass OK")
 
 
+def last_style(raw, pattern):
+    """The SGR parameters in force where `pattern` was last drawn: the last
+    `ESC[...m` before its last match in the client's output."""
+    found = list(re.finditer(pattern, raw))
+    if not found:
+        return None
+    styles = re.findall(rb"\x1b\[([0-9;]*)m", raw[:found[-1].start()])
+    return styles[-1].decode() if styles else None
+
+
+def artillery_phase():
+    """Artillery panel with a pooled carrier: fund the HQ and buy one with
+    colon-line verbs (loan, transfer to the HQ, four days for the courier,
+    buyarty), then record how the carrier row, the panel titles and the
+    detail pane are drawn at 120x40 and 80x24 with focus on each pane. The
+    focused list must draw the carrier row with the cursor, never as dim
+    chrome; the send picker opens; a TO&E-only key says where it acts."""
+    import tempfile, shutil
+    arty_tmp = tempfile.mkdtemp(prefix="iron-ledger-arty-smoke-")
+    atexit.register(shutil.rmtree, arty_tmp, ignore_errors=True)
+    arty_pid, arty_fd = spawn(["--tui", "--no-splash", "--no-music", "--seed", "3025", "--store", os.path.join(arty_tmp, "arty.db")])
+    fcntl.ioctl(arty_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
+    global fd, out
+    saved_fd, saved_out = fd, out
+    fd, out = arty_fd, b""
+
+    def resize(rows, cols):
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+        os.kill(arty_pid, signal.SIGWINCH)
+        drain(1.0)
+
+    def record(label):
+        styles = {name: last_style(out, pattern) for name, pattern in (
+            ("carrier row", rb"(?<!Artillery )#1  hull #\d+  quality"),
+            ("list title", rb"ARTILLERY \("),
+            ("detail title", rb"ARTILLERY DETAIL"),
+            ("detail header", rb"Artillery #1  hull #\d+"),
+        )}
+        print(f"grey probe {label}: " + ", ".join(f"{k}={v}" for k, v in styles.items()))
+        return styles
+
+    try:
+        assert wait_for("MERCENARY", timeout=20), "artillery: welcome screen missing: " + plain()[-2000:]
+        send("p"); send("Gunner\r")
+        assert wait_for('player "Gunner" created'), plain()[-3000:]
+        send("n")
+        assert wait_for("NEW CAMPAIGN"), plain()[-3000:]
+        send("\r")
+        assert wait_for("CATALOG"), plain()[-3000:]
+        send("\r", 3.0)
+        assert wait_for("GENERATED COMPANY"), plain()[-3000:]
+        send("\r")
+        assert wait_for("REVIEW"), plain()[-3000:]
+        send("\r", 2.0)
+        assert wait_for("F1 Desk"), plain()[-3000:]
+        send(":"); send("loan 800000\r", 0.8)
+        send(":"); send("transfer outfit hq:1 800000\r", 0.8)
+        send(":"); send("day 4 force\r", 2.0)
+        send(":"); send("buyarty 1 hq:1\r", 1.0)
+        assert wait_for("bought Mobile Long Tom #1", tail=3000), plain()[-3000:]
+        send("3", 0.8)
+        send("\t", 0.6)                # focus the TO&E's pool pane first
+        send("[", 0.8)                 # all forces wraps back to the artillery panel
+        assert wait_for("ARTILLERY (", tail=30000), plain()[-3000:]
+        resize(40, 120)
+        entered = record("120x40 entered from the pool pane")
+        assert entered["carrier row"] == "0;30;46", f"entering the panel from another pane leaves the carrier without a cursor ({entered['carrier row']})"
+        wide_list = record("120x40 focus list")
+        send("\t", 0.8)                # focus the detail pane
+        wide_detail = record("120x40 focus detail")
+        send("\t", 0.8)                # back to the list
+        resize(24, 80)
+        narrow_list = record("80x24 focus list")
+        for label, styles in (("120x40", wide_list), ("80x24", narrow_list)):
+            row = styles["carrier row"]
+            assert row is not None and row != "0;90", f"{label}: carrier row drawn as dim chrome ({row})"
+            assert row == "0;30;46", f"{label}: focused list shows no cursor on the carrier ({row})"
+        assert wide_detail["carrier row"] != "0;90", f"120x40 detail focus: carrier row drawn dim ({wide_detail['carrier row']})"
+        resize(40, 120)
+        send("x", 0.8)                 # the send picker for the carrier under the cursor
+        assert wait_for("SEND ARTILLERY #1 TO", tail=30000), plain()[-3000:]
+        send("\x1b", 0.6)
+        send("l", 0.8)                 # a TO&E-only key says where it acts
+        assert wait_for("that key acts on TO&E rows", tail=3000), plain()[-3000:]
+        send("q", 0.8); send("r", 1.0)  # leave without saving
+        assert wait_for("MERCENARY", tail=8000), plain()[-3000:]
+        send("q", 0.5)
+    finally:
+        fd, out = saved_fd, saved_out
+
+    finish(arty_pid, timeout=10)
+    print("artillery panel phase OK")
+
+
 def game_over_phase():
     """GAME OVER smoke: load a bankrupt fixture, advance one forced day,
     assert the modal.  Runs the fixture generator each time so the store
@@ -665,5 +759,6 @@ def game_over_phase():
     print("GAME OVER phase OK")
 
 
+artillery_phase()
 game_over_phase()
 print("SMOKE OK")

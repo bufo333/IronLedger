@@ -14,6 +14,7 @@ const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 const founding = @import("founding.zig");
 const artillery = @import("artillery.zig");
+const artillery_field = @import("artillery_field.zig");
 const commands = @import("commands.zig");
 const starter_company = @import("starter_company.zig");
 const contract_market = @import("contract_market.zig");
@@ -675,9 +676,13 @@ pub fn execDisbandCompany(gs: *GameState, co: @FieldType(Command, "disband_compa
         "{s} [sale] {s} disbanded: {d} hulls sold, people released, {d} raised",
         .{ gs.clock.date.text(&date_buf), name, uids.items.len, total },
     );
-    try gs.reserveLog(1);
+    // Artillery on field freight to this company turns back to its source pool.
+    const diversions = try artillery_field.prepareDiversions(gs, gs.scratch(), co);
+    defer gs.scratch().free(diversions);
+    try gs.reserveLog(1 + diversions.len);
 
     // ---- commit: no fallible allocation past this point ----
+    artillery_field.commitDiversions(gs, diversions);
     // Remove hulls.
     for (uids.items) |uid| gs.removeUnit(uid);
     // Depart on-books personnel.  The ledger capacity reserved above makes

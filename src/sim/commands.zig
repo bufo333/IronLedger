@@ -45,6 +45,7 @@ const crew = @import("crew.zig");
 const toe = @import("toe.zig");
 const personnel = @import("personnel.zig");
 const artillery = @import("artillery.zig");
+const artillery_field = @import("artillery_field.zig");
 const artillery_crew = @import("artillery_crew.zig");
 const artillery_service = @import("artillery_service.zig");
 const artillery_operations = @import("artillery_operations.zig");
@@ -59,6 +60,9 @@ pub const Command = union(enum) {
     attach_artillery: struct { formation: types.ArtilleryFormationId, company: types.ForceId },
     detach_artillery: types.ArtilleryFormationId,
     transfer_artillery: struct { formation: types.ArtilleryFormationId, to_hq: types.HqId },
+    /// Freight a pooled carrier, its seated crew and mechanic to a company in
+    /// the field; it attaches on arrival (docs/p2-artillery-acquisition-design.md).
+    ship_artillery_to_company: struct { formation: types.ArtilleryFormationId, company: types.ForceId },
     sell_artillery: types.ArtilleryFormationId,
     assign_artillery_crew: struct { formation: types.ArtilleryFormationId, seat: artillery_rules.Seat, person: types.PersonId },
     unassign_artillery_crew: struct { formation: types.ArtilleryFormationId, seat: artillery_rules.Seat },
@@ -347,6 +351,14 @@ pub const Error = error{
     ArtilleryNoMechanic,
     ArtilleryBayJob,
     ArtilleryNothingToReload,
+    ArtilleryNotPooled,
+    ArtilleryCompanyHome,
+    ArtilleryCompanyAfield,
+    ArtilleryCompanyTravelling,
+    ArtilleryWrongHq,
+    ArtilleryCrewCannotTravel,
+    ArtilleryCrewOtherCompany,
+    ArtilleryPersonInCompany,
     UnknownPerson,
     UnknownForce,
     UnknownUnit,
@@ -735,6 +747,7 @@ pub fn execute(gs: *GameState, cmd: Command) Error!Result {
         .attach_artillery => |p| return artillery.attach(gs, p),
         .detach_artillery => |id| return artillery.detach(gs, id),
         .transfer_artillery => |p| return artillery.transfer(gs, p),
+        .ship_artillery_to_company => |p| return artillery_field.ship(gs, p),
         .sell_artillery => |id| return artillery.sell(gs, id),
         .assign_artillery_crew => |p| return artillery_crew.assign(gs, p),
         .unassign_artillery_crew => |p| return artillery_crew.unassign(gs, p),

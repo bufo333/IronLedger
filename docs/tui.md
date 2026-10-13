@@ -212,30 +212,30 @@ filters to the active context (see the Keys description above).
 |---|---|---|
 | `[ ]` | any | previous / next TO&E view: all forces, each company, unassigned hulls, the hangar, artillery |
 | `r` | any | cycle the side pane: readiness, manning, damage |
-| `Enter` | TO&E | assign people to the hull under the cursor (narrow: its detail) |
-| `a` | any | seat a pilot, crew or tech on the hull under the cursor |
-| `u` | any | clear a seat or the tech on the hull under the cursor |
+| `Enter` | TO&E | assign people to the hull under the cursor (narrow: its detail); artillery: seat crew (narrow: its detail) |
+| `a` | any | seat a pilot, crew or tech on the hull under the cursor; artillery: seat crew |
+| `u` | any | clear a seat or the tech on the hull under the cursor; artillery: clear a seat or the mechanic |
 | `l` | any | move the hull under the cursor into a lance |
-| `x` | any | send the hull under the cursor to another company |
-| `c` | any | hire from the halls to fill the company's manning table |
-| `A` | any | auto-assign the company's people to its hulls |
+| `x` | any | send the hull under the cursor to another company; artillery: send the carrier to a company |
+| `c` | any | hire from the halls to fill the company's manning table; artillery: its company's |
+| `A` | any | auto-assign the company's people to its hulls; artillery: its company's |
 | `t / T` | any | train one person (the command line); T enrolls the whole company |
 | `o` | any | cycle a lance's role, or a company's rules of engagement |
-| `d` | any | queue the hull under the cursor for depot repair |
+| `d` | any | queue the hull under the cursor for depot repair; artillery: as v |
 | `R` | any | on a hull: order spares for its broken gear; on a company: recall it home |
 | `m` | any | mothball or reactivate the hull under the cursor |
 | `w` | any | raise an air wing for the company under the cursor |
 | `+` | any | raise a new combat company |
-| `$` | any | sell the hull under the cursor |
+| `$` | any | sell the hull under the cursor; artillery: as p |
 | `X` | any | disband the company under the cursor |
 | `b` | any | fabricate the structural parts the company's home HQ lacks |
-| `h` | any | open the hull's lifecycle: combat history, maintenance log and ownership chain |
-| `e` | any | attach or detach the artillery carrier (artillery panel) |
-| `f` | any | assign an artillery crew seat (artillery panel) |
-| `g` | any | assign or clear the artillery mechanic (artillery panel) |
+| `h` | any | open the hull's lifecycle: combat history, maintenance log and ownership chain (artillery too) |
+| `e` | any | pooled: pick a company to attach to at home or send to in the field; attached: detach at home (artillery panel) |
+| `f` | any | pick crew for an empty artillery seat (artillery panel) |
+| `g` | any | pick the artillery mechanic (artillery panel) |
 | `i` | any | reload artillery magazines (artillery panel) |
 | `v` | any | queue an artillery depot repair (artillery panel) |
-| `s` | any | transfer artillery to another HQ (artillery panel) |
+| `s` | any | freight a pooled carrier to another HQ (artillery panel) |
 | `p` | any | sell the artillery carrier (artillery panel) |
 
 ### F4 Contracts
@@ -589,6 +589,35 @@ filters to the active context (see the Keys description above).
 
 <!-- /keys -->
 
+#### Artillery panel (F3 Forces)
+
+The last Forces view (`[` from all forces). Every view switch opens the new
+view on its first row with its list focused, so a pane focused in the old
+view never leaves the carrier list without a cursor. The list shows each carrier with
+its placement — `HQ pool`, `attached`, `in transit → HQ`, `shipping → company
+(eta dN)` or `diverted → HQ (eta dN)` — crew, mechanic, magazines and
+readiness; the side pane (narrow: Enter's detail modal) shows each seat and
+the mechanic with their travel state (`travelling until dN`, `cannot travel
+(reason)`, `unavailable`) and one `next:` line: a pooled carrier is attached at
+home or sent to a company in the field; a shipping one attaches on arrival; a
+diverted one returns to the HQ pool.
+
+Every Forces key acts on the carrier under the cursor or says why it does
+not. Enter (wide), `a` and `f` open the crew picker: one row per empty seat
+and vehicle crew member, eligible people first, the rest dimmed with the seat
+owner's reason. `g` opens the mechanic picker, `u` the clear picker (each
+occupied seat, then the mechanic). `x` — and `e` on a pooled carrier — opens
+the send picker: every combat company, `attach now` for one home at the
+carrier's HQ or `ship: N days, cost` for one in the field, at the field-freight
+quote, dimmed with the reason when refused. `e` on an attached carrier
+detaches it at home. `s`, `i` and `p`/`$` fill the command line (`shiparty N
+hq:`, `reloadarty N`, `sellarty N`); `v`/`d` queue depot repair; `h` opens the
+carrier's lifecycle record; `A` and `c` act on an attached carrier's company;
+`+` raises a company. Keys that act only on TO&E rows (`r l t T o R m w b X`)
+say so and list the panel's keys; on a TO&E view the artillery keys point to
+the panel. Enter on a dimmed picker row still sends its command and shows the
+canonical refusal.
+
 #### Operations board (P4c)
 
 Opened with `g` in the active pane when the contract has an arc.
@@ -765,11 +794,19 @@ and the TUI:
 - `mercCompanyDetail(id)` (read-only lines: identity, lifecycle, treasury,
   fieldable BV, hull roster, linked rival standing)
 - `artilleryFormationRows` (typed `ArtilleryFormationRow` list: `.id`, `.text`
-  with quality, hull id, placement, crew and readiness, and `.attached` bool;
-  used by the Forces artillery panel and the REPL `artillery` list view)
+  with quality, hull id, placement, crew and readiness, `.hull`, the
+  `.placement` tag and the attached `.company`; used by the Forces artillery
+  panel and the REPL `artillery` list view)
 - `artilleryDetailLines(id)` (detail lines for one formation: header with
-  hull id, readiness, crew, tech, magazines, upkeep; used by the Forces
-  detail pane and the `arty_detail` modal on narrow terminals)
+  hull id, readiness, crew and tech with their travel state, magazines, the
+  next step, upkeep; used by the Forces detail pane and the `arty_detail`
+  modal on narrow terminals)
+- `artilleryCrewChoices(id)`, `artilleryTechChoices(id)`,
+  `artilleryUnassignChoices(id)` and `artilleryCompanyChoices(id)` (picker
+  rows carrying the typed person, `.artillery_seat`, `.artillery_tech`, the
+  company and `.artillery_send` attach/ship; dim reasons from
+  `artillery_crew.eligibilityText` of the owners' refusals; send rows show the
+  field-freight quote's days and cost)
 - `artilleryOfferRows` (typed `ArtilleryOfferRow` list: `.id` + `.text`;
   used by the Market artillery-offers pane and the `buyarty` REPL verb)
 

@@ -30,10 +30,23 @@ references through typed owners within P2g. Battle armor remains deferred beyond
   Lower skill remains better. Salary, rank, XP, fatigue, morale, provisions,
   medical care, shares and departure payment remain ordinary Person behavior;
   count/pay/feed each person once. There is no formation wage surcharge.
-- Operating seats exist only while company-attached. The candidate belongs to
-  that company, or is wholly unassigned at that company's actual home HQ
-  while it is home. Assignment sets `assigned_force` to the company. People
-  from another company or a remote HQ are never silently moved.
+- Operating seats exist while company-attached and in an HQ pool. On an
+  attached carrier the candidate belongs to that company, or is wholly
+  unassigned at that company's actual home HQ while it is home; assignment
+  sets `assigned_force` to the company. On a pooled carrier the candidate stays
+  off company books — posted to that HQ, or wholly unassigned and standing
+  there (the outfit seat) — and seating leaves the books unchanged; a company
+  member is refused (attach the carrier to that company at home, then seat
+  them). Home attachment puts the pool crew on the company's books. In transit
+  or disposed there is no seat to take. People from another company or a
+  remote HQ are never silently moved.
+- Field freight carries the seated crew and the assigned mechanic with the
+  carrier. Each must be available for duty, present at the source HQ and on
+  no company's books. Travellers are on leave until the carrier's ETA, as
+  transferred pilots are, and join the company's books on arrival (HQ postings
+  cleared). A diversion moves their leave to the return leg's ETA and they
+  arrive back still seated on unchanged books. HQ freight clears pool crew and
+  the mechanic, who stay behind on their books.
 - A person occupies at most one operating seat across artillery and ordinary
   Unit pilots. Reject an already seated person; require explicit unassignment
   before reassignment. Ordinary pilot-assignment/TO&E paths must enforce the
@@ -65,7 +78,8 @@ references through typed owners within P2g. Battle armor remains deferred beyond
   lifecycle mutations prepare all logs, financial effects and replacements
   before changing references. Changes affecting only availability preserve
   seats and make readiness false. A mechanic or crew member cannot teleport
-  away from a deployed/transiting attached carrier through an HQ posting.
+  away from a deployed/transiting attached carrier, or from a carrier on field
+  freight or its return leg, through an HQ posting or a transfer.
 
 ## Physical location and complete capabilities
 
@@ -78,12 +92,14 @@ P2f tagged union; attached position derives from company posture.
 queries, commands, ticks and validators consume those answers.
 
 - Pool: actual pool HQ stock and facilities; mechanic-only maintenance,
-  reload and repairs are permitted, but no operating seats or firing readiness.
+  reload and repairs are permitted, and operating seats may be filled ahead of
+  deployment, but there is no firing readiness until attachment.
 - Attached and physically home: actual home HQ stock/facilities. Attached and
   deployed/idle afield: that company's field stores and local people, never
   the supplying HQ's stock or an unrelated home facility.
-- Company transit/return transit or artillery freight: no service, reload,
-  repair or readiness. Loaded rounds and condition travel intact; no weekly
+- Company transit/return transit or artillery freight (HQ freight, field
+  freight or its return leg): no service, reload, repair, depot or readiness;
+  service costs are overhead, and carry stays overhead until attachment. Loaded rounds and condition travel intact; no weekly
   maintenance roll or consumption occurs while in transit. Maintenance age
   continues advancing. No duplicate persisted planet/ETA for company travel.
 - Sold: historical condition and magazines retained, no crew/tech references,
@@ -253,8 +269,9 @@ MG/armor/component costs via `part.cost`, never copy their values.
   detach clears all crew and mechanic references, leaving ordinary people on
   their existing company books. No automatic firing, severance or person
   travel. Any queued/active depot job blocks either operation.
-- Pool freight requires no crew but no bay job; it clears the mechanic during
-  the atomic dispatch. Damage and magazines travel with the carrier. P2f
+- Pool HQ freight requires no crew but no bay job; it clears pool crew and the
+  mechanic during the atomic dispatch. Field freight carries them instead
+  ([field delivery](p2-artillery-acquisition-design.md)). Damage and magazines travel with the carrier. P2f
   catalogue mass, route, ETA, price and vehicle-bay policy remain unchanged;
   onboard ammunition is included in carrier transport, not counted again as
   warehouse cargo. Stored reload packages use their declared shipping tons.
@@ -267,9 +284,11 @@ MG/armor/component costs via `part.cost`, never copy their values.
   named project valuation constant; intact C-grade equals P2f price.
   Optional equipment/bin condition does not create another sale discount.
   Liquidation-backed credit calls that same sale-value owner once.
-- HQ sale is blocked by pooled/freight carriers and artillery bay jobs through
-  existing physical-use checks. Company disband/home reassignment stays
-  blocked by attachment. Person bookkeeping is never an alternate location.
+- HQ sale is blocked by pooled/freight carriers, field-freight sources,
+  return-leg HQs and artillery bay jobs through existing physical-use checks.
+  Company disband/home reassignment stays blocked by attachment; disband
+  diverts inbound field freight to its source pool. Person bookkeeping is never
+  an alternate location.
 
 ## Commands, orchestration and atomicity
 
@@ -321,8 +340,8 @@ retry semantics and tests. No unrelated tick retry redesign is authorized.
 
 Save support is governed by
 [contract rule 51](engineering-contract.md#51-save-format-support-is-explicit).
-The current P2h boundary supports schema **63** for both store and campaign;
-version numbering is retained. Store adoption, campaign loading and overwriting
+The current boundary supports format **67** for both store and campaign;
+version numbering is retained. Format 66 and older are refused. Store adoption, campaign loading and overwriting
 enforce this boundary before decoding or replacing gameplay rows.
 Older formats are preserved but refused, with typed `StoreOlderThanGame` or
 `SaveOlderThanGame` errors; future versions retain distinct
@@ -369,8 +388,13 @@ encoded in integer metadata as -1 for absence; day zero is a real checkpoint.
 Every formation, including sold history, has exactly the canonical crew and
 slot row set; unfilled Person references are SQL NULL, not fabricated IDs.
 New tables have campaign/formation/Person FKs, primary/unique keys, enum,
-integer-type and range checks; fresh schema 63 directly creates the bay table
-with the appropriate target constraints. The store clear/delete/overwrite registry and DDL parity test include these
+integer-type and range checks; a fresh current store directly creates the bay table
+with the appropriate target constraints. Crew rows are valid on attached
+carriers (company members, unposted) and on pooled, field-freight and
+return-leg carriers (on no company's books, posted nowhere or to the pool,
+source or return HQ); the mechanic follows the same book rule on the two field
+legs and is forbidden on HQ freight, sold and destroyed carriers. Presence and
+availability are not validated. The store clear/delete/overwrite registry and DDL parity test include these
 tables. The store facade
 owns transactions; existing artillery_store encodes/decodes its subsystem.
 No second save path or new persistence-module gate exception.

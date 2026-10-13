@@ -126,6 +126,12 @@ const Modal = union(enum) {
     pick_hq: types.PersonId,
     pick_crew: types.UnitId,
     pick_unassign: types.UnitId,
+    /// Artillery pickers: an empty seat's crew, the mechanic, clearing either,
+    /// and where a pooled carrier goes. Each captures the formation (rule 40).
+    pick_arty_crew: types.ArtilleryFormationId,
+    pick_arty_tech: types.ArtilleryFormationId,
+    pick_arty_unassign: types.ArtilleryFormationId,
+    pick_arty_send: types.ArtilleryFormationId,
     /// Part picker: picks the part, then the amount form asks the quantity.
     pick_part: struct { purpose: q.PartPurpose, site: types.Site, ship_to: ?types.ForceId = null },
     /// Amount form: every number the client asks for goes
@@ -1505,7 +1511,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail, .stop_report => try self.drawList(al),
+            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_arty_crew, .pick_arty_tech, .pick_arty_unassign, .pick_arty_send, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail, .stop_report => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -2723,6 +2729,30 @@ pub const App = struct {
                 .rows = try q.unassignChoices(al, g, uid),
                 .empty = "nobody is assigned to this hull",
             },
+            .pick_arty_crew => |fid| .{
+                .title = try listTitle(al, try std.fmt.allocPrint(al, "CREW ARTILLERY #{d}", .{@intFromEnum(fid)}), "seat", "cancel", false),
+                .cols = q.artillery_crew_pick_cols,
+                .rows = try q.artilleryCrewChoices(al, g, fid),
+                .empty = "every seat is filled, or no vehicle crew is on the books — hire from a hall (HQ screen)",
+            },
+            .pick_arty_tech => |fid| .{
+                .title = try listTitle(al, try std.fmt.allocPrint(al, "MECHANIC FOR ARTILLERY #{d}", .{@intFromEnum(fid)}), "assign", "cancel", false),
+                .cols = q.artillery_tech_pick_cols,
+                .rows = try q.artilleryTechChoices(al, g, fid),
+                .empty = "no mechanic on the books — hire one from a hall (HQ screen)",
+            },
+            .pick_arty_unassign => |fid| .{
+                .title = try listTitle(al, try std.fmt.allocPrint(al, "CLEAR FROM ARTILLERY #{d}", .{@intFromEnum(fid)}), "clear", "cancel", false),
+                .cols = q.unassign_pick_cols,
+                .rows = try q.artilleryUnassignChoices(al, g, fid),
+                .empty = "nobody is seated on this carrier and it has no mechanic",
+            },
+            .pick_arty_send => |fid| .{
+                .title = try listTitle(al, try std.fmt.allocPrint(al, "SEND ARTILLERY #{d} TO", .{@intFromEnum(fid)}), "send", "cancel", false),
+                .cols = q.artillery_send_pick_cols,
+                .rows = try q.artilleryCompanyChoices(al, g, fid),
+                .empty = "no company to send to — raise one (Forces +)",
+            },
             .pick_part => |pp| .{
                 .title = try listTitle(al, switch (pp.purpose) {
                     .order => "ORDER WHICH PART",
@@ -2777,6 +2807,15 @@ pub const App = struct {
             .pick_unassign => |uid| {
                 _ = try self.execSay(.{ .unassign = .{ .unit = uid, .slot = row.slot } }, .good, "#{d}: {s} cleared", .{ @intFromEnum(uid), if (row.slot == .any) "pilot and tech" else @tagName(row.slot) });
             },
+            // A dimmed row still sends its command: the owner refuses it in
+            // its own words (rule 34).
+            .pick_arty_crew => |fid| try self.execReport(.{ .assign_artillery_crew = .{ .formation = fid, .seat = row.artillery_seat.?, .person = row.sel.person } }),
+            .pick_arty_tech => |fid| try self.execReport(.{ .assign_artillery_tech = .{ .formation = fid, .person = row.sel.person } }),
+            .pick_arty_unassign => |fid| try self.execReport(if (row.artillery_tech) .{ .unassign_artillery_tech = fid } else .{ .unassign_artillery_crew = .{ .formation = fid, .seat = row.artillery_seat.? } }),
+            .pick_arty_send => |fid| try self.execReport(switch (row.artillery_send.?) {
+                .attach => .{ .attach_artillery = .{ .formation = fid, .company = row.sel.company } },
+                .ship => .{ .ship_artillery_to_company = .{ .formation = fid, .company = row.sel.company } },
+            }),
             .pick_part => |pp| {
                 const on_hand: i64 = row.on_hand;
                 const key = try al.dupe(u8, row.key);
@@ -3031,6 +3070,13 @@ pub const App = struct {
 
     pub fn exec(self: *App, cmd: Command) !bool {
         return self.execResult(cmd) != null;
+    }
+
+    /// Run a command and report its canonical outcome: the refusal sentence on
+    /// failure, `queries.resultText` on success.
+    pub fn execReport(self: *App, cmd: Command) !void {
+        const res = self.execResult(cmd) orelse return;
+        self.say(.good, "{s}", .{try q.resultText(self.a(), self.state(), cmd, res)});
     }
 
     /// Run a command and report it: the refusal sentence on failure, `fmt`
@@ -3441,7 +3487,7 @@ pub const App = struct {
                     .max_h = full_h,
                 };
             },
-            .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part => {
+            .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_arty_crew, .pick_arty_tech, .pick_arty_unassign, .pick_arty_send, .pick_part => {
                 const v = try self.pickView(al);
                 return .{ .title = v.title, .right_title = "best first · dimmed rows say why not", .table = try q.tableOf(al, v.cols, v.rows), .n = v.rows.len, .empty = try std.fmt.allocPrint(al, "{{d}}{s}{{/}}", .{v.empty}), .w = layout.modal.picker_w, .max_h = full_h };
             },
@@ -4298,7 +4344,7 @@ pub const App = struct {
                     .none => {},
                 }
             },
-            .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part => try self.pickEnter(),
+            .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_arty_crew, .pick_arty_tech, .pick_arty_unassign, .pick_arty_send, .pick_part => try self.pickEnter(),
             .accept_pick => |offer_id| {
                 const cands = try q.offerCandidates(al, self.state(), offer_id);
                 if (cands.len == 0) return;
@@ -4891,7 +4937,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail, .stop_report => try self.listKey(key),
+            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_arty_crew, .pick_arty_tech, .pick_arty_unassign, .pick_arty_send, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail, .stop_report => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {

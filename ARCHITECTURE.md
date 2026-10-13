@@ -234,8 +234,17 @@ cheap, copyable, and impossible to mix up.
   `shiparty`, `sellarty`, `seat`, `artytech`, `reloadarty`, `repairarty`) in
   `cli.zig`; an artillery panel as the last F3 Forces view (`]`/`[` wraps to
   it); and an ARTILLERY OFFERS pane on F10 Market (`B` to buy).
+  A pooled carrier can be crewed at its HQ (crew stay off company books) and
+  either attached at home or sent by field freight to a company in the field
+  (`ship_artillery_to_company`, `shiparty <id> co:<id>`; `artillery_field`
+  owns its quote, dispatch, arrival and diversion). Seated crew and the
+  mechanic travel with it, attach and join the company on arrival, or turn
+  back to the source pool with it when the company leaves the field or
+  disbands. On the artillery panel every Forces key acts on the carrier
+  through typed pickers (crew, mechanic, clear, send) or says why it does not.
   [Artillery acquisition policy](docs/p2-artillery-acquisition-design.md) defines
-  the monthly local offers and declared transport/accounting abstractions.
+  the monthly local offers, field delivery and declared transport/accounting
+  abstractions.
 - **Part** — static part definition (catalog) plus fungible quantities in site
   inventories; mounted unit slots carry condition, hulls carry maintenance
   quality A–F, and catalogue availability A–F controls sourcing. Acquisition
@@ -380,7 +389,9 @@ between contracts: a turn hold; the contact window; a decision queued that
 day or one that would default tomorrow; the employer's combat-ineffective
 breach notice (`contract_control.breachNoticeServed`); payday; a running
 contract closing; a company arriving on its contract world; a company
-coming home, a unit transfer or artillery formation landing. Between
+coming home, a unit transfer or artillery formation landing (HQ freight in
+its pool, field freight attaching to its company, or a diverted carrier back
+in its source pool; a diversion itself keeps the carrier on the road). Between
 contracts only: a fund courier or part order landing; a structural bay
 job (hull or artillery depot repair) leaving the bench finished; a
 construction project landing; a rare hull new on an HQ board; someone
@@ -1259,9 +1270,9 @@ identical hash, and identical evolution after load and executable restart;
 a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
-**Current P5c format boundary.** New empty stores
-initialize schema 66 transactionally. Existing store and campaign versions
-must both be 66; older formats (65 included) are refused intact and newer formats retain
+**Current format boundary.** New empty stores
+initialize schema 67 transactionally. Existing store and campaign versions
+must both be 67; older formats (66 included) are refused intact and newer formats retain
 their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
 missing tables or rows. No automatic reset, deletion, rewrite, backfill or
@@ -1324,6 +1335,15 @@ records out of order or dated after today, an answer that is not an option,
 and a pending situation and record that disagree (a pending situation with
 no open record, an open record with no pending situation, or an answered
 record still pending). A situation's options are rebuilt from its row.
+
+**Artillery field freight is saved** (schema 67): `artillery_formation` adds
+the `field_freight` (source HQ, company, dispatch day, ETA, paid cost) and
+`field_return` (target HQ, dispatch day, ETA, paid cost) placements in the
+existing nullable payload columns; SQL checks and the loader both require
+exactly each tag's own columns. Pool and travelling crew rows reload; the
+loader refuses a company member on a pool or travelling seat, field freight to
+a non-company force, inbound plus attached carriers over the company's cap,
+and a return leg to a missing HQ.
 
 **RNG state is saved per stream**: the campaign seed plus one
 `rng_stream` row per named stream (format 1: the generator's words,
