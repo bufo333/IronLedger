@@ -466,6 +466,10 @@ pub const Tuning = struct {
             /// wrecks roll `recovery_mod` better; below `clean_at` the
             /// rearguard takes `extra_hit_pct` of the line in hits.
             cover: struct { clean_at: i32, extra_hit_pct: i32, recovery_mod: i32 },
+            /// Committing the reserve at the contact pause adds
+            /// `commit_roll` roll points to the decisive roll, and the
+            /// reserve no longer clamps a lost fight's hits.
+            reserve: struct { commit_roll: i32 },
         },
         /// Per-drawn-OpFor-hull outcome by engagement band (destroyed first, then
         /// combat_ineffective; remainder survive). Percentages. // TUNE

@@ -153,6 +153,16 @@ pub const TaskedLance = struct {
     note: []const u8,
 };
 
+/// One lever pulled at the contact pause (ARCH §7 "The phased
+/// engagement"): what it was, the command capacity it spent and the
+/// decisive-roll modifier it added. Costs and modifiers are their owners'
+/// (`battle_phases.leverCost`, `leverMod`); the loader refuses others.
+pub const BattleLever = struct {
+    lever: battle_phase.Lever,
+    cost: u8,
+    roll_mod: i32,
+};
+
 pub const RecordedRoll = struct { roll: i32, target: i32 };
 
 /// Persisted canonical operating-seat identity and captured occupant history.
@@ -241,6 +251,9 @@ pub const BattleReport = struct {
     /// The phases fought and the order given at each (ARCH §7 "The phased
     /// engagement"); empty for a concession or a forfeit.
     phases: []const battle_phase.PhaseRecord = &.{},
+    /// The levers pulled at the contact pause, in the order given; empty
+    /// for a concession or a forfeit, which fight no phase.
+    levers: []const BattleLever = &.{},
     recon_quality: u8 = 0,
     avg_fatigue: u8 = 0,
     avg_morale: u8 = 0,

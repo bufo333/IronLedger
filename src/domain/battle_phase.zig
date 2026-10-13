@@ -12,6 +12,7 @@ const std = @import("std");
 const types = @import("types.zig");
 const force = @import("force.zig");
 const autoresolve = @import("autoresolve.zig");
+const operation = @import("operation.zig");
 
 /// A named slice of the engagement. `contact` and `decisive` end on a pause;
 /// `pursuit` (after a held field) and `withdrawal` (a lost field, or a
@@ -48,7 +49,9 @@ pub const Pause = enum {
 
 /// A battle order. `roe` changes the rules of engagement for the next phase
 /// and is recorded on the battle, never written to the company's standing
-/// ROE, so replaying the orders gives the same fight.
+/// ROE, so replaying the orders gives the same fight. `commit_reserve` and
+/// `intervene` are the contact-pause levers (`Lever`): they change the
+/// decisive phase only, and nothing live until the battle publishes.
 pub const Order = union(enum) {
     /// Fight the contact phase.
     engage,
@@ -63,6 +66,10 @@ pub const Order = union(enum) {
     /// After a lost field: cover the recovery of the wrecks.
     cover_recovery,
     roe: force.Roe,
+    /// At the contact pause: send the reserve-tasked lance in.
+    commit_reserve,
+    /// At the contact pause: spend command capacity on an intervention.
+    intervene: operation.Intervention,
 
     pub const Kind = std.meta.Tag(Order);
 
@@ -79,6 +86,43 @@ pub const Order = union(enum) {
                 .standard => "ROE standard",
                 .cautious => "ROE cautious",
             },
+            .commit_reserve => "commit the reserve",
+            .intervene => |k| switch (k) {
+                .emergency_recon => "call emergency recon",
+                .reinforce => "call reinforce",
+                .air_cover => "call air cover",
+                .field_repair => "call field repair",
+            },
+        };
+    }
+};
+
+/// A lever pulled at the contact pause: the reserve committed, or one
+/// command-capacity intervention called. Each is given at most once in a
+/// battle. The tag names are the persisted lever kinds.
+pub const Lever = enum {
+    commit_reserve,
+    emergency_recon,
+    reinforce,
+    air_cover,
+    field_repair,
+
+    /// The lever `given` pulls; null for an order that pulls none.
+    pub fn of(given: Order) ?Lever {
+        return switch (given) {
+            .commit_reserve => .commit_reserve,
+            .intervene => |k| switch (k) {
+                inline else => |tag| @field(Lever, @tagName(tag)),
+            },
+            .engage, .press_on, .withdraw, .pursue, .consolidate, .cover_recovery, .roe => null,
+        };
+    }
+
+    /// The order that pulls this lever.
+    pub fn order(self: Lever) Order {
+        return switch (self) {
+            .commit_reserve => .commit_reserve,
+            inline else => |tag| .{ .intervene = @field(operation.Intervention, @tagName(tag)) },
         };
     }
 };
@@ -147,6 +191,12 @@ pub const PhaseReport = struct {
     /// The field is held after the decisive phase.
     held_field: bool = false,
     odds: Odds = .{},
+    /// The decisive-roll modifier the levers given so far add.
+    lever_mod: i32 = 0,
+    /// The reserve is committed: the decisive phase runs without its clamp.
+    reserve_committed: bool = false,
+    /// Command capacity the interventions given so far spend.
+    capacity_spent: u8 = 0,
 };
 
 /// One order given and the pause it led to.
@@ -181,9 +231,22 @@ pub const PhaseRecord = struct {
     scenario_mod: i32 = 0,
     roe_roll: i32 = 0,
     momentum: i32 = 0,
+    /// The decisive roll's lever modifier; zero in every other phase.
+    lever_mod: i32 = 0,
     margin: i32 = 0,
     hits: u32 = 0,
 };
+
+test "every lever is pulled by exactly one order, and other orders pull none" {
+    inline for (@typeInfo(Lever).@"enum".fields) |field| {
+        const lever: Lever = @enumFromInt(field.value);
+        try std.testing.expectEqual(@as(?Lever, lever), Lever.of(lever.order()));
+    }
+    try std.testing.expectEqual(@as(?Lever, .air_cover), Lever.of(.{ .intervene = .air_cover }));
+    for ([_]Order{ .engage, .press_on, .withdraw, .pursue, .consolidate, .cover_recovery, .{ .roe = .hold } }) |order| {
+        try std.testing.expectEqual(@as(?Lever, null), Lever.of(order));
+    }
+}
 
 test "odds bands are named in the declaration order of their enum" {
     try std.testing.expectEqual(@as(usize, 5), NextPhase.decisive.bands());

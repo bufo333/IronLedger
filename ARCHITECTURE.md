@@ -337,8 +337,10 @@ engagement from live state, so live state must not move between orders;
 the lock is what makes the persisted battle record small and the replay
 exact. Before the first order the pre-battle levers (ROE, lance roles,
 battle orders, emergency resupply, tasks, interventions) stay open; only
-the advance is held. A battle starts only when no report or decision holds
-the turn.
+the advance is held. The contact-pause levers (committing the reserve, a
+mid-battle intervention) are battle orders, so the lock is unchanged: they
+change nothing live until the order that ends the battle publishes them. A
+battle starts only when no report or decision holds the turn.
 
 The test for a new blocking rule is *what it disposes of*, not how big it
 feels. If the worst outcome is a worse bonus, it waits in the inbox.
@@ -498,11 +500,12 @@ roll and `tuning.battle.outcome_at`; there is no second engine.
   even or lost, which sets the contact hits (a share of the line) and the
   momentum carried into the decisive roll.
 - **Decisive** (`decisiveVerdict`, `decisiveHits`): decisive die + ratio +
-  conditions + the ROE roll in force + momentum, banded by `outcome_at`; a
-  losing roll is re-rolled on the Edge die when a pilot can spend Edge. The
-  line takes the larger of the contact hits and the outcome's share
-  (`hit_pct`, ROE and reserve clamp as before). A cautious draw gives up the
-  field (`cautiousWithdrawal`).
+  conditions + the ROE roll in force + momentum + the contact-pause levers'
+  modifier (`decisiveMod`), banded by `outcome_at`; a losing roll is
+  re-rolled on the Edge die when a pilot can spend Edge. The line takes the
+  larger of the contact hits and the outcome's share (`hit_pct`, ROE, and
+  the reserve's clamp unless the reserve was committed). A cautious draw
+  gives up the field (`cautiousWithdrawal`).
 - **Pursuit or withdrawal.** A held field may be pursued (the pursuit die
   adds an enemy-loss bonus, widening the pool path's destroyed band, at the
   risk of hits) or consolidated; a lost field may be covered (wrecks roll
@@ -520,12 +523,61 @@ for the next phase and the exact odds of each band of the next phase
 screen shows those exact counts as whole percentages totalling 100
 (`queries.oddsPercents`: each band rounded down, the points left to the
 largest remainders). The legal orders at each pause are `battle_phases.legalOrders`: engage; press on,
-withdraw or an ROE change at contact; pursue or consolidate after a held
+withdraw, an ROE change or a lever at contact; pursue or consolidate after a held
 field, cover the recovery or withdraw after a lost one. An ROE change is
 recorded on the battle, never written to the company's standing ROE, and is
 refused (`RoeReservedByEmployer`) when integrated command holds the ROE. An
 engagement's outcome is a pure function of the campaign state at engagement
 start, its fixed dice and its ordered orders (`battle_phases.run`).
+
+**Contact-pause levers.** At the contact pause, alongside an ROE change, the
+commander may pull each lever once, in any order, before pressing on or
+withdrawing; a lever keeps the battle at the contact pause, consumes no die
+and changes only the decisive phase (`Order.commit_reserve`,
+`Order.intervene`; `battle_phase.Lever`).
+
+- **Commit the reserve.** The reserve-tasked lance already fights in the
+  line (P4e). Committing it adds `tuning.battle.phases.reserve.commit_roll`
+  to the decisive roll and gives up its clamp: a lost fight lands its full
+  share of hits. It costs no command capacity.
+- **Call an intervention** (`emergency recon`, `reinforce`, `air cover`,
+  `field repair`). The decisive roll gains exactly what the intervention's
+  profile adds before battle (`operations.interventionProfile`), here to the
+  decisive phase alone, for `operations.interventionCost` command capacity.
+- **Owners.** `battle_phases.leverCost`, `leverMod` and `decisiveMod` own the
+  cost and modifiers; `battle_phases.leverAllowed` owns availability.
+  `battle.leverAvailability` reads it from live state at engagement start
+  (which the battle lock keeps fixed) and the engagement's weather: an
+  operational reserve-tasked lance of the committed combat operation
+  (`readiness.forceOperational`), each intervention's gate
+  (`interventionGate`), prior application (`interventionApplied`), the
+  employer lock (`operations.interventionReservedByEmployer`: integrated
+  command reserves `reinforce` and `air_cover` mid-battle; pre-battle
+  `apply_intervention` does not consult it) and the capacity the commander
+  may spend (`commandCapacityAvailable`, less earlier calls in this battle).
+- **Refusals**, each consuming nothing, with one `cli.errorText` sentence:
+  no operational reserve (`ReserveUnavailable`), the reserve already
+  committed (`OrderNotLegal`), the employer's lock
+  (`InterventionReservedByEmployer`), air cover in weather that grounds
+  aircraft (`AirCoverGrounded`), an intervention applied before battle or
+  already called (`InterventionAlreadyApplied`), an unmet gate
+  (`InterventionGateUnmet`) and capacity short (`InsufficientCommandCapacity`),
+  checked in that order. A lever at the decisive pause or before contact is
+  `OrderNotLegal`: the decisive pause leads to a pursuit or a rearguard on the
+  bare pursuit die, which no lever reaches.
+- **Report and odds.** The contact pause's report carries the levers'
+  modifier, the reserve commitment and the capacity spent, and its odds are
+  `nextPhaseOdds` under the levers' modifier. The decisive `PhaseRecord`
+  carries `lever_mod`; `BattleReport.levers` lists each lever with its cost
+  and modifier; the loader refuses figures other than the owners give.
+- **Publication.** The order that ends the battle publishes the levers with
+  it: the interventions' capacity is deducted from the contract, each
+  intervention joins the committed operation's `interventions` (logged with
+  the same `[arc] intervention applied` line a pre-battle one leaves), a
+  committed reserve sets `Operation.reserve_committed`, and the AAR and the
+  campaign log name each lever and its effect. A withdrawal after a lever
+  still pays for it: the capacity was spent at the pause, and the lever added
+  nothing. Unattended and decision-started engagements give no levers.
 
 The battle record (`GameState.battles_in_progress`, at most one) keeps the
 contract, the pause and each order with the report it reached; it holds no
@@ -537,8 +589,9 @@ first order as one-step battles. The AAR and the campaign log name each
 phase and the order given at it (`BattleReport.phases`,
 `after_action.phaseText`). Engagements a decision's "fight" option starts
 (`.engagement`) fight through the same phases with the unattended orders
-(`battle_phases.defaultOrder`) in one publication. Reserve commitment, air
-cover and the command-capacity interventions mid-battle are P5b.2.
+(`battle_phases.defaultOrder`) in one publication. Levers pulled at the
+contact pause, each with its cost and effect, are on the record too
+(`BattleReport.levers`, `after_action.leverText`).
 
 An engagement with nobody fit to put in the line is **conceded**
 (`battle.concede`): a defeat `BattleReport` that holds the turn like any
@@ -561,11 +614,15 @@ and `untask` CLI verbs or the TUI 't' key on the active-contracts pane.
 `operations.legalTasks`, `taskEligible`, `taskProfile`, and
 `operationTaskMods` are the single rule owners; battle, queries and TUI
 consume only through those functions.  Each tasked lance appears in the AAR.
+The reserve-tasked lance can be committed at the battle's contact pause
+(see the contact-pause levers above); the operation records it
+(`reserve_committed`) and the AAR says it was committed.
 
 **Operation report** (P4i.3): the Contracts screen's `G` key opens a read-only
 report (`queries.operationReport`) over an arc contract's decided and terminal
 operations. Each row carries the operation's intent, tempo, outcome, command
-capacity spent, interventions applied, tempo delay, and the campaign-state
+capacity spent, interventions applied (before battle or at its contact
+pause), whether its battle's reserve was committed, tempo delay, and the campaign-state
 consequence its resolution applied — world-state, relationship, rival and
 officer deltas for a resolved non-combat operation. Every value is read from
 the operation rule owners, never re-derived (rule 86); the report adds no
@@ -1112,9 +1169,9 @@ identical hash, and identical evolution after load and executable restart;
 a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
-**Current P5b.1 format boundary.** New empty stores
-initialize schema 64 transactionally. Existing store and campaign versions
-must both be 64; older formats (63 included) are refused intact and newer formats retain
+**Current P5b.2 format boundary.** New empty stores
+initialize schema 65 transactionally. Existing store and campaign versions
+must both be 65; older formats (64 included) are refused intact and newer formats retain
 their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
 missing tables or rows. No automatic reset, deletion, rewrite, backfill or
@@ -1134,25 +1191,35 @@ skipped or defaulted. Loading an unknown campaign id, or saving over a
 deleted one, is `NoSuchCampaign`; a first save takes its `campaign_id`
 only after COMMIT.
 
-**A battle in progress is saved** (schema 64): `battle_in_progress` (the
-contract and its pause) and `battle_in_progress_order` (each order with the
-pause report it reached, odds included), and each report's fought phases in
-`battle_report_phase`. The record count (meta `battle_in_progress_count`),
-each record's order count and each report's phase count are saved as
+**A battle in progress is saved** (schema 65): `battle_in_progress` (the
+contract and its pause) and `battle_in_progress_order` (each order, with the
+intervention an `intervene` order calls, and the pause report it reached:
+odds, lever modifier, reserve commitment and capacity spent included), each
+report's fought phases in `battle_report_phase` (the decisive phase's
+`lever_mod` included) and its levers in `battle_report_lever` (kind, cost and
+decisive-roll modifier); `operation.reserve_committed` keeps a committed
+reserve. The record count (meta `battle_in_progress_count`),
+each record's order count and each report's phase and lever counts are saved as
 completeness checks, so a removed record, a truncated course of orders or a
-report missing phases is corruption, never a battle not yet engaged, an
-earlier pause or a concession. The loader refuses an unknown phase or order,
+report missing phases or levers is corruption, never a battle not yet engaged, an
+earlier pause or a concession. The loader refuses an unknown phase, order,
+intervention or lever kind,
 a record for a missing or inactive contract, more than one record, orders out
 of sequence or orphaned, a malformed integer, a count the rows do not match,
-a course of orders that `battle_phases.recordConsistent` rejects, and report
+a course of orders that `battle_phases.recordConsistent` rejects (a lever
+pulled twice, or lever figures other than the owners' sums), report
 phases that are not a whole course agreeing with the report's verdict
 (`battle_phases.reportPhasesConsistent`): every rolled phase's margin must
-need a die 2d6 can show under its recorded modifiers, and a report with no
+need a die 2d6 can show under its recorded modifiers, levers must carry
+their owners' cost and modifier, at most once each, summing to the decisive
+`lever_mod`, and a report with no
 phases must be a concession or a forfeit as those write it, with no measured
-power, losses, kills, prisoners or hits. Once the campaign is loaded,
+power, losses, kills, prisoners, hits or levers; and a reserve commitment on
+a non-combat operation. Once the campaign is loaded,
 `battle.validateInProgress` replays every prefix of the orders from live
 state and requires exactly the pause stored for it, with the engagement
-due, nothing else holding the turn and no ROE order the employer reserves.
+due, nothing else holding the turn, no ROE order the employer reserves and
+every lever still allowed (`leverAllowed`).
 A forged pause is refused, never repaired. Saving mid-battle, loading and
 finishing gives the same digest as finishing without the save.
 

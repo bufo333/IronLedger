@@ -164,16 +164,30 @@ pub const battle_order_words = [_]struct { []const u8, game.battle_phase.Order.K
     .{ "consolidate", .consolidate },
     .{ "cover", .cover_recovery },
     .{ "roe", .roe },
+    .{ "reserve", .commit_reserve },
+    .{ "call", .intervene },
+};
+
+/// The intervention a `battle <contract> call <word>` order calls: one
+/// spelling per intervention (rule 10).
+pub const battle_intervention_words = [_]struct { []const u8, game.operation.Intervention }{
+    .{ "recon", .emergency_recon },
+    .{ "reinforce", .reinforce },
+    .{ "air", .air_cover },
+    .{ "repair", .field_repair },
 };
 
 /// The command line that gives `order` on a contract's battle:
-/// "battle 3 roe cautious".
+/// "battle 3 roe cautious", "battle 3 call air".
 pub fn battleCommandText(alloc: std.mem.Allocator, contract: types.ContractId, order: game.battle_phase.Order) ![]const u8 {
     const word = for (battle_order_words) |w| {
         if (w[1] == std.meta.activeTag(order)) break w[0];
     } else unreachable;
     return switch (order) {
         .roe => |r| std.fmt.allocPrint(alloc, "battle {d} {s} {s}", .{ @intFromEnum(contract), word, @tagName(r) }),
+        .intervene => |kind| std.fmt.allocPrint(alloc, "battle {d} {s} {s}", .{ @intFromEnum(contract), word, for (battle_intervention_words) |w| {
+            if (w[1] == kind) break w[0];
+        } else unreachable }),
         else => std.fmt.allocPrint(alloc, "battle {d} {s}", .{ @intFromEnum(contract), word }),
     };
 }
@@ -450,8 +464,8 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
     if (eq(u8, verb, "complete")) return .{ .complete_contract = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "confirm")) return .{ .confirm_orders = @enumFromInt(try num(u32, tokens.next())) };
     if (eq(u8, verb, "battle")) {
-        // battle <contract> <order word> [roe] — bare `battle <contract>` is
-        // the REPL's battle screen.
+        // battle <contract> <order word> [roe | intervention] — bare
+        // `battle <contract>` is the REPL's battle screen.
         const contract: types.ContractId = @enumFromInt(try num(u32, tokens.next()));
         const word = try need(tokens.next());
         const kind = for (battle_order_words) |w| {
@@ -459,6 +473,11 @@ fn parseVerb(verb: []const u8, tokens: *std.mem.TokenIterator(u8, .scalar)) Pars
         } else return error.BadArguments;
         const order: game.battle_phase.Order = switch (kind) {
             .roe => .{ .roe = std.meta.stringToEnum(game.force.Roe, try need(tokens.next())) orelse return error.BadArguments },
+            .intervene => blk: {
+                const what = try need(tokens.next());
+                for (battle_intervention_words) |w| if (eq(u8, w[0], what)) break :blk .{ .intervene = w[1] };
+                return error.BadArguments;
+            },
             inline else => |k| @unionInit(game.battle_phase.Order, @tagName(k), {}),
         };
         return .{ .battle_order = .{ .contract = contract, .order = order } };
@@ -831,6 +850,9 @@ pub fn errorText(err: anyerror) []const u8 {
         error.NoEngagementDue => "that contract has no engagement due or being fought",
         error.OrderNotLegal => "that order cannot be given at this point of the battle — `battle <contract>` lists the ones that can",
         error.RoeReservedByEmployer => "the employer's integrated command sets the rules of engagement — the ROE cannot be changed",
+        error.ReserveUnavailable => "there is no reserve to commit — a lance tasked reserve on the committed combat operation, operational and crewed, stands behind the line",
+        error.InterventionReservedByEmployer => "the employer's integrated command directs that in battle — reinforcements and air cover are theirs",
+        error.AirCoverGrounded => "the weather has grounded the fighters — no air cover in this engagement",
         error.NoSuchDecision => "no pending decision with that id — `inbox` lists them, each with the id to answer it by",
         error.NoSuchEvent => "no such event — kinds read as the log names them, e.g. smuggler_offer (`sop` lists the ones with a history)",
         error.NoSuchListing => "that listing is gone",
@@ -1070,7 +1092,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "activate", "activate <unit>" },
         .{ "complete", "complete <contract id>" },
         .{ "confirm", "confirm <contract id>   (battle orders given; see `briefing <contract id>`)" },
-        .{ "battle", "battle <contract id> [engage|on|withdraw|pursue|consolidate|cover|roe hold|standard|cautious]   (bare: the battle screen)" },
+        .{ "battle", "battle <contract id> [engage|on|withdraw|pursue|consolidate|cover|roe hold|standard|cautious|reserve|call recon|reinforce|air|repair]   (bare: the battle screen)" },
         .{ "rush", "rush <contract id>   (emergency resupply on the contract world before contact)" },
         .{ "recall", "recall co:N" },
         .{ "commit", "commit <contract-id> <operation-id> <intent>   (commit an available operation; intent: preserve_force, secure_objective, break_enemy, protect_assets, secure_intelligence, recover)" },
@@ -1209,6 +1231,11 @@ test "battle parses every order word strictly, and each order prints back as the
         .{ "battle 3 cover", .cover_recovery },
         .{ "battle 3 roe cautious", .{ .roe = .cautious } },
         .{ "battle 3 roe hold", .{ .roe = .hold } },
+        .{ "battle 3 reserve", .commit_reserve },
+        .{ "battle 3 call recon", .{ .intervene = .emergency_recon } },
+        .{ "battle 3 call reinforce", .{ .intervene = .reinforce } },
+        .{ "battle 3 call air", .{ .intervene = .air_cover } },
+        .{ "battle 3 call repair", .{ .intervene = .field_repair } },
     };
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -1224,14 +1251,24 @@ test "battle parses every order word strictly, and each order prints back as the
         for (battle_order_words) |w| words += @intFromBool(w[1] == kind);
         try std.testing.expectEqual(@as(usize, 1), words);
     }
+    // And every intervention exactly one word after `call`.
+    for (std.enums.values(game.operation.Intervention)) |kind| {
+        var words: usize = 0;
+        for (battle_intervention_words) |w| words += @intFromBool(w[1] == kind);
+        try std.testing.expectEqual(@as(usize, 1), words);
+    }
     try std.testing.expectError(error.BadArguments, parseLine("battle 3"));
     try std.testing.expectError(error.BadArguments, parseLine("battle 3 charge"));
     try std.testing.expectError(error.BadArguments, parseLine("battle 3 roe bold"));
     try std.testing.expectError(error.BadArguments, parseLine("battle 3 roe"));
     try std.testing.expectError(error.BadArguments, parseLine("battle 3 engage now"));
+    try std.testing.expectError(error.BadArguments, parseLine("battle 3 call"));
+    try std.testing.expectError(error.BadArguments, parseLine("battle 3 call artillery"));
+    try std.testing.expectError(error.BadArguments, parseLine("battle 3 call air now"));
+    try std.testing.expectError(error.BadArguments, parseLine("battle 3 reserve now"));
     try std.testing.expectError(error.BadNumber, parseLine("battle x engage"));
     // Each refusal the command gives has its own sentence.
-    for ([_]anyerror{ error.EngagementDue, error.BattleInProgress, error.NoEngagementDue, error.OrderNotLegal, error.RoeReservedByEmployer }) |err| {
+    for ([_]anyerror{ error.EngagementDue, error.BattleInProgress, error.NoEngagementDue, error.OrderNotLegal, error.RoeReservedByEmployer, error.ReserveUnavailable, error.InterventionReservedByEmployer, error.AirCoverGrounded, error.InterventionGateUnmet, error.InterventionAlreadyApplied, error.InsufficientCommandCapacity }) |err| {
         try std.testing.expect(!std.mem.eql(u8, errorText(err), errorText(error.Unexpected)));
     }
 }

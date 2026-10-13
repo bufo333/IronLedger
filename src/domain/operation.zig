@@ -154,9 +154,13 @@ pub const Operation = struct {
     /// Lance task assignments for this committed combat operation (P4e).
     /// Lives in the campaign arena; freed with the arena. Default empty.
     tasks: std.ArrayListUnmanaged(LanceTasking) = .empty,
-    /// Command interventions applied to this committed combat operation (P4g).
-    /// Lives in the campaign arena; freed with the arena. Default empty.
+    /// Command interventions applied to this committed combat operation,
+    /// before battle or at its contact pause. Lives in the campaign arena;
+    /// freed with the arena. Default empty.
     interventions: std.ArrayListUnmanaged(Intervention) = .empty,
+    /// The reserve was committed at the contact pause of this combat
+    /// operation's battle. Only a combat operation can carry it.
+    reserve_committed: bool = false,
 };
 
 /// The commander's stated objective for this operation (docs/p4-operations-design.md §6).

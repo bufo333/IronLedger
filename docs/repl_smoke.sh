@@ -100,8 +100,16 @@ printf '%s\n' \
   'day 30 force' \
   'battle 9' \
   'battle 9 pursue' \
+  'battle 9 reserve' \
+  'commit 9 2 secure_objective' \
+  'task 9 2 3 reserve' \
   'battle 9 engage' \
   'sell 3' \
+  'battle 9 reserve' \
+  'battle 9 call recon' \
+  'battle 9 call air' \
+  'battle 9 call recon' \
+  'battle 9' \
   'battle 9 roe hold' \
   'battle 9 on' \
   'battle 9 consolidate' \
@@ -211,4 +219,15 @@ check 'ROE hold for the next phase — the odds are recomputed'
 check 'press on: decisive fought'
 check 'the battle is over — after-action #'
 check 'AAR\]   contact — engage: margin'
+# P5b.2: at the contact pause the reserve is committed and recon called on
+# the committed Repel Probe; air cover without a fighter, recon a second
+# time, and a lever before contact are refused; the AAR names each lever.
+check 'battle 9 reserve  *commit the reserve'
+check 'commit the reserve for the decisive phase — the odds are recomputed'
+check 'call emergency recon for the decisive phase — the odds are recomputed'
+check 'refused: the intervention gate is not met'
+check 'refused: that intervention has already been applied to this operation'
+check 'levers: decisive roll +4 · 1 command capacity spent · the reserve is committed'
+check 'AAR\]   contact pause — commit the reserve: decisive roll +2'
+check 'AAR\]   contact pause — call emergency recon: 1 capacity, decisive roll +2'
 echo "REPL SMOKE OK"

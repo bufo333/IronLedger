@@ -135,6 +135,10 @@ pub fn render(alloc: std.mem.Allocator, r: *const BattleReport) ![]const []const
     }));
 
     for (r.phases) |p| try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   {s}", .{try phaseText(alloc, p)}));
+    const decisive_fought = for (r.phases) |p| {
+        if (p.phase == .decisive) break true;
+    } else false;
+    for (r.levers) |l| try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   {s}", .{try leverText(alloc, l, decisive_fought)}));
 
     try out.append(alloc, try std.fmt.allocPrint(alloc, "[AAR]   losses: {d} hit / {d} destroyed, {d} wounded, {d} KIA | enemy losses {d} BV ≈ {d} kill{s} credited{s} | salvage {d} BV claimed | comp {d} | score {d}", .{
         r.hits_taken,         r.destroyed,        r.wounded,                              r.kia,
@@ -219,9 +223,23 @@ pub fn phaseText(alloc: std.mem.Allocator, p: battle_phase.PhaseRecord) ![]const
     return std.fmt.allocPrint(alloc, "{s} — {s}: margin {s}{d} (ratio {s}{d}, conditions {s}{d}, ROE {s} {s}{d}{s}), {s}", .{
         p.phase.label(),        p.order.label(),     sign.of(p.margin),       p.margin,
         sign.of(p.ratio_bonus), p.ratio_bonus,       sign.of(p.scenario_mod), p.scenario_mod,
-        @tagName(p.roe),        sign.of(p.roe_roll), p.roe_roll,              if (p.phase == .decisive) try std.fmt.allocPrint(alloc, ", momentum {s}{d}", .{ sign.of(p.momentum), p.momentum }) else "",
+        @tagName(p.roe),        sign.of(p.roe_roll), p.roe_roll,              if (p.phase == .decisive) try std.fmt.allocPrint(alloc, ", momentum {s}{d}{s}", .{ sign.of(p.momentum), p.momentum, if (p.lever_mod != 0) try std.fmt.allocPrint(alloc, ", levers {s}{d}", .{ sign.of(p.lever_mod), p.lever_mod }) else "" }) else "",
         hits,
     });
+}
+
+/// One contact-pause lever in words: the order, what it cost and what it did
+/// to the decisive roll, or that the battle ended before the decisive phase
+/// it was pulled for. "contact pause — call reinforce: 2 capacity, decisive
+/// roll +2".
+pub fn leverText(alloc: std.mem.Allocator, l: battle_report.BattleLever, decisive_fought: bool) ![]const u8 {
+    const order = l.lever.order();
+    const cost = if (l.cost > 0) try std.fmt.allocPrint(alloc, "{d} capacity, ", .{l.cost}) else "";
+    const effect = if (!decisive_fought)
+        "the field given up before the decisive phase it was for"
+    else
+        try std.fmt.allocPrint(alloc, "decisive roll {s}{d}{s}", .{ if (l.roll_mod >= 0) "+" else "", l.roll_mod, if (order == .commit_reserve) ", the reserve's clamp on a lost fight given up" else "" });
+    return std.fmt.allocPrint(alloc, "contact pause — {s}: {s}{s}", .{ order.label(), cost, effect });
 }
 
 /// Conventional lost hulls alone are enemy-held; terminal artillery has its own

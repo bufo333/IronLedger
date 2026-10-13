@@ -143,6 +143,7 @@ fn promotedReport(alloc: std.mem.Allocator, value: report.BattleReport) !report.
     result.weather = try ownedText(alloc, value.weather);
     result.edge_spent_by = try ownedText(alloc, value.edge_spent_by);
     result.phases = try alloc.dupe(battle_phase.PhaseRecord, value.phases);
+    result.levers = try alloc.dupe(report.BattleLever, value.levers);
     result.command_rights = try ownedText(alloc, value.command_rights);
     result.operation = try ownedText(alloc, value.operation);
     result.operation_interventions = try ownedText(alloc, value.operation_interventions);
@@ -252,9 +253,10 @@ pub const Publication = struct {
             const old = live.contracts.getPtr(c.id) orelse return error.UnknownContract;
             if (c.operations.items.len != old.operations.items.len) return error.CorruptSave;
             c.operations = try copiedList(scratch, c.operations);
-            for (c.operations.items, old.operations.items) |*op, old_op| {
+            for (c.operations.items, old.operations.items) |*op, *old_op| {
                 op.tasks = old_op.tasks;
-                op.interventions = old_op.interventions;
+                // A battle's contact-pause interventions join the operation's list.
+                op.interventions = try destinationList(alloc, &old_op.interventions, op.interventions.items.len);
             }
             c.actor_ids = old.actor_ids;
             c.rival_ids = old.rival_ids;
@@ -356,7 +358,8 @@ pub const Publication = struct {
             publishMap(&h.stock, source.stock);
             live.hqs.getPtr(h.id).?.* = h.*;
         }
-        for (self.values.contracts.values()) |c| {
+        for (self.values.contracts.values(), staged.contracts.values()) |c, source| {
+            for (c.operations.items, source.operations.items) |*op, source_op| publishList(&op.interventions, source_op.interventions);
             const destination = live.contracts.getPtr(c.id).?;
             var value = c;
             publishList(&destination.operations, c.operations);

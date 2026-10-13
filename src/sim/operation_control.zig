@@ -700,12 +700,7 @@ pub fn execApplyIntervention(gs: *GameState, args: @FieldType(commands.Command, 
     // ---- PREPARE: reserve log slot, pre-allocate list entry, pre-format ----
     try gs.reserveLog(1);
     try op.interventions.ensureUnusedCapacity(gs.allocator(), 1);
-    var date_buf: [10]u8 = undefined;
-    const log_text = try std.fmt.allocPrint(gs.allocator(), "{s} [arc] intervention applied: {s} ({d} capacity)", .{
-        gs.clock.date.text(&date_buf),
-        kind.label(),
-        cost,
-    });
+    const log_text = try operations.interventionLogText(gs.allocator(), gs, kind);
 
     // ---- COMMIT: infallible ----
     c.command_capacity -|= cost;

@@ -441,16 +441,29 @@ after = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "rep
 assert "contact ahead" not in after and "BATTLE ORDERS" not in after, after[-3000:]
 
 
-def fight_battle(refuse_first):
+def fight_battle(refuse_first, levers=False):
     """P5b.1: the advance stops on the engagement's day and opens the battle
     screen. Engage, press on, then consolidate a held field — or, when that
-    is refused on a lost one, withdraw; the after-action opens and Esc reads it."""
+    is refused on a lost one, withdraw; the after-action opens and Esc reads it.
+    P5b.2 (levers): at the contact pause commit the reserve, call the first
+    intervention from its row, and be refused air cover (no fighter)."""
     assert wait_for("BATTLE ·", tail=30000), plain()[-3000:]
     if refuse_first:
         send("p", 0.8)                 # press on before contact is joined: refused
         assert wait_for("cannot be given at this point of the battle", tail=2500), plain()[-3000:]
     send("e", 1.5)
     assert wait_for("contact fought", tail=30000), plain()[-3000:]
+    if levers:
+        send("R", 1.5)                 # commit the reserve
+        assert wait_for("commit the reserve for the decisive phase", tail=4000), plain()[-3000:]
+        send("i", 0.5)                 # the cursor to the first intervention: emergency recon
+        send("\r", 1.5)
+        assert wait_for("call emergency recon for the decisive phase", tail=4000), plain()[-3000:]
+        send("i", 0.3); send("i", 0.3); send("i", 0.5)   # recon → reinforce → air cover
+        send("\r", 1.5)
+        assert wait_for("the intervention gate is not met", tail=4000), plain()[-3000:]
+        assert wait_for("the reserve is committed", tail=30000), plain()[-3000:]
+        print("battle levers OK")
     send("p", 1.5)
     assert wait_for("decisive phase fought", tail=30000), plain()[-3000:]
     send("c", 1.5)                     # an after-action ignores the w that follows
@@ -478,6 +491,7 @@ send("\x1b", 0.5); send("\x1b", 0.5)
 # after-action so the second client starts with no unresolved turn holds.
 if has_ops:
     send(":"); send("commit 9 2 secure_objective\r", 1.0)
+    send(":"); send("task 9 2 3 reserve\r", 1.0)   # the 2nd Lance stands as the reserve
     send("4", 0.6); send("\t", 0.6)   # contracts tab, active-contracts pane
     send("g", 0.8)                    # open operations board
     send("j", 0.3)                    # navigate to the second op (repel_probe, committed)
@@ -496,7 +510,7 @@ if has_ops:
             break
         send("\x1b", 0.5)
     assert due, plain()[-3000:]
-    fight_battle(False)
+    fight_battle(False, levers=True)
     send("\x1b", 0.5)                 # close any decision modal that auto-opened
 # Layout-boundary smoke: Forces focus must not wedge on a narrow resize.
 # Switch to Forces, Tab to the pool pane (focus 1), shrink to 118 columns

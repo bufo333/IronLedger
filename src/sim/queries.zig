@@ -511,6 +511,12 @@ pub fn battlePhaseReport(alloc: Alloc, gs: *GameState, id: types.ContractId) !?B
         }
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "hits taken so far {s}{d}{{/}} · they land on the line when the battle ends", .{ if (r.hits > 0) "{c}" else "{g}", r.hits }));
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "ROE for the next phase: {s}{s}", .{ @tagName(r.roe), if (roe_locked) " {d}(set by the employer's integrated command){/}" else "" }));
+        if (r.lever_mod != 0 or r.capacity_spent > 0 or r.reserve_committed) {
+            try lines.append(alloc, try std.fmt.allocPrint(alloc, "levers: decisive roll {s}{d} · {d} command capacity spent{s}", .{
+                if (r.lever_mod >= 0) "+" else "", r.lever_mod, r.capacity_spent,
+                if (r.reserve_committed) " · {a}the reserve is committed{/}" else "",
+            }));
+        }
         var odds: std.ArrayListUnmanaged(u8) = .empty;
         const percents = oddsPercents(r.odds);
         for (0..r.odds.next.bands()) |band| {
@@ -529,6 +535,13 @@ pub fn battlePhaseReport(alloc: Alloc, gs: *GameState, id: types.ContractId) !?B
     var rows: std.ArrayListUnmanaged(BattleOrderRow) = .empty;
     const pause: ?battle_phase.Pause = if (latest) |r| r.pause else null;
     const held = if (latest) |r| r.held_field else false;
+    // The levers' availability from live state; the weather is the
+    // replay's, so grounded air cover is the command's to refuse (rule 34).
+    const avail = battle.leverAvailability(gs, c, false);
+    const given = try alloc.alloc(battle_phase.Order, if (record) |r| r.steps.items.len else 0);
+    if (record) |r| for (r.steps.items, given) |step, *o| {
+        o.* = step.order;
+    };
     for (battle_phases.legalOrders(pause, held)) |kind| switch (kind) {
         .engage => try rows.append(alloc, .{ .contract = id, .order = .engage, .text = "engage — fight the contact phase" }),
         .press_on => try rows.append(alloc, .{ .contract = id, .order = .press_on, .text = "press on — fight the decisive phase" }),
@@ -543,6 +556,24 @@ pub fn battlePhaseReport(alloc: Alloc, gs: *GameState, id: types.ContractId) !?B
             if (r == roe) continue;
             try rows.append(alloc, .{ .contract = id, .order = .{ .roe = r }, .text = try std.fmt.allocPrint(alloc, "ROE {s} for the next phase — {s}", .{ @tagName(r), r.describe() }), .locked = if (roe_locked) "the employer's integrated command sets ROE" else "" });
         },
+        .commit_reserve => try rows.append(alloc, .{
+            .contract = id,
+            .order = .commit_reserve,
+            .text = try std.fmt.allocPrint(alloc, "commit the reserve — {s} to the decisive roll; the reserve no longer steadies a lost fight", .{try signed(alloc, battle_phases.leverMod(.commit_reserve))}),
+            .locked = leverLock(avail, given, .commit_reserve),
+        }),
+        .intervene => for (std.enums.values(operation_mod.Intervention)) |kind_iv| {
+            const order: battle_phase.Order = .{ .intervene = kind_iv };
+            const lever = battle_phase.Lever.of(order).?;
+            try rows.append(alloc, .{
+                .contract = id,
+                .order = order,
+                .text = try std.fmt.allocPrint(alloc, "{s} — {d} command capacity, {s} to the decisive roll; needs {s}", .{
+                    order.label(), battle_phases.leverCost(lever), try signed(alloc, battle_phases.leverMod(lever)), interventionNeeds(kind_iv),
+                }),
+                .locked = leverLock(avail, given, order),
+            });
+        },
     };
     return .{
         .contract = id,
@@ -552,6 +583,38 @@ pub fn battlePhaseReport(alloc: Alloc, gs: *GameState, id: types.ContractId) !?B
         .roe = roe,
         .default_order = battle_phases.defaultOrder(latest),
     };
+}
+
+/// Why the battle order command will likely refuse a contact-pause lever,
+/// from its owner (`battle_phases.leverAllowed`); empty when nothing stands
+/// in the way. Informative only (rule 34).
+fn leverLock(avail: @import("battle_phases.zig").Availability, given: []const battle_phase.Order, order: battle_phase.Order) []const u8 {
+    @import("battle_phases.zig").leverAllowed(avail, given, order) catch |err| return switch (err) {
+        error.IllegalOrder => "the reserve is already committed",
+        error.ReserveUnavailable => "no operational reserve-tasked lance on a committed combat operation",
+        error.InterventionGateUnmet => "what it needs is not ready",
+        error.InterventionAlreadyApplied => "already applied to the operation",
+        error.InsufficientCommandCapacity => "not enough command capacity",
+        error.InterventionReservedByEmployer => "the employer's integrated command directs it",
+        error.AirCoverGrounded => "the weather grounds the fighters",
+    };
+    return "";
+}
+
+/// What an intervention's gate asks for, in words
+/// (`operations.interventionGate` owns the rule).
+fn interventionNeeds(kind: operation_mod.Intervention) []const u8 {
+    return switch (kind) {
+        .emergency_recon => "an operational scout lance, or comms at the home HQ",
+        .reinforce => "an operational combat lance not leading the main effort",
+        .air_cover => "an operational, piloted fighter and weather it can fly in",
+        .field_repair => "an available tech with the company",
+    };
+}
+
+/// A roll modifier with its sign: "+2", "-1".
+fn signed(alloc: Alloc, v: i32) ![]const u8 {
+    return std.fmt.allocPrint(alloc, "{s}{d}", .{ if (v >= 0) "+" else "", v });
 }
 
 /// The contact warning for one contract: the line a multi-day advance
@@ -5232,6 +5295,47 @@ test "the battle screen offers exactly the orders the rule allows and shows the 
     try std.testing.expect(try battlePhaseReport(a, &gs, @enumFromInt(99)) == null);
 }
 
+test "the battle screen lists every lever at the contact pause with its cost, and its lock is the owner's refusal" {
+    const battle = @import("battle.zig");
+    const battle_phases = @import("battle_phases.zig");
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const id = try battle.leverEngagementForTest(&gs, 30, 4);
+    for ([_]battle_phase.Order{ .engage, .{ .intervene = .reinforce } }) |o| _ = try commands.execute(&gs, .{ .battle_order = .{ .contract = id, .order = o } });
+    const view = (try battlePhaseReport(a, &gs, id)).?;
+    // One row per lever, each carrying its contract and its typed order.
+    var shown = std.EnumSet(battle_phase.Lever).initEmpty();
+    for (view.orders) |row| if (battle_phase.Lever.of(row.order)) |lever| {
+        try std.testing.expectEqual(id, row.contract);
+        try std.testing.expect(!shown.contains(lever));
+        shown.insert(lever);
+        // Its lock is exactly what the command would refuse, or nothing.
+        const refused = if (battle_phases.leverAllowed(battle.leverAvailability(&gs, gs.contracts.getPtr(id).?, false), &.{ .engage, .{ .intervene = .reinforce } }, row.order)) |_| false else |_| true;
+        try std.testing.expectEqual(refused, row.locked.len > 0);
+        if (lever != .commit_reserve) try std.testing.expect(std.mem.indexOf(u8, row.text, try std.fmt.allocPrint(a, "{d} command capacity", .{battle_phases.leverCost(lever)})) != null);
+    };
+    try std.testing.expectEqual(@as(usize, battle_phases.max_levers), shown.count());
+    // Reinforcements already called, air cover without a fighter: locked. The reserve and recon: open.
+    for (view.orders) |row| switch (row.order) {
+        .commit_reserve => try std.testing.expectEqualStrings("", row.locked),
+        .intervene => |kind| switch (kind) {
+            .reinforce => try std.testing.expectEqualStrings("already applied to the operation", row.locked),
+            .air_cover => try std.testing.expectEqualStrings("what it needs is not ready", row.locked),
+            .emergency_recon => try std.testing.expectEqualStrings("", row.locked),
+            .field_repair => {},
+        },
+        else => {},
+    };
+    // The pause shows what the levers given so far did.
+    var levers_line = false;
+    for (view.lines) |line| levers_line = levers_line or std.mem.startsWith(u8, line, "levers: decisive roll +2 · 2 command capacity spent");
+    try std.testing.expect(levers_line);
+}
+
 test "oddsPercents totals 100 for every distribution the next phase can have" {
     const battle_phases = @import("battle_phases.zig");
     // A contact pause's decisive odds of 360/576/252/108/0 in 1296 round
@@ -5249,7 +5353,7 @@ test "oddsPercents totals 100 for every distribution the next phase can have" {
         while (mod <= 10) : (mod += 1) for ([_]force_dom.Roe{ .hold, .standard, .cautious }) |roe| {
             var momentum: i32 = -1;
             while (momentum <= 1) : (momentum += 1) for ([_]bool{ false, true }) |edge| {
-                const odds = battle_phases.nextPhaseOdds(next, .{ .ratio_bonus = mod, .scenario_mod = 0 }, roe, momentum, edge);
+                const odds = battle_phases.nextPhaseOdds(next, .{ .ratio_bonus = mod, .scenario_mod = 0 }, roe, momentum, 0, edge);
                 const percents = oddsPercents(odds);
                 var total: u32 = 0;
                 for (odds.counts, percents, 0..) |n, pct, band| {
@@ -7688,6 +7792,8 @@ pub fn resultText(
         .confirm_orders => return "battle orders given — the contact warning is cleared",
         .battle_order => |o| return if (o.order == .roe)
             try std.fmt.allocPrint(alloc, "{s} for the next phase — the odds are recomputed (`battle {d}`)", .{ o.order.label(), @intFromEnum(o.contract) })
+        else if (battle_phase.Lever.of(o.order) != null and result.battle_pause != null)
+            try std.fmt.allocPrint(alloc, "{s} for the decisive phase — the odds are recomputed (`battle {d}`)", .{ o.order.label(), @intFromEnum(o.contract) })
         else if (result.battle_pause) |pause|
             try std.fmt.allocPrint(alloc, "{s}: {s} fought — the battle pauses for orders (`battle {d}`)", .{ o.order.label(), pause.phase().label(), @intFromEnum(o.contract) })
         else
@@ -8331,8 +8437,11 @@ pub const OperationReportRow = struct {
     resolved_day: ?u32,
     /// Total command capacity spent (sum of interventionCost over applied interventions).
     capacity_spent: u8,
-    /// Interventions applied to this operation (slice into campaign arena).
+    /// Interventions applied to this operation, before battle or at its
+    /// contact pause (slice into campaign arena).
     interventions: []const operation_mod.Intervention,
+    /// The reserve was committed at the contact pause of its battle.
+    reserve_committed: bool,
     /// Added days from tempo posture (tempoDelayDays).
     delay_days: u16,
     /// Campaign-state consequence this operation's resolution applied (or would apply).
@@ -9259,6 +9368,7 @@ pub fn operationReport(alloc: Alloc, gs: *GameState, contract_id: types.Contract
             .resolved_day = op.resolved_day,
             .capacity_spent = capacity_spent,
             .interventions = op.interventions.items,
+            .reserve_committed = op.reserve_committed,
             .delay_days = delay_days,
             .consequence = consequence,
         });

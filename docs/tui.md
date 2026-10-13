@@ -476,6 +476,8 @@ filters to the active context (see the Keys description above).
 | `c` | after a held field: end the battle as it stands |
 | `v` | after a lost field: cover the recovery of the wrecks, at the risk of hits |
 | `r` | at the contact pause: step the ROE for the next phase (standard → cautious → hold) |
+| `R` | at the contact pause: send the reserve lance in — a better decisive roll, without its steadying on a lost fight |
+| `i` | at the contact pause: step the cursor through the interventions (Enter calls the highlighted one for its command capacity) |
 
 ### Contract log
 
@@ -664,7 +666,10 @@ withdrawn):
 - a heading line — name, `combat`/`non-combat`, state, outcome band and an
   `ok`/`miss` tag (success given the operation's intent), `intent:`, `tempo:`
   and the clock delta `Δclk:N`;
-- a cost line — `cost: cap N (interventions) · delay Nd`;
+- a cost line — `cost: cap N (interventions) · delay Nd`, ending
+  `· reserve committed` when its battle's reserve was committed; the
+  interventions and capacity include those called at the battle's contact
+  pause;
 - for a resolved non-combat operation, a consequence line with the world-state,
   relationship, rival-standing and officer deltas its resolution applied and
   the counts of actors, rivals and officers affected.
@@ -702,11 +707,18 @@ then opens; an outfit that folds goes to the saved GAME OVER instead) ·
 come due or is being fought — from an advance that stops on it, the stop
 screen, the Desk's warning, or after an after-action is read. The head is
 the stored phase report: the orders given, the phase fought and its margin,
-the hits taken so far, the ROE for the next phase, and the next phase's
-odds by band. The rows are the orders legal at the pause, each carrying the
-typed order its command sends; ↑/↓ and Enter give the highlighted one, and
-the battle keys give each order directly. An order the employer reserves
-shows why, and still sends its command for the canonical refusal. A pause
+the hits taken so far, the ROE for the next phase, the levers given so far
+(their decisive-roll modifier, the capacity spent and a committed reserve),
+and the next phase's odds by band. The rows are the orders legal at the
+pause, each carrying the typed order its command sends; at the contact pause
+they include committing the reserve and each intervention with its capacity
+cost, its decisive-roll modifier and what it needs. ↑/↓ and Enter give the
+highlighted one, `i` steps the cursor through the interventions, and the
+battle keys give each order directly. An order likely refused (the employer
+reserves it, its asset is not ready, it is spent, or the capacity is short)
+shows why, from `battle_phases.leverAllowed`, and still sends its command
+for the canonical refusal; grounded air cover is known only to the command,
+which fights the weather. A pause
 keeps the screen on its new report; the order that ends the battle opens
 the after-action; `Esc` leaves it, and the turn waits) ·
 **Battle orders** (the situation and odds; ←/→ step the ROE and each

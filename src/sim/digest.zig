@@ -488,6 +488,24 @@ test "every battle-in-progress field and every report phase field affects the co
     step.* = original;
     step.report.odds.next = .cover;
     try std.testing.expect(base != stateHash(&gs));
+    // The levers: each order and its intervention, and each pause figure.
+    step.* = original;
+    step.order = .commit_reserve;
+    try std.testing.expect(base != stateHash(&gs));
+    step.order = .{ .intervene = .reinforce };
+    const intervened = stateHash(&gs);
+    try std.testing.expect(base != intervened);
+    step.order = .{ .intervene = .air_cover };
+    try std.testing.expect(intervened != stateHash(&gs));
+    step.* = original;
+    step.report.lever_mod += 1;
+    try std.testing.expect(base != stateHash(&gs));
+    step.* = original;
+    step.report.reserve_committed = true;
+    try std.testing.expect(base != stateHash(&gs));
+    step.* = original;
+    step.report.capacity_spent += 1;
+    try std.testing.expect(base != stateHash(&gs));
     step.* = original;
     try std.testing.expectEqual(base, stateHash(&gs));
     // A report's fought phases, each field.
@@ -496,7 +514,7 @@ test "every battle-in-progress field and every report phase field affects the co
     const reported = stateHash(&gs);
     var changed = records;
     gs.battle_reports.kept.items[0].phases = &changed;
-    inline for (.{ "ratio_bonus", "scenario_mod", "roe_roll", "momentum", "margin", "hits" }) |field| {
+    inline for (.{ "ratio_bonus", "scenario_mod", "roe_roll", "momentum", "lever_mod", "margin", "hits" }) |field| {
         changed = records;
         @field(changed[0], field) += 1;
         try std.testing.expect(reported != stateHash(&gs));
@@ -512,6 +530,35 @@ test "every battle-in-progress field and every report phase field affects the co
     try std.testing.expect(reported != stateHash(&gs));
     changed = records;
     try std.testing.expectEqual(reported, stateHash(&gs));
+    // A report's levers, each field, and the count.
+    const report_levers = [_]@import("../domain/battle_report.zig").BattleLever{.{ .lever = .reinforce, .cost = 2, .roll_mod = 2 }};
+    var levers = report_levers;
+    gs.battle_reports.kept.items[0].levers = &levers;
+    const levered = stateHash(&gs);
+    try std.testing.expect(reported != levered);
+    levers[0].lever = .field_repair;
+    try std.testing.expect(levered != stateHash(&gs));
+    levers = report_levers;
+    levers[0].cost += 1;
+    try std.testing.expect(levered != stateHash(&gs));
+    levers = report_levers;
+    levers[0].roll_mod += 1;
+    try std.testing.expect(levered != stateHash(&gs));
+    levers = report_levers;
+    try std.testing.expectEqual(levered, stateHash(&gs));
+}
+
+test "an operation's committed reserve affects the complete digest" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{ .id = @enumFromInt(1), .kind = .recon_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 } });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    try c.operations.append(gs.allocator(), .{ .id = @enumFromInt(1), .template_key = "repel_probe", .state = .resolved, .opened_day = 0 });
+    const base = stateHash(&gs);
+    c.operations.items[0].reserve_committed = true;
+    try std.testing.expect(base != stateHash(&gs));
+    c.operations.items[0].reserve_committed = false;
+    try std.testing.expectEqual(base, stateHash(&gs));
 }
 
 test "captured artillery combat payload and terminal placement affect the complete digest" {

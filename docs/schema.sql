@@ -1,8 +1,8 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 64, the only supported store and campaign format.
+-- Matches schema_version 65, the only supported store and campaign format.
 -- Older and newer formats are refused before persistent mutation under
--- docs/engineering-contract.md rule 51; only empty stores initialize schema 64.
+-- docs/engineering-contract.md rule 51; only empty stores initialize schema 65.
 -- The executable DDL and dormant historical migration declarations live in
 -- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
@@ -70,7 +70,7 @@ CREATE TABLE campaign (
     commander       TEXT,
     day             INTEGER NOT NULL,                -- day_index at save
     date            TEXT    NOT NULL,                -- in-game date at save
-    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 64; older/newer versions are refused before load or overwrite
+    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 65; older/newer versions are refused before load or overwrite
     save_seq        INTEGER NOT NULL,                -- store-wide save counter, orders "most recent"
     player_id       INTEGER NOT NULL DEFAULT 0       -- -> player.id; 0 = none
 );
@@ -562,6 +562,7 @@ CREATE TABLE operation (
     committed_day   INTEGER,                         -- P4c: day_index when committed; NULL = not yet committed
     intent          TEXT    NOT NULL DEFAULT 'secure_objective', -- P4d: commander's stated intent (domain/operation.zig Intent)
     tempo           TEXT    NOT NULL DEFAULT 'advance', -- P4f: TempoPosture tag name (advance/recon/prepare/delay)
+    reserve_committed INTEGER NOT NULL DEFAULT 0 CHECK (reserve_committed IN (0,1)), -- P5b.2: the reserve was committed at its battle's contact pause; the loader refuses it on a non-combat operation
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
@@ -803,6 +804,7 @@ CREATE TABLE battle_report (
     operation_interventions TEXT NOT NULL DEFAULT '', -- P4g: comma-separated intervention labels applied; empty = none
     artillery_present INTEGER NOT NULL CHECK(typeof(artillery_present)='integer' AND artillery_present IN (0,1)), -- required result-presence marker, never inferred from child rows
     phase_count     INTEGER NOT NULL CHECK (typeof(phase_count)='integer' AND phase_count BETWEEN 0 AND 3), -- exact battle_report_phase row count (0: a concession or a forfeit); completeness check, not state
+    lever_count     INTEGER NOT NULL CHECK (typeof(lever_count)='integer' AND lever_count BETWEEN 0 AND 5), -- exact battle_report_lever row count (0 for a concession or a forfeit); completeness check, not state
     UNIQUE (cid, ord),
     UNIQUE (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
@@ -972,6 +974,7 @@ CREATE TABLE battle_report_phase (
     scenario_mod    INTEGER NOT NULL CHECK (typeof(scenario_mod)='integer' AND scenario_mod BETWEEN -2147483648 AND 2147483647),
     roe_roll        INTEGER NOT NULL CHECK (typeof(roe_roll)='integer' AND roe_roll BETWEEN -2147483648 AND 2147483647),
     momentum        INTEGER NOT NULL CHECK (typeof(momentum)='integer' AND momentum BETWEEN -2147483648 AND 2147483647),
+    lever_mod       INTEGER NOT NULL CHECK (typeof(lever_mod)='integer' AND lever_mod BETWEEN -2147483648 AND 2147483647), -- P5b.2: the contact-pause levers' decisive-roll modifier (the sum of the report's levers); 0 in every other phase
     margin          INTEGER NOT NULL CHECK (typeof(margin)='integer' AND margin BETWEEN -2147483648 AND 2147483647), -- roll less tuning.battle.phases.par
     hits            INTEGER NOT NULL CHECK (typeof(hits)='integer' AND hits BETWEEN 0 AND 4294967295), -- hits the phase added
     PRIMARY KEY (cid, report_ord, ord),
@@ -980,6 +983,23 @@ CREATE TABLE battle_report_phase (
     FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_battle_report_phase_report ON battle_report_phase(cid, report_ord);
+
+-- P5b.2: the levers pulled at the contact pause, in the order given (child
+-- of battle_report; none for a concession or a forfeit). Each lever at most
+-- once; cost and roll_mod must be their owners' (battle_phases.leverCost,
+-- leverMod), and the decisive phase's lever_mod their sum.
+CREATE TABLE battle_report_lever (
+    cid             INTEGER NOT NULL,
+    report_ord      INTEGER NOT NULL, -- -> battle_report.ord
+    ord             INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord BETWEEN 0 AND 4), -- order given, contiguous from 0 (battle_phases.max_levers)
+    kind            TEXT    NOT NULL CHECK (kind IN ('commit_reserve','emergency_recon','reinforce','air_cover','field_repair')), -- domain/battle_phase.zig Lever
+    cost            INTEGER NOT NULL CHECK (typeof(cost)='integer' AND cost BETWEEN 0 AND 255), -- command capacity spent
+    roll_mod        INTEGER NOT NULL CHECK (typeof(roll_mod)='integer' AND roll_mod BETWEEN -2147483648 AND 2147483647), -- decisive-roll points added
+    PRIMARY KEY (cid, report_ord, ord),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_battle_report_lever_report ON battle_report_lever(cid, report_ord);
 
 -- P5b.1: the battle in progress — at most one (the battle lock). The
 -- contract table has no unique (cid, id), so the loader checks that the
@@ -1002,8 +1022,9 @@ CREATE TABLE battle_in_progress_order (
     cid             INTEGER NOT NULL,
     contract_id     INTEGER NOT NULL, -- -> battle_in_progress.contract_id
     ord             INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), -- order given, contiguous from 0
-    order_kind      TEXT    NOT NULL CHECK (order_kind IN ('engage','press_on','withdraw','pursue','consolidate','cover_recovery','roe')),
+    order_kind      TEXT    NOT NULL CHECK (order_kind IN ('engage','press_on','withdraw','pursue','consolidate','cover_recovery','roe','commit_reserve','intervene')),
     order_roe       TEXT    CHECK (order_roe IS NULL OR order_roe IN ('hold','standard','cautious')),
+    order_intervention TEXT CHECK (order_intervention IS NULL OR order_intervention IN ('emergency_recon','reinforce','air_cover','field_repair')), -- P5b.2: an intervene order's intervention; NULL for every other order
     pause           TEXT    NOT NULL CHECK (pause IN ('contact','decisive')), -- the pause this order reached
     margin          INTEGER NOT NULL CHECK (typeof(margin)='integer' AND margin BETWEEN -2147483648 AND 2147483647),
     hits            INTEGER NOT NULL CHECK (typeof(hits)='integer' AND hits BETWEEN 0 AND 4294967295), -- hits taken so far (not yet landed)
@@ -1018,8 +1039,12 @@ CREATE TABLE battle_in_progress_order (
     odds_3          INTEGER NOT NULL CHECK (typeof(odds_3)='integer' AND odds_3 BETWEEN 0 AND 65535),
     odds_4          INTEGER NOT NULL CHECK (typeof(odds_4)='integer' AND odds_4 BETWEEN 0 AND 65535),
     odds_total      INTEGER NOT NULL CHECK (typeof(odds_total)='integer' AND odds_total BETWEEN 1 AND 65535), -- equally likely results counted
+    lever_mod       INTEGER NOT NULL CHECK (typeof(lever_mod)='integer' AND lever_mod BETWEEN -2147483648 AND 2147483647), -- P5b.2: the decisive-roll modifier the levers given so far add
+    reserve_committed INTEGER NOT NULL CHECK (reserve_committed IN (0,1)), -- P5b.2: the reserve has been committed
+    capacity_spent  INTEGER NOT NULL CHECK (typeof(capacity_spent)='integer' AND capacity_spent BETWEEN 0 AND 255), -- P5b.2: command capacity the interventions given so far spend
     PRIMARY KEY (cid, contract_id, ord),
     CHECK ((order_roe IS NULL) = (order_kind != 'roe')),
+    CHECK ((order_intervention IS NULL) = (order_kind != 'intervene')),
     CHECK ((outcome IS NULL) = (pause = 'contact')),
     CHECK (pause = 'decisive' OR held_field = 0),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,

@@ -49,7 +49,7 @@ A package has one primary invariant or subsystem outcome.
   decisive, pursuit or withdrawal) under one seed; a pause between phases with
   recomputed odds and the existing interventions (ROE, tactical withdrawal);
   AAR names each phase; fixed-seed and refusal tests.
-- [ ] P5b.2 the battle you can touch (ROADMAP P5b): the existing interventions
+- [x] P5b.2 the battle you can touch (ROADMAP P5b): the existing interventions
   (reserve commit, air cover, command capacity); AAR and operation record name
   each intervention; fixed-seed and refusal tests.
 - [ ] P5c situations slice (ROADMAP P5c.1–P5c.4): actor-owned situations with

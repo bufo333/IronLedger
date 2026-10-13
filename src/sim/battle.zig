@@ -169,7 +169,10 @@ pub fn dueEngagement(gs: *const GameState) ?types.ContractId {
 /// order given so far plus this one, then either appends the order and the
 /// pause it reached to the battle record or, when the order ends the
 /// battle, publishes the engagement and its next schedule atomically and
-/// removes the record. A refusal changes nothing (rules 11–13).
+/// removes the record. A contact-pause lever the course refuses
+/// (`battle_phases.leverAllowed`, on `leverAvailability`) is refused by the
+/// replay before anything live changes. A refusal changes nothing (rules
+/// 11–13).
 pub fn execBattleOrder(gs: *GameState, o: @FieldType(commands.Command, "battle_order")) commands.Error!commands.Result {
     const c = gs.contracts.getPtr(o.contract) orelse return error.UnknownContract;
     const record: ?*battle_phase.BattleInProgress = for (gs.battles_in_progress.items) |*r| {
@@ -960,10 +963,33 @@ const Setup = struct {
     /// the report is written, and that insertion can move every entry.
     edge_pilot: types.PersonId,
 
-    fn inputs(self: Setup, engaged: usize) battle_phases.Inputs {
-        return .{ .mods = self.mods, .roe = self.roe, .engaged = engaged, .edge_available = self.edge_pilot != .none, .reserve_present = self.reserve_present };
+    fn inputs(self: Setup, engaged: usize, avail: battle_phases.Availability) battle_phases.Inputs {
+        return .{ .mods = self.mods, .roe = self.roe, .engaged = engaged, .edge_available = self.edge_pilot != .none, .reserve_present = self.reserve_present, .avail = avail };
     }
 };
+
+/// What the contact-pause levers may draw on (ARCH §7 "The phased
+/// engagement"), from live state at engagement start and the engagement's
+/// weather: an operational reserve-tasked lance of the committed combat
+/// operation, each intervention's gate, prior application and employer
+/// lock, and the command capacity the commander may spend. With no
+/// committed combat operation no lever is available. The battle lock keeps
+/// every input unchanged until the battle publishes. Pure.
+pub fn leverAvailability(gs: *GameState, c: *const contract_mod.Contract, air_grounded: bool) battle_phases.Availability {
+    var avail: battle_phases.Availability = .{ .capacity = operations_m.commandCapacityAvailable(c), .air_grounded = air_grounded };
+    const op = operations_m.committedCombatOp(c) orelse return avail;
+    for (op.tasks.items) |lt| {
+        if (lt.task != .reserve) continue;
+        const lance = gs.force(lt.lance) orelse continue;
+        if (readiness_m.forceOperational(gs, lance)) avail.reserve_ready = true;
+    }
+    for (std.enums.values(operation_mod.Intervention)) |kind| avail.interventions.set(kind, .{
+        .gate = operations_m.interventionGate(gs, c, op, kind),
+        .applied = operations_m.interventionApplied(op, kind),
+        .reserved = operations_m.interventionReservedByEmployer(c.terms.command_rights, kind),
+    });
+    return avail;
+}
 
 /// The verdict the consequences read: how the decisive phase, or a
 /// withdrawal after contact, went.
@@ -1458,7 +1484,7 @@ test "non artillery engagement reference preserves every gameplay field and stre
         defer gs.deinit();
         const id = try engagementFixture(&gs, real_pool);
         try resolveEngagement(&gs, gs.contracts.getPtr(id).?);
-        try std.testing.expectEqual(if (real_pool) @as(u64, 13352134096994359390) else @as(u64, 17059056061362327667), digest.nonArtilleryReferenceHash(&gs));
+        try std.testing.expectEqual(if (real_pool) @as(u64, 17990823969907520998) else @as(u64, 10266394272565828129), digest.nonArtilleryReferenceHash(&gs));
     }
 }
 
@@ -1574,8 +1600,9 @@ fn fightStagedObserved(gs: *GameState, c: *contract_mod.Contract, orders: Orders
     var artillery_result = try artillery_battle.snapshot(gs, c, .not_ready);
     const setup = openEngagement(gs, c, &player, env, opposition.enemy_bv_override, &artillery_result);
     const dice = battle_phases.Dice.draw(&gs.rng);
-    if (observed) |out| out.* = .{ .inputs = setup.inputs(player.engaged.items.len), .dice = dice };
-    const final = switch (try courseOf(setup.inputs(player.engaged.items.len), dice, orders)) {
+    const inputs = setup.inputs(player.engaged.items.len, leverAvailability(gs, c, env.groundsAir()));
+    if (observed) |out| out.* = .{ .inputs = inputs, .dice = dice };
+    const final = switch (try courseOf(inputs, dice, orders)) {
         .paused => |report| return .{ .paused = report },
         .finished => |f| f,
     };
@@ -1583,17 +1610,41 @@ fn fightStagedObserved(gs: *GameState, c: *contract_mod.Contract, orders: Orders
     return .finished;
 }
 
+/// A course's refusal as the battle order command gives it: an order not
+/// legal where it is given, or a lever's own refusal (`leverAllowed`).
+const CourseError = error{
+    OrderNotLegal,
+    ReserveUnavailable,
+    InterventionGateUnmet,
+    InterventionAlreadyApplied,
+    InsufficientCommandCapacity,
+    InterventionReservedByEmployer,
+    AirCoverGrounded,
+};
+
+fn courseError(err: battle_phases.LeverError) CourseError {
+    return switch (err) {
+        error.IllegalOrder => error.OrderNotLegal,
+        error.ReserveUnavailable => error.ReserveUnavailable,
+        error.InterventionGateUnmet => error.InterventionGateUnmet,
+        error.InterventionAlreadyApplied => error.InterventionAlreadyApplied,
+        error.InsufficientCommandCapacity => error.InsufficientCommandCapacity,
+        error.InterventionReservedByEmployer => error.InterventionReservedByEmployer,
+        error.AirCoverGrounded => error.AirCoverGrounded,
+    };
+}
+
 /// The course of the engagement under `orders`. Unattended, each pause is
 /// answered with `battle_phases.defaultOrder` until the battle ends.
-fn courseOf(inputs: battle_phases.Inputs, dice: battle_phases.Dice, orders: Orders) error{OrderNotLegal}!battle_phases.Course {
+fn courseOf(inputs: battle_phases.Inputs, dice: battle_phases.Dice, orders: Orders) CourseError!battle_phases.Course {
     switch (orders) {
-        .given => |list| return battle_phases.run(inputs, dice, list) catch error.OrderNotLegal,
+        .given => |list| return battle_phases.run(inputs, dice, list) catch |err| return courseError(err),
         .unattended => {
             var list: [battle_phases.max_phases]battle_phase.Order = undefined;
             list[0] = battle_phases.defaultOrder(null);
             var n: usize = 1;
             while (true) {
-                const course = battle_phases.run(inputs, dice, list[0..n]) catch return error.OrderNotLegal;
+                const course = battle_phases.run(inputs, dice, list[0..n]) catch |err| return courseError(err);
                 switch (course) {
                     .finished => return course,
                     .paused => |report| {
@@ -2061,7 +2112,7 @@ fn assembleReport(
             const lance_name = if (lf) |f| try gs.allocator().dupe(u8, f.name) else "";
             const succeeded = operations_m.taskSucceeded(lt.task, operations_m.combatBand(final.outcome), final.held_field);
             const note = try gs.allocator().dupe(u8, switch (lt.task) {
-                .reserve => if (final.reserve_steadied) "steadied a bad opening" else if (succeeded) "held in reserve" else "line broke before reserve could act",
+                .reserve => if (final.reserve_committed) "committed to the decisive phase" else if (final.reserve_steadied) "steadied a bad opening" else if (succeeded) "held in reserve" else "line broke before reserve could act",
                 .main_effort => if (succeeded) "led the advance" else "could not break through",
                 .screen => if (succeeded) "screened the advance" else "screen failed",
                 .escort => if (succeeded) "escort held" else "escort failed",
@@ -2136,6 +2187,7 @@ fn assembleReport(
         // Owned, not borrowed: the hit log is freed when the engagement
         // concludes, and the report outlives it.
         .hulls = try gs.allocator().dupe(battle_report.HullHit, k.hits),
+        .levers = try gs.allocator().dupe(battle_report.BattleLever, final.levers()),
         .ammo = ammo_lines.items,
         .silenced_mounts = player.silenced_mounts,
         .armor_left = gs.stockCount(player.site, "armor"),
@@ -2167,16 +2219,25 @@ const Aftertrail = struct {
 
 /// Records the finished engagement and what follows from it, in order: the
 /// rendered AAR on the campaign log, the report, hulls left to the enemy,
-/// the contract's objectives, the committed operation's resolution, the
-/// decisions the fight raises, the hull combat records, the carrier's
-/// history and a lost field's enemy wreck dispersal.
+/// the contract's objectives, the committed operation's contact-pause
+/// levers and its resolution, the decisions the fight raises, the hull
+/// combat records, the carrier's history and a lost field's enemy wreck
+/// dispersal.
 fn publishEngagement(gs: *GameState, c: *contract_mod.Contract, report: battle_report.BattleReport, t: Aftertrail) !void {
     const outcome = report.outcome;
     const held_field = report.held_field;
     const pool_path = t.opposition.enemy_bv_override != null;
     const committed_op = operations_m.committedCombatOp(c);
+    // A lever needs the committed combat operation (`leverAvailability`).
+    std.debug.assert(report.levers.len == 0 or committed_op != null);
+    var lever_log_text: [battle_phases.max_levers][]const u8 = undefined;
+    var lever_log_count: usize = 0;
     var arc_log_text: []const u8 = "";
     if (committed_op) |op| {
+        for (report.levers) |l| if (l.lever.order() == .intervene) {
+            lever_log_text[lever_log_count] = try operations_m.interventionLogText(gs.allocator(), gs, l.lever.order().intervene);
+            lever_log_count += 1;
+        };
         // Allocate the log text now (only allocates; does NOT touch event_log).
         // reserveLog is called later, immediately before the infallible commit
         // block, so nothing appends to event_log between the reservation and
@@ -2202,12 +2263,30 @@ fn publishEngagement(gs: *GameState, c: *contract_mod.Contract, report: battle_r
     // Objectives: the pool shrinks, VP accrue, and a broken pool
     // completes the contract.
     try @import("contract_control.zig").recordBattle(gs, c, t.enemy_destroyed_bv, t.score_delta);
-    // Arc operation binding: transition the committed combat op and log result.
-    // reserveLog is called here, immediately before the first mutation, so
-    // nothing appends to event_log between reservation and appendAssumeCapacity
-    // (the AAR render loop runs before this block).
+    // Arc operation binding: spend the contact-pause interventions' capacity
+    // and record them on the operation (logged as a pre-battle one is),
+    // record a committed reserve, then transition the committed combat op
+    // and log its result. reserveLog is called here, immediately before the
+    // first mutation, so nothing appends to event_log between reservation and
+    // appendAssumeCapacity (the AAR render loop runs before this block).
     if (committed_op) |op| {
-        try gs.reserveLog(1);
+        try gs.reserveLog(1 + lever_log_count);
+        try op.interventions.ensureUnusedCapacity(gs.allocator(), lever_log_count);
+        for (report.levers) |l| switch (l.lever.order()) {
+            .intervene => |kind| {
+                c.command_capacity -|= l.cost;
+                op.interventions.appendAssumeCapacity(kind);
+            },
+            .commit_reserve => op.reserve_committed = true,
+            else => unreachable,
+        };
+        for (lever_log_text[0..lever_log_count]) |text| gs.event_log.appendAssumeCapacity(.{
+            .day = gs.clock.day_index,
+            .category = .contract,
+            .company = c.assigned_company,
+            .contract = c.id,
+            .text = text,
+        });
         const band = operations_m.combatBand(outcome);
         const clock_d = operations_m.outcomeClockDelta(band);
         op.state = .resolved;
@@ -5687,6 +5766,35 @@ pub fn dueEngagementForCompanyForTest(gs: *GameState, company: types.ForceId) !t
     return id;
 }
 
+/// `dueEngagementForTest` with a committed combat operation on the
+/// contract: its first combat lance tasked reserve, and `capacity` command
+/// capacity for the contact-pause levers to spend.
+pub fn leverEngagementForTest(gs: *GameState, armor: u8, capacity: u8) !types.ContractId {
+    const id = try dueEngagementForTest(gs, false, armor);
+    const c = gs.contracts.getPtr(id).?;
+    c.command_capacity = capacity;
+    const company = gs.force(c.assigned_company).?;
+    const reserve = for (company.children.items) |lance| {
+        const f = gs.force(lance) orelse continue;
+        if (f.isCombatLance()) break lance;
+    } else return error.TestUnexpectedResult;
+    const op: types.OperationId = @enumFromInt(gs.next_operation_id);
+    gs.next_operation_id += 1;
+    try c.operations.append(gs.allocator(), .{ .id = op, .template_key = "repel_probe", .state = .committed, .opened_day = 0, .committed_day = 0 });
+    try c.operations.items[c.operations.items.len - 1].tasks.append(gs.allocator(), .{ .lance = reserve, .task = .reserve });
+    return id;
+}
+
+/// Fights a fresh lever fixture under `orders`, finished unattended, and
+/// returns its last report.
+fn leverFoughtForTest(gs: *GameState, seed: u64, orders: []const battle_phase.Order) !*const battle_report.BattleReport {
+    gs.* = GameState.init(std.testing.allocator, .{ .seed = seed });
+    const id = try leverEngagementForTest(gs, 30, 4);
+    for (orders) |o| _ = try orderForTest(gs, id, o);
+    while (battle_phases.inProgress(gs) != null) try @import("tick.zig").fightDueEngagement(gs);
+    return &gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1];
+}
+
 fn orderForTest(gs: *GameState, id: types.ContractId, order: battle_phase.Order) !commands.Result {
     return commands.execute(gs, .{ .battle_order = .{ .contract = id, .order = order } });
 }
@@ -5763,7 +5871,7 @@ test "engaging fights contact and pauses: odds over every band, nothing lands un
     try std.testing.expectEqualDeep((try battle_phases.run(observed.inputs, observed.dice, &.{.engage})).paused, report);
     const contact = battle_phases.contactVerdict(observed.dice.contact, observed.inputs.mods, observed.inputs.roe);
     try std.testing.expectEqual(battle_phases.lineHits(observed.inputs.engaged, contact.hit_pct), report.hits);
-    try std.testing.expectEqualDeep(battle_phases.nextPhaseOdds(.decisive, observed.inputs.mods, report.roe, contact.momentum, observed.inputs.edge_available), report.odds);
+    try std.testing.expectEqualDeep(battle_phases.nextPhaseOdds(.decisive, observed.inputs.mods, report.roe, contact.momentum, 0, observed.inputs.edge_available), report.odds);
 }
 
 test "a withdrawal after contact preserves hulls at the cost of the field (fixed seed)" {
@@ -5994,45 +6102,282 @@ test "the after-action names every phase and the order given at it, and the camp
 }
 
 test "a failed battle order leaves the complete campaign unchanged, and a retry fights the same battle" {
-    const digest = @import("digest.zig");
     // Pattern one: an order that pauses (replay plus record growth).
     // Pattern two: the order that ends the battle (workspace publication,
     // record removal and the next schedule).
-    for ([_][]const battle_phase.Order{ &.{}, &.{ .engage, .press_on } }) |given| {
-        const final_order: battle_phase.Order = if (given.len == 0) .engage else .withdraw;
-        var reference = GameState.init(std.testing.allocator, .{ .seed = 3007 });
-        defer reference.deinit();
-        const id = try dueEngagementForTest(&reference, true, 30);
-        for (given) |o| _ = try orderForTest(&reference, id, o);
-        const held = battle_phases.inProgress(&reference);
-        const last: battle_phase.Order = if (held) |r| battle_phases.defaultOrder(r.latest()) else final_order;
-        _ = try orderForTest(&reference, id, last);
-        const expected = digest.stateHash(&reference);
-        var index: usize = 0;
-        var failed: usize = 0;
-        while (true) : (index += 1) {
-            var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
-            defer outer.deinit();
-            var gs = GameState.init(outer.allocator(), .{ .seed = 3007 });
-            _ = try dueEngagementForTest(&gs, true, 30);
-            for (given) |o| _ = try orderForTest(&gs, id, o);
-            const before = digest.stateHash(&gs);
-            var failure = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = index });
-            gs.arena.state = .{};
-            gs.arena.child_allocator = failure.allocator();
-            defer gs.deinit();
-            if (orderForTest(&gs, id, last)) |_| {
-                try std.testing.expectEqual(expected, digest.stateHash(&gs));
-                break;
-            } else |err| {
-                try std.testing.expectEqual(error.OutOfMemory, err);
-                try std.testing.expectEqual(before, digest.stateHash(&gs));
-                failed += 1;
-                gs.arena.child_allocator = outer.allocator();
-                _ = try orderForTest(&gs, id, last);
-                try std.testing.expectEqual(expected, digest.stateHash(&gs));
-            }
+    const fixture = struct {
+        fn due(gs: *GameState) anyerror!types.ContractId {
+            return dueEngagementForTest(gs, true, 30);
         }
-        try std.testing.expect(failed > 0);
+    }.due;
+    try expectFailedOrderUnchangedForTest(fixture, 3007, &.{}, .engage);
+    try expectFailedOrderUnchangedForTest(fixture, 3007, &.{ .engage, .press_on }, null);
+}
+
+test "a failed lever order, and a failed publication of levers, leave the complete campaign unchanged" {
+    // Pattern one: a lever that pauses (replay plus record growth). Pattern
+    // two: the final publication with levers (the operation's interventions
+    // growing, the log reserved for their lines, the capacity deducted).
+    const fixture = struct {
+        fn levers(gs: *GameState) anyerror!types.ContractId {
+            return leverEngagementForTest(gs, 30, 4);
+        }
+    }.levers;
+    try expectFailedOrderUnchangedForTest(fixture, 3, &.{ .engage, .commit_reserve }, .{ .intervene = .reinforce });
+    try expectFailedOrderUnchangedForTest(fixture, 3, &.{ .engage, .commit_reserve, .{ .intervene = .reinforce }, .{ .intervene = .emergency_recon }, .press_on }, null);
+}
+
+/// Gives `given` on a fresh `fixture` campaign at `seed`, then `last` (null:
+/// the unattended order at the pause reached) with the campaign arena
+/// failing at every allocation in turn: each failure leaves the complete
+/// digest unchanged, and a retry reaches the same campaign as an order that
+/// never failed (rule 69).
+fn expectFailedOrderUnchangedForTest(fixture: *const fn (*GameState) anyerror!types.ContractId, seed: u64, given: []const battle_phase.Order, last_order: ?battle_phase.Order) !void {
+    const digest = @import("digest.zig");
+    var reference = GameState.init(std.testing.allocator, .{ .seed = seed });
+    defer reference.deinit();
+    const id = try fixture(&reference);
+    for (given) |o| _ = try orderForTest(&reference, id, o);
+    const last: battle_phase.Order = last_order orelse battle_phases.defaultOrder(battle_phases.inProgress(&reference).?.latest());
+    _ = try orderForTest(&reference, id, last);
+    const expected = digest.stateHash(&reference);
+    var index: usize = 0;
+    var failed: usize = 0;
+    while (true) : (index += 1) {
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+        var gs = GameState.init(outer.allocator(), .{ .seed = seed });
+        _ = try fixture(&gs);
+        for (given) |o| _ = try orderForTest(&gs, id, o);
+        const before = digest.stateHash(&gs);
+        var failure = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = index });
+        gs.arena.state = .{};
+        gs.arena.child_allocator = failure.allocator();
+        defer gs.deinit();
+        if (orderForTest(&gs, id, last)) |_| {
+            try std.testing.expectEqual(expected, digest.stateHash(&gs));
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&gs));
+            failed += 1;
+            gs.arena.child_allocator = outer.allocator();
+            _ = try orderForTest(&gs, id, last);
+            try std.testing.expectEqual(expected, digest.stateHash(&gs));
+        }
     }
+    try std.testing.expect(failed > 0);
+}
+
+/// The contract's committed combat operation.
+fn leverOpForTest(gs: *GameState, id: types.ContractId) *operation_mod.Operation {
+    return &gs.contracts.getPtr(id).?.operations.items[0];
+}
+
+test "a lever at the contact pause keeps the battle there, changes nothing live and shows its recomputed odds" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3 });
+    defer gs.deinit();
+    const id = try leverEngagementForTest(&gs, 30, 4);
+    const observed = try observeEngagementForTest(&gs, id);
+    _ = try orderForTest(&gs, id, .engage);
+    const contact = battle_phases.inProgress(&gs).?.latest().*;
+    const before = digestBesideBattleForTest(&gs);
+    const course = [_]battle_phase.Order{ .engage, .commit_reserve, .{ .intervene = .emergency_recon } };
+    for (course[1..], 2..) |order, n| {
+        const r = try orderForTest(&gs, id, order);
+        try std.testing.expectEqual(@as(?battle_phase.Pause, .contact), r.battle_pause);
+        // No capacity, operation, hull, stock or live RNG change before the battle publishes.
+        try std.testing.expectEqual(before, digestBesideBattleForTest(&gs));
+        // Consumer agreement: the command stored exactly the course's pause.
+        const report = battle_phases.inProgress(&gs).?.latest().*;
+        try std.testing.expectEqualDeep((try battle_phases.run(observed.inputs, observed.dice, course[0..n])).paused, report);
+        try std.testing.expectEqual(contact.margin, report.margin);
+        try std.testing.expectEqual(contact.hits, report.hits);
+    }
+    const report = battle_phases.inProgress(&gs).?.latest().*;
+    const lever_mod = battle_phases.leverMod(.commit_reserve) + battle_phases.leverMod(.emergency_recon);
+    try std.testing.expectEqual(lever_mod, report.lever_mod);
+    try std.testing.expect(report.reserve_committed);
+    try std.testing.expectEqual(battle_phases.leverCost(.emergency_recon), report.capacity_spent);
+    try std.testing.expectEqualDeep(battle_phases.nextPhaseOdds(.decisive, observed.inputs.mods, report.roe, report.momentum, lever_mod, observed.inputs.edge_available), report.odds);
+    try std.testing.expect(!std.meta.eql(contact.odds, report.odds));
+}
+
+test "committing the reserve turns the battle at a fixed seed, and a lost fight lands more hits without its clamp" {
+    var committed: GameState = undefined;
+    defer committed.deinit();
+    var stood: GameState = undefined;
+    defer stood.deinit();
+    // Seed 2: the reserve's two points turn a lost defeat into a held draw.
+    const k = try leverFoughtForTest(&committed, 2, &.{ .engage, .commit_reserve, .press_on });
+    const s = try leverFoughtForTest(&stood, 2, &.{ .engage, .press_on });
+    try std.testing.expect(s.outcome == .defeat and !s.held_field);
+    try std.testing.expect(k.outcome == .draw and k.held_field);
+    try std.testing.expectEqual(s.phases[1].margin + battle_phases.leverMod(.commit_reserve), k.phases[1].margin);
+    try std.testing.expectEqual(battle_phases.leverMod(.commit_reserve), k.phases[1].lever_mod);
+    try std.testing.expectEqual(@as(usize, 1), k.levers.len);
+    try std.testing.expectEqual(battle_phase.Lever.commit_reserve, k.levers[0].lever);
+    try std.testing.expectEqual(@as(usize, 0), s.levers.len);
+    try std.testing.expect(leverOpForTest(&committed, k.contract).reserve_committed);
+    try std.testing.expect(!leverOpForTest(&stood, s.contract).reserve_committed);
+    // Committing the reserve spends no capacity.
+    try std.testing.expectEqual(stood.contracts.getPtr(s.contract).?.command_capacity, committed.contracts.getPtr(k.contract).?.command_capacity);
+    // The AAR and the campaign log name it.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const line = try std.fmt.allocPrint(arena.allocator(), "[AAR]   {s}", .{try after_action.leverText(arena.allocator(), k.levers[0], true)});
+    try std.testing.expect(std.mem.indexOf(u8, line, "commit the reserve") != null);
+    var in_log = false;
+    for (committed.event_log.items) |e| in_log = in_log or std.mem.endsWith(u8, e.text, line);
+    try std.testing.expect(in_log);
+
+    // Seed 7: a rout either way, and the committed reserve no longer clamps its hits.
+    var committed_rout: GameState = undefined;
+    defer committed_rout.deinit();
+    var stood_rout: GameState = undefined;
+    defer stood_rout.deinit();
+    const kr = try leverFoughtForTest(&committed_rout, 7, &.{ .engage, .commit_reserve, .press_on });
+    const sr = try leverFoughtForTest(&stood_rout, 7, &.{ .engage, .press_on });
+    try std.testing.expect(kr.outcome == .rout and sr.outcome == .rout);
+    try std.testing.expect(kr.hits_taken > sr.hits_taken);
+}
+
+test "calling an intervention at the contact pause raises the decisive margin by its profile, spends its capacity and names it" {
+    var called: GameState = undefined;
+    defer called.deinit();
+    var plain: GameState = undefined;
+    defer plain.deinit();
+    const k = try leverFoughtForTest(&called, 3, &.{ .engage, .{ .intervene = .reinforce }, .press_on });
+    const p = try leverFoughtForTest(&plain, 3, &.{ .engage, .press_on });
+    const profile = operations_m.interventionProfile(.reinforce);
+    try std.testing.expectEqual(p.phases[1].margin + profile.surprise_reduction + profile.prepared_roll_bonus, k.phases[1].margin);
+    // Before battle the profile would have moved every phase; here contact is untouched.
+    try std.testing.expectEqualDeep(p.phases[0], k.phases[0]);
+    try std.testing.expectEqual(p.conditions_mod, k.conditions_mod);
+    // The capacity falls by its cost, and the operation records it.
+    const cost = operations_m.interventionCost(.reinforce);
+    try std.testing.expectEqual(plain.contracts.getPtr(p.contract).?.command_capacity - cost, called.contracts.getPtr(k.contract).?.command_capacity);
+    try std.testing.expect(operations_m.interventionApplied(leverOpForTest(&called, k.contract), .reinforce));
+    try std.testing.expect(!operations_m.interventionApplied(leverOpForTest(&plain, p.contract), .reinforce));
+    // The report keeps the pre-battle interventions apart from the lever.
+    try std.testing.expectEqualStrings("", k.operation_interventions);
+    try std.testing.expectEqual(battle_phase.Lever.reinforce, k.levers[0].lever);
+    // The AAR and the campaign log name it, and the log carries the arc line a pre-battle call leaves.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const aar = try std.fmt.allocPrint(arena.allocator(), "[AAR]   {s}", .{try after_action.leverText(arena.allocator(), k.levers[0], true)});
+    const arc = try operations_m.interventionLogText(arena.allocator(), &called, .reinforce);
+    var aar_logged = false;
+    var arc_logged = false;
+    for (called.event_log.items) |e| {
+        aar_logged = aar_logged or std.mem.endsWith(u8, e.text, aar);
+        arc_logged = arc_logged or std.mem.eql(u8, e.text, arc);
+    }
+    try std.testing.expect(aar_logged and arc_logged);
+    // The operation record names it and counts its capacity.
+    called.contracts.getPtr(k.contract).?.arc_key = "fracturing_garrison";
+    const record = try @import("queries.zig").operationReport(arena.allocator(), &called, k.contract);
+    try std.testing.expectEqual(@as(usize, 1), record.rows.len);
+    try std.testing.expectEqualSlices(operation_mod.Intervention, &.{.reinforce}, record.rows[0].interventions);
+    try std.testing.expectEqual(cost, record.rows[0].capacity_spent);
+    try std.testing.expect(!record.rows[0].reserve_committed);
+}
+
+test "a withdrawal after a lever spends its capacity, records it and lands only the contact hits" {
+    var gs: GameState = undefined;
+    defer gs.deinit();
+    const w = try leverFoughtForTest(&gs, 3, &.{ .engage, .{ .intervene = .reinforce }, .withdraw });
+    try std.testing.expect(w.withdrew and !w.held_field);
+    try std.testing.expectEqual(@as(usize, 2), w.phases.len);
+    try std.testing.expectEqual(w.phases[0].hits, w.hits_taken);
+    try std.testing.expectEqual(battle_phase.Lever.reinforce, w.levers[0].lever);
+    var fresh = GameState.init(std.testing.allocator, .{ .seed = 3 });
+    defer fresh.deinit();
+    const id = try leverEngagementForTest(&fresh, 30, 4);
+    try std.testing.expectEqual(fresh.contracts.getPtr(id).?.command_capacity - operations_m.interventionCost(.reinforce), gs.contracts.getPtr(w.contract).?.command_capacity);
+    try std.testing.expect(operations_m.interventionApplied(leverOpForTest(&gs, w.contract), .reinforce));
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const line = try after_action.leverText(arena.allocator(), w.levers[0], false);
+    try std.testing.expect(std.mem.indexOf(u8, line, "before the decisive phase") != null);
+}
+
+test "every lever refusal consumes nothing" {
+    // Each refusal's sentence: cli.zig's "battle parses every order word strictly" test.
+    const digest = @import("digest.zig");
+    const Change = enum { none, uncrewed_reserve, short_capacity, applied_before, integrated };
+    const Case = struct { seed: u64, setup: Change, given: []const battle_phase.Order, order: battle_phase.Order, err: anyerror };
+    const cases = [_]Case{
+        .{ .seed = 3, .setup = .uncrewed_reserve, .given = &.{.engage}, .order = .commit_reserve, .err = error.ReserveUnavailable },
+        .{ .seed = 3, .setup = .none, .given = &.{ .engage, .commit_reserve }, .order = .commit_reserve, .err = error.OrderNotLegal },
+        .{ .seed = 3, .setup = .short_capacity, .given = &.{ .engage, .{ .intervene = .reinforce } }, .order = .{ .intervene = .emergency_recon }, .err = error.InsufficientCommandCapacity },
+        // The starter company flies no fighters.
+        .{ .seed = 3, .setup = .none, .given = &.{.engage}, .order = .{ .intervene = .air_cover }, .err = error.InterventionGateUnmet },
+        .{ .seed = 3, .setup = .none, .given = &.{ .engage, .{ .intervene = .emergency_recon } }, .order = .{ .intervene = .emergency_recon }, .err = error.InterventionAlreadyApplied },
+        .{ .seed = 3, .setup = .applied_before, .given = &.{.engage}, .order = .{ .intervene = .field_repair }, .err = error.InterventionAlreadyApplied },
+        .{ .seed = 3, .setup = .integrated, .given = &.{.engage}, .order = .{ .intervene = .reinforce }, .err = error.InterventionReservedByEmployer },
+        // Seed 5: the engagement's weather grounds aircraft.
+        .{ .seed = 5, .setup = .none, .given = &.{.engage}, .order = .{ .intervene = .air_cover }, .err = error.AirCoverGrounded },
+        .{ .seed = 3, .setup = .none, .given = &.{}, .order = .commit_reserve, .err = error.OrderNotLegal },
+        .{ .seed = 3, .setup = .none, .given = &.{ .engage, .press_on }, .order = .{ .intervene = .emergency_recon }, .err = error.OrderNotLegal },
+    };
+    for (cases) |case| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = case.seed });
+        defer gs.deinit();
+        const id = try leverEngagementForTest(&gs, 30, 4);
+        const c = gs.contracts.getPtr(id).?;
+        switch (case.setup) {
+            .none => {},
+            .uncrewed_reserve => for (gs.force(leverOpForTest(&gs, id).tasks.items[0].lance).?.units.items) |uid| {
+                gs.unit(uid).?.pilot = .none;
+            },
+            .short_capacity => c.command_capacity = operations_m.interventionCost(.reinforce),
+            .applied_before => try leverOpForTest(&gs, id).interventions.append(gs.allocator(), .field_repair),
+            .integrated => c.terms.command_rights = .integrated,
+        }
+        for (case.given) |o| _ = try orderForTest(&gs, id, o);
+        const before = digest.stateHash(&gs);
+        try std.testing.expectError(case.err, orderForTest(&gs, id, case.order));
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+    }
+}
+
+test "earlier phases are never re-rolled by a lever: the contact report and the dice are the same whatever levers follow" {
+    const branches = [_][]const battle_phase.Order{
+        &.{ .engage, .press_on },
+        &.{ .engage, .commit_reserve, .press_on },
+        &.{ .engage, .{ .intervene = .emergency_recon }, .withdraw },
+        &.{ .engage, .{ .intervene = .reinforce }, .commit_reserve, .{ .roe = .cautious }, .press_on },
+    };
+    var dice: ?battle_phases.Dice = null;
+    var contact: ?battle_phase.PhaseReport = null;
+    var contact_phase: ?battle_phase.PhaseRecord = null;
+    for (branches) |orders| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 3 });
+        defer gs.deinit();
+        const id = try leverEngagementForTest(&gs, 30, 4);
+        const observed = try observeEngagementForTest(&gs, id);
+        if (dice) |d| try std.testing.expectEqualDeep(d, observed.dice) else dice = observed.dice;
+        _ = try orderForTest(&gs, id, .engage);
+        const report = battle_phases.inProgress(&gs).?.latest().*;
+        if (contact) |r| try std.testing.expectEqualDeep(r, report) else contact = report;
+        for (orders[1..]) |o| _ = try orderForTest(&gs, id, o);
+        while (battle_phases.inProgress(&gs) != null) try @import("tick.zig").fightDueEngagement(&gs);
+        const phases = gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1].phases;
+        if (contact_phase) |p| try std.testing.expectEqualDeep(p, phases[0]) else contact_phase = phases[0];
+    }
+}
+
+test "an unattended engagement pulls no lever: its operation commits no reserve and calls nothing" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 3 });
+    defer gs.deinit();
+    const id = try leverEngagementForTest(&gs, 30, 4);
+    const capacity = gs.contracts.getPtr(id).?.command_capacity;
+    try resolveEngagement(&gs, gs.contracts.getPtr(id).?);
+    const report = gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1];
+    try std.testing.expectEqual(@as(usize, 0), report.levers.len);
+    for (report.phases) |p| try std.testing.expectEqual(@as(i32, 0), p.lever_mod);
+    const op = leverOpForTest(&gs, id);
+    try std.testing.expect(!op.reserve_committed and op.interventions.items.len == 0);
+    try std.testing.expectEqual(capacity, gs.contracts.getPtr(id).?.command_capacity);
 }

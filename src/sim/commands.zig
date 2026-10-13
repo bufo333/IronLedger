@@ -370,6 +370,12 @@ pub const Error = error{
     OrderNotLegal,
     /// The employer's integrated command sets the rules of engagement.
     RoeReservedByEmployer,
+    /// No operational reserve-tasked lance on the committed combat operation.
+    ReserveUnavailable,
+    /// The employer reserves that intervention in battle.
+    InterventionReservedByEmployer,
+    /// The engagement's weather grounds aircraft: no air cover.
+    AirCoverGrounded,
     NoSuchChoice,
     NotADecision,
     CommanderExists,

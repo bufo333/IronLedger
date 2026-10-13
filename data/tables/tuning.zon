@@ -289,6 +289,7 @@
             },
             .pursuit = .{ .clean_at = 8, .costly_at = 5, .enemy_loss_bonus_pct = 10, .extra_hit_pct = 10 }, // TUNE
             .cover = .{ .clean_at = 7, .extra_hit_pct = 10, .recovery_mod = 2 }, // TUNE: as good as a cautious withdrawal's recovery
+            .reserve = .{ .commit_roll = 2 }, // TUNE: decisive-roll points, as much as calling reinforcements
         },
         // Per-drawn-OpFor-hull outcome bands: destroyed_pct non-increasing from decisive_victory to rout;
         // destroyed_pct + ineffective_pct <= 100 per band. // TUNE

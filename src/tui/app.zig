@@ -2497,6 +2497,19 @@ pub const App = struct {
         self.openModal(.{ .after_action = res.battle_report });
     }
 
+    /// The battle screen row the intervention key moves to: the next
+    /// intervention row after `cursor`, wrapping to the first; `cursor`
+    /// unchanged when the pause offers none. Rows are found by the order
+    /// they carry, never by position.
+    fn nextInterventionRow(rows: []const q.BattleOrderRow, cursor: usize) usize {
+        var first: ?usize = null;
+        for (rows, 0..) |row, i| if (row.order == .intervene) {
+            if (i > cursor) return i;
+            if (first == null) first = i;
+        };
+        return first orelse cursor;
+    }
+
     // ---- settings form: one look with the pickers and the amount form ----
 
     pub const SettingKey = enum { music, volume, track, soundtrack, auto_admit, difficulty, shares, info };
@@ -3779,10 +3792,11 @@ pub const App = struct {
                         try iv_buf.appendSlice(al, @tagName(iv));
                     }
                     const iv_text: []const u8 = if (iv_buf.items.len > 0) iv_buf.items else "-";
-                    try rows.append(al, try std.fmt.allocPrint(al, "   {{d}}cost: cap {d} ({s}) · delay {d}d{{/}}", .{
+                    try rows.append(al, try std.fmt.allocPrint(al, "   {{d}}cost: cap {d} ({s}) · delay {d}d{s}{{/}}", .{
                         r.capacity_spent,
                         iv_text,
                         r.delay_days,
+                        if (r.reserve_committed) " · reserve committed" else "",
                     }));
                     // Campaign-state consequence detail for non-combat resolved ops.
                     if (r.consequence.applies_campaign_deltas) {
@@ -4012,7 +4026,7 @@ pub const App = struct {
     /// The battle screen's orders (ARCH §7 "The phased engagement"). Each
     /// key sends its order; the command refuses one that is not legal at
     /// this pause, with its own sentence.
-    const BattleAction = enum { engage, press_on, withdraw, pursue, consolidate, cover, roe };
+    const BattleAction = enum { engage, press_on, withdraw, pursue, consolidate, cover, roe, reserve, intervention };
     pub const battle_bindings = [_]keys.Binding(BattleAction){
         .{ .match = keys.Match.char('e'), .action = .engage, .label = "engage", .group = .act, .help = "fight the contact phase" },
         .{ .match = keys.Match.char('p'), .action = .press_on, .label = "press on", .group = .act, .help = "fight the decisive phase" },
@@ -4021,6 +4035,8 @@ pub const App = struct {
         .{ .match = keys.Match.char('c'), .action = .consolidate, .label = "consolidate", .group = .act, .help = "after a held field: end the battle as it stands" },
         .{ .match = keys.Match.char('v'), .action = .cover, .label = "cover", .group = .act, .help = "after a lost field: cover the recovery of the wrecks, at the risk of hits" },
         .{ .match = keys.Match.char('r'), .action = .roe, .label = "ROE", .group = .act, .help = "at the contact pause: step the ROE for the next phase (standard → cautious → hold)" },
+        .{ .match = keys.Match.char('R'), .action = .reserve, .label = "commit reserve", .group = .act, .help = "at the contact pause: send the reserve lance in — a better decisive roll, without its steadying on a lost fight" },
+        .{ .match = keys.Match.char('i'), .action = .intervention, .label = "interventions", .group = .navigate, .help = "at the contact pause: step the cursor through the interventions (Enter calls the highlighted one for its command capacity)" },
     };
     const LogAction = enum { top, bottom, close };
     pub const log_bindings = [_]keys.Binding(LogAction){
@@ -4504,6 +4520,12 @@ pub const App = struct {
                     .roe => blk: {
                         const view = (try q.battlePhaseReport(self.a(), self.state(), cid)) orelse return true;
                         break :blk .{ .roe = view.roe.next() };
+                    },
+                    .reserve => .commit_reserve,
+                    .intervention => {
+                        const view = (try q.battlePhaseReport(self.a(), self.state(), cid)) orelse return true;
+                        self.modal_cursor = nextInterventionRow(view.orders, self.modal_cursor);
+                        return true;
                     },
                 };
                 try self.giveBattleOrder(cid, order);
@@ -5320,13 +5342,48 @@ test "the battle screen: keys and rows send their own orders, the cursor clamps,
     for (view.orders) |row| try std.testing.expectEqual(id, row.contract);
     const list = try c.app.listView(c.app.a());
     try std.testing.expectEqual(view.orders.len, list.n);
-    // A cursor run past the rows clamps to the last one: Enter sends that row's order.
+    // With no committed combat operation every lever row is locked, and says why.
+    var lever_rows: usize = 0;
+    for (view.orders) |row| if (battle_phase.Lever.of(row.order) != null) {
+        try std.testing.expect(row.locked.len > 0);
+        lever_rows += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 5), lever_rows);
+    // A cursor run past the rows clamps to the last one: Enter sends that
+    // row's order, a locked intervention: the command refuses it and the
+    // battle stands where it was.
     c.app.modal_cursor = 99;
-    const last = view.orders[view.orders.len - 1].order;
+    try std.testing.expect(view.orders[view.orders.len - 1].order == .intervene);
+    const before_lever = game.digest.stateHash(c.app.state());
+    try pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .battle);
+    try std.testing.expectEqual(before_lever, game.digest.stateHash(c.app.state()));
+    // The reserve key sends its order through the same path: refused, nothing changes.
+    try pressForTest(c, .{ .char = 'R' });
+    try std.testing.expect(c.app.modal == .battle);
+    try std.testing.expectEqual(before_lever, game.digest.stateHash(c.app.state()));
+    // The intervention key walks the cursor over the intervention rows only,
+    // wrapping from the last back to the first. (A key press resets the
+    // frame arena, so the view is read again after each.)
+    c.app.modal_cursor = 0;
+    var first_row: ?usize = null;
+    for (0..6) |_| {
+        try pressForTest(c, .{ .char = 'i' });
+        view = (try q.battlePhaseReport(c.app.a(), c.app.state(), id)).?;
+        try std.testing.expect(view.orders[c.app.modal_cursor].order == .intervene);
+        if (first_row == null) first_row = c.app.modal_cursor;
+    }
+    // Four interventions: the fifth press wrapped to the first, the sixth one past it.
+    try std.testing.expectEqual(first_row.? + 1, c.app.modal_cursor);
+    // Enter on an ROE row (by identity) changes the ROE for the next phase.
+    for (view.orders, 0..) |row, i| if (row.order == .roe) {
+        c.app.modal_cursor = i;
+    };
+    const chosen = view.orders[c.app.modal_cursor].order;
     try pressForTest(c, .enter);
     try std.testing.expect(c.app.modal == .battle);
     view = (try q.battlePhaseReport(c.app.a(), c.app.state(), id)).?;
-    try std.testing.expectEqual(last.roe, view.roe);
+    try std.testing.expectEqual(chosen.roe, view.roe);
     // It draws at 80x24 too.
     try c.app.screen.resize(80, 24);
     try c.app.draw();

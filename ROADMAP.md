@@ -1964,9 +1964,13 @@ pulled back.
 **Delivered in P5b.1:** P5b.1 in full; from P5b.2 the pause, the phase report
 with recomputed odds, the ROE change and tactical withdrawal; from P5b.3 the
 phase narration in the AAR and campaign log and the employer's ROE lock; from
-P5b.4 the phase-one withdrawal fixed-seed test. **Pending (P5b.2):** reserve
-commit, air cover and the command-capacity interventions with their costs and
-refusals, the operation record naming them, and the reserve-commit test.
+P5b.4 the phase-one withdrawal fixed-seed test. **Delivered in P5b.2:** reserve
+commit, air cover and the command-capacity interventions at the contact pause,
+each with its cost, what it needs and its refusal (air cover grounded by the
+weather; the employer's integrated command reserving reinforcements and air
+cover); the AAR, campaign log and operation record naming each; the
+reserve-commit fixed-seed test and the uncrewed-reserve, spent-capacity and
+locked-intervention refusal tests. P5b is delivered in full.
 
 ### P5c — Situations, not events
 

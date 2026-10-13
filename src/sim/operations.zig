@@ -722,6 +722,28 @@ pub fn interventionProfile(kind: operation_mod.Intervention) InterventionProfile
     };
 }
 
+/// Rule owner: the employer reserves this intervention mid-battle
+/// (ARCH §7 "The phased engagement"). An integrated employer's officers
+/// direct the line's reinforcements and its air assets, so at a battle's
+/// contact pause `reinforce` and `air_cover` are theirs; every other
+/// combination is the commander's. Before battle, `apply_intervention` does
+/// not consult it. // TUNE: the locked set awaits the playtest.
+pub fn interventionReservedByEmployer(rights: contract_mod.CommandRights, kind: operation_mod.Intervention) bool {
+    return rights == .integrated and (kind == .reinforce or kind == .air_cover);
+}
+
+/// The campaign-log line an applied intervention leaves, before battle or
+/// at its contact pause: "<date> [arc] intervention applied: <label> (<n>
+/// capacity)". Allocates the text from `alloc`.
+pub fn interventionLogText(alloc: std.mem.Allocator, gs: *const GameState, kind: operation_mod.Intervention) ![]const u8 {
+    var date_buf: [10]u8 = undefined;
+    return std.fmt.allocPrint(alloc, "{s} [arc] intervention applied: {s} ({d} capacity)", .{
+        gs.clock.date.text(&date_buf),
+        kind.label(),
+        interventionCost(kind),
+    });
+}
+
 /// Rule owner: is this intervention already applied to the operation?
 pub fn interventionApplied(op: *const operation_mod.Operation, kind: operation_mod.Intervention) bool {
     for (op.interventions.items) |iv| if (iv == kind) return true;
@@ -2381,4 +2403,17 @@ test "instantiateFollowUps: failure-atomic under injected OOM" {
     try testing.expectEqual(id_start, gs.next_operation_id);
     // No operations appended.
     try testing.expectEqual(@as(usize, 0), c.operations.items.len);
+}
+
+test "interventionReservedByEmployer: integrated command reserves reinforce and air cover, nothing else" {
+    const testing = std.testing;
+    try testing.expect(interventionReservedByEmployer(.integrated, .reinforce));
+    try testing.expect(interventionReservedByEmployer(.integrated, .air_cover));
+    try testing.expect(!interventionReservedByEmployer(.integrated, .emergency_recon));
+    try testing.expect(!interventionReservedByEmployer(.integrated, .field_repair));
+    for ([_]contract_mod.CommandRights{ .independent, .liaison, .house }) |rights| {
+        for ([_]operation_mod.Intervention{ .emergency_recon, .reinforce, .air_cover, .field_repair }) |kind| {
+            try testing.expect(!interventionReservedByEmployer(rights, kind));
+        }
+    }
 }

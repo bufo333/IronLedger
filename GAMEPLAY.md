@@ -230,7 +230,19 @@ you own reports to you (Stages 9A–9C):
   phase under your orders. At the contact pause you can **press on** to
   the decisive phase, change the **ROE** for it (not under integrated
   command), or **withdraw**: the field is lost, but only the hits so far
-  land and the wrecks roll as a cautious withdrawal. After the decisive
+  land and the wrecks roll as a cautious withdrawal. Before you press on
+  you can also pull the **levers**, each once, each recomputing the odds:
+  **commit the reserve** (a lance tasked reserve on the committed combat
+  operation) for a better decisive roll, at the price of its steadying
+  hand if the fight is lost anyway; or **call an intervention** — emergency
+  recon, reinforcements, air cover or field repair — for its command
+  capacity and the same bonus it would have given before the battle, here
+  to the decisive phase alone. Each needs what it needs before battle (a
+  scout lance or comms, a spare combat lance, a fighter that can fly in
+  the weather, a tech); an integrated employer directs reinforcements and
+  air cover itself; one already applied before battle cannot be called
+  again. Withdrawing after a lever still spends its capacity. The
+  operation and the after-action record every lever. After the decisive
   phase a held field may be **pursued** (more of the enemy run down, at the
   risk of hits) or **consolidated**; a lost field may be **covered** (the
   wrecks roll better to come home, at the risk of hits) or left now. The
