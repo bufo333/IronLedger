@@ -583,6 +583,17 @@ out = b""
 assert wait_for("MERCENARY", timeout=20), plain()[-2000:]
 send("\t"); send("\r", 3.0)
 assert wait_for("F1 Desk", timeout=20) and "+-" in plain(), plain()[-2000:]          # ascii borders
+# The seeded campaign is saved with a decision still in its inbox: the Desk
+# opens it at 80x24 in --ascii, and its key hint stays in the foot. A
+# resolved or missing decision has no "decide later", so this cannot pass
+# without one.
+send("1"); send("\t", 0.6)     # the INBOX pane, cursor on the first decision
+mark = len(out)
+send("\r", 1.0)
+narrow = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "replace")
+assert "DECISION · [" in narrow and "decide later" in narrow, narrow[-2000:]
+send("\x1b", 0.6)              # decide later: the decision stays in the inbox
+print("decision at 80x24 --ascii OK")
 for k in "234567891":
     send(k, 0.6)
 send("4"); send("\x1b[C", 0.6); send("\x1b[C", 0.6)        # contracts board at 80 wide: what cannot drop scrolls
