@@ -11,6 +11,7 @@ const operations = @import("operations.zig");
 const operation_mod = @import("../domain/operation.zig");
 const force_mod = @import("../domain/force.zig");
 const contract_mod = @import("../domain/contract.zig");
+const battle_report = @import("../domain/battle_report.zig");
 const types = @import("../domain/types.zig");
 const founding = @import("founding.zig");
 const starter_company = @import("starter_company.zig");
@@ -123,6 +124,51 @@ pub fn clearHoldsForTest(gs: *GameState, al: std.mem.Allocator) !void {
 pub fn dueEngagementForTest(gs: *GameState) !types.ContractId {
     for (gs.forces.values()) |f| if (f.echelon == .company) return @import("battle.zig").dueEngagementForCompanyForTest(gs, f.id);
     return error.NoCompany;
+}
+
+/// Twelve reachable wrecks: a salvage decision long enough to scroll in the
+/// smallest supported modal.
+const many_wrecks = blk: {
+    const names = [_][]const u8{ "Dragon", "Locust", "Stinger", "Wasp", "Commando", "Jenner", "Panther", "Hunchback", "Centurion", "Trebuchet", "Vindicator", "Wolverine" };
+    var out: [names.len]battle_report.SalvageCandidate = undefined;
+    for (names, 0..) |name, i| out[i] = .{ .key = name[0..3], .name = name, .bv = 400 + 50 * i, .armor_pct = 30, .quality = .c, .damaged_slots = 1, .destroyed_slots = 1, .missing_components = 1 };
+    break :blk out;
+};
+
+/// A salvage decision over `many_wrecks` for the campaign's first company,
+/// for client tests that need a decision taller than its modal; returns its id.
+pub fn salvageDecisionForTest(gs: *GameState) !types.EventId {
+    const co = for (gs.forces.values()) |f| {
+        if (f.echelon == .company) break f.id;
+    } else return error.NoCompany;
+    const battle_id = gs.nextBattleId();
+    try gs.battle_reports.record(gs.allocator(), .{
+        .id = battle_id,
+        .day = gs.clock.day_index,
+        .contract = @enumFromInt(1),
+        .company = co,
+        .kind = "recon_raid",
+        .enemy_key = "DC",
+        .scenario = "breakthrough",
+        .terrain = "badlands",
+        .weather = "clear skies",
+        .outcome = .victory,
+        .held_field = true,
+        .acknowledged = true,
+        .salvage = .{ .claimed_bv = 5_000, .candidates = &many_wrecks, .unclaimed_bv = 5_000 },
+    });
+    const contract_events = @import("contract_events.zig");
+    const entry = contract_events.salvageEntry();
+    try gs.event_queue.pending.ensureUnusedCapacity(gs.allocator(), 1);
+    return gs.event_queue.pushAssumeCapacity(.{
+        .day = gs.clock.day_index,
+        .kind = .salvage_priority,
+        .company = co,
+        .battle = battle_id,
+        .options = entry.options,
+        .default_choice = entry.default_choice,
+        .deadline_day = gs.clock.day_index + contract_events.decision_window_days,
+    });
 }
 
 /// Found a campaign and accept the first eligible arc-contract offer.

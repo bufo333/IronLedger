@@ -472,15 +472,35 @@ def fight_battle(refuse_first, levers=False):
     mark_read = len(out)
     send("\x1b", 0.8)                  # read the after-action
     # The decisions the fight raised open one after another: answer each.
+    # A decision modal (its title, not a logged "DECISION:") keeps its key
+    # hint in the foot; the first is also shrunk to 80x24, where a long one
+    # scrolls. Returns how many decision modals were answered.
+    modals = 0
     for _ in range(6):
         frame = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark_read:]).decode("utf-8", "replace")
         if "DECISION" not in frame[-6000:]:
             break
+        screen = frame[-(200 * 50):]   # one whole 200x50 repaint
+        if "DECISION · [" in screen:
+            assert "decide later" in screen, screen[-3000:]
+            modals += 1
+            if modals == 1:
+                mark_narrow = len(out)
+                fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+                os.kill(pid, signal.SIGWINCH)
+                drain(1.0)
+                narrow = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark_narrow:]).decode("utf-8", "replace")
+                assert "DECISION · [" in narrow and "decide later" in narrow, narrow[-2000:]
+                fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 200, 0, 0))
+                os.kill(pid, signal.SIGWINCH)
+                drain(1.0)
+                print("decision at 80x24 OK")
         mark_read = len(out)
         send("1", 1.0)
+    return modals
 
 
-fight_battle(True)
+assert fight_battle(True) > 0, "the first battle raised no decision modal: " + plain()[-3000:]
 send("\x1b", 0.5); send("\x1b", 0.5)
 # P4g: exercise the intervention picker on a committed combat op.  The
 # garrison auto-probe battle above has been resolved; the contract is still

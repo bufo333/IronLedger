@@ -164,7 +164,7 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             const view = try q.desk(al, g, q.desk_log_rows);
             const ib = try inboxPane(al, view);
             const c = self.cur(1).*;
-            if (c < ib.event.len) self.modal = .{ .decision = ib.event[c] };
+            if (c < ib.event.len) self.openModal(.{ .decision = ib.event[c] });
         },
         .read_entry => {
             const view = try q.desk(al, g, q.desk_log_rows);
@@ -233,13 +233,19 @@ test "a situation's inbox lines open its decision, which draws narrow and is ans
         lines += 1;
     };
     try std.testing.expectEqual(@as(usize, 5), lines);
+    // The modal opens at its top, and draws, at 80x24, even after another
+    // modal was scrolled and closed there.
+    try c.app.screen.resize(80, 24);
+    try app.pressForTest(c, .{ .char = '?' });
+    for (0..3) |_| try app.pressForTest(c, .{ .char = 'j' });
+    try app.pressForTest(c, .escape);
+    try std.testing.expect(c.app.modal_cursor > 0);
     c.app.focus = 1;
     c.app.cur(1).* = first + 3; // an option line, not the header
-    // The modal opens, and draws, at 80x24.
-    try c.app.screen.resize(80, 24);
     try app.pressForTest(c, .enter);
     try std.testing.expect(c.app.modal == .decision);
     try std.testing.expectEqual(id, c.app.modal.decision);
+    try std.testing.expectEqual(@as(usize, 0), c.app.modal_cursor);
     try app.pressForTest(c, .{ .char = '1' });
     try c.app.screen.resize(200, 50);
     for ((try q.desk(c.app.a(), c.app.state(), q.desk_log_rows)).inbox) |row| try std.testing.expect(row.event_id != id);

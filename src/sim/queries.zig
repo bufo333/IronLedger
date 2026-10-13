@@ -258,6 +258,10 @@ pub const ChecklistRow = struct {
     contract: types.ContractId = .none,
 };
 
+/// The gap between an inbox option's columns (label, effects, what it
+/// leaves behind): a frontend that re-flows an option splits at it.
+pub const option_gap = "   ";
+
 pub const InboxRow = struct {
     /// The event this row is about. A frontend answers with this,
     /// never with the row's position (rule 32).
@@ -671,7 +675,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
             continue;
         }
         var opts: std.ArrayListUnmanaged([]const u8) = .empty;
-        for (ev.options) |o| try opts.append(alloc, try std.fmt.allocPrint(alloc, "{s}   {s}", .{ o.label, try effectsText(alloc, o.effects) }));
+        for (ev.options) |o| try opts.append(alloc, try std.fmt.allocPrint(alloc, "{s}" ++ option_gap ++ "{s}", .{ o.label, try effectsText(alloc, o.effects) }));
         const entry = contract_events.entryForKind(ev.kind);
         try inbox.append(alloc, .{
             .event_id = ev.id,
@@ -745,7 +749,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
 fn situationInboxRow(alloc: Alloc, gs: *GameState, ev: *const @import("../domain/events.zig").Event, day: u32) !InboxRow {
     const s = situation_mod.find(ev.situation) orelse return error.CorruptSave;
     var opts: std.ArrayListUnmanaged([]const u8) = .empty;
-    for (s.options) |o| try opts.append(alloc, try std.fmt.allocPrint(alloc, "{s}   {s}   {{d}}{s}{{/}}", .{ o.label, try effectsText(alloc, o.costs), o.remembers }));
+    for (s.options) |o| try opts.append(alloc, try std.fmt.allocPrint(alloc, "{s}" ++ option_gap ++ "{s}" ++ option_gap ++ "{{d}}{s}{{/}}", .{ o.label, try effectsText(alloc, o.costs), o.remembers }));
     return .{
         .event_id = ev.id,
         .kind = @tagName(ev.kind),

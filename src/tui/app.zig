@@ -3189,6 +3189,63 @@ pub const App = struct {
         .{ .action = .fire, .key = 'D', .label = "dismiss (asks first)" },
     };
 
+    /// An inbox decision as modal rows no wider than `width` cells. A row
+    /// that fits is kept byte for byte, so aligned detail columns stay
+    /// aligned; a longer one wraps under its own indent. An option hangs
+    /// under its `[n]`, each of its columns (`q.option_gap`) starting a line,
+    /// so wrapping never runs two columns together. Presentation only: the
+    /// number on an option is still the choice its key sends.
+    fn decisionRows(al: std.mem.Allocator, it: q.InboxRow, width: usize) ![]const []const u8 {
+        var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+        try rows.append(al, "");
+        try appendFitted(al, &rows, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} · {s} · defaults on day {d} ({d} days)", .{ it.kind, it.company, it.deadline_day, it.days_left }), width);
+        try rows.append(al, "");
+        try appendFitted(al, &rows, try std.fmt.allocPrint(al, "  {s}", .{it.description}), width);
+        try rows.append(al, "");
+        // What the decision is actually about, when one line
+        // cannot carry it (the wrecks on offer).
+        if (it.detail.len > 0) {
+            for (it.detail) |line| try appendFitted(al, &rows, line, width);
+            try rows.append(al, "");
+        }
+        const default_mark = "{d}default{/}";
+        for (it.options, 0..) |o, oi| {
+            const prefix = try std.fmt.allocPrint(al, "    [{d}] ", .{oi + 1});
+            const is_default = oi == it.default_choice;
+            const whole = try std.mem.concat(al, u8, &.{ prefix, o, if (is_default) q.option_gap ++ default_mark else "" });
+            if (screen_mod.visibleLen(whole) <= width) {
+                try rows.append(al, whole);
+                continue;
+            }
+            var columns: std.ArrayListUnmanaged([]const u8) = .empty;
+            var split = std.mem.splitSequence(u8, o, q.option_gap);
+            while (split.next()) |col| if (col.len > 0) try columns.append(al, col);
+            if (is_default) try columns.append(al, default_mark);
+            const hang = try indentation(al, screen_mod.visibleLen(prefix));
+            var first = true;
+            for (columns.items) |col| for (try screen_mod.wrap(al, col, width -| hang.len)) |line| {
+                try rows.append(al, try std.mem.concat(al, u8, &.{ if (first) prefix else hang, line }));
+                first = false;
+            };
+        }
+        return rows.toOwnedSlice(al);
+    }
+
+    /// `line` as one row when it fits `width` cells, else word-wrapped with
+    /// its leading spaces repeated on every line.
+    fn appendFitted(al: std.mem.Allocator, rows: *std.ArrayListUnmanaged([]const u8), line: []const u8, width: usize) !void {
+        if (screen_mod.visibleLen(line) <= width) return rows.append(al, line);
+        const words = std.mem.trimStart(u8, line, " ");
+        const indent = line[0 .. line.len - words.len];
+        for (try screen_mod.wrap(al, words, width -| indent.len)) |l| try rows.append(al, try std.mem.concat(al, u8, &.{ indent, l }));
+    }
+
+    fn indentation(al: std.mem.Allocator, cells: usize) ![]const u8 {
+        const pad = try al.alloc(u8, cells);
+        @memset(pad, ' ');
+        return pad;
+    }
+
     /// What the open list modal shows.
     fn listView(self: *App, al: std.mem.Allocator) !ListView {
         const full_h = self.screen.rows -| 2;
@@ -3237,30 +3294,26 @@ pub const App = struct {
             },
             .decision => |idx| {
                 const view = try q.desk(al, self.state(), 0);
-                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
-                var found = false;
-                for (view.inbox) |it| {
-                    if (it.event_id != idx) continue;
-                    found = true;
-                    try rows.append(al, "");
-                    try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} · {s} · defaults on day {d} ({d} days)", .{ it.kind, it.company, it.deadline_day, it.days_left }));
-                    try rows.append(al, "");
-                    try rows.append(al, try std.fmt.allocPrint(al, "  {s}", .{it.description}));
-                    try rows.append(al, "");
-                    // What the decision is actually about, when one line
-                    // cannot carry it (the wrecks on offer).
-                    if (it.detail.len > 0) {
-                        try rows.appendSlice(al, it.detail);
-                        try rows.append(al, "");
-                    }
-                    for (it.options, 0..) |o, oi| {
-                        try rows.append(al, try std.fmt.allocPrint(al, "    [{d}] {s}{s}", .{ oi + 1, o, if (oi == it.default_choice) "   {d}default{/}" else "" }));
-                    }
-                    try rows.append(al, "");
-                    try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s} · {s}{{/}}", .{ try keyHint(DecisionAction, al, &decision_bindings, .choose, "choose that option"), try keyHint(SheetAction, al, &sheet_bindings, .close, "decide later") }));
-                }
-                if (!found) try rows.append(al, "  {d}this decision has been resolved{/}");
-                return .{ .title = try keys.title(al, try listTitle(al, "DECISION", null, "later", false), &decision_legend), .rows = rows.items, .read_only = true, .w = layout.modal.decision_w, .max_h = layout.modal.decision_max_h };
+                const title = try keys.title(al, try listTitle(al, "DECISION", null, "later", false), &decision_legend);
+                const it = for (view.inbox) |row| {
+                    if (row.event_id == idx) break row;
+                } else return .{ .title = title, .rows = &.{"  {d}this decision has been resolved{/}"}, .read_only = true, .w = layout.modal.decision_w, .max_h = layout.modal.decision_max_h };
+                // The hint sits in the foot, so it stays in view while a
+                // long decision scrolls.
+                const hint = try std.fmt.allocPrint(al, "  {{d}}{s} · {s} · {s}{{/}}", .{
+                    try keyHint(DecisionAction, al, &decision_bindings, .choose, "choose that option"),
+                    try keyHint(SheetAction, al, &sheet_bindings, .close, "decide later"),
+                    try keyHint(ListAction, al, &list_bindings, .down, "scroll"),
+                });
+                return .{
+                    .title = title,
+                    .rows = try decisionRows(al, it, self.modalTextWidth(layout.modal.decision_w)),
+                    .foot = try al.dupe([]const u8, &.{ "", hint }),
+                    .read_only = true,
+                    .scroll = true,
+                    .w = layout.modal.decision_w,
+                    .max_h = layout.modal.decision_max_h,
+                };
             },
             .battle => |cid| {
                 const view = (try q.battlePhaseReport(al, self.state(), cid)) orelse
@@ -5974,4 +6027,148 @@ test "help overlay scrolls and question mark closes it" {
     try pressForTest(c, .{ .char = '?' });
     try pressForTest(c, .{ .char = '?' });
     try std.testing.expectEqual(Modal.none, c.app.modal);
+}
+
+/// The open decision modal's rectangle as `drawList` sizes it.
+fn decisionRectForTest(c: *ClientForTest, v: App.ListView) Rect {
+    const want = v.head.len + @max(v.rows.len, 1) + v.foot.len + 2;
+    return c.app.modalRect(v.w, @intCast(@min(want, v.max_h)));
+}
+
+test "a situation's decision keeps every word inside the modal at 200x50 and 80x24" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    const id = try game.situations.raisedSituationForTest(c.app.state());
+    for ([_][2]u16{ .{ 200, 50 }, .{ 80, 24 } }) |size| {
+        try c.app.screen.resize(size[0], size[1]);
+        c.app.openModal(.{ .decision = id });
+        _ = c.app.frame.reset(.retain_capacity);
+        try c.app.draw();
+        const al = c.app.a();
+        const v = try c.app.listView(al);
+        const width = c.app.modalTextWidth(layout.modal.decision_w);
+        var tokens: std.ArrayListUnmanaged([]const u8) = .empty;
+        for (v.rows) |row| {
+            const cells = screen_mod.visibleLen(row);
+            if (cells > width) {
+                std.debug.print("{d}x{d}: a decision row of {d} cells overflows the {d}-cell modal: {s}\n", .{ size[0], size[1], cells, width, row });
+                return error.TestUnexpectedResult;
+            }
+            var it = std.mem.tokenizeScalar(u8, try q.stripMarks(al, row), ' ');
+            while (it.next()) |t| try tokens.append(al, t);
+        }
+        for (v.foot) |row| try std.testing.expect(screen_mod.visibleLen(row) <= width);
+        // Wrapping only moves words between lines: each word of the
+        // description and of every option is still there.
+        const row = for ((try q.desk(al, c.app.state(), 0)).inbox) |r| {
+            if (r.event_id == id) break r;
+        } else return error.TestUnexpectedResult;
+        var texts: std.ArrayListUnmanaged([]const u8) = .empty;
+        try texts.append(al, row.description);
+        try texts.appendSlice(al, row.options);
+        for (texts.items) |text| {
+            var words = std.mem.tokenizeScalar(u8, try q.stripMarks(al, text), ' ');
+            while (words.next()) |word| {
+                for (tokens.items) |t| {
+                    if (std.mem.eql(u8, t, word)) break;
+                } else {
+                    std.debug.print("{d}x{d}: \"{s}\" is missing from the decision\n", .{ size[0], size[1], word });
+                    return error.TestUnexpectedResult;
+                }
+            }
+        }
+        // Nothing was drawn over the right border.
+        const r = decisionRectForTest(c, v);
+        var y: u16 = r.y + 1;
+        while (y < r.y + r.h - 1) : (y += 1) try std.testing.expectEqual(@as(u21, '\u{2551}'), c.app.screen.get(r.x + r.w - 1, y).ch);
+    }
+}
+
+test "an overflowing decision option hangs under its number, one column per line" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const long = "Buy the crates, no paperwork" ++ q.option_gap ++ "{c}−60,000 C-bills{/}" ++ q.option_gap ++ "{d}the contact remembers your coin; the market trades openly{/}";
+    const row: q.InboxRow = .{ .event_id = @enumFromInt(3), .kind = "situation", .company = "Alpha", .deadline_day = 9, .days_left = 2, .description = "a short ask", .options = &.{ long, "Send them away" }, .default_choice = 0 };
+    const width = 40;
+    const rows = try App.decisionRows(al, row, width);
+    for (rows) |r| try std.testing.expect(screen_mod.visibleLen(r) <= width);
+    // Rows that fit are untouched.
+    for (rows) |r| {
+        if (std.mem.eql(u8, r, "  a short ask")) break;
+    } else return error.TestUnexpectedResult;
+    try std.testing.expectEqualStrings("    [2] Send them away", rows[rows.len - 1]);
+    const first = for (rows, 0..) |r, i| {
+        if (std.mem.startsWith(u8, r, "    [1] ")) break i;
+    } else return error.TestUnexpectedResult;
+    // Label, then costs, each starting its own line; every continuation
+    // hangs under the label, clear of the number column.
+    try std.testing.expectEqualStrings("    [1] Buy the crates, no paperwork", rows[first]);
+    try std.testing.expectEqualStrings("        {c}−60,000 C-bills{/}", rows[first + 1]);
+    const hang = rows[first + 1 .. rows.len - 1];
+    try std.testing.expect(hang.len >= 4); // costs, the wrapped remembers, default
+    for (hang) |r| try std.testing.expect(std.mem.startsWith(u8, r, "        ") and r[8] != ' ');
+    try std.testing.expectEqualStrings("        {d}default{/}", hang[hang.len - 1]);
+}
+
+/// Screen row `y` from column `x`, `w` cells wide, as UTF-8.
+fn screenRowForTest(c: *ClientForTest, al: std.mem.Allocator, x: u16, y: u16, w: u16) ![]const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    var buf: [4]u8 = undefined;
+    for (x..x + w) |col| try out.appendSlice(al, buf[0..try std.unicode.utf8Encode(c.app.screen.get(@intCast(col), y).ch, &buf)]);
+    return out.items;
+}
+
+test "a decision taller than its modal scrolls under a fixed hint, and its keys still answer it" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    const id = try game.campaign_scripts.salvageDecisionForTest(c.app.state());
+    try c.app.screen.resize(80, 24);
+    c.app.openModal(.{ .decision = id });
+    _ = c.app.frame.reset(.retain_capacity);
+    try c.app.draw();
+    const al = c.app.a();
+    const v = try c.app.listView(al);
+    const inner = decisionRectForTest(c, v).inner();
+    const body_h = inner.h - v.foot.len;
+    try std.testing.expect(v.rows.len > body_h);
+    const S = struct {
+        fn hintShown(cl: *ClientForTest, a: std.mem.Allocator, in: Rect) !bool {
+            return std.mem.indexOf(u8, try screenRowForTest(cl, a, in.x, in.y + in.h - 1, in.w), "decide later") != null;
+        }
+        fn bodyShows(cl: *ClientForTest, a: std.mem.Allocator, in: Rect, h: usize, needle: []const u8) !bool {
+            for (0..h) |i| if (std.mem.indexOf(u8, try screenRowForTest(cl, a, in.x, in.y + @as(u16, @intCast(i)), in.w), needle) != null) return true;
+            return false;
+        }
+    };
+    try std.testing.expect(try S.hintShown(c, al, inner));
+    // The detail's plan lines carry their own [n]; the option is matched by its label.
+    try std.testing.expect(!try S.bodyShows(c, al, inner, body_h, "[3] No wrecks"));
+    // j scrolls a row and keeps the decision open.
+    try pressForTest(c, .{ .char = 'j' });
+    try std.testing.expect(c.app.modal == .decision);
+    try std.testing.expectEqual(@as(usize, 1), c.app.modal_cursor);
+    try std.testing.expect(try S.hintShown(c, c.app.a(), inner));
+    // End reaches the last option; the hint is still drawn.
+    try pressForTest(c, .end);
+    try std.testing.expect(c.app.modal == .decision);
+    try std.testing.expectEqual(v.rows.len - body_h, c.app.modal_cursor);
+    try std.testing.expect(try S.bodyShows(c, c.app.a(), inner, body_h, "[3] No wrecks"));
+    try std.testing.expect(try S.hintShown(c, c.app.a(), inner));
+    // Esc decides later: the decision stays in the inbox.
+    try pressForTest(c, .escape);
+    try std.testing.expect(c.app.modal == .none);
+    const Pending = struct {
+        fn has(cl: *ClientForTest, ev: types.EventId) !bool {
+            for ((try q.desk(cl.app.a(), cl.app.state(), 0)).inbox) |row| if (row.event_id == ev) return true;
+            return false;
+        }
+    };
+    try std.testing.expect(try Pending.has(c, id));
+    // Scrolled or not, a digit answers this event with that option.
+    c.app.openModal(.{ .decision = id });
+    try pressForTest(c, .end);
+    try pressForTest(c, .{ .char = '3' });
+    try std.testing.expect(c.app.modal == .none);
+    try std.testing.expect(!try Pending.has(c, id));
 }

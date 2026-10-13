@@ -709,7 +709,12 @@ produced (`queries.logSpan`), oldest first, in front of the screen the stop
 is about — the tab where it is acted on, or the after-action, battle
 decision, battle screen or battle orders it waits on, which Enter or Esc
 then opens; an outfit that folds goes to the saved GAME OVER instead) ·
-**Decision** (options with effects, default marked) ·
+**Decision** (options with effects, default marked; a line too long for
+the modal wraps under its own indent, and an option's label, effects and
+what it leaves behind each start a line hung under its `[n]`; a decision
+taller than the modal scrolls with the list keys — `j/k ↑/↓`, `PgUp/PgDn`,
+`Home/End` — while the key hint stays in its foot; a digit chooses at any
+scroll, and Esc, Enter or any other key decides later) ·
 **Battle** (`queries.battlePhaseReport`: opens on an engagement that has
 come due or is being fought — from an advance that stops on it, the stop
 screen, the Desk's warning, or after an after-action is read. The head is
