@@ -380,7 +380,9 @@ commands, the bankruptcy committed; an outfit already bankrupt is refused
 with `Bankrupt`. An error anywhere in an advance (before, inside or
 between days) leaves the campaign exactly as it was before the command,
 restored from the campaign backup taken at its start (`campaign_backup`),
-so retrying the command reruns it from that campaign.
+so retrying the command reruns it from that campaign. The outcomes that
+change nothing — a turn hold, `Bankrupt`, a zero-day `Insolvent` and the
+zero-day decision stop — are answered before that backup is taken.
 
 Before an engagement's day there is no hold, only a **stop**. When a scheduled
 engagement comes within `tuning.battle.contact_warning_days`, a multi-day

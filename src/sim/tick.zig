@@ -845,25 +845,36 @@ fn holdError(gs: *GameState) ?Error {
 /// Advance `days` days, one turn each (the `advance_day` and `advance_days`
 /// commands). A turn hold or an outfit already bankrupt refuses with
 /// nothing changed, and so does an overdrawn outfit that a loan or a sale
-/// could still cover (`Insolvent`) before the first day. An outfit that
-/// folds before the first day succeeds with zero days and `.bankrupt`, its
-/// bankruptcy committed; after a day it stops with `.insolvent` or
-/// `.bankrupt` and the days run. Any error leaves the campaign exactly as
-/// before the command (`restoredOnError`).
+/// could still cover (`Insolvent`) before the first day; none of these
+/// takes a campaign backup. An outfit that folds before the first day
+/// succeeds with zero days and `.bankrupt`, its bankruptcy committed; after
+/// a day it stops with `.insolvent` or `.bankrupt` and the days run. Any
+/// error leaves the campaign exactly as before the command
+/// (`restoredOnError`).
 pub fn advance(gs: *GameState, days: u32) Error!Result {
+    if (turnRefusal(gs)) |e| return e;
+    if (days == 0) return .{};
+    if (try solvencyOf(gs) == .insolvent) return Error.Insolvent;
     return restoredOnError(gs, days, advanceDays);
 }
 
-/// Runs one advance command body after the refusals that change nothing: a
-/// turn hold (`read <id>`, `decide <id> <n>` and `battle <contract> …` clear
-/// them, and the client opens each) and an outfit already bankrupt. The body
-/// runs against a campaign backup taken first; if it fails, the backup is
-/// restored and the body's error returned, so a retry reruns the command
-/// from exactly the campaign it started from (rules 11 and 17). The backup
-/// is needed because no preparation can undo a day already committed.
-fn restoredOnError(gs: *GameState, limit: u32, comptime body: fn (*GameState, u32) Error!Result) Error!Result {
+/// The refusals of an outfit that cannot take a turn at all, which change
+/// nothing: a turn hold (`read <id>`, `decide <id> <n>` and
+/// `battle <contract> …` clear them, and the client opens each) and an
+/// outfit already bankrupt.
+fn turnRefusal(gs: *GameState) ?Error {
     if (holdError(gs)) |e| return e;
     if (gs.bankrupt) return Error.Bankrupt;
+    return null;
+}
+
+/// Runs one advance command body against a campaign backup taken first; if
+/// the body fails, the backup is restored and the body's error returned, so
+/// a retry reruns the command from exactly the campaign it started from
+/// (rules 11 and 17). The backup is needed because no preparation can undo
+/// a day already committed. Callers answer the outcomes that change nothing
+/// before calling, so those never depend on the backup's allocation.
+fn restoredOnError(gs: *GameState, limit: u32, comptime body: fn (*GameState, u32) Error!Result) Error!Result {
     var backup = try campaign_backup.take(gs);
     const result = body(gs, limit) catch |err| {
         campaign_backup.restore(gs, backup);
@@ -921,11 +932,19 @@ pub const Solvency = enum { solvent, insolvent, bankrupt };
 /// Both commands report a fold as a typed `.bankrupt` stop, with zero days
 /// when it comes before the first.
 pub fn settleSolvency(gs: *GameState) !Solvency {
-    if (gs.funds + treasury.inboundToOutfit(gs) >= 0) return .solvent;
-    if (!try treasury.isInsolvent(gs.scratch(), gs)) return .insolvent;
+    const solvency = try solvencyOf(gs);
+    if (solvency != .bankrupt) return solvency;
     const log_entry = try gs.prepareLog(.finance, .{}, "[bankrupt] the outfit cannot cover {d}: creditors seize what is left", .{gs.funds});
     gs.bankrupt = true;
     gs.commitLog(log_entry);
+    return .bankrupt;
+}
+
+/// The money check `settleSolvency` acts on, with nothing committed:
+/// `.bankrupt` means the outfit would fold.
+fn solvencyOf(gs: *GameState) !Solvency {
+    if (gs.funds + treasury.inboundToOutfit(gs) >= 0) return .solvent;
+    if (!try treasury.isInsolvent(gs.scratch(), gs)) return .insolvent;
     return .bankrupt;
 }
 
@@ -940,11 +959,19 @@ fn stoppedFor(reason: @import("checklist.zig").StopReason) @FieldType(Result, "s
 /// `cap` days have run (0 = `tuning.battle.auto_advance_cap_days`), and
 /// report exactly that stop. A turn hold, an outfit already bankrupt and a
 /// zero-day insolvency refuse with nothing changed; a decision that defaults
-/// tomorrow stops with zero days; an outfit that folds before the first day
-/// succeeds with zero days and `.bankrupt`, its bankruptcy committed.
-/// Any error leaves the campaign exactly as before the command
-/// (`restoredOnError`).
+/// tomorrow stops with zero days; none of these takes a campaign backup. An
+/// outfit that folds before the first day succeeds with zero days and
+/// `.bankrupt`, its bankruptcy committed. Any error leaves the campaign
+/// exactly as before the command (`restoredOnError`).
 pub fn advanceUntilStop(gs: *GameState, cap: u32) Error!Result {
+    if (turnRefusal(gs)) |e| return e;
+    switch (try solvencyOf(gs)) {
+        .insolvent => return Error.Insolvent,
+        // A fold outranks the zero-day stop and commits, so it runs under
+        // the backup.
+        .bankrupt => {},
+        .solvent => if (@import("checklist.zig").advanceStop(gs, null)) |stop| return .{ .stopped = stoppedFor(stop.reason) },
+    }
     return restoredOnError(gs, cap, advanceToStop);
 }
 
@@ -1626,12 +1653,17 @@ test "a 90-day advance with an open decision stops the day before its deadline; 
     try std.testing.expect(defaulted);
 }
 
-test "advance_until_stop: a refusal before the first day leaves the complete digest unchanged" {
+test "an advance that ends before its first day changes nothing and takes no campaign backup" {
+    // Every allocation fails, so a campaign backup (which always allocates)
+    // would turn each of these outcomes into OutOfMemory.
     const digest = @import("digest.zig");
     const Case = enum { unread_report, already_bankrupt, insolvent, decision_tomorrow };
-    for (std.enums.values(Case)) |case| {
-        var gs = GameState.init(std.testing.allocator, .{ .seed = 906 });
-        defer gs.deinit();
+    for (std.enums.values(Case)) |case| for ([_]Command{ .advance_day, .{ .advance_until_stop = 10 } }) |command| {
+        // A decision due tomorrow stops only `advance_until_stop`.
+        if (case == .decision_tomorrow and command == .advance_day) continue;
+        var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer outer.deinit();
+        var gs = GameState.init(outer.allocator(), .{ .seed = 906 });
         _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .paymaster);
         switch (case) {
             .unread_report => try gs.battle_reports.record(gs.allocator(), .{ .id = @enumFromInt(1), .day = 0, .contract = .none, .company = .none, .kind = "objective_raid", .enemy_key = "DC", .scenario = "breakthrough", .terrain = "grasslands", .weather = "clear", .outcome = .victory }),
@@ -1641,7 +1673,12 @@ test "advance_until_stop: a refusal before the first day leaves the complete dig
             .decision_tomorrow => try gs.event_queue.push(gs.allocator(), .{ .day = 0, .kind = .off_contract_request, .options = &.{.{ .label = "ok", .effects = &.{} }}, .deadline_day = 1 }),
         }
         const before = digest.stateHash(&gs);
-        const result = advanceUntilStop(&gs, 10);
+        var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = 0, .resize_fail_index = 0 });
+        gs.arena.state.used_list = null;
+        gs.arena.state.free_list = null;
+        gs.arena.child_allocator = failing.allocator();
+        const result = commands.execute(&gs, command);
+        gs.arena.child_allocator = outer.allocator();
         switch (case) {
             .unread_report => try std.testing.expectError(Error.ReportUnread, result),
             .already_bankrupt => try std.testing.expectError(Error.Bankrupt, result),
@@ -1653,7 +1690,7 @@ test "advance_until_stop: a refusal before the first day leaves the complete dig
             },
         }
         try std.testing.expectEqual(before, digest.stateHash(&gs));
-    }
+    };
 }
 
 test "an outfit that folds before the first day succeeds with only the bankruptcy committed, for both advance commands" {
