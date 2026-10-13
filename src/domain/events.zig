@@ -67,6 +67,9 @@ pub const EventKind = enum {
     /// The night after a fight, and the hours and armour will not stretch
     /// over all the damage: whose hull the techs take first.
     field_repair,
+    /// An actor-owned situation on an arc contract (ARCHITECTURE.md §8
+    /// "Situations"); the event's `situation` names its row.
+    situation,
 
     /// Does this decision hold the turn (ARCH §6)? The test is what the
     /// decision disposes of, not how big it feels: a battle decision
@@ -166,6 +169,10 @@ pub const Event = struct {
     /// Battle decisions: the engagement this is about, so the
     /// answer can be applied against that fight's record.
     battle: types.BattleId = .none,
+    /// Situations: the key of the `situations.zon` row ("" otherwise).
+    situation: []const u8 = "",
+    /// Situations: the contract's actor who owns it.
+    actor: types.ActorId = .none,
     /// Empty = auto event (applied at roll time, never queued).
     options: []const Option = &.{},
     /// Applied automatically at the deadline if the player never answers.
@@ -207,6 +214,16 @@ pub const EventQueue = struct {
         stamped.id = @enumFromInt(self.next_id);
         self.next_id += 1;
         try self.pending.append(alloc, stamped);
+    }
+
+    /// `push` into room the caller reserved in `pending`: cannot fail.
+    /// Returns the id it stamped.
+    pub fn pushAssumeCapacity(self: *EventQueue, ev: Event) types.EventId {
+        var stamped = ev;
+        stamped.id = @enumFromInt(self.next_id);
+        self.next_id += 1;
+        self.pending.appendAssumeCapacity(stamped);
+        return stamped.id;
     }
 
     /// The pending event with this id, or null once it has been answered
@@ -257,6 +274,32 @@ pub const EventQueue = struct {
         return n;
     }
 };
+
+/// The closed subset of effects that `contract_events.prepareCosts` applies
+/// with a prepare/commit pair, and so the only effects a situation's
+/// option may name as its costs (ARCHITECTURE.md §8 "Situations").
+pub fn isCost(e: Effect) bool {
+    return switch (e) {
+        .cash, .supply_loss, .fatigue, .morale, .employer_standing, .score, .escalation => true,
+        else => false,
+    };
+}
+
+/// A cost that takes something from the company: money, supplies, rest,
+/// spirit, standing, score, or time before the arc breaks. An option with
+/// none of these is free.
+pub fn isBurden(e: Effect) bool {
+    return switch (e) {
+        .cash => |c| c < 0,
+        .supply_loss => |c| c > 0,
+        .fatigue => |f| f > 0,
+        .morale => |m| m < 0,
+        .employer_standing => |d| d < 0,
+        .score => |s| s < 0,
+        .escalation => |d| d > 0,
+        else => false,
+    };
+}
 
 /// One effect as a plain phrase (no markup, no colour) — the single owner
 /// for per-effect wording (rules 24, 28). Both `queries.effectsText` and

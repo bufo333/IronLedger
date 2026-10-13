@@ -491,6 +491,7 @@ test "data: every data-file string can go into screen markup as it is" {
         @import("../domain/opfor.zig").table,      @import("../domain/skulls.zig").table,
         @import("../domain/difficulty.zig").table, @import("../domain/meklab.zig").tables,
         @import("../domain/tuning.zig").t,         @import("../gen/person_gen.zig").names,
+        @import("../domain/situation.zig").table,
     };
     inline for (catalogues) |c| {
         if (unsafeString(c)) |bad| {

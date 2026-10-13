@@ -52,7 +52,7 @@ A package has one primary invariant or subsystem outcome.
 - [x] P5b.2 the battle you can touch (ROADMAP P5b): the existing interventions
   (reserve commit, air cover, command capacity); AAR and operation record name
   each intervention; fixed-seed and refusal tests.
-- [ ] P5c situations slice (ROADMAP P5c.1–P5c.4): actor-owned situations with
+- [x] P5c situations slice (ROADMAP P5c.1–P5c.4): actor-owned situations with
   typed flags on relationship and world state; three situations on the garrison
   arc with one callback inside the contract; the matching event deck retired.
 - [ ] Playtest gate: John plays the P5a–P5c slice on one garrison contract before

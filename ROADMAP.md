@@ -1998,6 +1998,19 @@ actors (P4i), so a choice is remembered.
 different situations, prices and a different finale, and the player can read
 why.
 
+**Delivered in the P5c slice:** P5c.1 with the slice's content — three
+situations on the Fracturing Garrison arc (garrison and security duty), owned
+by the black-market contact (the crates; the contact's return) and the militia
+commander (the drill), each option naming its cost from a closed subset and
+none free; P5c.2's consumers later situations, local pricing and the finale,
+through typed actor and world flags and their owners (a trained militia opens
+*Garrison Holds — the Town Stands With It*); P5c.3 within the contract only —
+the contact returns because you bought their crates, and the inbox and log say
+so; P5c.4, with the monthly deck retired on arcs that have situations. The
+acceptance runs as a fixed-seed test. What remains, owned by "P5c content
+expansion" in `TODO.md`: intelligence quality and recruitment as flag readers,
+callbacks across contracts, content for the other arcs, and the weekly deck.
+
 ### P5d — Rivals and pressure
 
 P5d owns the NPC merc-company work previously listed in `TODO.md` under its

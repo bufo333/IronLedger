@@ -569,4 +569,10 @@
     },
     // Commander bonus. // TUNE
     .commander = .{ .bonus_bp = 200 },
+    // Situation flags on a world and the local supplies valve (ARCH §9.6).
+    // Invented placeholder values; the playtest gate sets them.
+    .situations = .{
+        .black_market_price_bp = 8_500, // TUNE: crates off the books, 15% under the valve
+        .informant_price_bp = 11_000, // TUNE: the market shut, 10% dearer
+    },
 }

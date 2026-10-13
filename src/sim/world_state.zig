@@ -4,6 +4,8 @@
 //! Rule 5 / queries leaf: this module does NOT import queries.zig.
 
 const std = @import("std");
+const types = @import("../domain/types.zig");
+const tuning = @import("../domain/tuning.zig").t;
 const world_state_dom = @import("../domain/world_state.zig");
 const operation_mod = @import("../domain/operation.zig");
 const arc_mod = @import("../domain/arc.zig");
@@ -17,14 +19,30 @@ fn clampWorld(v: i32) i16 {
     return @intCast(@min(@as(i32, world_state_dom.world_max), @max(@as(i32, world_state_dom.world_min), v)));
 }
 
-/// Delta to all five world-state dimensions from a named cause.
-pub const WorldDelta = struct {
-    security: i16 = 0,
-    civilian_support: i16 = 0,
-    infrastructure_strain: i16 = 0,
-    employer_control: i16 = 0,
-    enemy_influence: i16 = 0,
-};
+pub const WorldDelta = world_state_dom.WorldDelta;
+
+/// Rule owner: the world's flags after the company's answer sets `set`
+/// (ARCHITECTURE.md §8 "Situations"). `black_market_open` and
+/// `black_market_closed` exclude each other, the later answer winning.
+/// Pure; the caller stores the result in its commit phase.
+pub fn setFlags(current: world_state_dom.WorldFlags, set: world_state_dom.WorldFlags) world_state_dom.WorldFlags {
+    var out = current;
+    if (set.contains(.black_market_open)) out.remove(.black_market_closed);
+    if (set.contains(.black_market_closed)) out.remove(.black_market_open);
+    out.setUnion(set);
+    return out;
+}
+
+/// Rule owner: the local supplies valve's price adjustment, in basis
+/// points, for a world with these flags (ARCHITECTURE.md §9.6): an open
+/// black market undercuts the valve, a closed one leaves it dearer, and
+/// otherwise the valve's price stands (`types.full_bp`).
+pub fn localPriceAdjustBp(flags: world_state_dom.WorldFlags) types.Bp {
+    const t = tuning.situations;
+    if (flags.contains(.black_market_open)) return t.black_market_price_bp;
+    if (flags.contains(.black_market_closed)) return t.informant_price_bp;
+    return types.full_bp;
+}
 
 /// Named outcome→world-delta owner for operation resolution (P4h.4, rule 20).
 /// All values // TUNE.
@@ -195,6 +213,37 @@ test "prepareWorldAdjust + commitWorldAdjust: new key initialises from zero" {
     try std.testing.expectEqual(@as(i16, 0), ws.infrastructure_strain);
     try std.testing.expectEqual(@as(i16, 0), ws.enemy_influence);
     try std.testing.expectEqualStrings("first_op", ws.last_cause);
+}
+
+test "setFlags: an open and a closed black market exclude each other; the militia stays trained" {
+    const F = world_state_dom.WorldFlags;
+    var open: F = .{};
+    open.insert(.black_market_open);
+    var closed: F = .{};
+    closed.insert(.black_market_closed);
+    var trained: F = .{};
+    trained.insert(.militia_trained);
+    var flags = setFlags(.{}, open);
+    flags = setFlags(flags, trained);
+    try std.testing.expect(flags.contains(.black_market_open) and flags.contains(.militia_trained));
+    flags = setFlags(flags, closed);
+    try std.testing.expect(flags.contains(.black_market_closed) and !flags.contains(.black_market_open) and flags.contains(.militia_trained));
+    flags = setFlags(flags, open);
+    try std.testing.expect(flags.contains(.black_market_open) and !flags.contains(.black_market_closed));
+}
+
+test "localPriceAdjustBp: an open market undercuts the valve, a closed one dearer, otherwise unchanged" {
+    var open: world_state_dom.WorldFlags = .{};
+    open.insert(.black_market_open);
+    var closed: world_state_dom.WorldFlags = .{};
+    closed.insert(.black_market_closed);
+    var trained: world_state_dom.WorldFlags = .{};
+    trained.insert(.militia_trained);
+    try std.testing.expectEqual(tuning.situations.black_market_price_bp, localPriceAdjustBp(open));
+    try std.testing.expectEqual(tuning.situations.informant_price_bp, localPriceAdjustBp(closed));
+    try std.testing.expectEqual(types.full_bp, localPriceAdjustBp(trained));
+    try std.testing.expectEqual(types.full_bp, localPriceAdjustBp(.{}));
+    try std.testing.expect(tuning.situations.black_market_price_bp < types.full_bp and tuning.situations.informant_price_bp > types.full_bp);
 }
 
 test "prepareWorldAdjust: empty planet_key is a no-op" {

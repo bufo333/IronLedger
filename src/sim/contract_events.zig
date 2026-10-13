@@ -10,7 +10,10 @@ const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const events = @import("../domain/events.zig");
 const contract_mod = @import("../domain/contract.zig");
+const situation_mod = @import("../domain/situation.zig");
 const GameState = @import("state.zig").GameState;
+const LogEntry = @import("state.zig").LogEntry;
+const situations = @import("situations.zig");
 const founding = @import("founding.zig");
 const lift = @import("lift.zig");
 const unit_mod = @import("../domain/unit.zig");
@@ -298,7 +301,7 @@ fn queueDecision(gs: *GameState, deck: Entry, c: *contract_mod.Contract, roll: u
 
 /// " — fatigue +3, rep −1" for an automatic event's log line.
 /// Per-effect phrase text comes from `events.effectPhrase` (the single owner).
-fn effectsPlain(gs: *GameState, effects: []const events.Effect) ![]const u8 {
+pub fn effectsPlain(gs: *GameState, effects: []const events.Effect) ![]const u8 {
     if (effects.len == 0) return "";
     var out: std.ArrayListUnmanaged(u8) = .empty;
     try out.appendSlice(gs.allocator(), " — ");
@@ -383,17 +386,24 @@ test "data: weekly deck: every non-quiet kind resolves through entryForKind" {
 
 // ----------------------------------------------------------------- engine
 
-/// Monthly roll for every active contract (called on the 1st).
+/// Monthly roll for every active contract (called on the 1st). A contract
+/// whose arc has situations raises its next situation instead, drawing no
+/// dice (`situations.queueDue`); every other contract rolls its deck.
 pub fn rollMonthly(gs: *GameState) !void {
     var it = gs.contracts.iterator();
     while (it.next()) |entry| {
         const c = entry.value_ptr;
         if (c.status != .active) continue;
+        const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
+
+        if (situation_mod.arcHasSituations(c.arc_key)) {
+            if (!try situations.queueDue(gs, c)) try gs.log(.contract, ctx, "[situation] a quiet month on station", .{});
+            continue;
+        }
 
         const roll = gs.rng.roll2d6(.events);
         const deck = if (c.kind.isGarrisonClass()) garrisonDeck(roll) else combatDeck(roll);
 
-        const ctx: @import("state.zig").LogCtx = .{ .company = c.assigned_company, .contract = c.id };
         if (deck.options.len == 0) {
             try applyEffects(gs, deck.auto_effects, c);
             try gs.log(.contract, ctx, "[{s}] (2d6 = {d}) {s}{s}", .{ c.kind.label(), roll, deck.log, try effectsPlain(gs, deck.auto_effects) });
@@ -408,6 +418,7 @@ pub fn resolveChoice(gs: *GameState, event_id: types.EventId, choice: usize) !vo
     const ev = (gs.event_queue.find(event_id) orelse return error.NoSuchDecision).*;
     if (!ev.needsDecision()) return error.NotADecision;
     if (choice >= ev.options.len) return error.NoSuchChoice;
+    if (ev.kind == .situation) return situations.resolve(gs, event_id, choice, .answered);
 
     if (ev.contract != .none) try gs.event_memory.ensureUnusedCapacity(gs.allocator(), 1);
     // Answered while its effects run, so nothing they reach answers it
@@ -436,7 +447,10 @@ pub fn expireDue(gs: *GameState) !void {
     while (i < gs.event_queue.pending.items.len) {
         // A copy: the effects can reshape the queue under it.
         const ev = gs.event_queue.pending.items[i];
-        if (ev.defaultsBy(gs.clock.day_index)) {
+        if (ev.defaultsBy(gs.clock.day_index) and ev.kind == .situation) {
+            try situations.resolve(gs, ev.id, ev.default_choice, .defaulted);
+            i = 0;
+        } else if (ev.defaultsBy(gs.clock.day_index)) {
             const opt = ev.options[ev.default_choice];
             const c = if (ev.contract != .none) gs.contracts.getPtr(ev.contract) else null;
             try applyEffectsFor(gs, opt.effects, c, .{ .person = ev.person, .battle = ev.battle });
@@ -449,6 +463,114 @@ pub fn expireDue(gs: *GameState) !void {
             i += 1;
         }
     }
+}
+
+// ------------------------------------------------------------------ costs
+
+/// The most effects one `prepareCosts` call takes: a situation option's
+/// limit (a deck applies its costs one effect at a time).
+pub const max_costs = situation_mod.max_costs;
+
+/// The closed cost subset (`events.isCost`) of an answer, prepared: every
+/// fallible step done, so `commitCosts` cannot fail. Valid until the
+/// campaign next changes.
+pub const PreparedCosts = struct {
+    effects: []const events.Effect,
+    contract: ?*contract_mod.Contract,
+    company: types.ForceId,
+    postings: [max_costs]GameState.PreparedTreasuryPosting = undefined,
+    standings: [max_costs]GameState.PreparedStandingAdjustment = undefined,
+    standing_logs: [max_costs]LogEntry = undefined,
+};
+
+/// The log lines `commitCosts` writes for these effects: one per move in
+/// employer standing on a contract.
+pub fn costLogLines(effects: []const events.Effect, contract: ?*const contract_mod.Contract) usize {
+    if (contract == null) return 0;
+    var n: usize = 0;
+    for (effects) |e| n += @intFromBool(e == .employer_standing);
+    return n;
+}
+
+/// Rule owner of the closed cost subset's application (rules 3, 11–14;
+/// ARCHITECTURE.md §8): prepare `effects` against `contract` (null for an
+/// outfit-level event) and `company`, whose operating fund pays when it is
+/// set. Money is posted to the ledger (`event` or `supplies`), standing
+/// moves the employer's clamped value and logs `[standing]`, score banks
+/// victory points as it moves, morale and fatigue reach every active
+/// person in the company, escalation moves the arc clock (never below 0).
+/// Reserves every ledger, standing-map and log slot and formats every line;
+/// changes nothing. Every effect must be in the subset.
+pub fn prepareCosts(gs: *GameState, effects: []const events.Effect, contract: ?*contract_mod.Contract, company: types.ForceId) !PreparedCosts {
+    std.debug.assert(effects.len <= max_costs);
+    var p: PreparedCosts = .{ .effects = effects, .contract = contract, .company = company };
+    const contract_id: types.ContractId = if (contract) |c| c.id else .none;
+    const account: @import("state.zig").Treasury = if (company != .none) .{ .company = company } else .outfit;
+    var postings: usize = 0;
+    for (effects) |e| {
+        std.debug.assert(events.isCost(e));
+        postings += @intFromBool(e == .cash or e == .supply_loss);
+    }
+    try gs.reserveLedger(postings);
+    try gs.reserveLog(costLogLines(effects, contract));
+    var n_post: usize = 0;
+    var n_standing: usize = 0;
+    var standing_now: i32 = 0;
+    for (effects) |effect| switch (effect) {
+        .cash => |amount| {
+            p.postings[n_post] = try gs.prepareTreasuryPosting(account, .{ .day = gs.clock.day_index, .amount = amount, .category = .event, .company = company, .contract = contract_id, .note = "contract event" });
+            n_post += 1;
+        },
+        .supply_loss => |amount| {
+            p.postings[n_post] = try gs.prepareTreasuryPosting(account, .{ .day = gs.clock.day_index, .amount = -amount, .category = .supplies, .company = company, .contract = contract_id, .note = "event: supply losses" });
+            n_post += 1;
+        },
+        .employer_standing => |delta| if (contract) |c| {
+            // Each move clamps from the one before it; only the first can
+            // create the employer's entry.
+            p.standings[n_standing] = if (n_standing == 0)
+                try gs.prepareStandingAdjustment(c.employer_key, delta)
+            else
+                .{ .faction = c.employer_key, .value = GameState.adjustedStandingValue(standing_now, delta), .key = null };
+            standing_now = p.standings[n_standing].value;
+            p.standing_logs[n_standing] = try gs.prepareLog(.contract, .{ .company = company, .contract = contract_id }, "[standing] {s} {s}{d} → {d}", .{ c.employer_key, if (delta < 0) "−" else "+", @abs(delta), standing_now });
+            n_standing += 1;
+        },
+        .score, .morale, .fatigue, .escalation => {},
+        else => unreachable,
+    };
+    return p;
+}
+
+/// Apply prepared costs, in their order. Cannot fail.
+pub fn commitCosts(gs: *GameState, p: *const PreparedCosts) void {
+    var n_post: usize = 0;
+    var n_standing: usize = 0;
+    for (p.effects) |effect| switch (effect) {
+        .cash, .supply_loss => {
+            gs.commitTreasuryPosting(p.postings[n_post]);
+            n_post += 1;
+        },
+        .employer_standing => if (p.contract != null) {
+            gs.commitStandingAdjustment(p.standings[n_standing]);
+            gs.commitLog(p.standing_logs[n_standing]);
+            n_standing += 1;
+        },
+        .score => |delta| if (p.contract) |c| {
+            c.score += delta;
+            c.victory_points += delta * tuning.contract.vp_per_score; // VP when earned, never again at term end
+        },
+        .morale => |delta| applyToCompany(gs, p.company, .morale, delta),
+        .fatigue => |amount| applyToCompany(gs, p.company, .fatigue, @intCast(amount)),
+        .escalation => |delta| if (p.contract) |c| {
+            if (delta < 0) {
+                c.escalation_clock -|= @intCast(@abs(delta));
+            } else {
+                c.escalation_clock +|= @intCast(delta);
+            }
+        },
+        else => unreachable,
+    };
 }
 
 /// What an effect acts on besides the contract: the person a personnel
@@ -472,14 +594,11 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
     const account: @import("state.zig").Treasury = if (company != .none) .{ .company = company } else .outfit;
     for (effects) |effect| {
         switch (effect) {
-            .cash => |amount| try gs.postTreasury(account, .{
-                .day = gs.clock.day_index,
-                .amount = amount,
-                .category = .event,
-                .company = company,
-                .contract = contract_id,
-                .note = "contract event",
-            }),
+            // The closed cost subset has one applier (rule 3).
+            .cash, .supply_loss, .score, .morale, .fatigue, .employer_standing, .escalation => {
+                const prepared = try prepareCosts(gs, &[_]events.Effect{effect}, contract, company);
+                commitCosts(gs, &prepared);
+            },
             .cash_monthly_pct => |pct| if (contract) |c| {
                 try gs.postTreasury(account, .{
                     .day = gs.clock.day_index,
@@ -490,21 +609,7 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
                     .note = "contract event",
                 });
             },
-            .supply_loss => |amount| try gs.postTreasury(account, .{
-                .day = gs.clock.day_index,
-                .amount = -amount,
-                .category = .supplies,
-                .company = company,
-                .contract = contract_id,
-                .note = "event: supply losses",
-            }),
             .reputation => |delta| gs.reputation += delta,
-            .score => |delta| if (contract) |c| {
-                c.score += delta;
-                c.victory_points += delta * @import("../domain/tuning.zig").t.contract.vp_per_score; // VP when earned, never again at term end
-            },
-            .morale => |delta| applyToCompany(gs, company, .morale, delta),
-            .fatigue => |amount| applyToCompany(gs, company, .fatigue, @intCast(amount)),
             .xp_all => |amount| applyToCompany(gs, company, .xp, @intCast(amount)),
             .parts_windfall => |n| {
                 // Weapons stay with the company (field techs can fit them);
@@ -519,10 +624,6 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
             },
             .damage_random_units => |n| damageRandomUnits(gs, company, n, .line),
             .damage_convoy_units => |n| damageRandomUnits(gs, company, n, .support),
-            .employer_standing => |delta| if (contract) |c| {
-                const now = try gs.adjustStanding(c.employer_key, delta);
-                try gs.log(.contract, .{ .company = company, .contract = contract_id }, "[standing] {s} {s}{d} → {d}", .{ c.employer_key, if (delta < 0) "−" else "+", @abs(delta), now });
-            },
             .raise_pct => |pct| if (gs.person(person_id)) |p| {
                 const was = p.monthlySalary();
                 p.salary_override = types.applyBp(was, 10_000 + @as(types.Bp, pct) * 100);
@@ -652,13 +753,6 @@ fn applyEffectsFor(gs: *GameState, effects: []const events.Effect, contract: ?*c
             // here from the live stores, by the function the inbox row
             // called — so what was offered is what the techs do.
             .field_repair => |order| try fieldRepairNight(gs, company, contract_id, order),
-            .escalation => |delta| if (contract) |c| {
-                if (delta < 0) {
-                    c.escalation_clock -|= @intCast(@abs(delta));
-                } else {
-                    c.escalation_clock +|= @intCast(delta);
-                }
-            },
             .delay_arrival => |days| if (contract) |c| {
                 if (c.status == .transit) {
                     if (c.arrive_day) |d| c.arrive_day = d + days;
@@ -1156,6 +1250,78 @@ test "the black market and a salvage dispute move standing and field stock" {
     // Both kinds are in a deck the rollers reach.
     try std.testing.expect(combatDeck(8).kind == .salvage_dispute);
     try std.testing.expect(weeklyDeck(false, 9).kind == .black_market_contact);
+}
+
+/// A campaign with the starter company on an active raid contract, and
+/// `standing` with its employer (a fixture for the cost owner's tests).
+fn costFixtureForTest(gs: *GameState, standing: i32) !*contract_mod.Contract {
+    _ = try founding.createCommander(gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(gs, "Alpha");
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
+        .id = @enumFromInt(1),
+        .kind = .objective_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 400_000 },
+        .status = .active,
+        .assigned_company = co,
+        .escalation_clock = 6,
+    });
+    if (standing != 0) _ = try gs.adjustStanding("LC", standing);
+    return gs.contracts.getPtr(@enumFromInt(1)).?;
+}
+
+test "the cost owner applies each cost in the subset as the deck's effects always did" {
+    const digest = @import("digest.zig");
+    const costs = [_]events.Effect{ .{ .cash = -30_000 }, .{ .supply_loss = 12_000 }, .{ .score = -2 }, .{ .morale = -3 }, .{ .fatigue = 4 }, .{ .employer_standing = -2 }, .{ .escalation = -9 }, .{ .escalation = 5 } };
+    for (costs) |cost| {
+        var deck = GameState.init(std.testing.allocator, .{ .seed = 6101 });
+        defer deck.deinit();
+        var owner = GameState.init(std.testing.allocator, .{ .seed = 6101 });
+        defer owner.deinit();
+        const dc = try costFixtureForTest(&deck, 0);
+        const oc = try costFixtureForTest(&owner, 0);
+        try applyEffects(&deck, &.{cost}, dc);
+        const prepared = try prepareCosts(&owner, &.{cost}, oc, oc.assigned_company);
+        commitCosts(&owner, &prepared);
+        try std.testing.expectEqual(digest.stateHash(&deck), digest.stateHash(&owner));
+    }
+    // Each lands where the rule says.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6102 });
+    defer gs.deinit();
+    const c = try costFixtureForTest(&gs, 0);
+    const co = c.assigned_company;
+    const funds = gs.force(co).?.local_funds;
+    const vp = c.victory_points;
+    const prepared = try prepareCosts(&gs, &.{ .{ .cash = -30_000 }, .{ .supply_loss = 12_000 }, .{ .score = -2 }, .{ .escalation = -9 } }, c, co);
+    commitCosts(&gs, &prepared);
+    try std.testing.expectEqual(funds - 42_000, gs.force(co).?.local_funds);
+    try std.testing.expectEqual(@as(i32, -2), c.score);
+    try std.testing.expectEqual(vp - 2 * tuning.contract.vp_per_score, c.victory_points);
+    try std.testing.expectEqual(@as(u16, 0), c.escalation_clock); // relief never below 0
+    const ledger = gs.ledger.transactions.items;
+    try std.testing.expectEqual(finance_mod_for_test.Category.event, ledger[ledger.len - 2].category);
+    try std.testing.expectEqual(finance_mod_for_test.Category.supplies, ledger[ledger.len - 1].category);
+}
+
+const finance_mod_for_test = @import("../econ/finance.zig");
+
+test "standing moves in one batch clamp one after another, each logged" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6103 });
+    defer gs.deinit();
+    const c = try costFixtureForTest(&gs, 99);
+    const logs = gs.event_log.items.len;
+    const before = @import("digest.zig").stateHash(&gs);
+    const prepared = try prepareCosts(&gs, &.{ .{ .employer_standing = 5 }, .{ .employer_standing = -5 } }, c, c.assigned_company);
+    // Preparing changes nothing.
+    try std.testing.expectEqual(before, @import("digest.zig").stateHash(&gs));
+    commitCosts(&gs, &prepared);
+    // +5 clamps at 100, then −5: 95, not the 99 a summed delta would leave.
+    try std.testing.expectEqual(@as(i32, 95), gs.standing("LC"));
+    try std.testing.expectEqual(logs + 2, gs.event_log.items.len);
+    try std.testing.expect(std.mem.endsWith(u8, gs.event_log.items[logs].text, "[standing] LC +5 → 100"));
+    try std.testing.expect(std.mem.endsWith(u8, gs.event_log.items[logs + 1].text, "[standing] LC −5 → 95"));
 }
 
 test "automatic events never move money, stock or hulls — those are decisions" {

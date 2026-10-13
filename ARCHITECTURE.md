@@ -264,9 +264,12 @@ cheap, copyable, and impossible to mix up.
   officer arcs map, world-state map.
 - **Actor** — a contract-introduced NPC (liaison, official, enemy commander,
   etc.) that persists across contracts. Each actor carries four relationship
-  dimensions (trust, debt, respect, hostility; −100…100). Actors are keyed by
+  dimensions (trust, debt, respect, hostility; −100…100) and typed **flags**
+  (`ActorFlag`: did business, informed on, drilled together, cut ties) that
+  remember the company's answers to its situations. Actors are keyed by
   `ActorId`; the same faction/archetype pair recurring in a later contract
-  surfaces the prior relationship. Owned by `sim/actors.zig` (P4i).
+  surfaces the prior relationship and flags. Owned by `sim/actors.zig`
+  (P4i); `actors.setFlags` decides which flags exclude each other.
 - **Rival** — a persistent opposing or allied mercenary company introduced by a
   contract arc. Each rival carries a single standing dimension (−100…100) that
   shifts on operation outcomes and the finale. Rivals are keyed by `RivalId`.
@@ -282,11 +285,22 @@ cheap, copyable, and impossible to mix up.
   `sim/officers.zig`. Officers never alter loyalty, rank, retention, or any
   other `Person` field; those remain owned by the personnel system (P4i).
 - **WorldState** — five bounded numeric dimensions (security, civilian support,
-  infrastructure strain, employer control, enemy influence; −100…100) keyed by
-  `planet_key` in `GameState.world_states`. Changed only by
-  `operation_control.resolveDueOperations` and `operation_control.resolveFinale`
-  via `sim/world_state.zig` delta owners. Surfaced read-only on the Map and
-  Contracts screens (P4h.4).
+  infrastructure strain, employer control, enemy influence; −100…100) and
+  typed **flags** (`WorldFlag`: black market open, black market closed,
+  militia trained) keyed by `planet_key` in `GameState.world_states`. Changed
+  only by `operation_control.resolveDueOperations`,
+  `operation_control.resolveFinale` and `situations.resolve` via
+  `sim/world_state.zig` owners (`world_state.setFlags` decides which flags
+  exclude each other). The flags stay on the planet across contracts; local
+  pricing (§9.6) and the arc finale read them. Surfaced read-only on the Map
+  and Contracts screens (P4h.4).
+- **Situation** — a `data/tables/situations.zon` row: an actor-owned decision
+  on an arc contract (owner archetype, arc, earliest beat, optional actor-flag
+  requirement for a callback, 2–3 options each naming its costs, deltas and
+  the flags it leaves). Each contract keeps a `SituationRecord` (key, day,
+  owning actor, answer) for every situation it raised; a pending one rides the
+  decision inbox as an `Event` of kind `situation` naming its row and actor
+  (§8 "Situations").
 
 Contract types (matching MekHQ/AtB): **Garrison Duty, Cadre Duty, Security
 Duty, Riot Duty, Planetary Assault, Relief Duty, Guerrilla Warfare, Pirate
@@ -418,7 +432,9 @@ part of the spec:
    failures degrade quality/parts, MekHQ-style.
 6. **Training** — unassigned-to-combat lances train; XP trickle, cadre duties.
 7. **Contract events** — per active contract, roll on the event table for its
-   type (see §8); scenario generation for combat-class contracts.
+   type (see §8); scenario generation for combat-class contracts. On the 1st,
+   a contract whose arc has situations raises its next due situation in place
+   of the monthly roll, drawing no dice (§8 "Situations").
 8. **Battle resolution** — engagements are scheduled; one whose day has come
    does not resolve here, it **comes due** and holds the turn. The
    commander fights it after the day's tick and before the next turn, so
@@ -689,6 +705,48 @@ rather than by picking an option, never defaults, and holds the turn
 until its calls are made (§6, §7): it disposes of hulls and people, not
 of the contract bonus.
 
+### Situations
+
+On a contract whose arc has rows in `data/tables/situations.zon` (today the
+Fracturing Garrison arc of garrison and security duty), the monthly deck
+retires: on the 1st, `situations.queueDue` raises the next due situation
+instead, or logs a quiet month. The weekly deck, the combat deck and every
+contract without such an arc are unchanged.
+
+- **Selection.** `situations.nextDue` is the one owner: the first row, in
+  table order, of the contract's arc that the contract has not raised, whose
+  earliest beat the arc has reached, whose owner archetype is one of the
+  contract's attached actors, and whose actor-flag requirement that actor
+  carries. It reads campaign state alone and draws no dice, so at most one
+  situation comes up a month and each at most once per contract.
+- **Ownership.** Every situation is brought by one of the contract's actors;
+  the inbox row, its log line and the contract's record name that actor and
+  archetype. A callback (a row requiring an actor flag) also says why it came
+  back.
+- **Costs.** Every option names a concrete cost drawn from a closed subset of
+  `events.Effect` — cash, supply loss, fatigue, morale, employer standing,
+  score, escalation — and at least one of them takes something from the
+  company; the build refuses a free option. `contract_events.prepareCosts` /
+  `commitCosts` is the one applier of that subset, for situations and for the
+  event decks alike.
+- **Answering.** `situations.resolve` answers through the existing `resolve`
+  command and the inbox's decision modal; an unanswered situation applies its
+  cautious default at the deadline through `contract_events.expireDue`. It
+  validates, prepares every cost, relationship and world change and every log
+  line, then commits: the costs, the owner's relationship (`actors`), the
+  world's state (`world_state`), the flags each option sets, the record's
+  answer, and the event leaves the inbox (rules 11–14). Situations do not
+  become standing orders and never hold the turn: they dispose of no hulls.
+- **Flags.** Options leave typed flags on the owning actor and the contract
+  world. Three readers consume them through their owners: later situations
+  (`nextDue`'s flag requirement), the local supplies valve
+  (`world_state.localPriceAdjustBp`, §9.6), and the arc finale
+  (`operations.selectFinale`: a finale gated on a world flag, such as the
+  Fracturing Garrison's *Garrison Holds — the Town Stands With It* on a
+  trained militia, outranks the unconditional fallback at an equal clock and
+  is never a collapse). Actor flags recur with the actor; world flags stay on
+  the planet.
+
 ## 9. HQ network, influence & supply lines (the game's centerpiece)
 
 The player-facing loop this section defines is walked through in GAMEPLAY.md.
@@ -842,7 +900,11 @@ plateauing (no death spiral) and every effect a visible P&L line item:
   ledger teaches. `field_supply.beachheadActive` gates the penalty: it is false
   once the contract world falls inside any current ring (including a newly
   planted field HQ, which has a 15 LY base ring). `field_supply.localPriceMultBp`
-  and `econ/logistics.localPurchaseMultBp` are the single owners.
+  and `econ/logistics.localPurchaseMultBp` are the single owners. The
+  contract world's situation flags (§8 "Situations") then adjust the
+  valve's price through `world_state.localPriceAdjustBp`: an open black
+  market undercuts it (`tuning.situations.black_market_price_bp`), one turned
+  in leaves it dearer (`informant_price_bp`). Only that world's price moves.
 - **Hardship pay:** payroll bonus for remote deployment (own category), also
   gated by `beachheadActive`.
 - **Morale/HR decay** and **training XP slowdown**, recovering once back in
@@ -1176,9 +1238,9 @@ identical hash, and identical evolution after load and executable restart;
 a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
-**Current P5b.2 format boundary.** New empty stores
-initialize schema 65 transactionally. Existing store and campaign versions
-must both be 65; older formats (64 included) are refused intact and newer formats retain
+**Current P5c format boundary.** New empty stores
+initialize schema 66 transactionally. Existing store and campaign versions
+must both be 66; older formats (65 included) are refused intact and newer formats retain
 their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
 missing tables or rows. No automatic reset, deletion, rewrite, backfill or
@@ -1229,6 +1291,18 @@ due, nothing else holding the turn, no ROE order the employer reserves and
 every lever still allowed (`leverAllowed`).
 A forged pause is refused, never repaired. Saving mid-battle, loading and
 finishing gives the same digest as finishing without the save.
+
+**Situations are saved** (schema 66): each contract's records in
+`contract_situation` (key, day, owning actor, answer or NULL while it
+awaits one), a pending situation's key and owner on its `pending_event`
+row, and the flag sets as bitmasks in `actor.flags` and `world_state.flags`
+(bit = the flag's declared value). The loader refuses an unknown flag bit,
+an unknown situation key or one of another arc, an owner that is not the
+contract's actor of that archetype, a situation raised twice on a contract,
+records out of order or dated after today, an answer that is not an option,
+and a pending situation and record that disagree (a pending situation with
+no open record, an open record with no pending situation, or an answered
+record still pending). A situation's options are rebuilt from its row.
 
 **RNG state is saved per stream**: the campaign seed plus one
 `rng_stream` row per named stream (format 1: the generator's words,

@@ -60,10 +60,11 @@ overlay of each family and checks that every one fails; CI runs it.
 | `tables/opfor.zon` | `domain/opfor.zig` `Table` | the opposing force per contract kind: lances, quality roll, reinforcements |
 | `tables/skulls.zon` | `domain/skulls.zig` `Table` | half-skull bands by power ratio (keep them aligned with `battle.ratioBonus`), the outmatched line, the checklist warning level |
 | `tables/terrain.zon` | `domain/terrain.zig` `Table` | terrain classes, weather, the 2d6 weather table |
-| `tables/arcs.zon` | `domain/arc.zig` `Table` | operation arc archetypes: narrative beats, finale options, opening templates per contract kind |
+| `tables/arcs.zon` | `domain/arc.zig` `Table` | operation arc archetypes: narrative beats, finale options (each optionally gated on a world flag, `requires_world_flag`), opening templates per contract kind |
 | `tables/operations.zon` | `domain/operation.zig` `Table` | operation mission templates: arc ownership, combat flag, objectives, follow-up keys |
 | `tables/actor_archetypes.zon` | `domain/actor.zig` `Table` | actor archetypes attached to arcs: NPC roles (liaison, official, militia leader …), faction side, agenda text, and the arc keys they appear in (P4i) |
 | `tables/rival_archetypes.zon` | `domain/rival.zig` `ArchetypeTable` | rival company archetypes instantiated at contract accept: hostile/allied faction side, doctrine (aggressive/cautious/attritional/opportunist/honorable), and the arc keys they appear in (P4i) |
+| `tables/situations.zon` | `domain/situation.zig` `Table` | actor-owned situations on an arc contract: owner archetype, arc, earliest beat, an optional actor-flag requirement (a callback, with its note), the default, and 2–3 options with their costs, relationship and world deltas, the actor and world flags they leave, and a `remembers` phrase (ARCHITECTURE.md §8 "Situations"). An arc with rows here raises them in place of its contracts' monthly event deck |
 
 ## Rules of the road
 
@@ -79,8 +80,21 @@ overlay of each family and checks that every one fails; CI runs it.
   `actor_archetypes.zon` and at least one rival archetype in
   `rival_archetypes.zon` whose `arcs` list includes that arc key; the build
   enforces this at compile time and fails with the first uncovered arc key.
+  An arc has exactly one finale with `min_clock = 0` and no
+  `requires_world_flag` (the unconditional fallback), and a finale gated on a
+  world flag is never a collapse (`ends_contract`).
   `zig build test -Ddata=<dir>` runs the catalogue tests that check those
   links, plus the MekLab construction rules on every mek.
+- The build refuses a `situations.zon` row with an unknown arc, a
+  `min_beat` that is not a beat of its arc, an owner archetype that does not
+  attach to that arc, a `callback_note` present without a
+  `requires_actor_flag` or missing with one, fewer than 2 or more than 3
+  options, a `default_choice` out of range, or an option whose costs are
+  empty, more than 4, outside the cost subset (`cash`, `supply_loss`,
+  `fatigue`, `morale`, `employer_standing`, `score`, `escalation`), or free —
+  every option must take something from the company. Flags are
+  `domain/actor.zig` `ActorFlag` and `domain/world_state.zig` `WorldFlag`
+  tags; an unknown one fails the build.
 - Every string must be safe to show as it is: valid UTF-8, no `{`
   anywhere (braces start the screens' colour tags, and there is no escape
   for a literal one in data), and no control characters — no tabs,

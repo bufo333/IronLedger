@@ -10,8 +10,13 @@
 //                         advances to the next; 0 = terminal (stays until
 //                         a finale is triggered, P4h)
 //   finales               possible ending conditions; bands checked
-//                         high-to-low by min_clock; one must have min_clock
-//                         = 0 as the unconditional fallback
+//                         high-to-low by min_clock; exactly one has
+//                         min_clock = 0 and no requires_world_flag: the
+//                         unconditional fallback. requires_world_flag (a
+//                         domain/world_state.zig WorldFlag) gates a finale
+//                         on the contract world's flags; it outranks the
+//                         fallback at an equal min_clock and is never a
+//                         collapse (ends_contract)
 //   opening               operation template keys available at beat 0
 //
 // All numeric thresholds carry // TUNE; balance against escalationStep
@@ -57,6 +62,15 @@
                     .score_delta = 2, // TUNE: garrison held earns a bonus
                     .vp_delta = 3, // TUNE
                     .standing_delta = 2, // TUNE: employer pleased
+                },
+                .{
+                    .key = "held_with_the_town",
+                    .name = "Garrison Holds — the Town Stands With It",
+                    .min_clock = 0, // below collapse, like held
+                    .requires_world_flag = .militia_trained, // the company drilled the town militia
+                    .score_delta = 3, // TUNE: a held town earns more than a held perimeter
+                    .vp_delta = 4, // TUNE
+                    .standing_delta = 3, // TUNE
                 },
             },
             .opening = .{ "negotiate_terms", "repel_probe", "patrol_sweep" },

@@ -914,6 +914,14 @@ pub const Tuning = struct {
     },
     /// Commander bonus. // TUNE
     commander: struct { bonus_bp: types.Bp },
+    /// What the flags situations leave on a world do to the local
+    /// supplies valve's price (ARCHITECTURE.md §9.6). // TUNE
+    situations: struct {
+        /// An open black market undercuts the valve.
+        black_market_price_bp: types.Bp,
+        /// A black market turned in leaves supplies dearer.
+        informant_price_bp: types.Bp,
+    },
 };
 
 /// The live table.

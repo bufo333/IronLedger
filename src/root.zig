@@ -70,6 +70,7 @@ pub const hq_link = @import("domain/hq_link.zig");
 pub const arc = @import("domain/arc.zig");
 pub const operation = @import("domain/operation.zig");
 pub const actor = @import("domain/actor.zig");
+pub const situation = @import("domain/situation.zig");
 pub const rival = @import("domain/rival.zig");
 pub const merc_company = @import("domain/merc_company.zig");
 pub const logo = @import("domain/logo.zig");
@@ -104,6 +105,7 @@ pub const digest = @import("sim/digest.zig");
 pub const campaign_backup = @import("sim/campaign_backup.zig");
 pub const clock = @import("domain/clock.zig");
 pub const contract_events = @import("sim/contract_events.zig");
+pub const situations = @import("sim/situations.zig");
 pub const battle = @import("sim/battle.zig");
 pub const after_action = @import("sim/after_action.zig");
 

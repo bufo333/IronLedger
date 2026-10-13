@@ -16,6 +16,8 @@ const types = @import("../domain/types.zig");
 const part_mod = @import("../domain/part.zig");
 const planet_mod = @import("../domain/planet.zig");
 const contract_mod = @import("../domain/contract.zig");
+const world_state_dom = @import("../domain/world_state.zig");
+const world_state = @import("world_state.zig");
 const market_mod = @import("../econ/market.zig");
 const logistics_mod = @import("../econ/logistics.zig");
 const sites = @import("sites.zig");
@@ -341,11 +343,15 @@ fn liveBeachheadLy(gs: *GameState, c: *const contract_mod.Contract) u32 {
 /// The local supplies valve's price multiplier (ARCH §9.6) for a company
 /// on a contract: inside every ring (or once a field HQ is planted on the
 /// beachhead world), the ordinary field markup; on an active beachhead,
-/// remoteness beyond the nearest ring eased by the world's industry.
+/// remoteness beyond the nearest ring eased by the world's industry. The
+/// contract world's flags then adjust it (`world_state.localPriceAdjustBp`).
 pub fn localPriceMultBp(gs: *GameState, c: *const contract_mod.Contract) types.Bp {
-    if (!beachheadActive(gs, c)) return tuning.finance.field_markup_bp;
-    const industry: u8 = if (planet_mod.find(c.planet_key)) |w| w.industry else 0;
-    return logistics_mod.localPurchaseMultBp(liveBeachheadLy(gs, c), industry);
+    const base: types.Bp = if (!beachheadActive(gs, c)) tuning.finance.field_markup_bp else blk: {
+        const industry: u8 = if (planet_mod.find(c.planet_key)) |w| w.industry else 0;
+        break :blk logistics_mod.localPurchaseMultBp(liveBeachheadLy(gs, c), industry);
+    };
+    const flags = if (gs.worldState(c.planet_key)) |ws| ws.flags else world_state_dom.WorldFlags{};
+    return types.applyBp(base, world_state.localPriceAdjustBp(flags));
 }
 
 /// One line of an emergency resupply.

@@ -392,9 +392,37 @@ hostility; −100…100) that shift with every operation outcome and finale resu
 Encountering the same faction/archetype combination on a later contract surfaces
 the stored relationship: a trusted ally from a previous garrison duty turns up
 as a liaison again, their history intact. The Operations screen shows the
-current actors for the active contract with a "(returning)" tag for recurrences.
-No player decisions in this increment — actors are read-only display, groundwork
-for future conversation and mission choices.
+current actors for the active contract with a "(returning)" tag for recurrences
+and what each remembers of you. On a garrison or security contract some of
+them bring you **situations** (below).
+
+## Situations on a garrison contract (P5c)
+
+On garrison and security duty the monthly event deck gives way to
+**situations**: on the 1st, the contract's own people bring you at most one
+decision, and each comes up once per contract. The weekly happenings go on as
+before.
+
+- **The black-market contact** offers crates of munitions at a discount while
+  the local official watches. Buy them (60,000 C off the books, a point of
+  employer standing), turn the contact in (fatigue and a little spirit), or send
+  them away (spirit).
+- **The militia commander**, once the pressure rises, asks for instructors to
+  drill the town militia. Drilling costs fatigue and 20,000 C; keeping the
+  company on the line adds escalation and costs the town's support.
+- **The contact comes back** at the open-conflict beat — but only if you bought
+  their crates — selling the enemy's patrol routes, and yours. The inbox and the
+  log say why they returned.
+
+Every option names what it costs; none is free. Your answers stay with the
+people and the world: the contact remembers the coin or the betrayal, an open
+black market makes local supplies cheaper on that world and a shut one dearer,
+and a drilled militia lets the garrison end as **Garrison Holds — the Town
+Stands With It**, a better finale than the plain hold. Play the same contract
+twice with opposite answers and you see different situations, different local
+prices and a different ending. The Contracts screen and the Operations panel
+list every situation the contract raised and how you answered; an unanswered
+one takes its cautious default at the deadline.
 
 ## Persistent rivals (P4i)
 

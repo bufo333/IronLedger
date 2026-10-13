@@ -1,0 +1,111 @@
+// Actor-owned situations on an arc contract (ARCHITECTURE.md §8
+// "Situations"). Typed against domain/situation.zig `Table`; the build
+// refuses a defect (`situation.defect`).
+//
+//   key                   stable key, saved on the contract's record
+//   arc                   the arc whose contracts raise it; such contracts
+//                         raise situations in place of the monthly event deck
+//   owner                 the actor archetype (actor_archetypes.zon) that owns
+//                         it; it must attach to the arc
+//   min_beat              the arc beat from which it may come up
+//   requires_actor_flag   a callback: comes up only while the owner carries
+//                         this flag (domain/actor.zig ActorFlag)
+//   title                 what the owner brings, after the owner's name
+//   callback_note         why a callback came up; exactly when a flag is required
+//   default_choice        the answer applied at the deadline
+//   options               2–3 answers. costs: the closed effect subset
+//                         (cash, supply_loss, fatigue, morale,
+//                         employer_standing, score, escalation), at least one
+//                         a burden; relationship: a delta on the owner;
+//                         world: a delta on the contract world;
+//                         set_actor_flags / set_world_flags: what they leave;
+//                         remembers: shown beside the option
+//
+// Invented content and placeholder numbers (no sourcebook counterpart);
+// every value is // TUNE for the playtest gate. Money is C-bills, fatigue
+// and morale are per-person points, escalation is arc clock ticks.
+.{
+    .situations = .{
+        .{
+            .key = "crates_off_the_books",
+            .arc = "fracturing_garrison",
+            .owner = "black_market",
+            .min_beat = "beginning",
+            .title = "offers crates of munitions at a discount — and the local official is watching",
+            .default_choice = 2,
+            .options = .{
+                .{
+                    .label = "Buy the crates, no paperwork",
+                    .costs = .{ .{ .cash = -60_000 }, .{ .employer_standing = -1 } }, // TUNE
+                    .relationship = .{ .trust = 10, .debt = 5 }, // TUNE
+                    .set_actor_flags = .{.did_business},
+                    .set_world_flags = .{.black_market_open},
+                    .remembers = "the contact remembers your coin; the market trades openly",
+                },
+                .{
+                    .label = "Turn the contact over to the official",
+                    .costs = .{ .{ .fatigue = 3 }, .{ .morale = -1 } }, // TUNE
+                    .relationship = .{ .hostility = 20 }, // TUNE
+                    .set_actor_flags = .{.informed_on},
+                    .set_world_flags = .{.black_market_closed},
+                    .remembers = "the contact remembers who turned them in; the market shuts",
+                },
+                .{
+                    .label = "Send them away",
+                    .costs = .{.{ .morale = -2 }}, // TUNE
+                    .remembers = "nothing changes hands",
+                },
+            },
+        },
+        .{
+            .key = "drill_the_militia",
+            .arc = "fracturing_garrison",
+            .owner = "militia_commander",
+            .min_beat = "complication",
+            .title = "asks for instructors to drill the town militia before the pressure breaks",
+            .default_choice = 1,
+            .options = .{
+                .{
+                    .label = "Drill the militia",
+                    .costs = .{ .{ .fatigue = 6 }, .{ .cash = -20_000 } }, // TUNE
+                    .relationship = .{ .trust = 10 }, // TUNE
+                    .world = .{ .civilian_support = 5, .security = 5 }, // TUNE
+                    .set_actor_flags = .{.drilled_together},
+                    .set_world_flags = .{.militia_trained},
+                    .remembers = "the militia remembers its drills; the town can stand",
+                },
+                .{
+                    .label = "Keep the company on the line",
+                    .costs = .{.{ .escalation = 3 }}, // TUNE
+                    .relationship = .{ .respect = -10 }, // TUNE
+                    .world = .{ .civilian_support = -5 }, // TUNE
+                    .remembers = "the town remembers being left to itself",
+                },
+            },
+        },
+        .{
+            .key = "the_contact_returns",
+            .arc = "fracturing_garrison",
+            .owner = "black_market",
+            .min_beat = "escalation",
+            .requires_actor_flag = .did_business,
+            .title = "is back: the enemy commander's patrol routes are for sale — and so are yours",
+            .callback_note = "returns because you bought their crates",
+            .default_choice = 1,
+            .options = .{
+                .{
+                    .label = "Buy the enemy's routes",
+                    .costs = .{ .{ .cash = -80_000 }, .{ .escalation = -8 } }, // TUNE
+                    .remembers = "the contact's business goes on",
+                },
+                .{
+                    .label = "Cut ties",
+                    .costs = .{.{ .escalation = 5 }}, // TUNE
+                    .relationship = .{ .hostility = 15 }, // TUNE
+                    .set_actor_flags = .{.cut_ties},
+                    .remembers = "the contact remembers the door you closed",
+                },
+            },
+        },
+    },
+}

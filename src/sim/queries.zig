@@ -12,6 +12,7 @@ const logistics_mod = @import("../econ/logistics.zig");
 const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const contract_mod = @import("../domain/contract.zig");
+const situation_mod = @import("../domain/situation.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const force_dom = @import("../domain/force.zig");
 const finance = @import("../econ/finance.zig");
@@ -665,6 +666,10 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
     var inbox: std.ArrayListUnmanaged(InboxRow) = .empty;
     for (gs.event_queue.pending.items) |ev| {
         if (!ev.needsDecision()) continue;
+        if (ev.kind == .situation) {
+            try inbox.append(alloc, try situationInboxRow(alloc, gs, &ev, day));
+            continue;
+        }
         var opts: std.ArrayListUnmanaged([]const u8) = .empty;
         for (ev.options) |o| try opts.append(alloc, try std.fmt.allocPrint(alloc, "{s}   {s}", .{ o.label, try effectsText(alloc, o.effects) }));
         const entry = contract_events.entryForKind(ev.kind);
@@ -732,6 +737,60 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
         .hqs = try hqs.toOwnedSlice(alloc),
         .log = try log.toOwnedSlice(alloc),
     };
+}
+
+/// A pending situation as an inbox row: the owner's name (plain text) and
+/// archetype with the situation's title and, for a callback, why it came
+/// back; each option with its costs and what it leaves behind.
+fn situationInboxRow(alloc: Alloc, gs: *GameState, ev: *const @import("../domain/events.zig").Event, day: u32) !InboxRow {
+    const s = situation_mod.find(ev.situation) orelse return error.CorruptSave;
+    var opts: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (s.options) |o| try opts.append(alloc, try std.fmt.allocPrint(alloc, "{s}   {s}   {{d}}{s}{{/}}", .{ o.label, try effectsText(alloc, o.costs), o.remembers }));
+    return .{
+        .event_id = ev.id,
+        .kind = @tagName(ev.kind),
+        .company = try forceName(alloc, gs, ev.company),
+        .deadline_day = ev.deadline_day,
+        .days_left = @as(i64, ev.deadline_day) - @as(i64, day),
+        .description = try situationText(alloc, gs, s, ev.actor),
+        .options = try opts.toOwnedSlice(alloc),
+        .default_choice = ev.default_choice,
+    };
+}
+
+/// "Name (Archetype) title — callback note": who brings a situation and
+/// what, the name as plain text (rule 41).
+fn situationText(alloc: Alloc, gs: *GameState, s: *const situation_mod.Situation, actor_id: types.ActorId) ![]const u8 {
+    const a = gs.actor(actor_id) orelse return error.CorruptSave;
+    const arch = actor_dom.find(a.archetype_key) orelse return error.CorruptSave;
+    const name = try std.fmt.allocPrint(alloc, "{s} {s}", .{ a.first_name, a.last_name });
+    return std.fmt.allocPrint(alloc, "{s} ({s}) {s}{s}{s}", .{ try table.plain(alloc, name), arch.name, s.title, if (s.callback_note.len > 0) " — " else "", s.callback_note });
+}
+
+/// One contract-detail line per situation the contract raised: the day,
+/// who brought what, and the answer or that it awaits one.
+pub fn situationLines(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract) ![]const []const u8 {
+    var out: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (c.situations.items) |r| {
+        const s = situation_mod.find(r.key) orelse return error.CorruptSave;
+        const answer = if (r.choice) |ch|
+            try std.fmt.allocPrint(alloc, "chose \"{s}\" · {{d}}{s}{{/}}", .{ s.options[ch].label, s.options[ch].remembers })
+        else
+            "{a}awaiting answer{/}";
+        try out.append(alloc, try std.fmt.allocPrint(alloc, "    situation   day {d} · {s} — {s}", .{ r.day, try situationText(alloc, gs, s, r.actor), answer }));
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// A flag set as its labels, comma-separated; "" when empty.
+pub fn flagsText(alloc: Alloc, comptime E: type, set: std.EnumSet(E)) ![]const u8 {
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    var it = set.iterator();
+    while (it.next()) |f| {
+        if (out.items.len > 0) try out.appendSlice(alloc, ", ");
+        try out.appendSlice(alloc, f.label());
+    }
+    return out.toOwnedSlice(alloc);
 }
 
 /// An option's consequences as coloured tags: green for gains, red for
@@ -1223,6 +1282,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             const ws_sum = try worldStateSummary(alloc, gs, c.planet_key);
             if (ws_sum.len > 0) try lines.append(alloc, try std.fmt.allocPrint(alloc, "    world       {s}", .{ws_sum}));
         }
+        try lines.appendSlice(alloc, try situationLines(alloc, gs, c));
         try lines.append(alloc, "");
         try active.append(alloc, .{ .id = c.id, .company = c.assigned_company, .status = c.status, .lines = try lines.toOwnedSlice(alloc), .objectives_met = c.objectivesMet() });
     }
@@ -8288,27 +8348,23 @@ const rivals_m = @import("rivals.zig");
 const officers_m = @import("officers.zig");
 const actors_sim = @import("actors.zig");
 
-/// Format a compact read-only summary of the world state at planet_key.
-/// Returns an empty string when no state has been recorded yet.
-/// Output is markup-safe and owns its allocation from `alloc`.
+/// Format a compact read-only summary of the world state at planet_key,
+/// its flags last. Returns an empty string when no state has been
+/// recorded yet. Output is markup-safe and owns its allocation from `alloc`.
 pub fn worldStateSummary(alloc: Alloc, gs: *GameState, planet_key: []const u8) ![]const u8 {
     const ws = gs.world_states.get(planet_key) orelse return "";
-    if (ws.last_cause.len > 0) {
-        return std.fmt.allocPrint(alloc, "sec:{d} civ:{d} str:{d} emp:{d} enem:{d} (last:{s})", .{
-            ws.security,
-            ws.civilian_support,
-            ws.infrastructure_strain,
-            ws.employer_control,
-            ws.enemy_influence,
-            ws.last_cause,
-        });
-    }
-    return std.fmt.allocPrint(alloc, "sec:{d} civ:{d} str:{d} emp:{d} enem:{d}", .{
+    const flags = try flagsText(alloc, world_state_dom.WorldFlag, ws.flags);
+    return std.fmt.allocPrint(alloc, "sec:{d} civ:{d} str:{d} emp:{d} enem:{d}{s}{s}{s}{s}{s}", .{
         ws.security,
         ws.civilian_support,
         ws.infrastructure_strain,
         ws.employer_control,
         ws.enemy_influence,
+        if (ws.last_cause.len > 0) " (last:" else "",
+        ws.last_cause,
+        if (ws.last_cause.len > 0) ")" else "",
+        if (flags.len > 0) " · " else "",
+        flags,
     });
 }
 
@@ -8325,6 +8381,8 @@ pub const ActorRow = struct {
     hostility: i16,
     last_cause: table.Raw,
     recurring: bool,
+    /// What the actor remembers of the company (flag labels); "" when none.
+    flags: []const u8 = "",
 };
 
 /// One attached rival row in the Operations view (P4i).
@@ -8433,6 +8491,8 @@ pub const Operations = struct {
     officers: []OfficerRow,
     /// Read-only world-state summary for the contract's planet (P4h.4); empty if none.
     world_state_summary: []const u8,
+    /// One line per situation the contract raised (`situationLines`).
+    situations: []const []const u8 = &.{},
 };
 
 /// Per-operation consequence block for the operation report (P4i.3, rule 20).
@@ -8570,6 +8630,7 @@ pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.Contr
             .hostility = act.hostility,
             .last_cause = .{ .raw = act.last_cause },
             .recurring = act.recurring,
+            .flags = try flagsText(alloc, actor_dom.ActorFlag, act.flags),
         });
     }
 
@@ -8619,6 +8680,7 @@ pub fn contractOperations(alloc: Alloc, gs: *GameState, contract_id: types.Contr
         .rivals = try rival_rows.toOwnedSlice(alloc),
         .officers = try officer_rows.toOwnedSlice(alloc),
         .world_state_summary = try worldStateSummary(alloc, gs, c.planet_key),
+        .situations = try situationLines(alloc, gs, c),
     };
 }
 
@@ -9065,6 +9127,73 @@ test "taskEligible excludes a non-operational lance that combatLances still list
 
     // taskEligible excludes it because forceOperational returns false (no units).
     try std.testing.expect(!operations_m.taskEligible(&gs, c, op, empty_lance, .main_effort));
+}
+
+test "a situation's inbox row carries its event and names its owner, costs and what each answer leaves" {
+    const situations = @import("situations.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6301 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const c = try situations.garrisonContractForTest(&gs);
+    const contact = situations.ownerOf(&gs, c, "black_market").?;
+    // A name that would be markup crosses as plain text (rule 41).
+    contact.first_name = "{c}Ann";
+    try std.testing.expect(try situations.queueDue(&gs, c));
+    const id = gs.event_queue.pending.items[0].id;
+    const d = try desk(alloc, &gs, 0);
+    try std.testing.expectEqual(@as(usize, 1), d.inbox.len);
+    const row = d.inbox[0];
+    try std.testing.expectEqual(id, row.event_id);
+    try std.testing.expectEqualStrings("situation", row.kind);
+    try std.testing.expect(std.mem.indexOf(u8, row.description, "{{c}Ann") != null);
+    try std.testing.expect(std.mem.indexOf(u8, row.description, "(Black Market Contact) offers crates") != null);
+    try std.testing.expectEqual(@as(usize, 3), row.options.len);
+    try std.testing.expectEqual(@as(usize, 2), row.default_choice);
+    try std.testing.expect(std.mem.indexOf(u8, row.options[0], "Buy the crates, no paperwork") != null);
+    try std.testing.expect(std.mem.indexOf(u8, row.options[0], "-60,000 C") != null);
+    try std.testing.expect(std.mem.indexOf(u8, row.options[0], "the market trades openly") != null);
+    // The console prints the same row under its id.
+    const lines = try inboxLines(alloc, &gs);
+    try std.testing.expect(std.mem.startsWith(u8, lines[1], try std.fmt.allocPrint(alloc, "[{d}] situation", .{@intFromEnum(id)})));
+    // The contract's record reads "awaiting answer" until answered, then the answer.
+    try std.testing.expect(std.mem.indexOf(u8, (try situationLines(alloc, &gs, c))[0], "awaiting answer") != null);
+    _ = try @import("commands.zig").execute(&gs, .{ .resolve_decision = .{ .event = id, .choice = 0 } });
+    const answered = (try situationLines(alloc, &gs, c))[0];
+    try std.testing.expect(std.mem.indexOf(u8, answered, "chose \"Buy the crates, no paperwork\"") != null);
+    // The callback says why it came back.
+    c.arc_beat = 2;
+    try std.testing.expect(try situations.queueDue(&gs, c)); // the drill
+    try std.testing.expect(try situations.queueDue(&gs, c)); // the contact returns
+    const again = try desk(alloc, &gs, 0);
+    var callback = false;
+    for (again.inbox) |r| callback = callback or std.mem.indexOf(u8, r.description, "returns because you bought their crates") != null;
+    try std.testing.expect(callback);
+}
+
+test "the contract detail lists its situations, the operations view its actors' flags, the world line its flags" {
+    const situations = @import("situations.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6302 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const c = try situations.garrisonContractForTest(&gs);
+    try std.testing.expect(try situations.queueDue(&gs, c));
+    _ = try @import("commands.zig").execute(&gs, .{ .resolve_decision = .{ .event = gs.event_queue.pending.items[0].id, .choice = 0 } });
+    const view = try contracts(alloc, &gs, gs.seat());
+    var listed = false;
+    for (view.active) |a| if (a.id == c.id) for (a.lines) |l| {
+        listed = listed or std.mem.indexOf(u8, l, "situation   day 0") != null;
+    };
+    try std.testing.expect(listed);
+    const ops = try contractOperations(alloc, &gs, c.id);
+    try std.testing.expectEqual(@as(usize, 1), ops.situations.len);
+    var flagged = false;
+    for (ops.actors) |a| flagged = flagged or std.mem.eql(u8, a.flags, "did business");
+    try std.testing.expect(flagged);
+    try std.testing.expect(std.mem.endsWith(u8, ops.world_state_summary, "· black market open"));
 }
 
 test "worldStateSummary: empty for a world with no state; reflects a set value (P4h.4)" {

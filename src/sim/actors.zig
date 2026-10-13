@@ -14,13 +14,20 @@ const person_gen = @import("../gen/person_gen.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 
-/// A delta to one relationship dimension from a named cause.
-pub const RelDelta = struct {
-    trust: i16 = 0,
-    debt: i16 = 0,
-    respect: i16 = 0,
-    hostility: i16 = 0,
-};
+pub const RelDelta = actor_mod.RelDelta;
+
+/// Rule owner: the actor's flags after the company's answer sets `set`
+/// (ARCHITECTURE.md §8 "Situations"). `informed_on` and `did_business`
+/// exclude each other, the later answer winning; `cut_ties` ends any
+/// business. Pure; the caller stores the result in its commit phase.
+pub fn setFlags(current: actor_mod.ActorFlags, set: actor_mod.ActorFlags) actor_mod.ActorFlags {
+    var out = current;
+    if (set.contains(.informed_on)) out.remove(.did_business);
+    if (set.contains(.did_business)) out.remove(.informed_on);
+    out.setUnion(set);
+    if (set.contains(.cut_ties)) out.remove(.did_business);
+    return out;
+}
 
 /// Generate actor names using the `.actors` RNG stream (rule 57).
 /// Deterministic per seed; drawing does not perturb `.battle` or `.generation`.
@@ -365,6 +372,29 @@ test "priorRelationship: recurrence lookup carries forward name and relationship
     try std.testing.expect(priorRelationship(&gs, "FS", "liaison") == null);
     // Different archetype → no match.
     try std.testing.expect(priorRelationship(&gs, "LC", "local_official") == null);
+}
+
+test "setFlags: informing and buying exclude each other, the later winning; cutting ties ends the business" {
+    const F = actor_mod.ActorFlags;
+    const one = struct {
+        fn of(f: actor_mod.ActorFlag) F {
+            var s: F = .{};
+            s.insert(f);
+            return s;
+        }
+    }.of;
+    var flags = setFlags(.{}, one(.did_business));
+    try std.testing.expect(flags.contains(.did_business));
+    flags = setFlags(flags, one(.informed_on));
+    try std.testing.expect(flags.contains(.informed_on) and !flags.contains(.did_business));
+    flags = setFlags(flags, one(.did_business));
+    try std.testing.expect(flags.contains(.did_business) and !flags.contains(.informed_on));
+    flags = setFlags(flags, one(.drilled_together));
+    try std.testing.expect(flags.contains(.drilled_together) and flags.contains(.did_business));
+    flags = setFlags(flags, one(.cut_ties));
+    try std.testing.expect(flags.contains(.cut_ties) and !flags.contains(.did_business) and flags.contains(.drilled_together));
+    // Nothing set changes nothing.
+    try std.testing.expectEqual(flags, setFlags(flags, .{}));
 }
 
 test "conversionAllowed: returns .none for every actor" {

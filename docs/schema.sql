@@ -1,8 +1,8 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 65, the only supported store and campaign format.
+-- Matches schema_version 66, the only supported store and campaign format.
 -- Older and newer formats are refused before persistent mutation under
--- docs/engineering-contract.md rule 51; only empty stores initialize schema 65.
+-- docs/engineering-contract.md rule 51; only empty stores initialize schema 66.
 -- The executable DDL and dormant historical migration declarations live in
 -- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
@@ -726,6 +726,31 @@ CREATE TABLE pending_event (
     person          INTEGER NOT NULL DEFAULT 0,      -- -> person.id
     id              INTEGER NOT NULL DEFAULT 0,      -- EventId the inbox answers by
     battle          INTEGER NOT NULL DEFAULT 0,      -- BattleId the decision answers
+    situation       TEXT CHECK (situation IS NULL OR typeof(situation)='text'),
+                                                     -- situations.zon key; exactly when kind = 'situation'
+    actor           INTEGER NOT NULL CHECK (typeof(actor)='integer' AND actor BETWEEN 0 AND 4294967295),
+                                                     -- -> actor.id owning the situation; 0 otherwise
+    CHECK ((situation IS NOT NULL) = (kind = 'situation')),
+    CHECK ((actor != 0) = (kind = 'situation')),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+
+-- One row per situation a contract raised (ARCHITECTURE.md §8
+-- "Situations"), in the order raised; a pending one also has its
+-- pending_event row, and an answered one none.
+CREATE TABLE contract_situation (
+    cid             INTEGER NOT NULL,
+    contract        INTEGER NOT NULL CHECK (typeof(contract)='integer' AND contract BETWEEN 1 AND 4294967295),
+                                                     -- -> contract.id (an accepted contract, not an offer)
+    ord             INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0),
+    situation       TEXT    NOT NULL CHECK (typeof(situation)='text'), -- situations.zon key, of the contract's arc
+    day             INTEGER NOT NULL CHECK (typeof(day)='integer' AND day BETWEEN 0 AND 4294967295),
+    actor           INTEGER NOT NULL CHECK (typeof(actor)='integer' AND actor BETWEEN 1 AND 4294967295),
+                                                     -- -> actor.id: the contract's actor of the owner archetype
+    choice          INTEGER CHECK (choice IS NULL OR (typeof(choice)='integer' AND choice BETWEEN 0 AND 2)),
+                                                     -- the option applied; NULL while it awaits an answer
+    PRIMARY KEY (cid, contract, ord),
+    UNIQUE (cid, contract, situation),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 
@@ -1072,6 +1097,8 @@ CREATE TABLE actor (
     last_cause      TEXT    NOT NULL DEFAULT '', -- short markup-safe label for last rel change
     last_cause_day  INTEGER NOT NULL DEFAULT 0,  -- day_index of last rel change
     recurring       INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)),
+    flags           INTEGER NOT NULL CHECK (typeof(flags)='integer' AND flags BETWEEN 0 AND 15),
+                                      -- domain/actor.zig ActorFlag set: bit = the flag's value
     PRIMARY KEY (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
@@ -1092,10 +1119,13 @@ CREATE TABLE world_state (
     enemy_influence         INTEGER NOT NULL DEFAULT 0, -- clamped −100…100
     last_cause              TEXT    NOT NULL DEFAULT '', -- short markup-safe label for last change
     last_cause_day          INTEGER NOT NULL DEFAULT 0,  -- day_index of last change
+    flags                   INTEGER NOT NULL CHECK (typeof(flags)='integer' AND flags BETWEEN 0 AND 7),
+                                              -- domain/world_state.zig WorldFlag set: bit = the flag's value
     PRIMARY KEY (cid, planet_key),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_world_state_cid ON world_state(cid);
+CREATE INDEX IF NOT EXISTS ix_contract_situation_cid ON contract_situation(cid);
 
 -- Persistent rival companies encountered across contracts (P4i).
 -- `ord` preserves insertion order for a deterministic round-trip digest.

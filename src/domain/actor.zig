@@ -69,6 +69,46 @@ pub const RelationshipDim = enum {
 pub const rel_min: i16 = -100; // TUNE
 pub const rel_max: i16 = 100; // TUNE
 
+/// A delta to the four relationship dimensions from a named cause; the
+/// sim's `actors.adjustRelationship` applies it, clamped.
+pub const RelDelta = struct {
+    trust: i16 = 0,
+    debt: i16 = 0,
+    respect: i16 = 0,
+    hostility: i16 = 0,
+
+    pub fn isZero(self: RelDelta) bool {
+        return self.trust == 0 and self.debt == 0 and self.respect == 0 and self.hostility == 0;
+    }
+};
+
+/// What an actor remembers of the company's answers to its situations
+/// (ARCHITECTURE.md §8 "Situations"). `sim/actors.setFlags` owns which
+/// flags exclude each other. Each value is its bit in a save (schema 66):
+/// never reuse or renumber one.
+pub const ActorFlag = enum(u5) {
+    /// The company bought from them.
+    did_business = 0,
+    /// The company turned them over to the authorities.
+    informed_on = 1,
+    /// The company's instructors drilled their people.
+    drilled_together = 2,
+    /// The company broke with them.
+    cut_ties = 3,
+
+    /// Short display label (markup-safe).
+    pub fn label(self: ActorFlag) []const u8 {
+        return switch (self) {
+            .did_business => "did business",
+            .informed_on => "informed on",
+            .drilled_together => "drilled together",
+            .cut_ties => "cut ties",
+        };
+    }
+};
+
+pub const ActorFlags = std.EnumSet(ActorFlag);
+
 /// A persistent actor entity, introduced by an arc contract.
 /// Stored in GameState.actors keyed by ActorId.
 pub const Actor = struct {
@@ -98,6 +138,9 @@ pub const Actor = struct {
 
     /// True when this actor recurs from a prior contract (carried forward).
     recurring: bool = false,
+    /// What the actor remembers of the company; carried forward with the
+    /// relationship when the actor recurs.
+    flags: ActorFlags = .{},
 };
 
 // ---- Comptime validation ---------------------------------------------------

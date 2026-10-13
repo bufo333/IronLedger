@@ -8,6 +8,7 @@ const std = @import("std");
 const arc_mod = @import("../domain/arc.zig");
 const operation_mod = @import("../domain/operation.zig");
 const contract_mod = @import("../domain/contract.zig");
+const world_state_dom = @import("../domain/world_state.zig");
 const types = @import("../domain/types.zig");
 const GameState = @import("state.zig").GameState;
 const readiness = @import("readiness.zig");
@@ -163,20 +164,23 @@ pub fn escalationStep(c: *const contract_mod.Contract) u16 {
 }
 
 /// Rule owner: the finale selected from the arc's options given the current
-/// escalation clock. Selects the eligible finale with the highest min_clock
-/// (i.e. the most dramatic outcome the clock earned); falls back to min_clock==0.
-/// P4b stub (returns min_clock==0 only) is replaced here (P4c).
-pub fn selectFinale(c: *const contract_mod.Contract) ?*const arc_mod.Finale {
+/// escalation clock and the contract world's flags. Only finales whose
+/// `requires_world_flag` the world carries are eligible; among them the one
+/// with the highest min_clock at or below the clock wins (the most dramatic
+/// outcome the clock earned), and at an equal min_clock a gated finale
+/// outranks an unconditional one. The unconditional min_clock == 0 finale is
+/// the fallback. Null for a contract without a known arc.
+pub fn selectFinale(c: *const contract_mod.Contract, world_flags: world_state_dom.WorldFlags) ?*const arc_mod.Finale {
     const a = arc_mod.find(c.arc_key) orelse return null;
-    // Walk the finales; keep the one with the highest min_clock that is ≤ the clock.
     var best: ?*const arc_mod.Finale = null;
-    for (0..a.finales.len) |i| {
-        const f = &a.finales[i];
-        if (f.min_clock == 0) {
-            if (best == null) best = f; // fallback
-        } else if (f.min_clock <= c.escalation_clock) {
-            if (best == null or f.min_clock > best.?.min_clock) best = f;
-        }
+    for (a.finales) |*f| {
+        if (f.min_clock > c.escalation_clock) continue;
+        if (f.requires_world_flag) |flag| if (!world_flags.contains(flag)) continue;
+        const b = best orelse {
+            best = f;
+            continue;
+        };
+        if (f.min_clock > b.min_clock or (f.min_clock == b.min_clock and f.requires_world_flag != null and b.requires_world_flag == null)) best = f;
     }
     return best;
 }
@@ -1258,7 +1262,7 @@ test "selectFinale: below min_clock threshold returns held (min_clock==0); at th
     var fell_key: []const u8 = "";
     var fell_min: u16 = 0;
     for (a.finales) |f| {
-        if (f.min_clock == 0) held_key = f.key;
+        if (f.min_clock == 0 and f.requires_world_flag == null) held_key = f.key;
         if (f.min_clock > 0) {
             fell_key = f.key;
             fell_min = f.min_clock;
@@ -1276,7 +1280,7 @@ test "selectFinale: below min_clock threshold returns held (min_clock==0); at th
         .arc_key = "fracturing_garrison",
         .escalation_clock = fell_min - 1, // below the threshold
     };
-    const f_low = selectFinale(&c_low).?;
+    const f_low = selectFinale(&c_low, .{}).?;
     try testing.expectEqualStrings(held_key, f_low.key);
 
     var c_high: contract_mod.Contract = .{
@@ -1289,8 +1293,38 @@ test "selectFinale: below min_clock threshold returns held (min_clock==0); at th
         .arc_key = "fracturing_garrison",
         .escalation_clock = fell_min, // exactly at the threshold
     };
-    const f_high = selectFinale(&c_high).?;
+    const f_high = selectFinale(&c_high, .{}).?;
     try testing.expectEqualStrings(fell_key, f_high.key);
+}
+
+test "selectFinale: a world flag opens its gated finale, which outranks the fallback but never a collapse" {
+    const testing = std.testing;
+    var c: contract_mod.Contract = .{
+        .id = @enumFromInt(1),
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 18, .base_pay_month = 200_000 },
+        .arc_key = "fracturing_garrison",
+        .escalation_clock = 10,
+    };
+    var trained: world_state_dom.WorldFlags = .{};
+    trained.insert(.militia_trained);
+    var other: world_state_dom.WorldFlags = .{};
+    other.insert(.black_market_open);
+    // Below collapse: the flag decides between the two held finales.
+    try testing.expectEqualStrings("held", selectFinale(&c, .{}).?.key);
+    try testing.expectEqualStrings("held", selectFinale(&c, other).?.key);
+    try testing.expectEqualStrings("held_with_the_town", selectFinale(&c, trained).?.key);
+    // At the collapse clock the garrison falls whatever the town learned.
+    c.escalation_clock = topCollapseMinClock(arc_mod.find("fracturing_garrison").?);
+    try testing.expectEqualStrings("fell", selectFinale(&c, trained).?.key);
+    // An arc without a gated finale is unchanged by any flag.
+    var relief = c;
+    relief.arc_key = "aid_under_siege";
+    relief.escalation_clock = 0;
+    try testing.expectEqual(selectFinale(&relief, .{}), selectFinale(&relief, trained));
 }
 
 test "legalIntents / mandatedIntent / intentLegal: legal set × CommandRights" {

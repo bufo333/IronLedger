@@ -219,6 +219,32 @@ fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {
     try app.pressForTest(c, .{ .f = @intFromEnum(tab) + 1 });
 }
 
+test "a situation's inbox lines open its decision, which draws narrow and is answered by its key" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    const id = try app.game.situations.raisedSituationForTest(c.app.state());
+    try toTab(c, .desk);
+    const pane = try inboxPane(c.app.a(), try q.desk(c.app.a(), c.app.state(), q.desk_log_rows));
+    // The row's header and each of its three options belong to it.
+    var lines: usize = 0;
+    var first: usize = 0;
+    for (pane.event, 0..) |e, i| if (e == id) {
+        if (lines == 0) first = i;
+        lines += 1;
+    };
+    try std.testing.expectEqual(@as(usize, 5), lines);
+    c.app.focus = 1;
+    c.app.cur(1).* = first + 3; // an option line, not the header
+    // The modal opens, and draws, at 80x24.
+    try c.app.screen.resize(80, 24);
+    try app.pressForTest(c, .enter);
+    try std.testing.expect(c.app.modal == .decision);
+    try std.testing.expectEqual(id, c.app.modal.decision);
+    try app.pressForTest(c, .{ .char = '1' });
+    try c.app.screen.resize(200, 50);
+    for ((try q.desk(c.app.a(), c.app.state(), q.desk_log_rows)).inbox) |row| try std.testing.expect(row.event_id != id);
+}
+
 test "the desk bindings are well formed" {
     try app.keys.expectWellFormed(Action, &bindings);
 }

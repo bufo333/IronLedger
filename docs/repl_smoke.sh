@@ -93,7 +93,11 @@ printf '%s\n' \
   'artillery 999' \
   'seat 999 badname 1' \
   'seat 999 commander 1' \
-  'day 30 force' \
+  'day 23 force' \
+  'inbox' \
+  'resolve 1 3' \
+  'log 3' \
+  'day 7 force' \
   'day 30 force' \
   'day 30 force' \
   'day 30 force' \
@@ -230,4 +234,11 @@ check 'refused: that intervention has already been applied to this operation'
 check 'levers: decisive roll +4 · 1 command capacity spent · the reserve is committed'
 check 'AAR\]   contact pause — commit the reserve: decisive roll +2'
 check 'AAR\]   contact pause — call emergency recon: 1 capacity, decisive roll +2'
+# P5c: on the 1st the garrison arc's contract raises a situation in the
+# inbox instead of rolling the monthly deck; `resolve` answers it by id and
+# the log names the owner, the answer and its cost.
+check '\[1\] situation Alpha'
+check '(Black Market Contact) offers crates of munitions'
+check '3: Send them away   \[morale -2\]   nothing changes hands (default)'
+check '\[situation\] .* (Black Market Contact): chose "Send them away" — morale -2 · nothing changes hands'
 echo "REPL SMOKE OK"

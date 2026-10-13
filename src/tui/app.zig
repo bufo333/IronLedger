@@ -3595,10 +3595,15 @@ pub const App = struct {
                             try std.fmt.allocPrint(al, "  last:{s}", .{cause_text})
                         else
                             "";
-                        try head_lines.append(al, try std.fmt.allocPrint(al, "{s}  [{s}] {s}  tr:{d} dt:{d} re:{d} ho:{d}{s}{s}", .{
-                            name_text,    ar.archetype, ar.agenda,
-                            ar.trust,     ar.debt,      ar.respect,
-                            ar.hostility, cause_note,   recurring_tag,
+                        const flags_note: []const u8 = if (ar.flags.len > 0)
+                            try std.fmt.allocPrint(al, "  {{a}}{s}{{/}}", .{ar.flags})
+                        else
+                            "";
+                        try head_lines.append(al, try std.fmt.allocPrint(al, "{s}  [{s}] {s}  tr:{d} dt:{d} re:{d} ho:{d}{s}{s}{s}", .{
+                            name_text,     ar.archetype, ar.agenda,
+                            ar.trust,      ar.debt,      ar.respect,
+                            ar.hostility,  cause_note,   flags_note,
+                            recurring_tag,
                         }));
                     }
                 }
@@ -3638,6 +3643,10 @@ pub const App = struct {
                 if (ops.world_state_summary.len > 0) {
                     try head_lines.append(al, "");
                     try head_lines.append(al, try std.fmt.allocPrint(al, "{{d}}world{{/}}  {s}", .{ops.world_state_summary}));
+                }
+                if (ops.situations.len > 0) {
+                    try head_lines.append(al, "");
+                    try head_lines.appendSlice(al, ops.situations);
                 }
                 try head_lines.append(al, "");
                 return .{

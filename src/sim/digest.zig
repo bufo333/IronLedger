@@ -561,6 +561,46 @@ test "an operation's committed reserve affects the complete digest" {
     try std.testing.expectEqual(base, stateHash(&gs));
 }
 
+test "situation records, actor and world flags and a situation's event fields affect the complete digest" {
+    var gs = GameState.init(std.testing.allocator, .{});
+    defer gs.deinit();
+    try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{ .id = @enumFromInt(1), .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "DC", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 400_000 }, .arc_key = "fracturing_garrison" });
+    try gs.commitActor(.{ .id = @enumFromInt(1), .archetype_key = "black_market", .contract = @enumFromInt(1) });
+    try gs.world_states.put(gs.allocator(), "galatea", .{});
+    try gs.event_queue.push(gs.allocator(), .{ .day = 0, .kind = .situation, .contract = @enumFromInt(1), .situation = "crates_off_the_books", .actor = @enumFromInt(1), .deadline_day = 7 });
+    const c = gs.contracts.getPtr(@enumFromInt(1)).?;
+    try c.situations.append(gs.allocator(), .{ .key = "crates_off_the_books", .day = 0, .actor = @enumFromInt(1) });
+    const base = stateHash(&gs);
+    const record = c.situations.items[0];
+    inline for (.{ "day", "actor" }) |field| {
+        c.situations.items[0] = record;
+        if (@TypeOf(@field(record, field)) == u32) @field(c.situations.items[0], field) += 1 else @field(c.situations.items[0], field) = @enumFromInt(2);
+        try std.testing.expect(base != stateHash(&gs));
+    }
+    c.situations.items[0] = record;
+    c.situations.items[0].key = "drill_the_militia";
+    try std.testing.expect(base != stateHash(&gs));
+    c.situations.items[0] = record;
+    c.situations.items[0].choice = 0;
+    try std.testing.expect(base != stateHash(&gs));
+    c.situations.items[0] = record;
+    try std.testing.expectEqual(base, stateHash(&gs));
+    gs.actor(@enumFromInt(1)).?.flags.insert(.did_business);
+    try std.testing.expect(base != stateHash(&gs));
+    gs.actor(@enumFromInt(1)).?.flags = .{};
+    gs.worldState("galatea").?.flags.insert(.militia_trained);
+    try std.testing.expect(base != stateHash(&gs));
+    gs.worldState("galatea").?.flags = .{};
+    const ev = &gs.event_queue.pending.items[0];
+    ev.situation = "drill_the_militia";
+    try std.testing.expect(base != stateHash(&gs));
+    ev.situation = "crates_off_the_books";
+    ev.actor = @enumFromInt(2);
+    try std.testing.expect(base != stateHash(&gs));
+    ev.actor = @enumFromInt(1);
+    try std.testing.expectEqual(base, stateHash(&gs));
+}
+
 test "captured artillery combat payload and terminal placement affect the complete digest" {
     const operations = @import("artillery_operations.zig");
     const battle = @import("artillery_battle.zig");

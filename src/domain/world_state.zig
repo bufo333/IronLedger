@@ -30,6 +30,44 @@ pub const WorldDim = enum {
 pub const world_min: i16 = -100; // TUNE
 pub const world_max: i16 = 100; // TUNE
 
+/// Delta to all five world-state dimensions from a named cause; the sim's
+/// `world_state.prepareWorldAdjust` applies it, clamped.
+pub const WorldDelta = struct {
+    security: i16 = 0,
+    civilian_support: i16 = 0,
+    infrastructure_strain: i16 = 0,
+    employer_control: i16 = 0,
+    enemy_influence: i16 = 0,
+
+    pub fn isZero(self: WorldDelta) bool {
+        return self.security == 0 and self.civilian_support == 0 and self.infrastructure_strain == 0 and self.employer_control == 0 and self.enemy_influence == 0;
+    }
+};
+
+/// What a world remembers of the company's answers to situations on it
+/// (ARCHITECTURE.md §8 "Situations"). `sim/world_state.setFlags` owns which
+/// flags exclude each other; local pricing and the arc finale read them.
+/// Each value is its bit in a save (schema 66): never reuse or renumber one.
+pub const WorldFlag = enum(u5) {
+    /// The black market trades openly with the company.
+    black_market_open = 0,
+    /// The black market was turned over to the authorities.
+    black_market_closed = 1,
+    /// The town militia was drilled by the company.
+    militia_trained = 2,
+
+    /// Short display label (markup-safe).
+    pub fn label(self: WorldFlag) []const u8 {
+        return switch (self) {
+            .black_market_open => "black market open",
+            .black_market_closed => "black market closed",
+            .militia_trained => "militia trained",
+        };
+    }
+};
+
+pub const WorldFlags = std.EnumSet(WorldFlag);
+
 /// Per-world state persisted across contracts (P4h.4).
 /// Stored in GameState.world_states keyed by planet_key.
 pub const WorldState = struct {
@@ -42,6 +80,9 @@ pub const WorldState = struct {
     last_cause: []const u8 = "",
     /// Day index of the most recent change.
     last_cause_day: u32 = 0,
+    /// What the world remembers of the company; stays on the planet
+    /// across contracts.
+    flags: WorldFlags = .{},
 };
 
 // ---- Tests -----------------------------------------------------------------

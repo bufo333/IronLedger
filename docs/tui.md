@@ -599,6 +599,13 @@ an intelligence confidence on a 0–10 scale when non-zero (`intel:N/10`).
 The briefing line shows the current beat name followed by the escalation clock and
 collapse threshold (`esc:N/T` when a collapse finale is defined; `esc:N` otherwise).
 
+Below it, read-only: one line per attached actor (relationship dimensions, the
+last cause, what the actor remembers of the company in amber, and a
+`(returning)` tag), rivals and officers; the world line, its flags last
+(`· black market open`); and one `situation` line per situation the contract
+raised (the day, who brought what, and the answer or `awaiting answer`). A
+pending situation is answered from the Desk inbox like any decision.
+
 | Key | Does |
 |---|---|
 | `↑ ↓` | move cursor |

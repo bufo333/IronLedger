@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const contract_mod = @import("contract.zig");
+const world_state = @import("world_state.zig");
 
 /// One narrative beat in an arc's escalation sequence.
 pub const Beat = struct {
@@ -15,9 +16,10 @@ pub const Beat = struct {
     escalation_threshold: u16,
 };
 
-/// One possible ending for the arc, selected by the escalation clock level.
-/// Bands are checked highest min_clock first; one must have min_clock == 0
-/// as the unconditional fallback. // TUNE
+/// One possible ending for the arc, selected by the escalation clock level
+/// and the world's flags (`operations.selectFinale`). Bands are checked
+/// highest min_clock first; exactly one finale has min_clock == 0 and no
+/// flag requirement: the unconditional fallback. // TUNE
 pub const Finale = struct {
     key: []const u8,
     name: []const u8,
@@ -33,6 +35,9 @@ pub const Finale = struct {
     vp_delta: i16 = 0,
     /// Employer standing delta applied when this finale resolves (non-collapse only). // TUNE
     standing_delta: i16 = 0,
+    /// The contract world must carry this flag for the finale to be chosen;
+    /// a gated finale is never a collapse.
+    requires_world_flag: ?world_state.WorldFlag = null,
 };
 
 /// One arc archetype: a set of contract kinds it applies to, an ordered
@@ -101,14 +106,17 @@ test "data: arcs.zon loads and validates" {
             try testing.expect(b.key.len > 0);
         }
 
-        // finales non-empty; exactly one with min_clock == 0 (fallback).
+        // finales non-empty; exactly one unconditional min_clock == 0 fallback.
         try testing.expect(a.finales.len > 0);
         var fallback_count: u32 = 0;
-        for (a.finales) |f| {
+        for (a.finales, 0..) |f, fi| {
             try testing.expect(markupSafe(f.key));
             try testing.expect(markupSafe(f.name));
             try testing.expect(f.key.len > 0);
-            if (f.min_clock == 0) fallback_count += 1;
+            for (a.finales[0..fi]) |g| try testing.expect(!std.mem.eql(u8, f.key, g.key));
+            if (f.min_clock == 0 and f.requires_world_flag == null) fallback_count += 1;
+            // A finale gated on a world flag is never a collapse.
+            if (f.requires_world_flag != null) try testing.expect(!f.ends_contract);
             // Finale delta bounds // TUNE
             try testing.expect(f.score_delta >= -100 and f.score_delta <= 100);
             try testing.expect(f.vp_delta >= -100 and f.vp_delta <= 100);

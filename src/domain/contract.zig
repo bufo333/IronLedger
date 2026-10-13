@@ -6,6 +6,7 @@ const std = @import("std");
 const types = @import("types.zig");
 const tuning = @import("tuning.zig").t;
 const operation = @import("operation.zig");
+const situation_mod = @import("situation.zig");
 
 pub const ContractKind = enum {
     garrison_duty,
@@ -291,6 +292,9 @@ pub const Contract = struct {
     rival_ids: std.ArrayListUnmanaged(types.RivalId) = .empty,
     /// Persistent officer arcs attached to this contract by its arc (P4i).
     officer_arc_ids: std.ArrayListUnmanaged(types.OfficerArcId) = .empty,
+    /// Every situation this contract raised, in the order raised; each
+    /// comes up at most once per contract.
+    situations: std.ArrayListUnmanaged(situation_mod.SituationRecord) = .empty,
 
     /// The company is out on it: in transit to the world or on station.
     pub fn isRunning(self: *const Contract) bool {

@@ -43,13 +43,14 @@ const rival_mod = @import("../domain/rival.zig");
 const merc_company_mod = @import("../domain/merc_company.zig");
 const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
+const situation_mod = @import("../domain/situation.zig");
 
 const artillery_store = @import("artillery_store.zig");
 const artillery_battle_store = @import("artillery_battle_store.zig");
 const artillery = @import("../sim/artillery.zig");
 const artillery_catalogue = @import("../domain/artillery_catalogue.zig");
 
-pub const schema_version = 65;
+pub const schema_version = 66;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -94,7 +95,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS listing (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, item_key TEXT, rarity TEXT, price INTEGER, qty INTEGER, staple INTEGER CHECK (staple IN (0,1)), listed INTEGER, expires INTEGER, hq INTEGER, c_armor INTEGER, c_quality TEXT, c_damaged INTEGER, c_destroyed INTEGER, c_missing INTEGER, black INTEGER NOT NULL DEFAULT 0 CHECK (black IN (0,1)), company INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, hull_instance_id INTEGER NOT NULL DEFAULT 0, planet_key TEXT NOT NULL DEFAULT '', available_after INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS part_order (cid INTEGER NOT NULL, ord INTEGER NOT NULL, part_key TEXT, qty INTEGER, dest_kind TEXT, dest_id INTEGER, ordered INTEGER, eta INTEGER, cost INTEGER, status TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS event_log (cid INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER, category TEXT, company INTEGER, hq INTEGER, contract INTEGER, text TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, battle INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS pending_event (cid INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, day INTEGER, contract INTEGER, company INTEGER, default_choice INTEGER, deadline INTEGER, chosen INTEGER, person INTEGER NOT NULL DEFAULT 0, id INTEGER NOT NULL DEFAULT 0, battle INTEGER NOT NULL DEFAULT 0, situation TEXT CHECK (situation IS NULL OR typeof(situation)='text'), actor INTEGER NOT NULL CHECK (typeof(actor)='integer' AND actor BETWEEN 0 AND 4294967295), CHECK ((situation IS NOT NULL) = (kind = 'situation')), CHECK ((actor != 0) = (kind = 'situation')), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS refit_plan (cid INTEGER NOT NULL, ord INTEGER NOT NULL, unit INTEGER, committed INTEGER CHECK (committed IN (0,1)), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS refit_op (cid INTEGER NOT NULL, plan_ord INTEGER NOT NULL, ord INTEGER NOT NULL, kind TEXT, slot_key TEXT, location TEXT, part_key TEXT, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, plan_ord) REFERENCES refit_plan(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_report (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL CHECK (id > 0), day INTEGER, contract INTEGER, company INTEGER, kind TEXT, enemy_key TEXT, scenario TEXT, terrain TEXT, weather TEXT, outcome TEXT, held_field INTEGER, withdrew INTEGER, roe TEXT, roe_overridden INTEGER, player_power INTEGER, enemy_power INTEGER, conditions_mod INTEGER, close_terrain INTEGER, air_grounded INTEGER, convoy_hit INTEGER, edge_spent_by TEXT, recon_quality INTEGER, avg_fatigue INTEGER, avg_morale INTEGER, hits_taken INTEGER, destroyed INTEGER, wounded INTEGER, kia INTEGER, lost_hulls INTEGER, missing INTEGER, enemy_destroyed_bv INTEGER, kills_credited INTEGER, prisoners INTEGER, battle_loss_comp INTEGER, score_after INTEGER, score_delta INTEGER, morale_delta INTEGER, fatigue_add INTEGER, battle_loss_pct INTEGER, salvage_pct INTEGER, command_rights TEXT, silenced_mounts INTEGER, armor_left INTEGER, salvage_claimed INTEGER, salvage_haulable INTEGER, salvage_cut INTEGER, salvage_cash INTEGER, salvage_items TEXT, conceded INTEGER, acknowledged INTEGER NOT NULL DEFAULT 1 CHECK (acknowledged IN (0,1)), salvage_unclaimed INTEGER NOT NULL DEFAULT 0, operation TEXT NOT NULL DEFAULT '', operation_intent TEXT NOT NULL DEFAULT '', operation_tempo TEXT NOT NULL DEFAULT '', operation_interventions TEXT NOT NULL DEFAULT '', artillery_present INTEGER NOT NULL CHECK(typeof(artillery_present)='integer' AND artillery_present IN (0,1)), phase_count INTEGER NOT NULL CHECK (typeof(phase_count)='integer' AND phase_count BETWEEN 0 AND 3), lever_count INTEGER NOT NULL CHECK (typeof(lever_count)='integer' AND lever_count BETWEEN 0 AND 5), UNIQUE (cid, ord), UNIQUE (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
@@ -108,8 +109,9 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS battle_report_lever (cid INTEGER NOT NULL, report_ord INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord BETWEEN 0 AND 4), kind TEXT NOT NULL CHECK (kind IN ('commit_reserve','emergency_recon','reinforce','air_cover','field_repair')), cost INTEGER NOT NULL CHECK (typeof(cost)='integer' AND cost BETWEEN 0 AND 255), roll_mod INTEGER NOT NULL CHECK (typeof(roll_mod)='integer' AND roll_mod BETWEEN -2147483648 AND 2147483647), PRIMARY KEY (cid, report_ord, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, report_ord) REFERENCES battle_report(cid, ord) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_in_progress (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), contract_id INTEGER NOT NULL CHECK (typeof(contract_id)='integer' AND contract_id BETWEEN 1 AND 4294967295), phase TEXT NOT NULL CHECK (phase IN ('contact','decisive')), orders INTEGER NOT NULL CHECK (typeof(orders)='integer' AND orders >= 1), PRIMARY KEY (cid, contract_id), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS battle_in_progress_order (cid INTEGER NOT NULL, contract_id INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), order_kind TEXT NOT NULL CHECK (order_kind IN ('engage','press_on','withdraw','pursue','consolidate','cover_recovery','roe','commit_reserve','intervene')), order_roe TEXT CHECK (order_roe IS NULL OR order_roe IN ('hold','standard','cautious')), order_intervention TEXT CHECK (order_intervention IS NULL OR order_intervention IN ('emergency_recon','reinforce','air_cover','field_repair')), pause TEXT NOT NULL CHECK (pause IN ('contact','decisive')), margin INTEGER NOT NULL CHECK (typeof(margin)='integer' AND margin BETWEEN -2147483648 AND 2147483647), hits INTEGER NOT NULL CHECK (typeof(hits)='integer' AND hits BETWEEN 0 AND 4294967295), momentum INTEGER NOT NULL CHECK (typeof(momentum)='integer' AND momentum BETWEEN -2147483648 AND 2147483647), roe TEXT NOT NULL CHECK (roe IN ('hold','standard','cautious')), outcome TEXT CHECK (outcome IS NULL OR outcome IN ('decisive_victory','victory','draw','defeat','rout')), held_field INTEGER NOT NULL CHECK (held_field IN (0,1)), odds_next TEXT NOT NULL CHECK (odds_next IN ('decisive','pursuit','cover')), odds_0 INTEGER NOT NULL CHECK (typeof(odds_0)='integer' AND odds_0 BETWEEN 0 AND 65535), odds_1 INTEGER NOT NULL CHECK (typeof(odds_1)='integer' AND odds_1 BETWEEN 0 AND 65535), odds_2 INTEGER NOT NULL CHECK (typeof(odds_2)='integer' AND odds_2 BETWEEN 0 AND 65535), odds_3 INTEGER NOT NULL CHECK (typeof(odds_3)='integer' AND odds_3 BETWEEN 0 AND 65535), odds_4 INTEGER NOT NULL CHECK (typeof(odds_4)='integer' AND odds_4 BETWEEN 0 AND 65535), odds_total INTEGER NOT NULL CHECK (typeof(odds_total)='integer' AND odds_total BETWEEN 1 AND 65535), lever_mod INTEGER NOT NULL CHECK (typeof(lever_mod)='integer' AND lever_mod BETWEEN -2147483648 AND 2147483647), reserve_committed INTEGER NOT NULL CHECK (reserve_committed IN (0,1)), capacity_spent INTEGER NOT NULL CHECK (typeof(capacity_spent)='integer' AND capacity_spent BETWEEN 0 AND 255), PRIMARY KEY (cid, contract_id, ord), CHECK ((order_roe IS NULL) = (order_kind != 'roe')), CHECK ((order_intervention IS NULL) = (order_kind != 'intervene')), CHECK ((outcome IS NULL) = (pause = 'contact')), CHECK (pause = 'decisive' OR held_field = 0), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, contract_id) REFERENCES battle_in_progress(cid, contract_id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS actor (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, first_name TEXT NOT NULL, last_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, trust INTEGER NOT NULL DEFAULT 0, debt INTEGER NOT NULL DEFAULT 0, respect INTEGER NOT NULL DEFAULT 0, hostility INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS world_state (cid INTEGER NOT NULL, ord INTEGER NOT NULL, planet_key TEXT NOT NULL, security INTEGER NOT NULL DEFAULT 0, civilian_support INTEGER NOT NULL DEFAULT 0, infrastructure_strain INTEGER NOT NULL DEFAULT 0, employer_control INTEGER NOT NULL DEFAULT 0, enemy_influence INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, planet_key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS actor (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, first_name TEXT NOT NULL, last_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, trust INTEGER NOT NULL DEFAULT 0, debt INTEGER NOT NULL DEFAULT 0, respect INTEGER NOT NULL DEFAULT 0, hostility INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), flags INTEGER NOT NULL CHECK (typeof(flags)='integer' AND flags BETWEEN 0 AND 15), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS world_state (cid INTEGER NOT NULL, ord INTEGER NOT NULL, planet_key TEXT NOT NULL, security INTEGER NOT NULL DEFAULT 0, civilian_support INTEGER NOT NULL DEFAULT 0, infrastructure_strain INTEGER NOT NULL DEFAULT 0, employer_control INTEGER NOT NULL DEFAULT 0, enemy_influence INTEGER NOT NULL DEFAULT 0, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, flags INTEGER NOT NULL CHECK (typeof(flags)='integer' AND flags BETWEEN 0 AND 7), PRIMARY KEY (cid, planet_key), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS contract_situation (cid INTEGER NOT NULL, contract INTEGER NOT NULL CHECK (typeof(contract)='integer' AND contract BETWEEN 1 AND 4294967295), ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), situation TEXT NOT NULL CHECK (typeof(situation)='text'), day INTEGER NOT NULL CHECK (typeof(day)='integer' AND day BETWEEN 0 AND 4294967295), actor INTEGER NOT NULL CHECK (typeof(actor)='integer' AND actor BETWEEN 1 AND 4294967295), choice INTEGER CHECK (choice IS NULL OR (typeof(choice)='integer' AND choice BETWEEN 0 AND 2)), PRIMARY KEY (cid, contract, ord), UNIQUE (cid, contract, situation), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS rival (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, contract INTEGER NOT NULL DEFAULT 0, standing INTEGER NOT NULL DEFAULT 0, encounters INTEGER NOT NULL DEFAULT 1, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), merc_company_id INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS officer_arc (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, person INTEGER NOT NULL, contract INTEGER NOT NULL DEFAULT 0, seat TEXT NOT NULL, performance INTEGER NOT NULL DEFAULT 0, encounters INTEGER NOT NULL DEFAULT 1, last_cause TEXT NOT NULL DEFAULT '', last_cause_day INTEGER NOT NULL DEFAULT 0, recurring INTEGER NOT NULL DEFAULT 0 CHECK (recurring IN (0,1)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hull_instance (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, base_key TEXT, name TEXT, nickname TEXT, status TEXT NOT NULL DEFAULT 'active', intro_year INTEGER NOT NULL DEFAULT 0, pre_campaign INTEGER NOT NULL DEFAULT 0 CHECK (pre_campaign IN (0,1)), owner_type TEXT NOT NULL DEFAULT 'player', owner_faction_key TEXT NOT NULL DEFAULT '', owner_merc_company_id INTEGER NOT NULL DEFAULT 0, catalogue TEXT NOT NULL DEFAULT 'chassis' CHECK (catalogue IN ('chassis','artillery')), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
@@ -138,6 +140,7 @@ const tables = [_][]const u8{
     "operation_task",      "operation_intervention", "battle_report_task", "actor",                 "world_state",           "rival",               "officer_arc",            "hull_instance",            "hull_loadout",
     "artillery_formation", "artillery_crew",         "artillery_slot",     "artillery_offer",       "hull_combat_record",    "maintenance_entry",   "hull_ownership_history", "faction_roster",           "merc_company",
     "merc_company_roster", "retired_hq",             "artillery_battle",   "artillery_battle_seat", "artillery_battle_slot", "battle_report_phase", "battle_in_progress",     "battle_in_progress_order", "battle_report_lever",
+    "contract_situation",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -203,6 +206,7 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_battle_in_progress_order_cid ON battle_in_progress_order(cid, contract_id);
     \\CREATE INDEX IF NOT EXISTS ix_actor_cid ON actor(cid);
     \\CREATE INDEX IF NOT EXISTS ix_world_state_cid ON world_state(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_contract_situation_cid ON contract_situation(cid);
     \\CREATE INDEX IF NOT EXISTS ix_rival_cid ON rival(cid);
     \\CREATE INDEX IF NOT EXISTS ix_officer_arc_cid ON officer_arc(cid);
     \\CREATE INDEX IF NOT EXISTS ix_hull_instance_cid ON hull_instance(cid);
@@ -837,6 +841,7 @@ pub const Store = struct {
         try self.saveRetiredHq(gs, cid);
         try self.saveContracts(gs, cid);
         try self.saveOperations(gs, cid);
+        try self.saveContractSituations(gs, cid);
         try self.saveActors(gs, cid);
         try self.saveMercCompanies(gs, cid);
         try self.saveRivals(gs, cid);
@@ -1376,9 +1381,55 @@ pub const Store = struct {
         }
     }
 
+    /// Each contract's situation records, in the order raised.
+    fn saveContractSituations(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO contract_situation VALUES (?1,?2,?3,?4,?5,?6,?7)");
+        defer st.finalize();
+        var it = gs.contracts.iterator();
+        while (it.next()) |entry| {
+            const c = entry.value_ptr;
+            for (c.situations.items, 0..) |r, ord| {
+                try st.bindAll(.{ cid, @intFromEnum(c.id), @as(i64, @intCast(ord)), r.key, @as(i64, r.day), @intFromEnum(r.actor), if (r.choice) |ch| @as(?i64, ch) else null });
+                try st.run();
+            }
+        }
+    }
+
+    /// Situation records back onto their contracts (after `loadActors`).
+    /// Fails closed on a record whose contract, situation or owner is
+    /// unknown, whose situation belongs to another arc, whose owner is not
+    /// the contract's actor of that archetype, that repeats a situation,
+    /// that is out of order, dated after today, or whose choice is not an
+    /// option.
+    fn loadContractSituations(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare("SELECT contract, ord, situation, day, actor, choice, typeof(situation)='text' AND typeof(contract)='integer' AND typeof(ord)='integer' AND typeof(day)='integer' AND typeof(actor)='integer' AND (choice IS NULL OR typeof(choice)='integer') FROM contract_situation WHERE cid = ?1 ORDER BY contract, ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            if (st.int(6) != 1) return error.CorruptSave;
+            const c = gs.contracts.getPtr(try toId(types.ContractId, st.int(0))) orelse return error.CorruptSave;
+            if (st.int(1) != @as(i64, @intCast(c.situations.items.len))) return error.CorruptSave;
+            const s = situation_mod.find(try st.text(2, alloc)) orelse return error.CorruptSave;
+            if (!std.mem.eql(u8, s.arc, c.arc_key)) return error.CorruptSave;
+            for (c.situations.items) |r| if (std.mem.eql(u8, r.key, s.key)) return error.CorruptSave;
+            const day = try st.intAs(u32, 3);
+            if (day > gs.clock.day_index) return error.CorruptSave;
+            const actor_id = try toId(types.ActorId, st.int(4));
+            const owner = gs.actor(actor_id) orelse return error.CorruptSave;
+            if (owner.contract != c.id or !std.mem.eql(u8, owner.archetype_key, s.owner)) return error.CorruptSave;
+            const choice: ?u8 = if (st.optInt(5)) |raw| blk: {
+                const ch = try fit(u8, raw);
+                if (ch >= s.options.len) return error.CorruptSave;
+                break :blk ch;
+            } else null;
+            try c.situations.append(alloc, .{ .key = s.key, .day = day, .actor = actor_id, .choice = choice });
+        }
+    }
+
     // P4i: save and load persistent actors.
     fn saveActors(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO actor VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)");
+        const st = try self.db.prepare("INSERT INTO actor VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)");
         defer st.finalize();
         var it = gs.actors.iterator();
         var ord: i64 = 0;
@@ -1401,6 +1452,7 @@ pub const Store = struct {
                 a.last_cause,
                 @as(i64, a.last_cause_day),
                 @as(i64, @intFromBool(a.recurring)),
+                flagBits(actor_mod.ActorFlag, a.flags),
             });
             try st.run();
         }
@@ -1408,7 +1460,7 @@ pub const Store = struct {
 
     fn loadActors(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT id, archetype_key, first_name, last_name, faction_key, side, contract, trust, debt, respect, hostility, last_cause, last_cause_day, recurring FROM actor WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT id, archetype_key, first_name, last_name, faction_key, side, contract, trust, debt, respect, hostility, last_cause, last_cause_day, recurring, flags, typeof(flags)='integer' FROM actor WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -1443,6 +1495,7 @@ pub const Store = struct {
                 .last_cause = try st.text(11, alloc),
                 .last_cause_day = try st.intAs(u32, 12),
                 .recurring = st.int(13) != 0,
+                .flags = if (st.int(15) == 1) try flagSet(actor_mod.ActorFlag, st.int(14)) else return error.CorruptSave,
             };
             const gop = try gs.actors.getOrPut(alloc, a.id);
             if (gop.found_existing) return error.CorruptSave;
@@ -1471,7 +1524,7 @@ pub const Store = struct {
 
     // P4h.4: save and load per-world state.
     fn saveWorldStates(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO world_state VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
+        const st = try self.db.prepare("INSERT INTO world_state VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
         defer st.finalize();
         var it = gs.world_states.iterator();
         var ord: i64 = 0;
@@ -1488,6 +1541,7 @@ pub const Store = struct {
                 @as(i64, ws.enemy_influence),
                 ws.last_cause,
                 @as(i64, ws.last_cause_day),
+                flagBits(world_state_dom.WorldFlag, ws.flags),
             });
             try st.run();
         }
@@ -1495,7 +1549,7 @@ pub const Store = struct {
 
     fn loadWorldStates(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT planet_key, security, civilian_support, infrastructure_strain, employer_control, enemy_influence, last_cause, last_cause_day FROM world_state WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT planet_key, security, civilian_support, infrastructure_strain, employer_control, enemy_influence, last_cause, last_cause_day, flags, typeof(flags)='integer' FROM world_state WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -1519,6 +1573,7 @@ pub const Store = struct {
                 .enemy_influence = enemy_influence,
                 .last_cause = try st.text(6, alloc),
                 .last_cause_day = try st.intAs(u32, 7),
+                .flags = if (st.int(9) == 1) try flagSet(world_state_dom.WorldFlag, st.int(8)) else return error.CorruptSave,
             };
             const gop = try gs.world_states.getOrPut(alloc, planet_key);
             if (gop.found_existing) return error.CorruptSave;
@@ -2010,10 +2065,11 @@ pub const Store = struct {
     }
 
     fn savePendingEvent(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO pending_event VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)");
+        const st = try self.db.prepare("INSERT INTO pending_event VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)");
         defer st.finalize();
         for (gs.event_queue.pending.items, 0..) |e, i| {
-            try st.bindAll(.{ cid, @as(i64, @intCast(i)), e.kind, @as(i64, e.day), @intFromEnum(e.contract), @intFromEnum(e.company), @as(i64, @intCast(e.default_choice)), @as(i64, e.deadline_day), if (e.chosen) |c| @as(?i64, @intCast(c)) else null, @intFromEnum(e.person), @intFromEnum(e.id), @intFromEnum(e.battle) });
+            const situation: ?[]const u8 = if (e.kind == .situation) e.situation else null;
+            try st.bindAll(.{ cid, @as(i64, @intCast(i)), e.kind, @as(i64, e.day), @intFromEnum(e.contract), @intFromEnum(e.company), @as(i64, @intCast(e.default_choice)), @as(i64, e.deadline_day), if (e.chosen) |c| @as(?i64, @intCast(c)) else null, @intFromEnum(e.person), @intFromEnum(e.id), @intFromEnum(e.battle), situation, @intFromEnum(e.actor) });
             try st.run();
         }
     }
@@ -2276,6 +2332,7 @@ pub const Store = struct {
         try self.loadOperationTasks(&gs, cid);
         try self.loadOperationInterventions(&gs, cid);
         try self.loadActors(&gs, cid);
+        try self.loadContractSituations(&gs, cid);
         try self.loadMercCompanies(&gs, cid);
         try self.loadRivals(&gs, cid);
         try self.loadOfficerArcs(&gs, cid);
@@ -2300,6 +2357,7 @@ pub const Store = struct {
         try self.loadPartOrder(&gs, cid);
         try self.loadEventLog(&gs, cid);
         try self.loadPendingEvent(&gs, cid, saved_version);
+        try validateSituationEvents(&gs);
         try self.loadBattleReport(&gs, cid);
         try self.loadBattleInProgress(&gs, cid);
         try self.loadRefitPlan(&gs, cid);
@@ -3286,31 +3344,49 @@ pub const Store = struct {
 
     fn loadPendingEvent(self: Store, gs: *GameState, cid: i64, saved_version: u32) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT kind, day, contract, company, default_choice, deadline, chosen, person, id, battle FROM pending_event WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT kind, day, contract, company, default_choice, deadline, chosen, person, id, battle, situation, actor, situation IS NULL OR typeof(situation)='text' FROM pending_event WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
             const kind = st.enumValue(events_mod.EventKind, 0) orelse return error.CorruptSave;
-            const entry = contract_events.entryForKind(kind) orelse return error.CorruptSave;
+            if (st.int(12) != 1) return error.CorruptSave;
+            // A situation rebuilds its options from its row; every other
+            // kind from its deck entry, and names no situation or actor.
+            var situation: []const u8 = "";
+            var default_owned: ?usize = null;
+            const options: []const events_mod.Option = if (kind == .situation) blk: {
+                const s = situation_mod.find(try st.text(10, alloc)) orelse return error.CorruptSave;
+                situation = s.key;
+                default_owned = s.default_choice;
+                break :blk s.eventOptions();
+            } else blk: {
+                if (!st.isNull(10) or st.int(11) != 0) return error.CorruptSave;
+                break :blk (contract_events.entryForKind(kind) orelse return error.CorruptSave).options;
+            };
             const default_choice = try st.intAs(usize, 4);
-            if (default_choice >= entry.options.len) return error.CorruptSave; // out-of-range choice
+            if (default_choice >= options.len) return error.CorruptSave; // out-of-range choice
+            if (default_owned) |d| if (default_choice != d) return error.CorruptSave;
             const chosen: ?usize = if (st.optInt(6)) |c| blk: {
                 const ci = try fit(usize, c);
-                if (ci >= entry.options.len) return error.CorruptSave;
+                if (ci >= options.len) return error.CorruptSave;
                 break :blk ci;
             } else null;
+            const actor = try toId(types.ActorId, st.int(11));
+            if (kind == .situation and actor == .none) return error.CorruptSave;
             try gs.event_queue.pending.append(alloc, .{
                 .day = try st.intAs(u32, 1),
                 .kind = kind,
                 .contract = try toId(types.ContractId, st.int(2)),
                 .company = try toId(types.ForceId, st.int(3)),
-                .options = entry.options,
+                .options = options,
                 .default_choice = default_choice,
                 .deadline_day = try st.intAs(u32, 5),
                 .chosen = chosen,
                 .person = try toId(types.PersonId, st.int(7)),
                 .id = try toId(types.EventId, st.int(8)),
                 .battle = try toId(types.BattleId, st.int(9)),
+                .situation = situation,
+                .actor = actor,
             });
         }
         _ = saved_version;
@@ -4255,6 +4331,30 @@ fn validateCounters(gs: *GameState) error{CorruptSave}!void {
     }
 }
 
+/// Every pending situation answers an open record of its contract, owned
+/// by the same actor, and every open record has exactly one pending
+/// situation; an answered record has none (rule 47).
+fn validateSituationEvents(gs: *GameState) error{CorruptSave}!void {
+    for (gs.event_queue.pending.items, 0..) |ev, i| {
+        if (ev.kind != .situation) continue;
+        const c = gs.contracts.getPtr(ev.contract) orelse return error.CorruptSave;
+        const record = for (c.situations.items) |*r| {
+            if (std.mem.eql(u8, r.key, ev.situation)) break r;
+        } else return error.CorruptSave;
+        if (record.choice != null or record.actor != ev.actor or ev.chosen != null) return error.CorruptSave;
+        for (gs.event_queue.pending.items[0..i]) |prior| {
+            if (prior.kind == .situation and prior.contract == ev.contract and std.mem.eql(u8, prior.situation, ev.situation)) return error.CorruptSave;
+        }
+    }
+    for (gs.contracts.values()) |*c| for (c.situations.items) |r| {
+        if (r.choice != null) continue;
+        const pending = for (gs.event_queue.pending.items) |ev| {
+            if (ev.kind == .situation and ev.contract == c.id and std.mem.eql(u8, ev.situation, r.key)) break true;
+        } else false;
+        if (!pending) return error.CorruptSave;
+    };
+}
+
 /// A stored integer as `T`; `error.CorruptSave` when it does not fit.
 fn fit(comptime T: type, v: i64) error{CorruptSave}!T {
     return std.math.cast(T, v) orelse error.CorruptSave;
@@ -4267,6 +4367,31 @@ fn toId(comptime T: type, v: i64) error{CorruptSave}!T {
 
 fn optU32(v: ?i64) error{CorruptSave}!?u32 {
     return if (v) |x| try fit(u32, x) else null;
+}
+
+/// A flag set as stored (schema 66): bit `@intFromEnum(flag)` per flag held.
+fn flagBits(comptime E: type, set: std.EnumSet(E)) i64 {
+    var bits: i64 = 0;
+    var it = set.iterator();
+    while (it.next()) |f| bits |= @as(i64, 1) << @intFromEnum(f);
+    return bits;
+}
+
+/// A stored flag set; `error.CorruptSave` for a negative value or a bit
+/// that names no flag.
+fn flagSet(comptime E: type, bits: i64) error{CorruptSave}!std.EnumSet(E) {
+    if (bits < 0) return error.CorruptSave;
+    var set: std.EnumSet(E) = .{};
+    var rest = bits;
+    inline for (comptime std.enums.values(E)) |f| {
+        const bit = @as(i64, 1) << @intFromEnum(f);
+        if (rest & bit != 0) {
+            set.insert(f);
+            rest &= ~bit;
+        }
+    }
+    if (rest != 0) return error.CorruptSave;
+    return set;
 }
 
 const Cols = struct { kind: []const u8, id: i64 };
@@ -5461,8 +5586,8 @@ test "a played current campaign round trips and its downgraded store is refused 
     try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("UPDATE setting SET value = 36 WHERE key = 'schema_version'");
     defer raw.close();
-    try std.testing.expectEqual(@as(u64, 17400381237837659201), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 11405468828154880488), hash_before);
+    try std.testing.expectEqual(@as(u64, 5020649500626899030), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 12048552543560690271), hash_before);
     try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
@@ -5886,8 +6011,8 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     // service requires available, physically local technicians and local pool
     // teams (docs/p2-artillery-operations-design.md,
     // Condition, maintenance, repairs and shared hours).
-    try std.testing.expectEqual(@as(u64, 17400381237837659201), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 11405468828154880488), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 5020649500626899030), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 12048552543560690271), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -9802,7 +9927,7 @@ test "schema 63 operational corruption is never repaired on load" {
         try std.testing.expectEqual(before, digest.stateHash(&gs));
     }
     try store.save(&gs);
-    try store.db.exec("UPDATE campaign SET schema_version=66");
+    try store.db.exec("UPDATE campaign SET schema_version=67");
     try std.testing.expectError(error.SaveNewerThanGame, store.load(std.testing.allocator, gs.campaign_id));
 }
 
@@ -10115,7 +10240,7 @@ fn expectSuspendedDepotRoundTripForTest(store: Store, gs: *GameState, home: type
 }
 
 test "store versions require one exact positive integer and current structures are never healed" {
-    for ([_][]const u8{ "0", "-1", "4294967296", "NULL", "65.5", "'65'", "X'3635'" }) |value| {
+    for ([_][]const u8{ "0", "-1", "4294967296", "NULL", "66.5", "'66'", "X'3636'" }) |value| {
         const raw = try sqlite.Db.open(":memory:");
         defer raw.close();
         try raw.exec("CREATE TABLE setting(key,value)");
@@ -10125,8 +10250,8 @@ test "store versions require one exact positive integer and current structures a
     }
     for ([_][*:0]const u8{
         "CREATE TABLE setting(key,value)",
-        "CREATE TABLE setting(key,value); INSERT INTO setting VALUES('schema_version',65),('schema_version',65)",
-        "CREATE TABLE setting(key,value); INSERT INTO setting VALUES('schema_version',65)",
+        "CREATE TABLE setting(key,value); INSERT INTO setting VALUES('schema_version',66),('schema_version',66)",
+        "CREATE TABLE setting(key,value); INSERT INTO setting VALUES('schema_version',66)",
     }) |sql| {
         const raw = try sqlite.Db.open(":memory:");
         defer raw.close();
@@ -10177,9 +10302,10 @@ test "old and future campaign load and overwrite refuse before gameplay decoding
         .{ .version = 62, .expected = error.SaveOlderThanGame },
         .{ .version = 63, .expected = error.SaveOlderThanGame },
         .{ .version = 64, .expected = error.SaveOlderThanGame },
-        .{ .version = 66, .expected = error.SaveNewerThanGame },
+        .{ .version = 65, .expected = error.SaveOlderThanGame },
+        .{ .version = 67, .expected = error.SaveNewerThanGame },
     }) |case| {
-        try store.db.exec("UPDATE campaign SET schema_version=65");
+        try store.db.exec("UPDATE campaign SET schema_version=66");
         try store.save(&gs);
         var sql: [128:0]u8 = undefined;
         try store.db.exec(try std.fmt.bufPrintZ(&sql, "UPDATE campaign SET schema_version={d}; DELETE FROM rng_stream", .{case.version}));
@@ -10613,7 +10739,7 @@ test "a store at format 64 is refused before any change, battle in progress or n
     try raw.exec("UPDATE setting SET value = 64 WHERE key = 'schema_version'");
     try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
     // A campaign row at 64 in a current store is refused the same way.
-    try raw.exec("UPDATE setting SET value = 65 WHERE key = 'schema_version'; UPDATE campaign SET schema_version = 64");
+    try raw.exec("UPDATE setting SET value = 66 WHERE key = 'schema_version'; UPDATE campaign SET schema_version = 64");
     store = try Store.fromDb(raw);
     const memory_before = digest.stateHash(&gs);
     const storage_before = try databaseFingerprintForTest(raw);
@@ -10782,4 +10908,128 @@ test "a battle report's levers round trip, and missing, malformed or forged leve
     try conceded_store.save(&conceded);
     try expectCurrentRoundTripForTest(conceded_store, &conceded);
     try expectBattleTamperRefusedForTest(conceded_store, &conceded, "INSERT INTO battle_report_lever SELECT cid, ord, 0, 'commit_reserve', 0, 2 FROM battle_report; UPDATE battle_report SET lever_count=1");
+}
+
+/// A garrison contract whose black-market contact sold the company crates
+/// (record answered, the contact and the world flagged) and whose militia
+/// commander's drill is pending, with a notice decision beside it.
+fn situationCampaignForTest(gs: *GameState) !*contract_mod.Contract {
+    const situations = @import("../sim/situations.zig");
+    const c = try situations.garrisonContractForTest(gs);
+    try std.testing.expect(try situations.queueDue(gs, c));
+    try contract_events.resolveChoice(gs, gs.event_queue.pending.items[0].id, 0);
+    c.arc_beat = 1;
+    try std.testing.expect(try situations.queueDue(gs, c));
+    try contract_events.queueNotice(gs, gs.people.keys()[0]);
+    return c;
+}
+
+fn pendingSituationForTest(gs: *GameState) types.EventId {
+    for (gs.event_queue.pending.items) |ev| if (ev.kind == .situation) return ev.id;
+    unreachable;
+}
+
+test "a pending situation, its records and the flags survive save, load and a reopened file, and play on identically" {
+    const commands = @import("../sim/commands.zig");
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const path = try std.fmt.allocPrintSentinel(std.testing.allocator, ".zig-cache/tmp/{s}/situations.db", .{temporary.sub_path}, 0);
+    defer std.testing.allocator.free(path);
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6201 });
+    defer gs.deinit();
+    const c = try situationCampaignForTest(&gs);
+    try std.testing.expectEqual(@as(usize, 2), c.situations.items.len);
+    {
+        const store = try Store.open(path);
+        defer store.close();
+        try store.save(&gs);
+        try expectCurrentRoundTripForTest(store, &gs);
+    }
+    const store = try Store.open(path);
+    defer store.close();
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expect(loaded.actors.values()[0].flags.count() + loaded.worldState("galatea").?.flags.count() > 0);
+    // Answering after the reload is answering without the save.
+    for ([_]*GameState{ &gs, &loaded }) |g| {
+        _ = try commands.execute(g, .{ .resolve_decision = .{ .event = pendingSituationForTest(g), .choice = 0 } });
+        _ = try commands.execute(g, .advance_day);
+    }
+    var difference: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &difference) orelse "");
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    try std.testing.expect(loaded.worldState("galatea").?.flags.contains(.militia_trained));
+}
+
+test "situation records, situation decisions and flags fail closed on every malformed form" {
+    const situations = @import("../sim/situations.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6202 });
+    defer gs.deinit();
+    const c = try situationCampaignForTest(&gs);
+    const liaison = @intFromEnum(situations.ownerOf(&gs, c, "liaison").?.id);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+    var buf: [256:0]u8 = undefined;
+    const tampers = [_][*:0]const u8{
+        // Flags: an unknown bit, a negative or non-integer value.
+        "UPDATE actor SET flags=16",
+        "UPDATE actor SET flags=-1",
+        "UPDATE actor SET flags='x'",
+        "UPDATE world_state SET flags=8",
+        "UPDATE world_state SET flags='y'",
+        // Records: unknown key, another arc, out of range, duplicate, out of order, from the future.
+        "UPDATE contract_situation SET situation='no_such_situation' WHERE ord=0",
+        "UPDATE contract_situation SET situation=X'6162' WHERE ord=0",
+        "UPDATE contract SET arc_key='aid_under_siege'",
+        "UPDATE contract_situation SET choice=3 WHERE ord=0",
+        "UPDATE contract_situation SET choice=-1 WHERE ord=0",
+        "UPDATE contract_situation SET ord=5 WHERE ord=1",
+        "UPDATE contract_situation SET day=4000000000 WHERE ord=0",
+        "UPDATE contract_situation SET actor=999 WHERE ord=0",
+        "UPDATE contract_situation SET contract=999 WHERE ord=0",
+        // A pending situation and its record disagree.
+        "DELETE FROM contract_situation WHERE ord=1",
+        "UPDATE contract_situation SET choice=0 WHERE ord=1",
+        "DELETE FROM pending_event WHERE kind='situation'",
+        "UPDATE pending_event SET situation='crates_off_the_books' WHERE kind='situation'",
+        "UPDATE pending_event SET situation=NULL WHERE kind='situation'",
+        "UPDATE pending_event SET situation='no_such_situation' WHERE kind='situation'",
+        "UPDATE pending_event SET actor=0 WHERE kind='situation'",
+        "UPDATE pending_event SET default_choice=0 WHERE kind='situation'",
+        "UPDATE pending_event SET chosen=0 WHERE kind='situation'",
+        "UPDATE pending_event SET contract=999 WHERE kind='situation'",
+        "INSERT INTO pending_event SELECT cid, 9, kind, day, contract, company, default_choice, deadline, chosen, person, id + 1, battle, situation, actor FROM pending_event WHERE kind='situation'; UPDATE meta SET value=value+1 WHERE key='next_event_id'",
+        // Another decision names no situation and no actor.
+        "UPDATE pending_event SET situation='drill_the_militia' WHERE kind='notice_given'",
+        "UPDATE pending_event SET actor=1 WHERE kind='notice_given'",
+    };
+    for (tampers) |tamper| try expectUncheckedTamperRefusedForTest(store, &gs, tamper);
+    // An owner that is the contract's actor of another archetype.
+    try expectUncheckedTamperRefusedForTest(store, &gs, try std.fmt.bufPrintZ(&buf, "UPDATE contract_situation SET actor={d} WHERE ord=0", .{liaison}));
+    try expectUncheckedTamperRefusedForTest(store, &gs, try std.fmt.bufPrintZ(&buf, "UPDATE pending_event SET actor={d} WHERE kind='situation'", .{liaison}));
+    // A situation raised twice on one contract, past the table's own
+    // uniqueness (rebuilt without it, so the loader alone must refuse).
+    try expectUncheckedTamperRefusedForTest(store, &gs, "CREATE TABLE cs AS SELECT * FROM contract_situation; DROP TABLE contract_situation; CREATE TABLE contract_situation AS SELECT * FROM cs; DROP TABLE cs; INSERT INTO contract_situation SELECT cid, contract, 2, situation, day, actor, choice FROM contract_situation WHERE ord=0");
+}
+
+test "a store or a campaign at format 65 is refused before any change, situations pending or not" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6203 });
+    defer gs.deinit();
+    _ = try situationCampaignForTest(&gs);
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    var store = try Store.fromDb(raw);
+    try store.save(&gs);
+    try raw.exec("UPDATE setting SET value = 65 WHERE key = 'schema_version'");
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
+    try raw.exec("UPDATE setting SET value = 66 WHERE key = 'schema_version'; UPDATE campaign SET schema_version = 65");
+    store = try Store.fromDb(raw);
+    const memory_before = digest.stateHash(&gs);
+    const storage_before = try databaseFingerprintForTest(raw);
+    try std.testing.expectError(error.SaveOlderThanGame, store.load(std.testing.allocator, gs.campaign_id));
+    try std.testing.expectError(error.SaveOlderThanGame, store.save(&gs));
+    try std.testing.expectEqual(storage_before, try databaseFingerprintForTest(raw));
+    try std.testing.expectEqual(memory_before, digest.stateHash(&gs));
 }

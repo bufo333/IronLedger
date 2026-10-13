@@ -286,7 +286,8 @@ pub fn resolveFinale(gs: *GameState, c: *contract_mod.Contract) !?*const arc_mod
     if (c.arc_key.len == 0) return null;
     if (c.arc_finale_key.len > 0) return null; // idempotent
 
-    const f = operations.selectFinale(c) orelse return null;
+    const world_flags = if (gs.worldState(c.planet_key)) |ws| ws.flags else @import("../domain/world_state.zig").WorldFlags{};
+    const f = operations.selectFinale(c, world_flags) orelse return null;
 
     // ---- PREPARE: reserve all log slots upfront: one for the finale line, one
     // per attached actor, one for world state, one per rival, one per officer arc
