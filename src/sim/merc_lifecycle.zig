@@ -152,7 +152,7 @@ pub fn spawnReplacementCompany(
     errdefer gs.discardLifecycleArena(transaction_arena);
     const transaction_alloc = transaction_arena.arena.allocator();
     var actions = [_]LifecycleAction{.{ .spawn = replacement }};
-    try allocateReplacementNames(transaction_alloc, gs, &actions);
+    try allocateReplacementNames(transaction_alloc, scratch, gs, &actions);
     const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, gs.next_listing_id, next_company_id, next_hull_instance_id, day);
     const log = try prepareLifecycleLog(gs, transaction_alloc, &actions);
     gs.replaceLifecycleArena(transaction_arena);
@@ -343,7 +343,7 @@ pub fn runMercLifecycle(gs: *GameState) !void {
     const transaction_arena = try gs.lifecycleArena();
     errdefer gs.discardLifecycleArena(transaction_arena);
     const transaction_alloc = transaction_arena.arena.allocator();
-    try allocateReplacementNames(transaction_alloc, gs, actions.items);
+    try allocateReplacementNames(transaction_alloc, scratch, gs, actions.items);
     const stage = try stageLifecycleCommit(gs, transaction_alloc, actions.items, next_listing_id, next_company_id, next_hull_instance_id, day);
     const log = try prepareLifecycleLog(gs, transaction_alloc, actions.items);
     gs.replaceLifecycleArena(transaction_arena);
@@ -489,9 +489,11 @@ fn planBuy(scratch: std.mem.Allocator, gs: *const GameState, listings: *std.Arra
 /// Name every replacement in `actions`, in action order, through
 /// `merc_identity.unitName` against every existing company name and the names
 /// given to earlier replacements in the same pass. Names live in `alloc`, the
-/// transaction arena.
-fn allocateReplacementNames(alloc: std.mem.Allocator, gs: *const GameState, actions: []LifecycleAction) !void {
+/// transaction arena; the taken list lives in the operation's `scratch` and is
+/// released on return (rule 78).
+fn allocateReplacementNames(alloc: std.mem.Allocator, scratch: std.mem.Allocator, gs: *const GameState, actions: []LifecycleAction) !void {
     var taken = std.ArrayListUnmanaged([]const u8).empty;
+    defer taken.deinit(scratch);
     var taken_listed = false;
     for (actions) |*action| {
         const replacement: *ReplacementPlan = switch (action.*) {
@@ -500,7 +502,7 @@ fn allocateReplacementNames(alloc: std.mem.Allocator, gs: *const GameState, acti
             .buy, .liquidate => continue,
         };
         if (!taken_listed) {
-            try taken.ensureTotalCapacity(alloc, gs.merc_companies.count() + actions.len);
+            try taken.ensureTotalCapacity(scratch, gs.merc_companies.count() + actions.len);
             for (gs.merc_companies.values()) |company| taken.appendAssumeCapacity(company.unit_name);
             taken_listed = true;
         }
@@ -1280,16 +1282,44 @@ test "replacements named in one pass from the same parts take the base name, the
         .{ .spawn = .{ .company = .{}, .unit_name_parts = parts, .buy = null } },
         .{ .spawn = .{ .company = .{}, .unit_name_parts = parts, .buy = null } },
     };
-    try allocateReplacementNames(arena.allocator(), &gs, &actions);
+    try allocateReplacementNames(arena.allocator(), a, &gs, &actions);
     try std.testing.expectEqualStrings("Baxter Guard", actions[0].spawn.company.unit_name);
     try std.testing.expectEqualStrings("Baxter Guard II", actions[1].spawn.company.unit_name);
 
     // A dissolved company still holds its name.
     const dissolved: types.MercCompanyId = @enumFromInt(1);
     try gs.merc_companies.put(gs.allocator(), dissolved, .{ .id = dissolved, .unit_name = "Baxter Guard", .dissolved_day = 5 });
-    try allocateReplacementNames(arena.allocator(), &gs, &actions);
+    try allocateReplacementNames(arena.allocator(), a, &gs, &actions);
     try std.testing.expectEqualStrings("Baxter Guard II", actions[0].spawn.company.unit_name);
     try std.testing.expectEqualStrings("Baxter Guard III", actions[1].spawn.company.unit_name);
+}
+
+test "allocateReplacementNames: the taken list is scratch, released on every exit" {
+    // Rule 78: the leak-checking testing allocator backs scratch, so a taken
+    // list that outlived the call, on success or on failure, fails the test.
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 3006 });
+    defer gs.deinit();
+    const parts: @FieldType(ReplacementPlan, "unit_name_parts") = .{ .last = "Baxter", .noun = "Guard" };
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var names = std.heap.ArenaAllocator.init(a);
+        defer names.deinit();
+        var failing = std.testing.FailingAllocator.init(a, .{ .fail_index = fail_index });
+        var actions = [_]LifecycleAction{
+            .{ .spawn = .{ .company = .{}, .unit_name_parts = parts, .buy = null } },
+            .{ .spawn = .{ .company = .{}, .unit_name_parts = parts, .buy = null } },
+        };
+        if (allocateReplacementNames(names.allocator(), failing.allocator(), &gs, &actions)) |_| {
+            try std.testing.expectEqualStrings("Baxter Guard II", actions[1].spawn.company.unit_name);
+            try std.testing.expect(failing.allocations > 0);
+            try std.testing.expectEqual(failing.allocations, failing.deallocations);
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(failing.allocations, failing.deallocations);
+        }
+    }
 }
 
 test "runMercLifecycle gives each replacement in a pass its own never-held logo" {
