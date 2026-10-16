@@ -1043,7 +1043,11 @@ An empty or unknown `planet_key` is unreachable by any buyer. On the first day
 of each month, `runNpcBlackMarketDraw` (called from `tick.runMarkets` after
 `faction_surplus.runMonthly`) evaluates each NPC buyer with its own
 `BuyerKind`, so pirates consume only PER-world listings and mercs consume only
-non-PER listings; `runPirateReplenishment` then mints a monthly hull trickle
+non-PER listings. A merc company pays the listing price, debited in the same
+commit as the hull transfer, and takes only a hull it still needs and can
+afford, so the draw never spends it below zero; pirates pay nothing.
+`rivals.mercCompanyNeedsHull` owns that need test for both the draw and the
+lifecycle buy. `runPirateReplenishment` then mints a monthly hull trickle
 into the PER roster independently of the market. Schema v57 adds both
 `planet_key` and `available_after` columns to the `listing` table with `ADD
 COLUMN NOT NULL DEFAULT` migrations (docs/p3f-faction-loop-design.md §2.3, §3).
@@ -1056,8 +1060,8 @@ battle value — the sum of chassis BV across all `.active` hulls in its pool
 can no longer be selected as the OpFor for a new arc contract. The predicate
 is derived, not persisted (no schema change); it is re-evaluated on each read
 and prevents selection for a new arc contract. It is not permanent: the monthly
-merc lifecycle buys eligible market hulls toward full strength, and its
-black-market draw can add further hulls. A company that remains insolvent
+merc lifecycle buys eligible market hulls toward full strength, and the paid
+black-market draw can add further hulls the company still needs. A company that remains insolvent
 liquidates and a replacement company forms from the market. Every merc company,
 active or dissolved, holds exactly one roster entry from its creation on, and an
 empty list is a real, durable state (saved as no rows, restored on load), so a

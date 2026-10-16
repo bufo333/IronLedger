@@ -77,9 +77,11 @@ A package has one primary invariant or subsystem outcome.
   durable when empty, so `mercCompanyInsolvent` judges a replacement that
   bought nothing. Lost-field recovery is unchanged; player financing is out of
   scope.
-- [ ] P5d.4a paid NPC black-market buys: NPC black-market draws debit the listing
-  price and respect roster target and cash; a rule-68 regression comes first.
-  Needs P5d.3.
+- [x] P5d.4a paid NPC black-market buys: merc black-market draws debit the
+  listing price in the hull-transfer commit and take only a known chassis the
+  company still needs (`rivals.mercCompanyNeedsHull`, shared with the lifecycle
+  buy) within its remaining cash, the unpaid-draw defect its regression
+  reproduced; pirates are unchanged.
 - [ ] P5d.4b NPC roster bands: a band on every company from a validated
   `merc_bands.zon`; band-scaled seed of 12 companies with four lances (16
   active mechs) and capital per D25 (50M at `band_4`); shared mech-market

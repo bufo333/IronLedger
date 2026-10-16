@@ -358,8 +358,12 @@ player.
 /// insertion order; within a buyer, up to npc_black_market_draws_per_month
 /// draws on stream .market from that buyer's eligible set. A consumed-marker
 /// array prevents two buyers from taking the same hull (rule 1).
-/// Asset safety: only NPC/pirate rosters are modified; no player funds,
-/// forces, or units are touched (rule 67 P3f.3 §7).
+/// A merc company pays the listing price, debited in the same commit as the
+/// hull transfer (P5d.4a). Before each draw its set narrows to known chassis
+/// it still needs (rivals.mercCompanyNeedsHull) priced within its remaining
+/// C-bills; an empty set ends its turn without a draw. Pirates pay nothing.
+/// Asset safety: only NPC/pirate rosters and merc C-bills are modified; no
+/// player funds, forces, or units are touched (rule 67 P3f.3 §7).
 pub fn runNpcBlackMarketDraw(gs: *state.GameState) !void
 ```
 

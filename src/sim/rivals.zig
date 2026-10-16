@@ -15,6 +15,8 @@ const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 const merc_company_mod = @import("../domain/merc_company.zig");
 const chassis_mod = @import("../domain/chassis.zig");
+const force = @import("../domain/force.zig");
+const unit = @import("../domain/unit.zig");
 const tuning = @import("../domain/tuning.zig").t;
 
 /// Generate rival names and identity using the `.rivals` RNG stream (rule 57).
@@ -122,6 +124,55 @@ pub fn mercCompanyEligibleAsOpFor(gs: *GameState, id: types.MercCompanyId) bool 
         if (chassis.kind == .mek) active_meks += 1;
     }
     return active_meks >= tuning.generation.merc_company_hulls_each;
+}
+
+/// Active hulls in a merc company's roster, by procurement kind.
+pub const MercHullCounts = struct {
+    meks: usize = 0,
+    vehicles: usize = 0,
+    aerospace: usize = 0,
+
+    /// Count one hull of `kind`; kinds outside procurement are ignored.
+    pub fn add(self: *MercHullCounts, kind: unit.UnitKind) void {
+        switch (kind) {
+            .mek => self.meks += 1,
+            .vehicle => self.vehicles += 1,
+            .aerospace => self.aerospace += 1,
+            else => {},
+        }
+    }
+};
+
+/// Count the `.active` hulls in a merc company's roster by chassis kind.
+/// Other kinds and unknown chassis are not counted; an id with no roster
+/// entry counts zero. Pure.
+pub fn mercCompanyHullCounts(gs: *const GameState, id: types.MercCompanyId) MercHullCounts {
+    const roster = gs.merc_company_rosters.get(id) orelse return .{};
+    var counts: MercHullCounts = .{};
+    for (roster.items) |hid| {
+        const inst = gs.hull_instances.get(hid) orelse continue;
+        if (inst.status != .active) continue;
+        const chassis = chassis_mod.find(inst.base_key) orelse continue;
+        counts.add(chassis.kind);
+    }
+    return counts;
+}
+
+/// Single owner of "does a merc company with `counts` still want a hull of
+/// `kind`" (rule 20/3). Meks fill the mek target, vehicles fill line positions
+/// meks leave open, and aerospace fills the air reserve; no other kind is
+/// procured. Targets: docs/p3c-economy-design.md §8.D (line and mek) and
+/// docs/p2-conventional-combat-design.md §NPC Policy (air reserve). Pure.
+pub fn mercCompanyNeedsHull(counts: MercHullCounts, kind: unit.UnitKind) bool {
+    const line_target: usize = tuning.generation.merc_company_hulls_each;
+    const mek_target = line_target;
+    const air_target: usize = @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size;
+    return switch (kind) {
+        .mek => counts.meks < mek_target,
+        .vehicle => counts.meks + counts.vehicles < line_target,
+        .aerospace => counts.aerospace < air_target,
+        else => false,
+    };
 }
 
 /// Named outcome→delta owner for operation resolution (P4i, rule 20).

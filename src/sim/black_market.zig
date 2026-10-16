@@ -17,6 +17,7 @@ const hull_instance_mod = @import("../domain/hull_instance.zig");
 const merc_company_mod = @import("../domain/merc_company.zig");
 const roster_gen = @import("../gen/roster_gen.zig");
 const faction_mod = @import("../domain/faction.zig");
+const rivals = @import("rivals.zig");
 
 /// Who is evaluating a black-market listing offer.
 pub const BuyerKind = enum { player, pirate, merc_company };
@@ -306,7 +307,11 @@ pub fn disperseEnemyWrecks(
 /// each active merc company in gs.merc_companies.keys() order (insertion order ==
 /// MercCompanyId order);
 /// within each buyer the listing is chosen by a .market draw over the remaining
-/// eligible set. Asset-safety: no player funds, forces, or units are touched.
+/// eligible set (`planNpcBuyerDraws`). A merc company pays the listing price,
+/// debited in the same commit as the hull transfer, and takes only a known
+/// chassis it still needs (`rivals.mercCompanyNeedsHull`) priced within its
+/// remaining C-bills, so the draw never spends it below zero. Pirates pay
+/// nothing. Asset-safety: no player funds, forces, or units are touched.
 /// gs.rng committed only on success (rules 7/11-13).
 /// Each NPC buyer is evaluated with its own BuyerKind, so per-buyer reach
 /// gating applies (pirates→PER worlds, mercs→non-PER worlds); the
@@ -353,32 +358,10 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
     const consumed = try scratch.alloc(bool, gs.market_listings.items.len);
     @memset(consumed, false);
 
-    // Build consumption plan: for each buyer in order, build that buyer's
-    // per-buyer eligible set from the not-yet-consumed listings and draw up
-    // to npc_black_market_draws_per_month. Pirates reach only PER worlds;
-    // mercs reach only non-PER worlds (buyerEligible reach rules; disjoint
-    // sets). kind==.unit and hull_instance_id!=.none exclude legacy
-    // abstraction offers and part listings (rule 1).
-    const Plan = struct { buyer_idx: usize, listing_idx: usize };
-    var plan: std.ArrayListUnmanaged(Plan) = .empty;
-    for (0..buyers_len) |bi| {
-        var elig: std.ArrayListUnmanaged(usize) = .empty;
-        for (gs.market_listings.items, 0..) |l, i| {
-            if (consumed[i]) continue;
-            if (!buyerEligible(gs, l, buyers_buf[bi].kind, day)) continue;
-            if (l.kind != .unit) continue;
-            if (l.hull_instance_id == .none) continue;
-            try elig.append(scratch, i);
-        }
-        if (elig.items.len == 0) continue;
-        const take = @min(tuning.market.npc_black_market_draws_per_month, elig.items.len);
-        for (0..take) |_| {
-            const j = rng_copy.random(.market).uintLessThan(usize, elig.items.len);
-            const idx = elig.items[j];
-            try plan.append(scratch, .{ .buyer_idx = bi, .listing_idx = idx });
-            consumed[idx] = true;
-            _ = elig.swapRemove(j);
-        }
+    // Build the consumption plan buyer by buyer, in buyer order.
+    var plan: std.ArrayListUnmanaged(NpcDrawTake) = .empty;
+    for (buyers_buf[0..buyers_len], 0..) |buyer, bi| {
+        try planNpcBuyerDraws(scratch, gs, buyer.kind, buyer.merc_id, bi, day, consumed, &rng_copy, &plan);
     }
 
     if (plan.items.len == 0) return;
@@ -478,13 +461,14 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
                 .prior_owner_key = "market",
             });
             staged_merc_company_rosters.getPtr(merc_id).?.appendAssumeCapacity(hid);
+            gs.merc_companies.getPtr(merc_id).?.cbills -= entry.price;
         }
     }
 
     // Remove consumed listings infallibly: sort by listing_idx descending so
     // each orderedRemove does not shift any remaining consumed index.
-    std.mem.sort(Plan, plan.items, {}, struct {
-        fn desc(_: void, a: Plan, b: Plan) bool {
+    std.mem.sort(NpcDrawTake, plan.items, {}, struct {
+        fn desc(_: void, a: NpcDrawTake, b: NpcDrawTake) bool {
             return a.listing_idx > b.listing_idx;
         }
     }.desc);
@@ -497,6 +481,66 @@ pub fn runNpcBlackMarketDraw(gs: *GameState) !void {
     gs.replaceFactionRosterLifecycleArena(faction_lifecycle);
     gs.replaceMercCompanyRosterLifecycleArena(merc_lifecycle);
     gs.rng = rng_copy;
+}
+
+/// One planned NPC black-market take; a merc buyer pays `price`, a pirate 0.
+const NpcDrawTake = struct { buyer_idx: usize, listing_idx: usize, price: types.CBills };
+
+/// Plan one buyer's monthly draws into `plan` (docs/p3f-faction-loop-design.md
+/// §4.1). The eligible set is the not-yet-consumed unit listings with a hull
+/// instance that `buyer` can reach (`buyerEligible`; pirates and mercs reach
+/// disjoint worlds). Before each of up to `npc_black_market_draws_per_month`
+/// draws, a merc buyer's set narrows to known chassis the company still needs
+/// (`rivals.mercCompanyNeedsHull`) priced within its remaining C-bills; each
+/// take spends the price and counts the kind. An empty set ends the buyer's
+/// turn without a draw. The `.market` draw and swap-remove order match a
+/// buyer whose set never narrows.
+fn planNpcBuyerDraws(
+    scratch: std.mem.Allocator,
+    gs: *const GameState,
+    buyer: BuyerKind,
+    merc_id: types.MercCompanyId,
+    buyer_idx: usize,
+    day: u32,
+    consumed: []bool,
+    rng: *rng_mod.Rng,
+    plan: *std.ArrayListUnmanaged(NpcDrawTake),
+) !void {
+    var elig: std.ArrayListUnmanaged(usize) = .empty;
+    for (gs.market_listings.items, 0..) |l, i| {
+        if (consumed[i]) continue;
+        if (!buyerEligible(gs, l, buyer, day)) continue;
+        if (l.kind != .unit) continue;
+        if (l.hull_instance_id == .none) continue;
+        try elig.append(scratch, i);
+    }
+
+    const pays = buyer == .merc_company;
+    var cash: types.CBills = if (pays) gs.merc_companies.get(merc_id).?.cbills else 0;
+    var counts: rivals.MercHullCounts = if (pays) rivals.mercCompanyHullCounts(gs, merc_id) else .{};
+    var candidates: std.ArrayListUnmanaged(usize) = .empty;
+    for (0..tuning.market.npc_black_market_draws_per_month) |_| {
+        candidates.clearRetainingCapacity();
+        for (elig.items) |i| {
+            const l = gs.market_listings.items[i];
+            if (pays) {
+                const chassis = chassis_mod.find(l.item_key) orelse continue;
+                if (!rivals.mercCompanyNeedsHull(counts, chassis.kind) or l.price > cash) continue;
+            }
+            try candidates.append(scratch, i);
+        }
+        if (candidates.items.len == 0) return;
+
+        const idx = candidates.items[rng.random(.market).uintLessThan(usize, candidates.items.len)];
+        const l = gs.market_listings.items[idx];
+        try plan.append(scratch, .{ .buyer_idx = buyer_idx, .listing_idx = idx, .price = if (pays) l.price else 0 });
+        consumed[idx] = true;
+        _ = elig.swapRemove(std.mem.indexOfScalar(usize, elig.items, idx).?);
+        if (pays) {
+            cash -= l.price;
+            counts.add(chassis_mod.find(l.item_key).?.kind);
+        }
+    }
 }
 
 /// Single owner of the monthly pirate-pool trickle rule (rule 20/76/77;
@@ -595,6 +639,7 @@ pub fn runPirateReplenishment(gs: *GameState) !void {
 
 const testing = std.testing;
 const digest = @import("digest.zig");
+const force = @import("../domain/force.zig");
 
 /// Seed N hull instances into a faction limbo state: owner = .{ .faction = key },
 /// status = .active, open ownership interval (to_day = 0), NOT in any roster.
@@ -1116,9 +1161,150 @@ test "runNpcBlackMarketDraw: dissolved merc companies do not buy listings" {
     try testing.expect(gs.merc_company_rosters.get(merc_id) == null);
 }
 
+/// Add a market-owned hull and its merc-reachable (non-PER) black-market
+/// listing at `price`.
+fn addMercDrawListing(gs: *GameState, base_key: []const u8, price: types.CBills) !types.HullInstanceId {
+    const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hid, .{ .id = hid, .base_key = base_key, .owner = .market });
+    try gs.hull_ownership_history.append(gs.allocator(), .{
+        .hull_instance_id = hid,
+        .from_day = 0,
+        .acquisition_type = .transfer,
+        .prior_owner_key = "market",
+    });
+    try gs.market_listings.append(gs.allocator(), .{
+        .id = @enumFromInt(gs.next_listing_id),
+        .kind = .unit,
+        .item_key = base_key,
+        .rarity = .common,
+        .price = price,
+        .black_market = true,
+        .planet_key = "galatea",
+        .hull_instance_id = hid,
+    });
+    gs.next_listing_id += 1;
+    return hid;
+}
+
+/// Give a merc company `n` active roster hulls of `base_key`.
+fn addMercRosterHulls(gs: *GameState, merc_id: types.MercCompanyId, base_key: []const u8, n: usize) !void {
+    const gop = try gs.merc_company_rosters.getOrPut(gs.allocator(), merc_id);
+    if (!gop.found_existing) gop.value_ptr.* = .empty;
+    for (0..n) |_| {
+        const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+        gs.next_hull_instance_id += 1;
+        try gs.hull_instances.put(gs.allocator(), hid, .{ .id = hid, .base_key = base_key, .owner = .{ .merc_company = merc_id } });
+        try gop.value_ptr.append(gs.allocator(), hid);
+    }
+}
+
+test "runNpcBlackMarketDraw: a merc take debits the listing price" {
+    // Rule 68: the draw transferred the hull and left the company's cash unchanged.
+    var gs = GameState.init(testing.allocator, .{ .seed = 57108 });
+    defer gs.deinit();
+    const merc_id: types.MercCompanyId = @enumFromInt(1);
+    const cash: types.CBills = 3_000_000;
+    const price: types.CBills = 1_000_000;
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .cbills = cash });
+    gs.clock.day_index = 30;
+    const hid = try addMercDrawListing(&gs, "LCT-1V", price);
+
+    try runNpcBlackMarketDraw(&gs);
+
+    try testing.expectEqualSlices(types.HullInstanceId, &.{hid}, gs.merc_company_rosters.get(merc_id).?.items);
+    try testing.expectEqual(cash - price, gs.merc_companies.get(merc_id).?.cbills);
+}
+
+test "runNpcBlackMarketDraw: an unaffordable listing is refused without a market draw" {
+    var gs = GameState.init(testing.allocator, .{ .seed = 57109 });
+    defer gs.deinit();
+    const merc_id: types.MercCompanyId = @enumFromInt(1);
+    const price: types.CBills = 1_000_000;
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .cbills = price - 1 });
+    gs.clock.day_index = 30;
+    const hid = try addMercDrawListing(&gs, "LCT-1V", price);
+    const rng_before = gs.rng;
+
+    try runNpcBlackMarketDraw(&gs);
+
+    try testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
+    try testing.expectEqual(hull_instance_mod.HullOwner.market, gs.hull_instances.get(hid).?.owner);
+    try testing.expectEqual(price - 1, gs.merc_companies.get(merc_id).?.cbills);
+    try testing.expectEqual(rng_before, gs.rng);
+}
+
+test "runNpcBlackMarketDraw: a company at its procurement target refuses a mek" {
+    var gs = GameState.init(testing.allocator, .{ .seed = 57110 });
+    defer gs.deinit();
+    const merc_id: types.MercCompanyId = @enumFromInt(1);
+    const cash: types.CBills = 100_000_000;
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .cbills = cash });
+    gs.clock.day_index = 30;
+    try addMercRosterHulls(&gs, merc_id, "LCT-1V", tuning.generation.merc_company_hulls_each);
+    try addMercRosterHulls(&gs, merc_id, "TR-7", @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size);
+    const hid = try addMercDrawListing(&gs, "LCT-1V", 1);
+    const rng_before = gs.rng;
+
+    try runNpcBlackMarketDraw(&gs);
+
+    try testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
+    try testing.expectEqual(hull_instance_mod.HullOwner.market, gs.hull_instances.get(hid).?.owner);
+    try testing.expectEqual(cash, gs.merc_companies.get(merc_id).?.cbills);
+    try testing.expectEqual(rng_before, gs.rng);
+}
+
+test "runNpcBlackMarketDraw: remaining cash bounds a merc company's second take" {
+    var gs = GameState.init(testing.allocator, .{ .seed = 57111 });
+    defer gs.deinit();
+    const merc_id: types.MercCompanyId = @enumFromInt(1);
+    const price: types.CBills = 1_000_000;
+    const cash: types.CBills = 2 * price - 1;
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .cbills = cash });
+    gs.clock.day_index = 30;
+    _ = try addMercDrawListing(&gs, "LCT-1V", price);
+    _ = try addMercDrawListing(&gs, "LCT-1V", price);
+
+    try runNpcBlackMarketDraw(&gs);
+
+    try testing.expectEqual(@as(usize, 1), gs.merc_company_rosters.get(merc_id).?.items.len);
+    try testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
+    try testing.expectEqual(cash - price, gs.merc_companies.get(merc_id).?.cbills);
+}
+
+test "runNpcBlackMarketDraw: a merc company takes needed vehicles but no infantry" {
+    var gs = GameState.init(testing.allocator, .{ .seed = 57112 });
+    defer gs.deinit();
+    const merc_id: types.MercCompanyId = @enumFromInt(1);
+    const cash: types.CBills = 100_000_000;
+    const price: types.CBills = 1_000_000;
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .cbills = cash });
+    gs.clock.day_index = 30;
+    const infantry = try addMercDrawListing(&gs, "SEC-PLT", price);
+    const rng_before = gs.rng;
+
+    try runNpcBlackMarketDraw(&gs);
+
+    try testing.expectEqual(hull_instance_mod.HullOwner.market, gs.hull_instances.get(infantry).?.owner);
+    try testing.expectEqual(cash, gs.merc_companies.get(merc_id).?.cbills);
+    try testing.expectEqual(rng_before, gs.rng);
+
+    // Meks + vehicles are below the line target, so a vehicle is wanted.
+    const vehicle = try addMercDrawListing(&gs, "SCP-1N", price);
+    try runNpcBlackMarketDraw(&gs);
+
+    try testing.expectEqual(hull_instance_mod.HullOwner{ .merc_company = merc_id }, gs.hull_instances.get(vehicle).?.owner);
+    try testing.expectEqual(hull_instance_mod.HullOwner.market, gs.hull_instances.get(infantry).?.owner);
+    try testing.expectEqual(cash - price, gs.merc_companies.get(merc_id).?.cbills);
+}
+
+/// The atomicity fixture's merc company funds and listing price.
+const npc_draw_fixture_cash: types.CBills = 10_000_000;
+const npc_draw_fixture_price: types.CBills = 1_000_000;
+
 fn seedNpcDrawAtomicityFixture(gs: *GameState) !void {
     const merc_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id });
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .cbills = npc_draw_fixture_cash });
     gs.clock.day_index = 30;
 
     const listings = [_]struct { planet_key: []const u8, id: types.HullInstanceId }{
@@ -1142,7 +1328,7 @@ fn seedNpcDrawAtomicityFixture(gs: *GameState) !void {
             .kind = .unit,
             .item_key = "LCT-1V",
             .rarity = .common,
-            .price = 0,
+            .price = npc_draw_fixture_price,
             .black_market = true,
             .planet_key = entry.planet_key,
             .hull_instance_id = entry.id,
@@ -1154,6 +1340,7 @@ fn seedNpcDrawAtomicityFixture(gs: *GameState) !void {
 test "runNpcBlackMarketDraw: OOM preserves stateHash and creates no roster map entries" {
     // Rule 69: both buyers require absent roster entries, exercising the staged
     // faction and merc-company map insertions under every allocation failure.
+    // The merc take is priced, so the hash also covers the C-bill debit.
     var outer = std.heap.ArenaAllocator.init(testing.allocator);
     defer outer.deinit();
 
@@ -1171,6 +1358,7 @@ test "runNpcBlackMarketDraw: OOM preserves stateHash and creates no roster map e
             try testing.expect(digest.stateHash(&gs) != before);
             try testing.expect(gs.faction_rosters.contains("PER"));
             try testing.expect(gs.merc_company_rosters.contains(@enumFromInt(1)));
+            try testing.expectEqual(npc_draw_fixture_cash - npc_draw_fixture_price, gs.merc_companies.get(@enumFromInt(1)).?.cbills);
             gs.deinit();
             break;
         } else |err| {
