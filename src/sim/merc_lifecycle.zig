@@ -21,6 +21,7 @@ const faction_mod = @import("../domain/faction.zig");
 const black_market = @import("black_market.zig");
 const merc_company_mod = @import("../domain/merc_company.zig");
 const logo = @import("../domain/logo.zig");
+const merc_identity = @import("merc_identity.zig");
 const logo_name = @import("../gen/logo_name.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
@@ -109,9 +110,11 @@ pub fn buyHullsForCompany(
 
 /// Single owner of replacement merc company spawn (rule 20/76).
 /// Draws the next archetype and hiring faction in the same order as
-/// `seedMercCompanies`. Picks the first logo from `logo.all_keys` not held
-/// by any active (dissolved_day == 0) company and never the player's reserved
-/// `player_logo_key`. Sets cbills to `merc_replacement_cbill_floor` and uses
+/// `seedMercCompanies`. Its logo is `merc_identity.firstUnusedLogo`: the first
+/// catalog key no company, active or dissolved, has ever held and never the
+/// player's reserved `player_logo_key`, or `""` once the catalog is used up.
+/// Its name is `merc_identity.unitName`, distinct from every company's name.
+/// Sets cbills to `merc_replacement_cbill_floor` and uses
 /// the shared purchase plan to form the hull pool from market supply. The
 /// company holds a roster entry, empty when nothing was bought, and its
 /// founding is logged.
@@ -149,7 +152,7 @@ pub fn spawnReplacementCompany(
     errdefer gs.discardLifecycleArena(transaction_arena);
     const transaction_alloc = transaction_arena.arena.allocator();
     var actions = [_]LifecycleAction{.{ .spawn = replacement }};
-    try allocateReplacementNames(transaction_alloc, &actions);
+    try allocateReplacementNames(transaction_alloc, gs, &actions);
     const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, gs.next_listing_id, next_company_id, next_hull_instance_id, day);
     const log = try prepareLifecycleLog(gs, transaction_alloc, &actions);
     gs.replaceLifecycleArena(transaction_arena);
@@ -340,7 +343,7 @@ pub fn runMercLifecycle(gs: *GameState) !void {
     const transaction_arena = try gs.lifecycleArena();
     errdefer gs.discardLifecycleArena(transaction_arena);
     const transaction_alloc = transaction_arena.arena.allocator();
-    try allocateReplacementNames(transaction_alloc, actions.items);
+    try allocateReplacementNames(transaction_alloc, gs, actions.items);
     const stage = try stageLifecycleCommit(gs, transaction_alloc, actions.items, next_listing_id, next_company_id, next_hull_instance_id, day);
     const log = try prepareLifecycleLog(gs, transaction_alloc, actions.items);
     gs.replaceLifecycleArena(transaction_arena);
@@ -399,19 +402,11 @@ fn planReplacement(scratch: std.mem.Allocator, gs: *const GameState, companies: 
     const archetype = &rival_mod.table.archetypes[rng.random(.rivals).uintLessThan(usize, rival_mod.table.archetypes.len)];
     const faction = &faction_mod.table[hiring_faction_idx[rng.random(.rivals).uintLessThan(usize, num_hiring)]];
     const identity = roster_gen.rollMercCompanyIdentity(rng, .rivals, archetype, faction.key);
-    var logo_key: []const u8 = "";
-    for (logo.all_keys) |key| {
-        if (gs.player_logo_key.len > 0 and std.mem.eql(u8, key, gs.player_logo_key)) continue;
-        var held = false;
-        for (companies.items) |company| if (company.dissolved_day == 0 and std.mem.eql(u8, company.logo_key, key)) {
-            held = true;
-            break;
-        };
-        if (!held) {
-            logo_key = key;
-            break;
-        }
-    }
+    // `companies` holds every company, dissolved ones and this pass's earlier
+    // replacements included, so no key is ever handed out twice.
+    const held = try scratch.alloc([]const u8, companies.items.len);
+    for (companies.items, held) |company, *key| key.* = company.logo_key;
+    const logo_key = merc_identity.firstUnusedLogo(gs.player_logo_key, held);
 
     const id: types.MercCompanyId = @enumFromInt(next_company_id.*);
     next_company_id.* += 1;
@@ -491,22 +486,28 @@ fn planBuy(scratch: std.mem.Allocator, gs: *const GameState, listings: *std.Arra
     return .{ .company_id = company.id, .purchases = try purchases.toOwnedSlice(scratch), .remove_order = remove_order };
 }
 
-fn allocateReplacementNames(alloc: std.mem.Allocator, actions: []LifecycleAction) !void {
-    for (actions) |*action| switch (action.*) {
-        .spawn => |*replacement| try allocateReplacementName(alloc, replacement),
-        .replace => |*replace| {
-            try allocateReplacementName(alloc, &replace.replacement);
-        },
-        .buy, .liquidate => {},
-    };
-}
-
-fn allocateReplacementName(alloc: std.mem.Allocator, replacement: *ReplacementPlan) !void {
-    replacement.company.unit_name = try std.fmt.allocPrint(
-        alloc,
-        "{s} {s}",
-        replacement.unit_name_parts,
-    );
+/// Name every replacement in `actions`, in action order, through
+/// `merc_identity.unitName` against every existing company name and the names
+/// given to earlier replacements in the same pass. Names live in `alloc`, the
+/// transaction arena.
+fn allocateReplacementNames(alloc: std.mem.Allocator, gs: *const GameState, actions: []LifecycleAction) !void {
+    var taken = std.ArrayListUnmanaged([]const u8).empty;
+    var taken_listed = false;
+    for (actions) |*action| {
+        const replacement: *ReplacementPlan = switch (action.*) {
+            .spawn => |*replacement| replacement,
+            .replace => |*replace| &replace.replacement,
+            .buy, .liquidate => continue,
+        };
+        if (!taken_listed) {
+            try taken.ensureTotalCapacity(alloc, gs.merc_companies.count() + actions.len);
+            for (gs.merc_companies.values()) |company| taken.appendAssumeCapacity(company.unit_name);
+            taken_listed = true;
+        }
+        const parts = replacement.unit_name_parts;
+        replacement.company.unit_name = try merc_identity.unitName(alloc, taken.items, parts.last, parts.noun);
+        taken.appendAssumeCapacity(replacement.company.unit_name);
+    }
 }
 
 fn stageLifecycleCommit(
@@ -1206,6 +1207,100 @@ test "spawnReplacementCompany: never picks the player's reserved logo_key" {
     const spawned = gs.merc_companies.getPtr(new_id) orelse return error.TestFailed;
     // Spawned company must not use the player's reserved logo.
     try std.testing.expect(!std.mem.eql(u8, spawned.logo_key, logo.all_keys[0]));
+}
+
+test "spawnReplacementCompany never reuses a logo a dissolved company held" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 3004 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const dissolved: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(gs.allocator(), dissolved, .{
+        .id = dissolved,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Dissolved Co",
+        .faction_key = "DC",
+        .dissolved_day = 5,
+        .logo_key = logo.all_keys[0],
+    });
+    gs.next_merc_company_id = 2;
+
+    var rng = gs.rng;
+    const new_id = try spawnReplacementCompany(&gs, gs.allocator(), 10, &rng);
+    try std.testing.expectEqualStrings(logo.all_keys[1], gs.merc_companies.get(new_id).?.logo_key);
+}
+
+test "spawnReplacementCompany founds logo-less companies under distinct names once the catalog is used up" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 3005 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    // The player reserves the first key; active and dissolved companies hold the rest.
+    gs.player_logo_key = logo.all_keys[0];
+    for (logo.all_keys[1..], 1..) |key, i| {
+        const id: types.MercCompanyId = @enumFromInt(@as(u32, @intCast(i)));
+        try gs.merc_companies.put(gs.allocator(), id, .{
+            .id = id,
+            .archetype_key = "enemy_raiders",
+            .unit_name = try std.fmt.allocPrint(gs.allocator(), "Holder {d}", .{i}),
+            .faction_key = "DC",
+            .dissolved_day = if (i % 2 == 0) 5 else 0,
+            .logo_key = key,
+        });
+    }
+    gs.next_merc_company_id = @intCast(logo.all_keys.len);
+
+    var rng = gs.rng;
+    var spawned: [2]types.MercCompanyId = undefined;
+    for (&spawned) |*id| {
+        const log_before = gs.event_log.items.len;
+        id.* = try spawnReplacementCompany(&gs, gs.allocator(), 10, &rng);
+        const company = gs.merc_companies.get(id.*).?;
+        try std.testing.expectEqualStrings("", company.logo_key);
+        try std.testing.expect(gs.merc_company_rosters.contains(id.*));
+        try std.testing.expectEqual(log_before + 1, gs.event_log.items.len);
+        const line = try foundingLine(a, company);
+        defer a.free(line);
+        try std.testing.expect(std.mem.endsWith(u8, gs.event_log.items[log_before].text, line));
+        for (gs.merc_companies.values()) |other| {
+            if (other.id != id.*) try std.testing.expect(!std.ascii.eqlIgnoreCase(other.unit_name, company.unit_name));
+        }
+    }
+    try std.testing.expect(spawned[0] != spawned[1]);
+}
+
+test "replacements named in one pass from the same parts take the base name, then II" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 3006 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(a);
+    defer arena.deinit();
+    const parts: @FieldType(ReplacementPlan, "unit_name_parts") = .{ .last = "Baxter", .noun = "Guard" };
+    var actions = [_]LifecycleAction{
+        .{ .spawn = .{ .company = .{}, .unit_name_parts = parts, .buy = null } },
+        .{ .spawn = .{ .company = .{}, .unit_name_parts = parts, .buy = null } },
+    };
+    try allocateReplacementNames(arena.allocator(), &gs, &actions);
+    try std.testing.expectEqualStrings("Baxter Guard", actions[0].spawn.company.unit_name);
+    try std.testing.expectEqualStrings("Baxter Guard II", actions[1].spawn.company.unit_name);
+
+    // A dissolved company still holds its name.
+    const dissolved: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(gs.allocator(), dissolved, .{ .id = dissolved, .unit_name = "Baxter Guard", .dissolved_day = 5 });
+    try allocateReplacementNames(arena.allocator(), &gs, &actions);
+    try std.testing.expectEqualStrings("Baxter Guard II", actions[0].spawn.company.unit_name);
+    try std.testing.expectEqualStrings("Baxter Guard III", actions[1].spawn.company.unit_name);
+}
+
+test "runMercLifecycle gives each replacement in a pass its own never-held logo" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 4010 });
+    defer gs.deinit();
+    try seedLifecycleAtomicityFixture(&gs);
+    // Companies 1 (all_keys[0]) and 3 (all_keys[2]) dissolve; 2 keeps all_keys[1].
+    try runMercLifecycle(&gs);
+    try std.testing.expectEqualStrings(logo.all_keys[3], gs.merc_companies.get(@enumFromInt(4)).?.logo_key);
+    try std.testing.expectEqualStrings(logo.all_keys[4], gs.merc_companies.get(@enumFromInt(5)).?.logo_key);
 }
 
 test "spawnReplacementCompany: late transaction OOM leaves no company or ID advance" {

@@ -93,6 +93,7 @@ pub const campaign_scripts = @import("sim/campaign_scripts.zig");
 pub const table = @import("sim/table.zig");
 pub const black_market = @import("sim/black_market.zig");
 pub const merc_lifecycle = @import("sim/merc_lifecycle.zig");
+pub const merc_identity = @import("sim/merc_identity.zig");
 
 // persist/ — SQLite save files
 pub const sqlite = @import("persist/sqlite.zig");

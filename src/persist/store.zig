@@ -8625,6 +8625,40 @@ test "merc companies survive a save/load round-trip with identical stateHash (P3
     try std.testing.expectEqual(merc_company_mod.RivalDoctrine.aggressive, lmc1.doctrine);
 }
 
+test "a suffixed merc company name and a logo-less merc company survive save and load" {
+    // Seed 26 founds "Baxter Guard" and "Baxter Guard II" (merc_identity.unitName).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 26 });
+    defer gs.deinit();
+    const commands = @import("../sim/commands.zig");
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    const suffixed: types.MercCompanyId = @enumFromInt(5);
+    try std.testing.expectEqualStrings("Baxter Guard II", gs.merc_companies.get(suffixed).?.unit_name);
+    const logo_less: types.MercCompanyId = @enumFromInt(gs.next_merc_company_id);
+    try gs.merc_companies.put(gs.allocator(), logo_less, .{
+        .id = logo_less,
+        .archetype_key = "enemy_raiders",
+        .commander_first = "Bo",
+        .commander_last = "Rex",
+        .unit_name = "Rex Raiders",
+        .faction_key = "DC",
+    });
+    try gs.merc_company_rosters.put(gs.allocator(), logo_less, .empty);
+    gs.next_merc_company_id += 1;
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    try std.testing.expectEqualStrings("Baxter Guard II", loaded.merc_companies.get(suffixed).?.unit_name);
+    try std.testing.expectEqualStrings("", loaded.merc_companies.get(logo_less).?.logo_key);
+}
+
 test "a rival row with a dangling merc_company_id rejects the load as corrupt (P3e entity split)" {
     // Rule 47 / P3e entity split: Rival.merc_company_id must resolve to a live merc company or be .none.
     var gs = try buildRivalGs(std.testing.allocator);

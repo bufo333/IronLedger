@@ -1074,7 +1074,10 @@ and surfaced read-only on the Operations rivals block via `RivalRow.insolvent`
 (docs/p3c-economy-design.md §4, §8.G). Each founding (campaign creation or
 replacement spawn) and each dissolution, with its cause, writes one `[merc]`
 line to the campaign log under the market category, committed with the
-lifecycle change it records.
+lifecycle change it records. `src/sim/merc_identity.zig` owns merc-company
+identity: names are campaign-unique (a collision takes a Roman-numeral suffix)
+and each catalog logo goes to at most one company, after which new companies
+are logo-less (docs/p3f-faction-loop-design.md §5.3).
 
 **Hulls are priced by what they are.** A listed mek carries a rolled
 condition — armor, quality grade, damaged and destroyed slots, missing

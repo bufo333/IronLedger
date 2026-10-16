@@ -484,6 +484,14 @@ pub fn spawnReplacementCompany(
 ) !types.MercCompanyId
 ```
 
+A replacement's identity comes from `src/sim/merc_identity.zig`. Its name is
+`"<last> <noun>"`, or the first free Roman-numeral suffix (`II`, `III`, …) when
+any company in the campaign, active or dissolved, or an earlier replacement in
+the same pass already holds it, ignoring case (`unitName`); seeded companies
+follow the same rule. Its logo is the first catalog key that no company has
+ever held and that is not the player's, or none once the catalog is used up
+(`firstUnusedLogo`). Neither draws RNG.
+
 A spawned company holds an empty roster entry before any buy, so one that finds
 nothing affordable is insolvent and dissolves on the next monthly pass. Each
 founding — the seeded companies at campaign creation, in company-id order, and
@@ -784,9 +792,8 @@ P3f black-market, NPC-competition, and merc-company lifecycle mappings.
 
 The merc-company death-and-replacement cycle maps to AtB's retirement/creation
 flow (`PersonnelMarket`, `UnitMarket`). The replacement company draws its
-identity from the person-name and rival-archetype generators, then separately
-selects a logo not held by an active company. The scheduled NPC identity work
-will make name and logo assignment campaign-wide unique. The campaign-wizard alone
+identity from the person-name and rival-archetype generators, then takes a
+campaign-unique name and a logo no company has ever held (§5.3). The campaign-wizard alone
 derives the player's outfit name from a chosen logo key (§6.2).
 
 ### Risk register

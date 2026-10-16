@@ -18,6 +18,7 @@ const merc_company_mod = @import("../domain/merc_company.zig");
 const roster_gen = @import("../gen/roster_gen.zig");
 const logo = @import("../domain/logo.zig");
 const merc_lifecycle = @import("merc_lifecycle.zig");
+const merc_identity = @import("merc_identity.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Maximum entries in faction.table; used for fixed stack arrays.
@@ -170,6 +171,8 @@ pub fn seedFactionRosters(gs: *GameState) !void {
 /// stream-consumption order is fixed for any given seed: company 0 identity,
 /// company 0 logo, company 0 pool hull 0..N-1, company 1 identity, … The
 /// eligible logo pool is the sorted catalog minus gs.player_logo_key (if any).
+/// Each unit_name is `merc_identity.unitName` over the names seeded before it,
+/// so seeded names are distinct (ignoring ASCII case) without an extra draw.
 /// This order is documented here so any change to it requires a deliberate
 /// re-pin of the golden digest (and the stream-isolation test will catch it).
 ///
@@ -215,6 +218,7 @@ pub fn seedMercCompanies(gs: *GameState) !void {
     // Pre-build per-company data into stack-local arrays.
     // Draw order: per-company, identity (on .rivals) then pool (on .rosters).
     var built_companies: [max_merc_companies]merc_company_mod.MercCompany = undefined;
+    var seeded_names: [max_merc_companies][]const u8 = undefined;
     var roster_lists: [max_merc_companies]std.ArrayListUnmanaged(types.HullInstanceId) =
         .{std.ArrayListUnmanaged(types.HullInstanceId).empty} ** max_merc_companies;
     const built_hulls = try alloc.alloc(hull_mod.HullInstance, total_hulls);
@@ -241,8 +245,10 @@ pub fn seedMercCompanies(gs: *GameState) !void {
         pool[logo_j] = pool[pool_len - 1];
         pool_len -= 1;
 
-        // Allocate unit_name (fallible, arena lifetime = campaign lifetime).
-        const unit_name = try std.fmt.allocPrint(alloc, "{s} {s}", .{ identity.last, archetype.unit_noun });
+        // Allocate unit_name (fallible, arena lifetime = campaign lifetime),
+        // distinct from every name seeded before it (merc_identity.unitName).
+        const unit_name = try merc_identity.unitName(alloc, seeded_names[0..ci], identity.last, archetype.unit_noun);
+        seeded_names[ci] = unit_name;
 
         built_companies[ci] = .{
             .id = mid,
@@ -698,6 +704,33 @@ test "seedMercCompanies: empty player_logo_key draws from the full catalog" {
         try std.testing.expect(!seen.contains(mc.logo_key));
         try seen.put(mc.logo_key, {});
     }
+}
+
+test "a campaign whose seeded base names collide founds every company under a distinct name" {
+    // Seed 26 draws "Baxter Guard" for companies 1 and 5.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 26 });
+    defer gs.deinit();
+    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    const companies = gs.merc_companies.values();
+    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_count), companies.len);
+
+    // Every identity field except the name, and every pool hull, is the
+    // seeding draw's; only the name avoids earlier names.
+    var fingerprint = std.hash.Wyhash.init(0);
+    for (companies) |company| {
+        for ([_][]const u8{ company.archetype_key, company.commander_first, company.commander_last, company.faction_key, company.logo_key, @tagName(company.side), @tagName(company.doctrine) }) |field| {
+            fingerprint.update(field);
+            fingerprint.update("\x00");
+        }
+        for (gs.merc_company_rosters.get(company.id).?.items) |hull_id| fingerprint.update(gs.hull_instances.get(hull_id).?.base_key);
+    }
+    try std.testing.expectEqual(@as(u64, 11323097951568880364), fingerprint.final());
+
+    for (companies, 0..) |company, i| {
+        for (companies[0..i]) |earlier| try std.testing.expect(!std.ascii.eqlIgnoreCase(company.unit_name, earlier.unit_name));
+    }
+    try std.testing.expectEqualStrings("Baxter Guard", gs.merc_companies.get(@enumFromInt(1)).?.unit_name);
+    try std.testing.expectEqualStrings("Baxter Guard II", gs.merc_companies.get(@enumFromInt(5)).?.unit_name);
 }
 
 /// Seed the Periphery/pirates (PER) faction hull pool at campaign creation

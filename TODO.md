@@ -65,10 +65,11 @@ A package has one primary invariant or subsystem outcome.
   the conflict-first world (§A–§K) and NPC company operations (§L), maps every
   clause of the former P5d.1 and P5d.4 entries to an increment below, and
   records decisions D1–D29.
-- [ ] P5d.2 NPC merc-company identity: unique company names across the campaign;
-  assign each unused logo once before creating any logo-less company, then
-  leave logo_key empty and continue with collision-free generated names. NPC
-  logo display remains deferred.
+- [x] P5d.2 NPC merc-company identity: company names are unique across the
+  campaign, a collision taking a Roman-numeral suffix (`merc_identity.unitName`);
+  each catalog logo goes to one company at most, and once none is left new
+  companies are founded logo-less under collision-free names
+  (`firstUnusedLogo`). NPC logo display remains deferred.
 - [x] P5d.3 NPC merc-company lifecycle visibility and hull disposition: every
   merc company founding and dissolution (with its cause) is a `[merc]`
   campaign-log line; a held field with no salvage claim strikes the destroyed
