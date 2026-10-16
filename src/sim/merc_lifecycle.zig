@@ -118,14 +118,16 @@ pub fn buyHullsForCompany(
 /// the shared purchase plan to form the hull pool from market supply. The
 /// company holds a roster entry, empty when nothing was bought, and its
 /// founding is logged. Planning and the taken-name list use an arena over
-/// `gs.scratch()`, released on return (rule 78).
+/// `gs.scratch()`, released on return (rule 78); `alloc` is unused.
 ///
 /// Does NOT write `gs.rng` — the caller commits the rng copy.
 pub fn spawnReplacementCompany(
     gs: *GameState,
+    alloc: std.mem.Allocator,
     day: u32,
     rng: *rng_mod.Rng,
 ) !types.MercCompanyId {
+    _ = alloc;
     var scratch_arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer scratch_arena.deinit();
     const scratch = scratch_arena.allocator();
@@ -1168,7 +1170,7 @@ test "spawnReplacementCompany: unique id, founded_day, dissolved_day==0, cbills=
 
     var rng = gs.rng;
     const log_before = gs.event_log.items.len;
-    const new_id = try spawnReplacementCompany(&gs, 60, &rng);
+    const new_id = try spawnReplacementCompany(&gs, alloc, 60, &rng);
 
     // Exactly one founding line, naming the new company.
     try std.testing.expectEqual(log_before + 1, gs.event_log.items.len);
@@ -1196,13 +1198,14 @@ test "spawnReplacementCompany: never picks the player's reserved logo_key" {
     var gs = GameState.init(a, .{ .seed = 3002 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const alloc = gs.allocator();
 
     // Reserve the first catalog key for the player (not held by any active company).
     gs.player_logo_key = logo.all_keys[0];
     gs.next_merc_company_id = 1;
 
     var rng = gs.rng;
-    const new_id = try spawnReplacementCompany(&gs, 10, &rng);
+    const new_id = try spawnReplacementCompany(&gs, alloc, 10, &rng);
 
     try std.testing.expectEqual(@as(types.MercCompanyId, @enumFromInt(1)), new_id);
     const spawned = gs.merc_companies.getPtr(new_id) orelse return error.TestFailed;
@@ -1227,7 +1230,7 @@ test "spawnReplacementCompany never reuses a logo a dissolved company held" {
     gs.next_merc_company_id = 2;
 
     var rng = gs.rng;
-    const new_id = try spawnReplacementCompany(&gs, 10, &rng);
+    const new_id = try spawnReplacementCompany(&gs, gs.allocator(), 10, &rng);
     try std.testing.expectEqualStrings(logo.all_keys[1], gs.merc_companies.get(new_id).?.logo_key);
 }
 
@@ -1255,7 +1258,7 @@ test "spawnReplacementCompany founds logo-less companies under distinct names on
     var spawned: [2]types.MercCompanyId = undefined;
     for (&spawned) |*id| {
         const log_before = gs.event_log.items.len;
-        id.* = try spawnReplacementCompany(&gs, 10, &rng);
+        id.* = try spawnReplacementCompany(&gs, gs.allocator(), 10, &rng);
         const company = gs.merc_companies.get(id.*).?;
         try std.testing.expectEqualStrings("", company.logo_key);
         try std.testing.expect(gs.merc_company_rosters.contains(id.*));
@@ -1347,7 +1350,7 @@ test "spawnReplacementCompany: late transaction OOM leaves no company or ID adva
         const rng_before = rng;
         var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
         gs.arena.child_allocator = failing.allocator();
-        if (spawnReplacementCompany(&gs, 1, &rng)) |new_id| {
+        if (spawnReplacementCompany(&gs, outer.allocator(), 1, &rng)) |new_id| {
             try std.testing.expectEqual(@as(types.MercCompanyId, @enumFromInt(1)), new_id);
             try std.testing.expectEqual(@as(usize, 1), gs.merc_companies.count());
             try std.testing.expectEqual(@as(u32, 2), gs.next_merc_company_id);
@@ -1390,7 +1393,7 @@ test "spawnReplacementCompany: planning scratch comes from gs.scratch() and is r
     var counting = std.testing.FailingAllocator.init(a, .{});
     gs.arena.child_allocator = counting.allocator();
     var rng = gs.rng;
-    _ = try spawnReplacementCompany(&gs, 10, &rng);
+    _ = try spawnReplacementCompany(&gs, gs.allocator(), 10, &rng);
     try std.testing.expect(counting.freed_bytes >= planned_bytes);
 }
 
