@@ -917,6 +917,17 @@ pub const Tuning = struct {
         /// A black market turned in leaves supplies dearer.
         informant_price_bp: types.Bp,
     },
+    /// Procedural personage character (domain/personage.zig,
+    /// gen/personage_gen.zig; docs/p5d-conflict-world-design.md §B). // TUNE
+    politics: struct {
+        /// Fewest and most motives a personage holds, in motives (§B: two
+        /// or three of the closed set).
+        motive_count_min: u8,
+        motive_count_max: u8,
+        /// Top of the ambition scale, in ambition points; the scale starts
+        /// at 0 (§B: a 0–100 scale).
+        ambition_max: u8,
+    },
 };
 
 /// The live table.

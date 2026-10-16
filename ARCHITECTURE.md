@@ -171,7 +171,8 @@ section explains the shape, the contract states the rules.
   `planet.weightedPickByFaction`, `market.priceRollBp`, `market.listingAppears`,
   `market.rollHullCondition`, `personnel.creditKills`) take the caller's stream:
   hall, market and hiring draw on `.market`, prisoners and salvage on `.battle`,
-  event recruits on `.events`, the starter company on `.generation`. All dice are
+  event recruits on `.events`, the starter company on `.generation`, and the
+  world's personages (`personage_gen`) on `.politics`. All dice are
   2d6 unless the cited source or design rule says otherwise (`// TUNE`).
 - **Presentation markup is escaped at the source.** Screen text carries
   inline tags (`{a}` … `{/}`); `table.Tokenizer` is the one reader of it
@@ -271,7 +272,21 @@ cheap, copyable, and impossible to mix up.
   loans, monthly close-out report per company (the *profit center* view).
 - **GameState** — campaign date, player outfit, reputation, all of the above,
   markets, pending events, RNG state, persistent actors map, rivals map,
-  officer arcs map, world-state map.
+  officer arcs map, world-state map, personages map.
+- **Personage** — a persisted figure of the political world
+  (`domain/personage.zig`, docs/p5d-conflict-world-design.md §B), keyed by
+  `PersonageId`. Two roles: a `planetary_ruler` for every world whose faction
+  hires (`personage.worldHasRuler`), and a `faction_leader` seated on the
+  capital of every hiring faction except the `PER` catch-all bucket
+  (`personage.factionHasLeader`). Each carries a name, two or three motives
+  from §B's closed set, an ambition (0–100) and a provenance; every row is
+  `procedural`, generated at `create_commander` by `personage_gen` and naming
+  its generator version. The title ("Governor of …", "Leader, …") is derived
+  by `personage.titleText`, never stored. Unlike the contract-scoped
+  **Actor**, a personage exists from campaign creation whether or not any
+  contract names it, and no game rule reads one yet. Seeding and the load
+  check are `sim/personages.zig` (`seedPersonages`, `validate`); `who` lists
+  them through `queries.personageRows`.
 - **Actor** — a contract-introduced NPC (liaison, official, enemy commander,
   etc.) that persists across contracts. Each actor carries four relationship
   dimensions (trust, debt, respect, hostility; −100…100) and typed **flags**
@@ -1333,8 +1348,8 @@ a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
 **Current format boundary.** New empty stores
-initialize schema 68 transactionally. Existing store and campaign versions
-must both be 68; older formats (67 included) are refused intact and newer formats retain
+initialize schema 70 transactionally. Existing store and campaign versions
+must both be 70; older formats (69 included) are refused intact and newer formats retain
 their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
 missing tables or rows. No automatic reset, deletion, rewrite, backfill or
@@ -1407,12 +1422,24 @@ loader refuses a company member on a pool or travelling seat, field freight to
 a non-company force, inbound plus attached carriers over the company's cap,
 and a return leg to a missing HQ.
 
+**Personages are saved** (schema 70): one `personage` row each (role, names,
+faction and seat keys, the motive set as a bitmask with bit = the motive's
+declared value, ambition, provenance and generator version) and the meta
+counter `next_personage_id`. SQL checks bound the role, motive count (two or
+three), ambition (0–100), provenance and generator version; the loader
+(`personages.validate`) refuses an unknown key, seat, enum or motive bit, a
+ruler on a world that does not hire or of another faction than its world's,
+two rulers on one world, a leader for a faction that gets none, off its
+capital or doubled, a campaign with a commander missing any ruler or leader,
+personages in a campaign without one, and an id at or above the counter.
+
 **RNG state is saved per stream**: the campaign seed plus one
 `rng_stream` row per named stream (format 1: the generator's words,
 little-endian). The approved current-format boundary requires the seed and
 exactly one valid row for every required named stream. Missing or malformed
 state, duplicate rows and unknown streams are `CorruptSave`; current rows never
-default to fresh streams. Unsupported old stream blobs are not loaded. Adding
+default to fresh streams, so a schema-70 save without its `politics` row is
+refused. Unsupported old stream blobs are not loaded. Adding
 an unused stream preserves existing stream identity and state; deterministic
 initialization in an older save would require an explicitly supported migration
 under rule 51. Current-format loading enforces these requirements without

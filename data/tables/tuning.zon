@@ -573,4 +573,11 @@
         .black_market_price_bp = 8_500, // TUNE: crates off the books, 15% under the valve
         .informant_price_bp = 11_000, // TUNE: the market shut, 10% dearer
     },
+    // Procedural personage character (docs/p5d-conflict-world-design.md §B).
+    // Design values from §B; the playtest gate may narrow them.
+    .politics = .{
+        .motive_count_min = 2, // TUNE: §B "two or three" motives
+        .motive_count_max = 3, // TUNE
+        .ambition_max = 100, // TUNE: §B 0–100 scale
+    },
 }

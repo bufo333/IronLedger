@@ -32,6 +32,7 @@ const world_state_mod = @import("../domain/world_state.zig");
 const officer_mod = @import("../domain/officer.zig");
 const artillery_dom = @import("../domain/artillery_formation.zig");
 const hull_instance_mod = @import("../domain/hull_instance.zig");
+const personage_mod = @import("../domain/personage.zig");
 
 pub const Config = struct {
     seed: u64 = 3025,
@@ -386,6 +387,11 @@ pub const GameState = struct {
     /// (.merc_company) is the per-hull mirror its producers keep consistent.
     merc_company_rosters: std.AutoArrayHashMapUnmanaged(types.MercCompanyId, std.ArrayListUnmanaged(types.HullInstanceId)) = .empty,
 
+    /// Persistent world personages (docs/p5d-conflict-world-design.md §B).
+    /// With a commander, exactly one ruler per hiring world and one leader per
+    /// leader-bearing faction; without one, none (`personages.validate`).
+    personages: std.AutoArrayHashMapUnmanaged(types.PersonageId, personage_mod.Personage) = .empty,
+
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
 
@@ -410,6 +416,7 @@ pub const GameState = struct {
     next_merc_company_id: u32 = 1,
     next_officer_arc_id: u32 = 1,
     next_hull_instance_id: u32 = 1,
+    next_personage_id: u32 = 1,
 
     pub fn init(gpa: std.mem.Allocator, config: Config) GameState {
         return .{
@@ -1460,6 +1467,8 @@ pub const GameState = struct {
         .{ "faction_rosters", .persisted },
         .{ "merc_company_rosters", .persisted },
         .{ "world_states", .persisted },
+        .{ "personages", .persisted },
+        .{ "next_personage_id", .persisted },
     };
 
     pub fn persistenceOf(comptime name: []const u8) Persistence {

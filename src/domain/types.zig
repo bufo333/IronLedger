@@ -106,6 +106,10 @@ pub const OfficerArcId = enum(u32) { none = 0, _ };
 /// One persisted hull instance (P3c); typed so a hull reference cannot be
 /// passed where a unit or actor index is expected (rule 56).
 pub const HullInstanceId = enum(u32) { none = 0, _ };
+/// One persisted world personage (docs/p5d-conflict-world-design.md §B); typed
+/// so a personage reference cannot be passed where an actor or rival index is
+/// expected (rule 56).
+pub const PersonageId = enum(u32) { none = 0, _ };
 pub const ArtilleryFormationId = enum(u32) { none = 0, _ };
 pub const ArtilleryOfferId = enum(u32) { none = 0, _ };
 

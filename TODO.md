@@ -95,9 +95,11 @@ A package has one primary invariant or subsystem outcome.
   `understrength_since` (schema v69) and no active commitment (a rival on a
   running contract, C1), with that cause in its log line; low BV alone no longer
   dissolves, so none dissolves in play until NPC costs land (C2).
-- [ ] P5d.1a personage record: every hiring world has a procedural planetary
-  ruler and every hiring faction a leader, persisted; a `.politics` stream;
-  REPL `who`. Needs D6 and D7.
+- [x] P5d.1a personage record: `create_commander` seats a procedural ruler on
+  every hiring world and a leader on the capital of every hiring faction but
+  `PER` (P1), drawn on a new `.politics` stream and persisted at schema v70,
+  with a load that refuses a dangling or missing seat; REPL `who` lists them
+  with their provenance label (D6, D7).
 - [ ] P5d.1b who's-who surface: TUI who's-who modal and query rows with the
   provenance label. Needs P5d.1a.
 - [ ] P5d.1c personage relations: kin, liege, rival, ally and grudge relations

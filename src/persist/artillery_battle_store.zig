@@ -206,6 +206,8 @@ fn prepareCampaignForTest(gs: *GameState) !types.ContractId {
     const capabilities = @import("../sim/artillery_operations.zig");
     const part = @import("../domain/part.zig");
     const id = try capabilities.fixtureForTest(gs, true);
+    // A load requires the founded campaign's personages.
+    try @import("../sim/personages.zig").seedPersonages(gs);
     const co = try @import("../sim/starter_company.zig").generateInto(gs, "Line company");
     const f = gs.artillery_formations.getPtr(id).?;
     f.placement = .{ .company = co };
@@ -273,6 +275,8 @@ fn capturedCampaignForTest(gs: *GameState, held: bool) !void {
     const battle_phases = @import("../sim/battle_phases.zig");
     const scenario = @import("../domain/scenario.zig");
     const id = try capabilities.fixtureForTest(gs, true);
+    // A load requires the founded campaign's personages.
+    try @import("../sim/personages.zig").seedPersonages(gs);
     const f = gs.artillery_formations.getPtr(id).?;
     f.armor_pct = 10;
     f.last_maintenance_day = 0;

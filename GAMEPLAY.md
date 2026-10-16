@@ -401,6 +401,17 @@ Nobody piloted a mek. That's the game.
 
 ---
 
+## Who rules the Inner Sphere (P5d.1a)
+
+Every world whose house hires mercenaries has a governor, and every great
+power that hires has a leader seated on its capital; the Periphery's pirate
+bucket has worlds and governors but no leader. Each carries two or three
+motives (expansion, honor, revenge, …) and an ambition. In the console `who`
+lists the leaders, `who LC` a power's leader and then its governors, and
+`who skye` that world's governor. For now every one of them is generated when
+the campaign starts and labelled `procedural`: they are not the canon rulers
+of 3025, and nothing in the game acts on them yet.
+
 ## Persistent actors (P4i)
 
 Some contracts introduce named NPCs — a sector liaison, an enemy commander, a

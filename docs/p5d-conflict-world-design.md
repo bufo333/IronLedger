@@ -327,6 +327,16 @@ for every kind.
 - **Merc commanders.** A merc company's existing `commander_first` /
   `commander_last` are linked to one `merc_commander` personage, so the name
   is not stored twice.
+- **Landed in P5d.1a.** The `personage` record holds the identity subset
+  (names, `role` limited to `planetary_ruler` and `faction_leader`,
+  `faction_key`, `seat_planet_key`), `motives`, `ambition` and a
+  `procedural` provenance with its generator version; the title is derived
+  ("Governor of …", "Leader, …"), not stored. Every hiring world has a ruler
+  and every hiring faction except `PER` (P1) a leader on its capital, drawn
+  on `.politics` at `create_commander` and persisted at schema v70. `key`,
+  `family_key`, `loyalty`, relations and the other roles belong to 1c,
+  stable keys, backstory, canon titles and the `canon`/`authored` layers to
+  1d, and `status`, `standing_with_player` and flags to later increments.
 
 ## §C World conflicts: the cause of every contract (D2)
 
@@ -1065,10 +1075,15 @@ whose design depends on a different choice is re-planned.
 - **D6 — corpus.** *Recommended:* three labelled layers. Procedural rulers come
   first (1a), and canon and authored rows follow (1d). The target is about
   3,000 scenarios from about 60 templates. *Alternatives:* authored-only;
-  canon-only.
+  canon-only. **John's choice (P5d.1a plan):** the recommendation —
+  procedural rows first, in 1a; canon and authored rows in 1d. Until 1d
+  every faction leader is procedural too, labelled `procedural`; 1d
+  replaces the procedural leaders.
 - **D7 — era and canon.** *Recommended:* canon is the 3025-01-01 state only;
   history is the sim's own. *Alternatives:* scripted canon milestones;
-  fictional leaders only.
+  fictional leaders only. **John's choice (P5d.1a plan):** the
+  recommendation. 1a generates no canon and reads no year; how 1d's 3025
+  canon applies to another start year is left to 1d.
 - **D8 — Sarna text.** *Recommended:* restate facts, cite the URL per row, copy
   no prose, credit Sarna in 1d. *Alternative:* adapt GFDL text after a
   licensing decision.
@@ -1169,6 +1184,13 @@ whose design depends on a different choice is re-planned.
   target. *Alternative:* keep fieldable-BV insolvency as an interim fourth
   dissolution cause (contradicts §L7, needs a design amendment). **John's
   choice (P5d.4c plan):** the recommendation, as the design orders it.
+- **P1 — a leader for `PER`.** `PER` ("Periphery / pirates") hires, but it is
+  a catch-all bucket, not a polity, and §B models a pirate organization as
+  its own power led by a `pirate_lord`. *Recommended:* the hiring factions
+  other than `PER` each get one `faction_leader`; `PER` gets none, and its
+  worlds still get planetary rulers. *Alternative:* every hiring faction,
+  `PER` included, with a "Periphery / pirates" leader seated on Galatea.
+  **John's choice (P5d.1a plan):** the recommendation.
 - **D26 — air and artillery growth.** *Recommended:* air is earned (band and
   cash margin) and replaces today's automatic aerospace reserve; artillery is
   deferred to D29. *Alternatives:* keep the automatic air reserve; allow both

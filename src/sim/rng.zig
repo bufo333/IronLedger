@@ -18,6 +18,7 @@ pub const Stream = enum(u8) {
     actors, // P4i: persistent actor identity and relationship seeds
     rivals, // P4i: persistent rival company identity seeds
     rosters, // P3e.4: faction hull-pool seeding at campaign creation
+    politics, // personage generation at campaign creation
 
     pub const count = @typeInfo(Stream).@"enum".fields.len;
 
@@ -37,6 +38,7 @@ pub const Stream = enum(u8) {
             .actors => 0xC2B2AE3D27D4EB4F, // P4i actor identity generation
             .rivals => 0xA3F84D2E6B1C9057, // P4i rival company identity generation
             .rosters => 0xBF58476D1CE4E5B9, // P3e.4 faction hull-pool seeding (save-meaning)
+            .politics => 0x94D049BB133111EB, // P5d.1a personage generation
         };
     }
 };
@@ -154,4 +156,28 @@ test "stream salts are distinct and independent of enum order" {
     try std.testing.expectEqual(@as(u64, 0xA3F84D2E6B1C9057), Stream.rivals.salt());
     // P3e.4: rosters stream salt pinned.
     try std.testing.expectEqual(@as(u64, 0xBF58476D1CE4E5B9), Stream.rosters.salt());
+    // The politics stream salt pinned.
+    try std.testing.expectEqual(@as(u64, 0x94D049BB133111EB), Stream.politics.salt());
+}
+
+test "every stream's first draw for a fixed seed is pinned" {
+    // Rule 57: adding a stream leaves every existing stream's draws as they
+    // were. Each value is the stream's first u64 for seed 3025.
+    const pinned = [_]struct { Stream, u64 }{
+        .{ .generation, 1013896583676193370 },
+        .{ .market, 2261206037223925633 },
+        .{ .maintenance, 6077392954855604654 },
+        .{ .acquisition, 15381688641334404543 },
+        .{ .battle, 16073282218357221649 },
+        .{ .events, 3679913571991931764 },
+        .{ .medical, 6179152037605412326 },
+        .{ .travel, 12936974518335990171 },
+        .{ .actors, 1676454171681377804 },
+        .{ .rivals, 16628555082215552019 },
+        .{ .rosters, 16870582734659653342 },
+        .{ .politics, 2700404483974280841 },
+    };
+    try std.testing.expectEqual(Stream.count, pinned.len);
+    var rng = Rng.init(3025);
+    for (pinned) |entry| try std.testing.expectEqual(entry[1], rng.random(entry[0]).int(u64));
 }

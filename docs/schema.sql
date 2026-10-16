@@ -1,8 +1,8 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 69, the only supported store and campaign format.
+-- Matches schema_version 70, the only supported store and campaign format.
 -- Older and newer formats are refused before persistent mutation under
--- docs/engineering-contract.md rule 51; only empty stores initialize schema 69.
+-- docs/engineering-contract.md rule 51; only empty stores initialize schema 70.
 -- The executable DDL and dormant historical migration declarations live in
 -- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
@@ -70,7 +70,7 @@ CREATE TABLE campaign (
     commander       TEXT,
     day             INTEGER NOT NULL,                -- day_index at save
     date            TEXT    NOT NULL,                -- in-game date at save
-    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 69; older/newer versions are refused before load or overwrite
+    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 70; older/newer versions are refused before load or overwrite
     save_seq        INTEGER NOT NULL,                -- store-wide save counter, orders "most recent"
     player_id       INTEGER NOT NULL DEFAULT 0       -- -> player.id; 0 = none
 );
@@ -97,6 +97,7 @@ CREATE TABLE campaign (
 -- v64 requires battle_in_progress_count (including zero), the exact
 -- battle_in_progress row count, likewise completeness metadata: removed
 -- battle rows are corruption, never an engagement not yet engaged.
+-- v70 requires next_personage_id, nonzero and greater than every personage id.
 CREATE TABLE meta (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,
@@ -120,7 +121,7 @@ CREATE TABLE meta_text (
 -- saves; loading never seeds a missing stream or falls back to a legacy blob.
 CREATE TABLE rng_stream (
     cid             INTEGER NOT NULL,
-    stream          TEXT    NOT NULL,                -- 'generation','market','battle',...
+    stream          TEXT    NOT NULL,                -- 'generation','market','battle',...,'politics' (v70)
     format          INTEGER NOT NULL,                -- 1: four u64 words, little-endian
     state           BLOB    NOT NULL,                -- 32 bytes in format 1
     UNIQUE (cid, stream),
@@ -1338,6 +1339,33 @@ CREATE TABLE merc_company_roster (
     FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_merc_company_roster_cid ON merc_company_roster(cid);
+
+-- personage: world personages (docs/p5d-conflict-world-design.md §B, v70).
+-- One ruler per world whose faction hires, one leader per hiring faction
+-- except PER, seated on its capital; all procedural. The loader
+-- (personages.validate) refuses an unknown key or seat, a ruler on a world
+-- that does not hire or of another faction than its world's, two rulers on a
+-- world or two leaders for a faction, a leader off its capital or for PER, a
+-- commander's campaign missing any of them, and personages without a
+-- commander. meta next_personage_id exceeds every id.
+CREATE TABLE personage (
+    cid              INTEGER NOT NULL,
+    ord              INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), -- insertion order
+    id               INTEGER NOT NULL CHECK (typeof(id)='integer' AND id BETWEEN 1 AND 4294967295), -- PersonageId
+    role             TEXT    NOT NULL CHECK (role IN ('planetary_ruler','faction_leader')),
+    first_name       TEXT    NOT NULL CHECK (typeof(first_name)='text' AND length(first_name) > 0), -- markup-safe
+    last_name        TEXT    NOT NULL CHECK (typeof(last_name)='text' AND length(last_name) > 0),   -- markup-safe
+    faction_key      TEXT    NOT NULL CHECK (typeof(faction_key)='text'),     -- -> factions catalog; a ruler's equals its world's
+    seat_planet_key  TEXT    NOT NULL CHECK (typeof(seat_planet_key)='text'), -- -> planets catalog; a leader's is its capital
+    motives          INTEGER NOT NULL CHECK (typeof(motives)='integer' AND motives BETWEEN 1 AND 511 AND (motives & 1) + ((motives >> 1) & 1) + ((motives >> 2) & 1) + ((motives >> 3) & 1) + ((motives >> 4) & 1) + ((motives >> 5) & 1) + ((motives >> 6) & 1) + ((motives >> 7) & 1) + ((motives >> 8) & 1) BETWEEN 2 AND 3), -- bit = personage.Motive value; two or three set
+    ambition         INTEGER NOT NULL CHECK (typeof(ambition)='integer' AND ambition BETWEEN 0 AND 100),
+    provenance       TEXT    NOT NULL CHECK (provenance IN ('procedural')),
+    generator_version INTEGER NOT NULL CHECK (typeof(generator_version)='integer' AND generator_version = 1), -- personage_gen.version
+    PRIMARY KEY (cid, id),
+    UNIQUE (cid, ord),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_personage_cid ON personage(cid);
 
 -- Artillery formation and HQ offer fields are persisted (schema v60).
 -- Catalogue facts and attached location are derived; quotes are scratch.

@@ -18,6 +18,7 @@ const contract_market = @import("contract_market.zig");
 const commands = @import("commands.zig");
 const artillery = @import("artillery.zig");
 const roster_seed = @import("roster_seed.zig");
+const personages = @import("personages.zig");
 
 pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld, UnknownSite, ArtilleryIdExhausted, HqIdExhausted, CorruptSave } || std.mem.Allocator.Error;
 
@@ -259,6 +260,9 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
     try roster_seed.seedMercCompanies(gs);
     // Seed the Periphery/pirates (PER) salvage pool (P3e.5b-1, §8.C).
     try roster_seed.seedPirateRoster(gs);
+    // Seat every world's ruler and every power's leader
+    // (docs/p5d-conflict-world-design.md §B).
+    try personages.seedPersonages(gs);
     return .{};
 }
 

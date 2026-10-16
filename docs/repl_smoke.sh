@@ -29,6 +29,10 @@ printf '%s\n' \
   'readiness' \
   'rating' \
   'summary' \
+  'who' \
+  'who LC' \
+  'who skye' \
+  'who nosuchkey' \
   'sellstock hq:1 ammo_lrm 1' \
   'stockpolicy hq:1 ammo_lrm 4 8' \
   'autoadmit off' \
@@ -247,4 +251,13 @@ check '\[1\] situation Alpha'
 check '(Black Market Contact) offers crates of munitions'
 check '3: Send them away   \[morale -2\]   nothing changes hands (default)'
 check '\[situation\] .* (Black Market Contact): chose "Send them away" — morale -2 · nothing changes hands'
+# P5d.1a: `who` lists the leaders, a faction's leader then its governors, and
+# a world's governor, each labelled with its provenance; an unknown key is
+# refused with the usage.
+check 'Leader, Draconis Combine'
+check 'Leader, Lyran Commonwealth .* LC '
+check 'Governor of Tharkad'
+check 'Governor of Skye'
+check '\[procedural\]'
+check 'those arguments do not fit the verb — usage: who'
 echo "REPL SMOKE OK"

@@ -47,13 +47,15 @@ const world_state_dom = @import("../domain/world_state.zig");
 const world_state_rules = @import("../sim/world_state.zig");
 const actor_rules = @import("../sim/actors.zig");
 const situation_mod = @import("../domain/situation.zig");
+const personage_mod = @import("../domain/personage.zig");
+const personage_rules = @import("../sim/personages.zig");
 
 const artillery_store = @import("artillery_store.zig");
 const artillery_battle_store = @import("artillery_battle_store.zig");
 const artillery = @import("../sim/artillery.zig");
 const artillery_catalogue = @import("../domain/artillery_catalogue.zig");
 
-pub const schema_version = 69;
+pub const schema_version = 70;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -125,6 +127,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS faction_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction_key TEXT NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS merc_company (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, cbills INTEGER NOT NULL DEFAULT 0, founded_day INTEGER NOT NULL DEFAULT 0, dissolved_day INTEGER NOT NULL DEFAULT 0, logo_key TEXT NOT NULL DEFAULT '', band_key TEXT NOT NULL, understrength_since INTEGER CHECK (understrength_since IS NULL OR (typeof(understrength_since)='integer' AND understrength_since BETWEEN 0 AND 4294967295)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS merc_company_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, merc_company_id INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, merc_company_id) REFERENCES merc_company(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS personage (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), id INTEGER NOT NULL CHECK (typeof(id)='integer' AND id BETWEEN 1 AND 4294967295), role TEXT NOT NULL CHECK (role IN ('planetary_ruler','faction_leader')), first_name TEXT NOT NULL CHECK (typeof(first_name)='text' AND length(first_name) > 0), last_name TEXT NOT NULL CHECK (typeof(last_name)='text' AND length(last_name) > 0), faction_key TEXT NOT NULL CHECK (typeof(faction_key)='text'), seat_planet_key TEXT NOT NULL CHECK (typeof(seat_planet_key)='text'), motives INTEGER NOT NULL CHECK (typeof(motives)='integer' AND motives BETWEEN 1 AND 511 AND (motives & 1) + ((motives >> 1) & 1) + ((motives >> 2) & 1) + ((motives >> 3) & 1) + ((motives >> 4) & 1) + ((motives >> 5) & 1) + ((motives >> 6) & 1) + ((motives >> 7) & 1) + ((motives >> 8) & 1) BETWEEN 2 AND 3), ambition INTEGER NOT NULL CHECK (typeof(ambition)='integer' AND ambition BETWEEN 0 AND 100), provenance TEXT NOT NULL CHECK (provenance IN ('procedural')), generator_version INTEGER NOT NULL CHECK (typeof(generator_version)='integer' AND generator_version = 1), PRIMARY KEY (cid, id), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS artillery_formation (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0), id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295), hull INTEGER NOT NULL CHECK (hull BETWEEN 1 AND 4294967295), acquisition_day INTEGER NOT NULL CHECK (acquisition_day BETWEEN 0 AND 4294967295), paid_price INTEGER NOT NULL CHECK (paid_price > 0), placement TEXT NOT NULL CHECK (placement IN ('hq_pool','company','freight','sold','destroyed','field_freight','field_return')), pool_hq INTEGER, company INTEGER, from_hq INTEGER, to_hq INTEGER, dispatch_day INTEGER, eta_day INTEGER, paid_cost INTEGER, quality TEXT NOT NULL DEFAULT 'c' CHECK(typeof(quality)='text' AND quality IN ('a','b','c','d','e','f')), armor INTEGER NOT NULL DEFAULT 100 CHECK(typeof(armor)='integer' AND armor BETWEEN 0 AND 100), last_maintenance INTEGER CHECK(last_maintenance IS NULL OR (typeof(last_maintenance)='integer' AND last_maintenance BETWEEN 0 AND 4294967295)), tech INTEGER CHECK(tech IS NULL OR (typeof(tech)='integer' AND tech BETWEEN 1 AND 4294967295)), FOREIGN KEY(cid,tech) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED, PRIMARY KEY (cid,id), UNIQUE (cid,ord), UNIQUE (cid,hull), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,hull) REFERENCES hull_instance(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,pool_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,company) REFERENCES force(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,from_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,to_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK ((pool_hq IS NOT NULL) = (placement='hq_pool')), CHECK ((company IS NOT NULL) = (placement IN ('company','field_freight'))), CHECK ((from_hq IS NOT NULL) = (placement IN ('freight','field_freight'))), CHECK ((to_hq IS NOT NULL) = (placement IN ('freight','field_return'))), CHECK ((dispatch_day IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK ((eta_day IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK ((paid_cost IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK (pool_hq IS NULL OR pool_hq BETWEEN 1 AND 4294967295), CHECK (company IS NULL OR company BETWEEN 1 AND 4294967295), CHECK (from_hq IS NULL OR from_hq BETWEEN 1 AND 4294967295), CHECK (to_hq IS NULL OR to_hq BETWEEN 1 AND 4294967295), CHECK (placement!='freight' OR from_hq!=to_hq), CHECK (placement NOT IN ('freight','field_freight','field_return') OR (dispatch_day BETWEEN 0 AND 4294967295 AND eta_day > dispatch_day AND eta_day <= 4294967295 AND paid_cost >= 0)));
     \\CREATE TABLE IF NOT EXISTS artillery_crew (cid INTEGER NOT NULL CHECK(typeof(cid)='integer'), formation INTEGER NOT NULL CHECK(typeof(formation)='integer' AND formation BETWEEN 1 AND 4294967295), seat TEXT NOT NULL CHECK(typeof(seat)='text' AND seat IN ('commander','gunner','driver','loader')), person INTEGER CHECK(person IS NULL OR (typeof(person)='integer' AND person BETWEEN 1 AND 4294967295)), PRIMARY KEY(cid,formation,seat), UNIQUE(cid,person), FOREIGN KEY(cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,formation) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,person) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS artillery_slot (cid INTEGER NOT NULL CHECK(typeof(cid)='integer'), formation INTEGER NOT NULL CHECK(typeof(formation)='integer' AND formation BETWEEN 1 AND 4294967295), slot TEXT NOT NULL CHECK(typeof(slot)='text' AND slot IN ('chassis','main_gun','machine_gun_right_1','machine_gun_right_2','machine_gun_left_1','machine_gun_left_2','long_tom_bin_1','long_tom_bin_2','long_tom_bin_3','long_tom_bin_4','machine_gun_bin','communications','hitch')), condition TEXT NOT NULL CHECK(typeof(condition)='text' AND condition IN ('ok','damaged','destroyed','missing')), rounds INTEGER, PRIMARY KEY(cid,formation,slot), FOREIGN KEY(cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,formation) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK((rounds IS NOT NULL)=(slot IN ('long_tom_bin_1','long_tom_bin_2','long_tom_bin_3','long_tom_bin_4','machine_gun_bin'))), CHECK(rounds IS NULL OR (typeof(rounds)='integer' AND rounds >= 0 AND rounds <= CASE WHEN slot='machine_gun_bin' THEN 100 ELSE 5 END)), CHECK(condition NOT IN ('destroyed','missing') OR rounds IS NULL OR rounds=0));
@@ -143,7 +146,7 @@ const tables = [_][]const u8{
     "operation_task",      "operation_intervention", "battle_report_task", "actor",                 "world_state",           "rival",               "officer_arc",            "hull_instance",            "hull_loadout",
     "artillery_formation", "artillery_crew",         "artillery_slot",     "artillery_offer",       "hull_combat_record",    "maintenance_entry",   "hull_ownership_history", "faction_roster",           "merc_company",
     "merc_company_roster", "retired_hq",             "artillery_battle",   "artillery_battle_seat", "artillery_battle_slot", "battle_report_phase", "battle_in_progress",     "battle_in_progress_order", "battle_report_lever",
-    "contract_situation",
+    "contract_situation",  "personage",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -220,6 +223,7 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_faction_roster_cid ON faction_roster(cid);
     \\CREATE INDEX IF NOT EXISTS ix_merc_company_cid ON merc_company(cid);
     \\CREATE INDEX IF NOT EXISTS ix_merc_company_roster_cid ON merc_company_roster(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_personage_cid ON personage(cid);
 ;
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -852,6 +856,7 @@ pub const Store = struct {
         try self.saveWorldStates(gs, cid);
         try self.saveFactionRosters(gs, cid);
         try self.saveMercCompanyRosters(gs, cid);
+        try self.savePersonages(gs, cid);
         try self.saveTxn(gs, cid);
         try self.saveLoan(gs, cid);
         try self.saveCourier(gs, cid);
@@ -933,7 +938,7 @@ pub const Store = struct {
             .{ "next_actor_id", gs.next_actor_id },                     .{ "next_rival_id", gs.next_rival_id },
             .{ "next_officer_arc_id", gs.next_officer_arc_id },         .{ "next_artillery_formation_id", gs.next_artillery_formation_id },
             .{ "next_artillery_offer_id", gs.next_artillery_offer_id }, .{ "next_hull_instance_id", gs.next_hull_instance_id },
-            .{ "next_merc_company_id", gs.next_merc_company_id },
+            .{ "next_merc_company_id", gs.next_merc_company_id },       .{ "next_personage_id", gs.next_personage_id },
         };
         for (ints) |kv| {
             try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -1760,6 +1765,57 @@ pub const Store = struct {
         }
     }
 
+    // World personages (docs/p5d-conflict-world-design.md §B, §J).
+    fn savePersonages(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO personage VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)");
+        defer st.finalize();
+        for (gs.personages.values(), 0..) |p, ord| {
+            try st.bindAll(.{
+                cid,
+                @as(i64, @intCast(ord)),
+                @as(i64, @intFromEnum(p.id)),
+                @tagName(p.role),
+                p.first_name,
+                p.last_name,
+                p.faction_key,
+                p.seat_planet_key,
+                @as(i64, personage_mod.motivesMask(p.motives)),
+                @as(i64, p.ambition),
+                @tagName(p.provenance),
+                @as(i64, p.generator_version),
+            });
+            try st.run();
+        }
+    }
+
+    /// Decode each row exactly; an unknown enum, a non-integer or
+    /// out-of-range value, or a duplicate id is `CorruptSave` (rule 47).
+    /// `personages.validate` then checks keys, seats and coverage.
+    fn loadPersonages(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare("SELECT id, role, first_name, last_name, faction_key, seat_planet_key, motives, ambition, provenance, generator_version, typeof(id)='integer' AND typeof(motives)='integer' AND typeof(ambition)='integer' AND typeof(generator_version)='integer' AND typeof(role)='text' AND typeof(first_name)='text' AND typeof(last_name)='text' AND typeof(faction_key)='text' AND typeof(seat_planet_key)='text' AND typeof(provenance)='text' FROM personage WHERE cid = ?1 ORDER BY ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            if (st.int(10) != 1) return error.CorruptSave;
+            const p: personage_mod.Personage = .{
+                .id = try toId(types.PersonageId, st.int(0)),
+                .role = st.enumValue(personage_mod.Role, 1) orelse return error.CorruptSave,
+                .first_name = try st.text(2, alloc),
+                .last_name = try st.text(3, alloc),
+                .faction_key = try st.text(4, alloc),
+                .seat_planet_key = try st.text(5, alloc),
+                .motives = personage_mod.motivesFromMask(try st.intAs(u16, 6)) orelse return error.CorruptSave,
+                .ambition = try st.intAs(u8, 7),
+                .provenance = st.enumValue(personage_mod.Provenance, 8) orelse return error.CorruptSave,
+                .generator_version = try st.intAs(u16, 9),
+            };
+            const gop = try gs.personages.getOrPut(alloc, p.id);
+            if (gop.found_existing) return error.CorruptSave;
+            gop.value_ptr.* = p;
+        }
+    }
+
     // P4i: save and load persistent officer arcs.
     fn saveOfficerArcs(self: Store, gs: *GameState, cid: i64) !void {
         const st = try self.db.prepare("INSERT INTO officer_arc VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
@@ -2333,7 +2389,7 @@ pub const Store = struct {
         try requireCampaignVersion(saved_version);
 
         const has_seed = try self.loadMeta(&gs, cid);
-        inline for (.{ "next_person_id", "next_unit_id", "next_force_id", "next_hq_id", "next_contract_id", "next_battle_id", "next_listing_id", "next_candidate_id", "next_loan_id", "next_operation_id", "next_actor_id", "next_rival_id", "next_officer_arc_id", "next_hull_instance_id", "next_merc_company_id" }) |key| {
+        inline for (.{ "next_person_id", "next_unit_id", "next_force_id", "next_hq_id", "next_contract_id", "next_battle_id", "next_listing_id", "next_candidate_id", "next_loan_id", "next_operation_id", "next_actor_id", "next_rival_id", "next_officer_arc_id", "next_hull_instance_id", "next_merc_company_id", "next_personage_id" }) |key| {
             const counter = (try self.hqMetaUint(cid, key, true)).?;
             if (counter == 0) return error.CorruptSave;
             @field(gs, key) = counter;
@@ -2364,6 +2420,7 @@ pub const Store = struct {
         try self.loadWorldStates(&gs, cid);
         try self.loadFactionRosters(&gs, cid);
         try self.loadMercCompanyRosters(&gs, cid);
+        try self.loadPersonages(&gs, cid);
         try self.loadTxn(&gs, cid);
         try self.loadLoan(&gs, cid);
         try self.loadCourier(&gs, cid);
@@ -2394,6 +2451,7 @@ pub const Store = struct {
         try validateReferences(&gs);
         try hq_ops.validateHqHistory(&gs);
         try artillery.validate(&gs);
+        try personage_rules.validate(&gs);
         try validateCounters(&gs);
         try validateStoredStrings(&gs);
         // Last: the battle in progress replays from the complete, validated campaign.
@@ -2496,6 +2554,7 @@ pub const Store = struct {
             if (std.mem.eql(u8, key, "next_officer_arc_id")) gs.next_officer_arc_id = try fit(@TypeOf(gs.next_officer_arc_id), v);
             if (std.mem.eql(u8, key, "next_hull_instance_id")) gs.next_hull_instance_id = try fit(@TypeOf(gs.next_hull_instance_id), v);
             if (std.mem.eql(u8, key, "next_merc_company_id")) gs.next_merc_company_id = try fit(@TypeOf(gs.next_merc_company_id), v);
+            if (std.mem.eql(u8, key, "next_personage_id")) gs.next_personage_id = try fit(@TypeOf(gs.next_personage_id), v);
             if (std.mem.eql(u8, key, "rng_seed")) {
                 if (has_seed) return error.CorruptSave;
                 gs.rng.seed = @bitCast(v);
@@ -4318,6 +4377,12 @@ fn validateCounters(gs: *GameState) error{CorruptSave}!void {
     }
     {
         var max: u32 = 0;
+        for (gs.personages.keys()) |id| max = @max(max, @intFromEnum(id));
+        if (max == max_u32) return error.CorruptSave;
+        if (gs.next_personage_id <= max) return error.CorruptSave;
+    }
+    {
+        var max: u32 = 0;
         var it = gs.officer_arcs.iterator();
         while (it.next()) |e| max = @max(max, @intFromEnum(e.key_ptr.*));
         if (max == max_u32) return error.CorruptSave;
@@ -4688,6 +4753,16 @@ test "nonempty unversioned databases are refused without creating a schema" {
     try std.testing.expectEqual(@as(i64, 1), st.int(0));
 }
 
+/// A test campaign founded as `create_commander` leaves the world a load
+/// requires: the commander and starter HQ, and every personage
+/// (`personages.validate`). Returns the starter HQ.
+pub fn foundCampaignForTest(gs: *GameState, name: []const u8, origin: commander_mod.Faction, profession: commander_mod.Profession) !types.HqId {
+    std.debug.assert(@import("builtin").is_test);
+    const home = try founding.createCommander(gs, name, origin, profession);
+    try personage_rules.seedPersonages(gs);
+    return home;
+}
+
 fn databaseFingerprintForTest(db: sqlite.Db) !u64 {
     var hash = std.hash.Wyhash.init(0);
     var scratch = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -4909,7 +4984,7 @@ test "a battle report round-trips as fields, not as a row count" {
     const part_mod = @import("../domain/part.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 90210 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -4998,7 +5073,7 @@ test "a fighter engagement preserves shared battle rows and rendered AAR through
     const seed = rng_mod.seedForFirstRoll(.battle, 6) orelse unreachable;
     var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const company = try gs.createForce("Alpha", .company, .none);
     const wing = try gs.createForce("Air Wing", .air_company, company);
     const air_lance = try gs.createForce("Air", .air_lance, wing);
@@ -5064,7 +5139,7 @@ test "a fighter engagement preserves shared battle rows and rendered AAR through
 test "battle reports beyond forty survive save and load" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 9_021 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     const report_count: u32 = 41;
     var i: u32 = 1;
@@ -5155,7 +5230,7 @@ test "a hull the enemy holds round-trips, slots and all — off the books, not s
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12007 });
     defer gs.deinit();
     gs.difficulty = .elite; // a lost field is the point of the fixture
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -5234,7 +5309,7 @@ test "loading a campaign id with no campaign row is refused" {
 test "a first save that fails leaves the campaign unsaved, and a retry registers it" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4004 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const store = try Store.open(":memory:");
     defer store.close();
     // A missing child table makes the save fail after the campaign INSERT.
@@ -5254,7 +5329,7 @@ test "a first save that fails leaves the campaign unsaved, and a retry registers
 test "saving over a campaign row that no longer exists is refused" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4005 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
@@ -5272,7 +5347,7 @@ test "saving over a campaign row that no longer exists is refused" {
 fn loadAfterTampering(sql: [*:0]const u8) !void {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 5005 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5322,6 +5397,7 @@ test "confirmed battle orders survive a save" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 8301 });
     defer gs.deinit();
     const f = try contract_events.damagedCompanyForTest(&gs, 0);
+    try personage_rules.seedPersonages(&gs);
     f.c.next_battle_day = gs.clock.day_index + 2;
     f.c.orders_day = f.c.next_battle_day;
     gs.next_contract_id = @intFromEnum(f.c.id) + 1;
@@ -5432,7 +5508,7 @@ test "a duplicate stock row for the same owner and key is rejected by the schema
     // remains for any non-SQL path.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 5005 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5469,7 +5545,7 @@ test "an unknown listing kind rejects the load" {
     // Insert a row directly so the test does not depend on the market state.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7771 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5491,7 +5567,7 @@ test "a duplicate primary person id is rejected by the schema" {
     defer store.close();
     var gs = GameState.init(std.testing.allocator, .{ .seed = 8881 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     try store.save(&gs);
     try std.testing.expectError(error.ConstraintViolation, store.db.exec("INSERT INTO person SELECT * FROM person"));
 }
@@ -5519,7 +5595,7 @@ test "next_person_id below its owned IDs is corrupt" {
     // Current counters are durable state; an invalid value is refused (rule 48).
     var gs = GameState.init(std.testing.allocator, .{ .seed = 8881 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5535,7 +5611,7 @@ test "a pending event with an out-of-range default_choice rejects the load" {
     // default_choice >= options.len for the event's kind is corruption (rule 47).
     var gs = GameState.init(std.testing.allocator, .{ .seed = 9991 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -5599,7 +5675,7 @@ test "foreign keys are enforced on every connection" {
     defer std.testing.log_level = saved_log_level;
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7701 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
@@ -5653,8 +5729,8 @@ test "a played current campaign round trips and its downgraded store is refused 
     try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("UPDATE setting SET value = 36 WHERE key = 'schema_version'");
     defer raw.close();
-    try std.testing.expectEqual(@as(u64, 6897570446611498295), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 7094298547721191795), hash_before);
+    try std.testing.expectEqual(@as(u64, 4371932905005686475), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 12180291330747351351), hash_before);
     try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
@@ -5687,7 +5763,7 @@ test "a current-version save draws no RNG and rewrites no counter on load" {
     // unchanged (no counter rewrite beyond the no-op reconciliation).
     var gs = GameState.init(std.testing.allocator, .{ .seed = 5551 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     stirRng(&gs);
     const pid_before = gs.next_person_id;
@@ -5765,7 +5841,7 @@ fn stirRng(gs: *GameState) void {
 test "every RNG stream and the seed survive a save and load" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 6006 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     stirRng(&gs);
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5781,7 +5857,7 @@ test "every RNG stream and the seed survive a save and load" {
 test "a missing current RNG stream is corrupt without a fresh-stream fallback" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 6007 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     stirRng(&gs);
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5797,7 +5873,7 @@ test "a missing current RNG stream is corrupt without a fresh-stream fallback" {
 test "current missing RNG rows and seed are corrupt even with a valid legacy blob" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 6008 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     stirRng(&gs);
     const store = try Store.open(":memory:");
     defer store.close();
@@ -5822,7 +5898,7 @@ test "current missing RNG rows and seed are corrupt even with a valid legacy blo
 /// A campaign that has fought `fights` engagements, every battle decision
 /// answered with its default and every report read.
 fn foughtCampaignForTest(gs: *GameState, fights: u32) !void {
-    _ = try founding.createCommander(gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -5876,7 +5952,7 @@ test "a missing current battle counter is corrupt without renumbering battles" {
 test "a battle decision round-trips answerable, and still holds the turn" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12006 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -5914,6 +5990,7 @@ test "a field repair decision comes back from a save with its three orders" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12069 });
     defer gs.deinit();
     const f = try contract_events.damagedCompanyForTest(&gs, 2);
+    try personage_rules.seedPersonages(&gs);
     gs.next_contract_id = @intFromEnum(f.c.id) + 1;
     try contract_events.queueFieldRepair(&gs, f.c, .none);
     try std.testing.expect(gs.event_queue.blocking() != null);
@@ -5941,7 +6018,7 @@ test "a field repair decision comes back from a save with its three orders" {
 test "a recovery decision remembers its battle, and a held hull its lance" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12066 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     try gs.contracts.put(gs.allocator(), @enumFromInt(1), .{
         .id = @enumFromInt(1),
@@ -5998,7 +6075,7 @@ test "the wrecks on offer survive a save — the same battlefield after a reload
     const battle = @import("../sim/battle.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12060 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     // A report with a haul still to be divided, built by hand so the test
     // does not depend on a campaign happening to throw one up.
@@ -6078,8 +6155,8 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     // service requires available, physically local technicians and local pool
     // teams (docs/p2-artillery-operations-design.md,
     // Condition, maintenance, repairs and shared hours).
-    try std.testing.expectEqual(@as(u64, 6897570446611498295), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 7094298547721191795), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 4371932905005686475), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 12180291330747351351), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -6101,7 +6178,7 @@ test "pool-path salvage: hull_instance_id round-trips through save/load" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4005 });
     defer gs.deinit();
     gs.clock.day_index = 5;
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     const cid: types.ContractId = @enumFromInt(1);
     try gs.contracts.put(gs.allocator(), cid, .{
@@ -6212,7 +6289,7 @@ test "the table registry matches the tables the executable schema creates" {
 fn loadArcAfterTampering(sql: [*:0]const u8) !void {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4205 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try gs.createForce("Alpha", .company, .none);
     const cid: types.ContractId = @enumFromInt(1);
     try gs.contracts.put(gs.allocator(), cid, .{
@@ -6254,7 +6331,7 @@ test "a garrison contract with arc state and operations round-trips to an identi
     // cover the serialisation paths.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4201 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try gs.createForce("Alpha", .company, .none);
     const cid: types.ContractId = @enumFromInt(1);
     try gs.contracts.put(gs.allocator(), cid, .{
@@ -6317,7 +6394,7 @@ test "arc_finale_key, committed_day, and battle_report.operation round-trip thro
     // a full save → load cycle without loss (firstStateDifference == "").
     var gs = GameState.init(std.testing.allocator, .{ .seed = 3901 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try gs.createForce("Alpha", .company, .none);
     const cid: types.ContractId = @enumFromInt(1);
     try gs.contracts.put(gs.allocator(), cid, .{
@@ -6386,7 +6463,7 @@ test "operation.tempo and battle_report.operation_tempo round-trip through save/
     // cycle without loss.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4201 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try gs.createForce("Alpha", .company, .none);
     const cid: types.ContractId = @enumFromInt(1);
     try gs.contracts.put(gs.allocator(), cid, .{
@@ -6549,7 +6626,7 @@ test "non-default op.intent and non-null operation_intent round-trip through sav
     // stores '.break_enemy' and '.preserve_force' to reach the non-default paths.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 4301 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try gs.createForce("Alpha", .company, .none);
     const cid: types.ContractId = @enumFromInt(1);
     try gs.contracts.put(gs.allocator(), cid, .{
@@ -6627,7 +6704,7 @@ test "operation_task and battle_report_task round-trip with ≥2 rows (P4e)" {
     // Spot-checks verify the enum, lance id, success flag and note survive exactly.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 55006 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try gs.createForce("Alpha", .company, .none);
     const cid: types.ContractId = @enumFromInt(1);
     const lance_a: types.ForceId = @enumFromInt(10);
@@ -6717,7 +6794,7 @@ test "operation_task and battle_report_task round-trip with ≥2 rows (P4e)" {
 test "v40 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 55007 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try gs.createForce("Beta", .company, .none);
     const cid: types.ContractId = @enumFromInt(1);
     try gs.contracts.put(gs.allocator(), cid, .{
@@ -6784,7 +6861,7 @@ test "invalid and orphaned operation_task rows reject the load as corrupt (P4e)"
     const buildGs = struct {
         fn run(alloc_gs: std.mem.Allocator) !GameState {
             var gs = GameState.init(alloc_gs, .{ .seed = 55008 });
-            _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+            _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
             const co = try gs.createForce("Gamma", .company, .none);
             const cid: types.ContractId = @enumFromInt(1);
             try gs.contracts.put(gs.allocator(), cid, .{
@@ -6846,7 +6923,7 @@ test "invalid and orphaned operation_task rows reject the load as corrupt (P4e)"
 /// with a committed combat operation (so operation_intervention rows are valid).
 fn buildInterventionGs(alloc_gs: std.mem.Allocator) !GameState {
     var gs = GameState.init(alloc_gs, .{ .seed = 55009 });
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try gs.createForce("Delta", .company, .none);
     const cid: types.ContractId = @enumFromInt(1);
     try gs.contracts.put(gs.allocator(), cid, .{
@@ -6963,7 +7040,7 @@ test "invalid and orphaned operation_intervention rows reject the load as corrup
 /// Used by actor corrupt-load tests so `saveActors`/`loadActors` write real rows.
 fn buildActorGs(alloc: std.mem.Allocator) !GameState {
     var gs = GameState.init(alloc, .{ .seed = 20050 });
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
     const cid: types.ContractId = @enumFromInt(1);
     try gs.contracts.put(gs.allocator(), cid, .{
@@ -7016,7 +7093,7 @@ test "actors with nonzero relationships and a recurring actor survive a save/loa
     // with an identical stateHash. Exercises saveActors/loadActors with real rows.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 20001 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
 
     // Contract 1 (completed) — introduces liaison actor (id=1).
@@ -7108,7 +7185,7 @@ test "actors with nonzero relationships and a recurring actor survive a save/loa
 test "v43 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 20002 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
 
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
@@ -7151,7 +7228,7 @@ test "withdrawn operation and fell finale round-trip through save/load with iden
     // variant which relies on the existing TEXT column for operation.state.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 77099 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try gs.createForce("Gamma", .company, .none);
     const cid: types.ContractId = @enumFromInt(1);
     try gs.contracts.put(gs.allocator(), cid, .{
@@ -7201,7 +7278,7 @@ test "withdrawn operation and fell finale round-trip through save/load with iden
 fn buildWorldStateGs(alloc: std.mem.Allocator) !GameState {
     const world_state_sim = @import("../sim/world_state.zig");
     var gs = GameState.init(alloc, .{ .seed = 30001 });
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     // Set world states for two known worlds.
     const prep1 = try world_state_sim.prepareWorldAdjust(&gs, "galatea", .{ .security = 30, .employer_control = 20, .enemy_influence = -10 }, "big_win");
     world_state_sim.commitWorldAdjust(&gs, prep1);
@@ -7254,7 +7331,7 @@ test "world states on two worlds survive a save/load round-trip (P4h.4)" {
 test "v44 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 30002 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
 
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
@@ -7291,7 +7368,7 @@ test "a world_state row with a non-markup-safe last_cause rejects the load as co
 
 fn buildRivalGs(alloc: std.mem.Allocator) !GameState {
     var gs = GameState.init(alloc, .{ .seed = 40001 });
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
 
     // Contract 1 (completed) — introduces enemy_raiders rival (id=1).
@@ -7418,7 +7495,7 @@ test "rivals with nonzero standing and a recurring rival survive a save/load rou
 test "v45 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 40002 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
 
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
@@ -7464,7 +7541,7 @@ test "a rival row with a non-markup-safe unit_name rejects the load as corrupt (
 
 fn buildOfficerGs(alloc: std.mem.Allocator) !GameState {
     var gs = GameState.init(alloc, .{ .seed = 50001 });
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const co = try @import("../sim/starter_company.zig").generateInto(&gs, "Alpha");
 
     // Contract 1 (completed) — introduces officer arc (id=1, non-recurring).
@@ -7585,7 +7662,7 @@ test "officer arcs with nonzero performance and a recurring arc survive a save/l
 test "v46 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50002 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
 
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
@@ -7657,7 +7734,7 @@ test "next_officer_arc_id below its owned IDs is corrupt" {
 fn buildHullGs(alloc: std.mem.Allocator) !GameState {
     const hull_mod = @import("../domain/hull_instance.zig");
     var gs = GameState.init(alloc, .{ .seed = 30001 });
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const a = gs.allocator();
     // Add two units directly so the fixture is independent of generation seeding.
     const uid1 = try gs.addUnit("LCT-1V");
@@ -7758,7 +7835,7 @@ test "hull instances and linked units survive a save/load round-trip with identi
 test "v47 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 30002 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Gamma");
     const owned_count = gs.units.count();
     try std.testing.expect(owned_count > 0);
@@ -8189,7 +8266,7 @@ test "hull_ownership_history corruption is rejected on load (P3c.4)" {
 fn buildOwnerGs(alloc: std.mem.Allocator) !GameState {
     const hull_mod = @import("../domain/hull_instance.zig");
     var gs = GameState.init(alloc, .{ .seed = 30011 });
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const a = gs.allocator();
     const uid1 = try gs.addUnit("LCT-1V");
     // Hull 1: player-owned — linked to uid1
@@ -8362,7 +8439,7 @@ test "v51 historical fixture is refused without mutation" {
 fn buildRosterGs(alloc: std.mem.Allocator) !GameState {
     const hull_mod = @import("../domain/hull_instance.zig");
     var gs = GameState.init(alloc, .{ .seed = 50001 });
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const a = gs.allocator();
 
     // One merc company (id=1) so merc_company_rosters has a live FK target.
@@ -8502,7 +8579,7 @@ test "a dissolved merc company's empty roster survives a save/load round-trip" {
 test "v52 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50002 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
 
     const raw = try sqlite.Db.open(":memory:");
     var s1 = try Store.fromDb(raw);
@@ -8562,7 +8639,7 @@ test "a replacement company that bought nothing keeps its empty roster across sa
     // and the reloaded campaign has the same entry and digest.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50040 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     gs.market_listings.clearRetainingCapacity();
     var rng = gs.rng;
     const spawned = try @import("../sim/merc_lifecycle.zig").spawnReplacementCompany(&gs, gs.allocator(), 0, &rng);
@@ -8590,7 +8667,7 @@ test "merc companies survive a save/load round-trip with identical stateHash (P3
     // side/doctrine/unit_name survive; rule 69 round-trip proof for the new collection.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50020 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const a = gs.allocator();
 
     const mc1: merc_company_mod.MercCompany = .{
@@ -8698,7 +8775,7 @@ test "a rival row with a dangling merc_company_id rejects the load as corrupt (P
 test "v53 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50030 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const a = gs.allocator();
 
     const hid1: types.HullInstanceId = @enumFromInt(1);
@@ -8738,7 +8815,7 @@ test "MercCompany save/load round-trip with all four new fields non-default (P3f
     // new fields round-trip exactly.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 58001 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const a = gs.allocator();
 
     const mc1: merc_company_mod.MercCompany = .{
@@ -8784,7 +8861,7 @@ test "merc company understrength_since round-trips null and set; a negative, non
     // Rules 47, 53, 70; docs/p5d-conflict-world-design.md §J.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 69001 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     // Stay inside the campaign's first month, where its market offers are dated.
     for (0..20) |_| gs.clock.advance();
     const a = gs.allocator();
@@ -8844,7 +8921,7 @@ test "merc company understrength_since round-trips null and set; a negative, non
 test "v57 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 58002 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     const a = gs.allocator();
 
     const mc1: merc_company_mod.MercCompany = .{
@@ -8882,7 +8959,7 @@ test "v57 historical fixture is refused without mutation" {
 test "v50 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 30003 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     _ = try @import("../sim/starter_company.zig").generateInto(&gs, "Delta");
     const owned_count = gs.units.count();
     try std.testing.expect(owned_count > 0);
@@ -8988,7 +9065,7 @@ test "P3e.6: surplus listing hull_instance_id round-trips through save/load" {
     // with the id preserved and the digest unchanged.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 56001 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     gs.clock.day_index = 5;
 
     // Mint a market-owned HullInstance.
@@ -9047,7 +9124,7 @@ test "P3e.6: surplus listing hull_instance_id round-trips through save/load" {
 test "P3e.6: v55 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 56002 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
 
     const lid: types.ListingId = @enumFromInt(gs.next_listing_id);
     gs.next_listing_id += 1;
@@ -9088,7 +9165,7 @@ test "P3e.6: a listing with hull_instance_id naming no hull is rejected as corru
     // must be rejected with CorruptSave by validateReferences.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 56003 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
 
     // Add a surplus listing with hull_instance_id pointing to a non-existent instance.
     const bad_hid: types.HullInstanceId = @enumFromInt(99999);
@@ -9119,7 +9196,7 @@ test "P3f.1: dispersed listing planet_key and available_after round-trip through
     // the digest unchanged.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 57001 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     gs.clock.day_index = 5;
 
     // Mint a market-owned HullInstance (validateReferences requires a referenced hull).
@@ -9203,7 +9280,7 @@ test "P3f.1: dispersed listing planet_key and available_after round-trip through
 test "P3f.1: v56 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 57002 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
 
     const lid: types.ListingId = @enumFromInt(gs.next_listing_id);
     gs.next_listing_id += 1;
@@ -9246,7 +9323,7 @@ fn removeArtilleryFromLegacyFixture(db: sqlite.Db) !void {
 
 fn artilleryCampaignForTest(gs: *GameState) !types.ArtilleryFormationId {
     const commands = @import("../sim/commands.zig");
-    const home = try founding.createCommander(gs, "T", .LC, .quartermaster);
+    const home = try foundCampaignForTest(gs, "T", .LC, .quartermaster);
     gs.hqs.getPtr(home).?.funds = artillery.purchasePrice() * 10;
     return (try commands.execute(gs, .{ .buy_artillery = .{ .hq = home, .offer = gs.artillery_offers.items[0].id } })).artillery_formation;
 }
@@ -9255,7 +9332,7 @@ test "artillery disposal followed by real HQ sale preserves save-load history" {
     const commands = @import("../sim/commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 625 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .quartermaster);
     gs.funds = 500_000_000;
     const created = try commands.execute(&gs, .{ .found_hq = .{ .name = "Historical depot", .planet_key = gs.hqs.values()[0].planet_key } });
     const hq = created.created_hq;
@@ -9581,7 +9658,7 @@ test "real v59 fixture refuses open ordinary and repeated day-zero intervals" {
     for ([_][]const u32{ &.{0}, &.{ 0, 5 }, &.{ 0, 0 }, &.{ 0, 0, 0 } }) |starts| {
         var gs = GameState.init(std.testing.allocator, .{ .seed = 625 });
         defer gs.deinit();
-        _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+        _ = try foundCampaignForTest(&gs, "T", .LC, .quartermaster);
         const uid = try gs.addUnit("WSP-1A");
         try gs.recordHullAcquisition(gs.unit(uid).?, .purchase, "market");
         const hid = gs.unit(uid).?.hull_instance_id;
@@ -9642,7 +9719,7 @@ test "malformed v59 ownership fixture refuses and leaves schema and rows unchang
 
 fn retiredCampaignForTest(gs: *GameState) !types.HqId {
     const commands = @import("../sim/commands.zig");
-    _ = try founding.createCommander(gs, "T", .LC, .quartermaster);
+    _ = try foundCampaignForTest(gs, "T", .LC, .quartermaster);
     const other = try founding.foundHq(gs, "{g}Historical\x1b depot", .regional, "skye");
     try artillery.syncMarkets(gs);
     gs.hqs.getPtr(other).?.funds = artillery.purchasePrice() * 4;
@@ -9836,7 +9913,7 @@ test "multiple retired HQs preserve sale order independently of ID order" {
     const commands = @import("../sim/commands.zig");
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .quartermaster);
     const first = try founding.foundHq(&gs, "First", .regional, "skye");
     const second = try founding.foundHq(&gs, "Second", .regional, "skye");
     _ = try commands.execute(&gs, .{ .sell_hq = second });
@@ -10098,7 +10175,7 @@ fn downgradeArtilleryToV61ForTest(db: sqlite.Db) !void {
 test "real schema 61 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
-    const home = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const home = try foundCampaignForTest(&gs, "T", .LC, .quartermaster);
     const far = try founding.foundHq(&gs, "Remote", .regional, "skye");
     const shipping = try founding.foundHq(&gs, "Shipping", .regional, "galatea");
     const sales = try founding.foundHq(&gs, "Sales", .regional, "galatea");
@@ -10187,6 +10264,7 @@ test "operational save continues through shared service injury repair reload and
     var gs = GameState.init(std.testing.allocator, .{ .seed = 625 });
     defer gs.deinit();
     const id = try operations.fixtureForTest(&gs, true);
+    try personage_rules.seedPersonages(&gs);
     const f = gs.artillery_formations.getPtr(id).?;
     f.slots[@intFromEnum(rules.Slot.communications)].condition = .missing;
     f.armor_pct = 80;
@@ -10230,7 +10308,7 @@ test "operational save continues through shared service injury repair reload and
     defer continued.deinit();
     try std.testing.expectEqual(digest.stateHash(&loaded), digest.stateHash(&continued));
     // Pin the complete operational command script, including service and injury streams.
-    try std.testing.expectEqual(@as(u64, 3502470723956715159), digest.stateHash(&continued));
+    try std.testing.expectEqual(@as(u64, 1734066061162536952), digest.stateHash(&continued));
 }
 
 test "artillery bay targets round trip and malformed mutually exclusive targets reject loading" {
@@ -10238,6 +10316,7 @@ test "artillery bay targets round trip and malformed mutually exclusive targets 
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
     const id = try operations.fixtureForTest(&gs, false);
+    try personage_rules.seedPersonages(&gs);
     _ = try gs.addUnit("SCP-1N");
     try gs.bay_jobs.append(gs.allocator(), .{ .hq = gs.seat(), .kind = .artillery_depot_repair, .artillery = id, .duration_days = 2, .queued_day = 0 });
     const store = try Store.open(":memory:");
@@ -10301,6 +10380,7 @@ test "attached artillery accident replacement preserves complete assignment thro
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
     const id = try operations.fixtureForTest(&gs, true);
+    try personage_rules.seedPersonages(&gs);
     const original = gs.artillery_formations.get(id).?;
     const replacement = try gs.hirePerson("Spare", "Mechanic", .tech_mechanic);
     gs.person(replacement).?.weekly_hours = 100;
@@ -10323,6 +10403,7 @@ test "absent pool mechanic and captive operating crew retain valid saved assignm
         var gs = GameState.init(std.testing.allocator, .{});
         defer gs.deinit();
         const id = try operations.fixtureForTest(&gs, true);
+        try personage_rules.seedPersonages(&gs);
         const f = gs.artillery_formations.get(id).?;
         if (pooled) {
             _ = try artillery.detach(&gs, id);
@@ -10357,6 +10438,7 @@ test "operational row write failures preserve first-save and overwrite identity 
         var gs = GameState.init(std.testing.allocator, .{});
         defer gs.deinit();
         const id = try operations.fixtureForTest(&gs, true);
+        try personage_rules.seedPersonages(&gs);
         gs.artillery_formations.getPtr(id).?.slots[@intFromEnum(rules.Slot.long_tom_bin_1)].rounds = 3;
         const store = try Store.open(":memory:");
         defer store.close();
@@ -10398,6 +10480,7 @@ test "queued and started artillery depot work survives normal departure station 
         var gs = GameState.init(std.testing.allocator, .{ .seed = 625 });
         defer gs.deinit();
         const id = try operations.fixtureForTest(&gs, true);
+        try personage_rules.seedPersonages(&gs);
         const f = gs.artillery_formations.getPtr(id).?;
         const company = f.placement.company;
         const home = gs.seat();
@@ -10556,6 +10639,7 @@ test "old and future campaign load and overwrite refuse before gameplay decoding
         .{ .version = 66, .expected = error.SaveOlderThanGame },
         .{ .version = 67, .expected = error.SaveOlderThanGame },
         .{ .version = 68, .expected = error.SaveOlderThanGame },
+        .{ .version = 69, .expected = error.SaveOlderThanGame },
         .{ .version = schema_version + 1, .expected = error.SaveNewerThanGame },
     }) |case| {
         var sql: [128:0]u8 = undefined;
@@ -10576,7 +10660,7 @@ test "old and future campaign load and overwrite refuse before gameplay decoding
 test "current RNG requires a valid seed and exactly one fully typed row per stream" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 6008 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&gs, "T", .LC, .line_officer);
     stirRng(&gs);
     const store = try Store.open(":memory:");
     defer store.close();
@@ -10633,6 +10717,7 @@ fn battleInProgressForTest(gs: *GameState) !types.ContractId {
     const battle = @import("../sim/battle.zig");
     const commands = @import("../sim/commands.zig");
     const id = try battle.dueEngagementForTest(gs, true, 30);
+    try personage_rules.seedPersonages(gs);
     for ([_]battle_phase_mod.Order{ .engage, .{ .roe = .cautious }, .press_on }) |order| {
         _ = try commands.execute(gs, .{ .battle_order = .{ .contract = id, .order = order } });
     }
@@ -10653,6 +10738,7 @@ test "a battle saved mid-fight loads, finishes and plays on exactly as one never
         var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
         defer gs.deinit();
         const id = try @import("../sim/battle.zig").dueEngagementForTest(&gs, true, 30);
+        try personage_rules.seedPersonages(&gs);
         const given = [_]battle_phase_mod.Order{ .engage, .{ .roe = .cautious }, .press_on };
         for (given[0..orders_given]) |order| _ = try @import("../sim/commands.zig").execute(&gs, .{ .battle_order = .{ .contract = id, .order = order } });
         {
@@ -10828,6 +10914,7 @@ test "a due engagement not yet engaged, and a finished one, load with no battle 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
     defer gs.deinit();
     const id = try @import("../sim/battle.zig").dueEngagementForTest(&gs, true, 30);
+    try personage_rules.seedPersonages(&gs);
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
@@ -10905,6 +10992,7 @@ test "a battle report whose phase rows are removed refuses to load; a concession
         var one_step = GameState.init(std.testing.allocator, .{ .seed = 3007 });
         defer one_step.deinit();
         const id = try @import("../sim/battle.zig").dueEngagementForTest(&one_step, forfeited, 100);
+        try personage_rules.seedPersonages(&one_step);
         if (forfeited) {
             one_step.faction_rosters.getPtr("DC").?.clearRetainingCapacity();
         } else {
@@ -10971,6 +11059,7 @@ test "a battle in progress whose stored pauses its replay does not reach refuses
     var locked = GameState.init(std.testing.allocator, .{ .seed = 3007 });
     defer locked.deinit();
     const lid = try @import("../sim/battle.zig").dueEngagementForTest(&locked, true, 30);
+    try personage_rules.seedPersonages(&locked);
     for ([_]battle_phase_mod.Order{ .engage, .{ .roe = .cautious } }) |order| {
         _ = try @import("../sim/commands.zig").execute(&locked, .{ .battle_order = .{ .contract = lid, .order = order } });
     }
@@ -11011,6 +11100,7 @@ const lever_course_for_test = [_]battle_phase_mod.Order{ .engage, .commit_reserv
 /// with a reserve lance, has the first `n` of `lever_course_for_test` given.
 fn leverBattleInProgressForTest(gs: *GameState, n: usize) !types.ContractId {
     const id = try @import("../sim/battle.zig").leverEngagementForTest(gs, 30, 4);
+    try personage_rules.seedPersonages(gs);
     for (lever_course_for_test[0..n]) |order| {
         _ = try @import("../sim/commands.zig").execute(gs, .{ .battle_order = .{ .contract = id, .order = order } });
     }
@@ -11154,6 +11244,7 @@ test "a battle report's levers round trip, and missing, malformed or forged leve
     var conceded = GameState.init(std.testing.allocator, .{ .seed = 3007 });
     defer conceded.deinit();
     const cid = try @import("../sim/battle.zig").dueEngagementForTest(&conceded, false, 100);
+    try personage_rules.seedPersonages(&conceded);
     for (conceded.units.values()) |*u| u.status = .destroyed;
     _ = try @import("../sim/commands.zig").execute(&conceded, .{ .battle_order = .{ .contract = cid, .order = .engage } });
     try std.testing.expect(conceded.battle_reports.kept.items[conceded.battle_reports.kept.items.len - 1].conceded);
@@ -11170,6 +11261,7 @@ test "a battle report's levers round trip, and missing, malformed or forged leve
 fn situationCampaignForTest(gs: *GameState) !*contract_mod.Contract {
     const situations = @import("../sim/situations.zig");
     const c = try situations.garrisonContractForTest(gs);
+    try personage_rules.seedPersonages(gs);
     try std.testing.expect(try situations.queueDue(gs, c));
     try contract_events.resolveChoice(gs, gs.event_queue.pending.items[0].id, 0);
     c.arc_beat = 1;
@@ -11308,7 +11400,7 @@ test "the schema refuses a situation record without its campaign's actor, and fl
     _ = try situationCampaignForTest(&gs);
     var other = GameState.init(std.testing.allocator, .{ .seed = 6205 });
     defer other.deinit();
-    _ = try founding.createCommander(&other, "T", .LC, .line_officer);
+    _ = try foundCampaignForTest(&other, "T", .LC, .line_officer);
     const store = try Store.open(":memory:");
     defer store.close();
     // A first save, an overwrite and a second campaign beside it commit.
@@ -11421,4 +11513,196 @@ test "a store or a campaign at format 68 is refused before any change, an unders
     try std.testing.expectError(error.SaveOlderThanGame, store.save(&gs));
     try std.testing.expectEqual(storage_before, try databaseFingerprintForTest(raw));
     try std.testing.expectEqual(memory_before, digest.stateHash(&gs));
+}
+
+test "a store or a campaign at format 69 is refused before any change, personages held or not" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6905 });
+    defer gs.deinit();
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    try std.testing.expectEqual(personage_rules.seed_count, gs.personages.count());
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    var store = try Store.fromDb(raw);
+    try store.save(&gs);
+    try raw.exec("UPDATE setting SET value = 69 WHERE key = 'schema_version'");
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
+    var sql: [128:0]u8 = undefined;
+    try raw.exec(try std.fmt.bufPrintZ(&sql, "UPDATE setting SET value = {d} WHERE key = 'schema_version'; UPDATE campaign SET schema_version = 69", .{schema_version}));
+    store = try Store.fromDb(raw);
+    const memory_before = digest.stateHash(&gs);
+    const storage_before = try databaseFingerprintForTest(raw);
+    try std.testing.expectError(error.SaveOlderThanGame, store.load(std.testing.allocator, gs.campaign_id));
+    try std.testing.expectError(error.SaveOlderThanGame, store.save(&gs));
+    try std.testing.expectEqual(storage_before, try databaseFingerprintForTest(raw));
+    try std.testing.expectEqual(memory_before, digest.stateHash(&gs));
+}
+
+test "a created campaign's personages and their counter survive save and load, and the campaign plays on identically" {
+    // Rules 46, 53, 70; docs/p5d-conflict-world-design.md §J.
+    const commands = @import("../sim/commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 70001 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    try std.testing.expectEqual(personage_rules.seed_count, gs.personages.count());
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var difference: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &difference) orelse "");
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    try std.testing.expectEqual(gs.next_personage_id, loaded.next_personage_id);
+    for (gs.personages.values(), loaded.personages.values()) |p, q| {
+        try std.testing.expectEqual(p.id, q.id);
+        try std.testing.expectEqual(p.role, q.role);
+        try std.testing.expectEqualStrings(p.first_name, q.first_name);
+        try std.testing.expectEqualStrings(p.last_name, q.last_name);
+        try std.testing.expectEqualStrings(p.faction_key, q.faction_key);
+        try std.testing.expectEqualStrings(p.seat_planet_key, q.seat_planet_key);
+        try std.testing.expect(p.motives.eql(q.motives));
+        try std.testing.expectEqual(p.ambition, q.ambition);
+        try std.testing.expectEqual(p.provenance, q.provenance);
+        try std.testing.expectEqual(p.generator_version, q.generator_version);
+    }
+    // The personage fields and the counter are digest-covered.
+    const hash = digest.stateHash(&gs);
+    gs.personages.values()[0].ambition ^= 1;
+    try std.testing.expect(digest.stateHash(&gs) != hash);
+    gs.personages.values()[0].ambition ^= 1;
+    gs.next_personage_id += 1;
+    try std.testing.expect(digest.stateHash(&gs) != hash);
+    gs.next_personage_id -= 1;
+    // Continued evolution: the saved and the never-saved campaign play on alike.
+    for ([_]*GameState{ &gs, &loaded }) |g| {
+        try @import("../sim/tick.zig").clearHolds(g);
+        _ = try commands.execute(g, .{ .advance_days = 7 });
+    }
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+}
+
+/// `template` with `$R` (a ruler's id), `$L` (a leader's id), `$S` (a free
+/// id), `$N` (the counter past it) and `$C` (the last id) filled in.
+fn personageTamperSqlForTest(buf: *[512:0]u8, template: []const u8, ids: [3]u32) ![:0]const u8 {
+    var w = std.Io.Writer.fixed(buf[0..511]);
+    var i: usize = 0;
+    while (i < template.len) : (i += 1) {
+        if (template[i] == '$' and i + 1 < template.len) {
+            const value: ?u32 = switch (template[i + 1]) {
+                'R' => ids[0],
+                'L' => ids[1],
+                'S' => ids[2],
+                'N' => ids[2] + 1,
+                'C' => ids[2] - 1,
+                else => null,
+            };
+            if (value) |v| {
+                try w.print("{d}", .{v});
+                i += 1;
+                continue;
+            }
+        }
+        try w.writeByte(template[i]);
+    }
+    const n = w.buffered().len;
+    buf[n] = 0;
+    return buf[0..n :0];
+}
+
+test "a tampered personage row, seat, counter or politics stream refuses to load" {
+    // Rules 47, 48, 50, 70; docs/p5d-conflict-world-design.md §J "dangling refs".
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 70002 });
+    defer gs.deinit();
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+
+    const ruler = 1; // the first hiring world's ruler
+    const leader = personage_rules.ruler_count + 1; // the first leader
+    const spare = gs.next_personage_id; // an id an added row may take
+    var buf: [512:0]u8 = undefined;
+    const Case = struct { []const u8, []const u8 };
+    const cases = [_]Case{
+        .{ "unknown role", "UPDATE personage SET role = 'heir' WHERE id = $R" },
+        .{ "unknown faction", "UPDATE personage SET faction_key = 'XX' WHERE id = $L" },
+        .{ "unknown planet", "UPDATE personage SET seat_planet_key = 'nowhere' WHERE id = $R" },
+        .{ "unknown provenance", "UPDATE personage SET provenance = 'canon' WHERE id = $R" },
+        .{ "unknown generator version", "UPDATE personage SET generator_version = 2 WHERE id = $R" },
+        .{ "ruler on a world that does not hire", "INSERT INTO personage SELECT cid, 999, $S, role, first_name, 'Extra', 'CS', 'terra', motives, ambition, provenance, generator_version FROM personage WHERE id = $R; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+        .{ "ruler of another faction than its world's", "UPDATE personage SET faction_key = CASE WHEN faction_key = 'DC' THEN 'LC' ELSE 'DC' END WHERE id = $R" },
+        .{ "two rulers on one world", "INSERT INTO personage SELECT cid, 999, $S, role, first_name, 'Extra', faction_key, seat_planet_key, motives, ambition, provenance, generator_version FROM personage WHERE id = $R; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+        .{ "a hiring world without a ruler", "DELETE FROM personage WHERE id = $R" },
+        .{ "a leader off its capital", "UPDATE personage SET seat_planet_key = 'skye' WHERE id = $L" },
+        .{ "two leaders for one faction", "INSERT INTO personage SELECT cid, 999, $S, role, first_name, 'Extra', faction_key, seat_planet_key, motives, ambition, provenance, generator_version FROM personage WHERE id = $L; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+        .{ "a leader for the catch-all faction", "INSERT INTO personage SELECT cid, 999, $S, role, first_name, 'Extra', 'PER', 'galatea', motives, ambition, provenance, generator_version FROM personage WHERE id = $L; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+        .{ "a leader-bearing faction without a leader", "DELETE FROM personage WHERE id = $L" },
+        .{ "personages without a commander", "DELETE FROM commander" },
+        .{ "one motive", "UPDATE personage SET motives = 1 WHERE id = $R" },
+        .{ "four motives", "UPDATE personage SET motives = 15 WHERE id = $R" },
+        .{ "a bit that is no motive", "UPDATE personage SET motives = 515 WHERE id = $R" },
+        .{ "a text motive set", "UPDATE personage SET motives = 'expansion' WHERE id = $R" },
+        .{ "ambition below the scale", "UPDATE personage SET ambition = -1 WHERE id = $R" },
+        .{ "ambition above the scale", "UPDATE personage SET ambition = 101 WHERE id = $R" },
+        .{ "an empty name", "UPDATE personage SET first_name = '' WHERE id = $R" },
+        .{ "a name that is markup", "UPDATE personage SET last_name = '{c}x' WHERE id = $R" },
+        .{ "an id at the counter", "UPDATE meta SET value = $C WHERE key = 'next_personage_id'" },
+        .{ "a counter of 0", "UPDATE meta SET value = 0 WHERE key = 'next_personage_id'" },
+        .{ "a missing counter", "DELETE FROM meta WHERE key = 'next_personage_id'" },
+        .{ "a missing politics stream", "DELETE FROM rng_stream WHERE stream = 'politics'" },
+    };
+    for (cases) |case| {
+        errdefer std.debug.print("personage tamper case: {s}\n", .{case[0]});
+        try store.save(&gs);
+        try store.db.exec("PRAGMA ignore_check_constraints=ON");
+        try store.db.exec(try personageTamperSqlForTest(&buf, case[1], .{ ruler, leader, spare }));
+        try store.db.exec("PRAGMA ignore_check_constraints=OFF");
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    }
+    // Controls: without its commander the campaign loads once its personages
+    // go too, so the refusal above is the personages' own.
+    try store.save(&gs);
+    try store.db.exec("DELETE FROM commander; DELETE FROM personage");
+    var commanderless = try store.load(std.testing.allocator, gs.campaign_id);
+    commanderless.deinit();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+}
+
+test "the personage schema refuses out-of-range rows without the loader" {
+    // Rule 50: the executable schema enforces what SQLite can check.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 70003 });
+    defer gs.deinit();
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    for ([_][:0]const u8{
+        "UPDATE personage SET role = 'heir' WHERE id = 1",
+        "UPDATE personage SET motives = 1 WHERE id = 1",
+        "UPDATE personage SET motives = 15 WHERE id = 1",
+        "UPDATE personage SET motives = 512 WHERE id = 1",
+        "UPDATE personage SET ambition = 101 WHERE id = 1",
+        "UPDATE personage SET ambition = -1 WHERE id = 1",
+        "UPDATE personage SET provenance = 'canon' WHERE id = 1",
+        "UPDATE personage SET generator_version = 2 WHERE id = 1",
+        "UPDATE personage SET first_name = '' WHERE id = 1",
+        "UPDATE personage SET id = 0 WHERE id = 1",
+        "UPDATE personage SET id = 2 WHERE id = 1",
+    }) |tamper| try std.testing.expectError(error.ConstraintViolation, store.db.exec(tamper));
+    try expectCurrentRoundTripForTest(store, &gs);
+}
+
+test "a campaign without a commander holds no personages and loads" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 70004 });
+    defer gs.deinit();
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(@as(usize, 0), loaded.personages.count());
+    try std.testing.expectEqual(@as(u32, 1), loaded.next_personage_id);
 }

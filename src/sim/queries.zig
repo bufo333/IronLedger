@@ -11091,3 +11091,147 @@ test "market propagates OutOfMemory while listing the artillery offer" {
     try std.testing.expectEqual(@as(usize, 1), (try market(arena.allocator(), &gs, .all, hqs.home)).board.len);
     try std.testing.expectError(error.OutOfMemory, market(std.testing.failing_allocator, &gs, .all, hqs.home));
 }
+
+// ------------------------------------------------------------------ who's who
+
+const personage_dom = @import("../domain/personage.zig");
+
+/// Which personages `who` lists: every leader, one faction's, or one world's.
+pub const WhoFilter = union(enum) {
+    leaders,
+    /// A `factions.zon` key: its leader, then its rulers.
+    faction: []const u8,
+    /// A `planets.zon` key: its ruler.
+    planet: []const u8,
+};
+
+/// `who [<faction-key>|<planet-key>]`: no key lists the leaders; a key
+/// names a faction, else a world. `BadArguments` for a key that names
+/// neither, or a second token.
+pub fn parseWhoFilter(key: ?[]const u8, extra: ?[]const u8) error{BadArguments}!WhoFilter {
+    if (extra != null) return error.BadArguments;
+    const k = key orelse return .leaders;
+    if (@import("../domain/faction.zig").find(k)) |f| return .{ .faction = f.key };
+    if (planet_mod.find(k)) |p| return .{ .planet = p.key };
+    return error.BadArguments;
+}
+
+/// One `who` row: the personage it shows, and its line — title, name,
+/// faction, ambition, motives and provenance label. Names are escaped.
+pub const PersonageRow = struct {
+    id: types.PersonageId,
+    text: []const u8,
+};
+
+/// The personages a filter selects, as display rows (rules 29–32): leaders
+/// in `factions.zon` order; a faction's leader before its rulers; a world's
+/// one ruler. Rulers follow personage id order.
+pub fn personageRows(alloc: Alloc, gs: *GameState, filter: WhoFilter) ![]PersonageRow {
+    var rows: std.ArrayListUnmanaged(PersonageRow) = .empty;
+    switch (filter) {
+        .leaders => for (@import("../domain/faction.zig").table) |f| {
+            for (gs.personages.values()) |*p| if (p.role == .faction_leader and std.mem.eql(u8, p.faction_key, f.key)) {
+                try rows.append(alloc, try personageRow(alloc, p));
+            };
+        },
+        .faction => |key| {
+            for ([_]personage_dom.Role{ .faction_leader, .planetary_ruler }) |role| {
+                for (gs.personages.values()) |*p| if (p.role == role and std.mem.eql(u8, p.faction_key, key)) {
+                    try rows.append(alloc, try personageRow(alloc, p));
+                };
+            }
+        },
+        .planet => |key| for (gs.personages.values()) |*p| if (p.role == .planetary_ruler and std.mem.eql(u8, p.seat_planet_key, key)) {
+            try rows.append(alloc, try personageRow(alloc, p));
+        },
+    }
+    return rows.toOwnedSlice(alloc);
+}
+
+fn personageRow(alloc: Alloc, p: *const personage_dom.Personage) !PersonageRow {
+    var motives: std.ArrayListUnmanaged(u8) = .empty;
+    var it = p.motives.iterator();
+    while (it.next()) |m| {
+        if (motives.items.len > 0) try motives.appendSlice(alloc, ", ");
+        try motives.appendSlice(alloc, @tagName(m));
+    }
+    const text = try std.fmt.allocPrint(alloc, "#{d}  {s}  {s} {s}  {s}  ambition {d}  motives {s}  {{d}}[{s}]{{/}}", .{
+        @intFromEnum(p.id),
+        try table.plain(alloc, try personage_dom.titleText(alloc, p)),
+        try table.plain(alloc, p.first_name),
+        try table.plain(alloc, p.last_name),
+        p.faction_key,
+        p.ambition,
+        motives.items,
+        p.provenance.label(),
+    });
+    return .{ .id = p.id, .text = text };
+}
+
+test "who lists the leaders in faction order, a faction's leader then its rulers, and a world's ruler" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 70201 });
+    defer gs.deinit();
+    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const faction = @import("../domain/faction.zig");
+
+    // Bare `who`: exactly the leaders, in factions.zon order.
+    const leaders = try personageRows(a, &gs, try parseWhoFilter(null, null));
+    var expected: usize = 0;
+    for (faction.table) |*f| {
+        if (!personage_dom.factionHasLeader(f)) continue;
+        const p = gs.personages.get(leaders[expected].id).?;
+        try std.testing.expectEqual(personage_dom.Role.faction_leader, p.role);
+        try std.testing.expectEqualStrings(f.key, p.faction_key);
+        expected += 1;
+    }
+    try std.testing.expectEqual(expected, leaders.len);
+
+    // A faction: its leader first, then exactly its rulers.
+    const lc = try personageRows(a, &gs, try parseWhoFilter("LC", null));
+    try std.testing.expectEqual(personage_dom.Role.faction_leader, gs.personages.get(lc[0].id).?.role);
+    var lc_worlds: usize = 0;
+    for (planet_mod.catalog) |w| if (std.mem.eql(u8, w.faction, "LC")) {
+        lc_worlds += 1;
+    };
+    try std.testing.expectEqual(lc_worlds + 1, lc.len);
+    for (lc[1..]) |row| {
+        const p = gs.personages.get(row.id).?;
+        try std.testing.expectEqual(personage_dom.Role.planetary_ruler, p.role);
+        try std.testing.expectEqualStrings("LC", p.faction_key);
+    }
+
+    // A world: its one ruler, whose line names the world.
+    const skye = try personageRows(a, &gs, try parseWhoFilter("skye", null));
+    try std.testing.expectEqual(@as(usize, 1), skye.len);
+    try std.testing.expectEqualStrings("skye", gs.personages.get(skye[0].id).?.seat_planet_key);
+    try std.testing.expect(std.mem.indexOf(u8, skye[0].text, "Governor of Skye") != null);
+    // A world that does not hire and a faction with no leader list nobody.
+    try std.testing.expectEqual(@as(usize, 0), (try personageRows(a, &gs, try parseWhoFilter("terra", null))).len);
+    try std.testing.expectEqual(@as(usize, 0), (try personageRows(a, &gs, try parseWhoFilter("CS", null))).len);
+
+    // Every row shows its provenance label and its personage's name.
+    for ([_][]const PersonageRow{ leaders, lc, skye }) |rows| for (rows) |row| {
+        const p = gs.personages.get(row.id).?;
+        try std.testing.expect(std.mem.indexOf(u8, row.text, "[procedural]") != null);
+        try std.testing.expect(std.mem.indexOf(u8, row.text, p.last_name) != null);
+    };
+
+    // Unknown keys and trailing tokens are refused.
+    try std.testing.expectError(error.BadArguments, parseWhoFilter("nosuchkey", null));
+    try std.testing.expectError(error.BadArguments, parseWhoFilter("LC", "skye"));
+    try std.testing.expectError(error.OutOfMemory, personageRows(std.testing.failing_allocator, &gs, .leaders));
+}
+
+test "a personage name is escaped in its who row" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 70202 });
+    defer gs.deinit();
+    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    gs.personages.values()[0].last_name = "{c}Red";
+    const rows = try personageRows(arena.allocator(), &gs, .{ .planet = gs.personages.values()[0].seat_planet_key });
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].text, "{{c}Red") != null);
+}

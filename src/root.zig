@@ -76,6 +76,7 @@ pub const merc_company = @import("domain/merc_company.zig");
 pub const merc_band = @import("domain/merc_band.zig");
 pub const logo = @import("domain/logo.zig");
 pub const officer = @import("domain/officer.zig");
+pub const personage = @import("domain/personage.zig");
 
 // sim/ — state, time, randomness, battle resolution
 pub const state = @import("sim/state.zig");
@@ -95,6 +96,7 @@ pub const table = @import("sim/table.zig");
 pub const black_market = @import("sim/black_market.zig");
 pub const merc_lifecycle = @import("sim/merc_lifecycle.zig");
 pub const merc_identity = @import("sim/merc_identity.zig");
+pub const personages = @import("sim/personages.zig");
 
 // persist/ — SQLite save files
 pub const sqlite = @import("persist/sqlite.zig");
@@ -125,6 +127,7 @@ pub const logo_name = @import("gen/logo_name.zig");
 pub const starter_company = @import("sim/starter_company.zig");
 pub const roster_seed = @import("sim/roster_seed.zig");
 pub const person_gen = @import("gen/person_gen.zig");
+pub const personage_gen = @import("gen/personage_gen.zig");
 
 test {
     std.testing.refAllDecls(@This());

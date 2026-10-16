@@ -22,7 +22,7 @@ test "artillery full campaign load rejects placement TEXT containing embedded NU
     const digest = @import("../sim/digest.zig");
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
-    const home = try @import("../sim/founding.zig").createCommander(&gs, "T", .LC, .quartermaster);
+    const home = try @import("store.zig").foundCampaignForTest(&gs, "T", .LC, .quartermaster);
     gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
     _ = try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
     const store = try store_mod.Store.open(":memory:");
@@ -309,7 +309,7 @@ test "artillery campaign load rejects fractional identity price and market year"
     const artillery = @import("../sim/artillery.zig");
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
-    const home = try @import("../sim/founding.zig").createCommander(&gs, "T", .LC, .quartermaster);
+    const home = try @import("store.zig").foundCampaignForTest(&gs, "T", .LC, .quartermaster);
     gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
     _ = try commands.execute(&gs, .{ .buy_artillery = .{ .hq = home, .offer = gs.artillery_offers.items[0].id } });
     const store = try store_mod.Store.open(":memory:");
@@ -499,7 +499,7 @@ test "artillery row codecs and transactional facade preserve consumed offers and
     const artillery = @import("../sim/artillery.zig");
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
-    const home = try @import("../sim/founding.zig").createCommander(&gs, "T", .LC, .quartermaster);
+    const home = try @import("store.zig").foundCampaignForTest(&gs, "T", .LC, .quartermaster);
     gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
     const bought = try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
     const company = try gs.createForce("Company", .company, .none);
@@ -526,7 +526,7 @@ test "artillery consumed offer deletion fails closed before market synchronizati
     const artillery = @import("../sim/artillery.zig");
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
-    const home = try @import("../sim/founding.zig").createCommander(&gs, "T", .LC, .quartermaster);
+    const home = try @import("store.zig").foundCampaignForTest(&gs, "T", .LC, .quartermaster);
     gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
     _ = try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
     const store = try store_mod.Store.open(":memory:");
@@ -585,7 +585,7 @@ test "offer completeness preserves zero boards and delayed initialization of new
         return error.TestExpectedError;
     }
 
-    const home = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    const home = try @import("store.zig").foundCampaignForTest(&gs, "T", .LC, .quartermaster);
     gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
     _ = try artillery.buy(&gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
     _ = try founding.foundHq(&gs, "New", .regional, "skye");
@@ -612,7 +612,7 @@ test "offer completeness preserves zero boards and delayed initialization of new
 fn placementCampaignForTest(gs: *GameState, placement: std.meta.Tag(dom.Placement)) !void {
     const artillery = @import("../sim/artillery.zig");
     const founding = @import("../sim/founding.zig");
-    const home = try founding.createCommander(gs, "T", .LC, .quartermaster);
+    const home = try @import("store.zig").foundCampaignForTest(gs, "T", .LC, .quartermaster);
     gs.hqs.getPtr(home).?.funds = artillery.purchasePrice() * 10;
     const bought = try artillery.buy(gs, .{ .hq = home, .offer = gs.artillery_offers.items[0].id });
     if (placement == .hq_pool or placement == .field_freight or placement == .field_return) {
