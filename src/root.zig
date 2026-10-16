@@ -73,6 +73,7 @@ pub const actor = @import("domain/actor.zig");
 pub const situation = @import("domain/situation.zig");
 pub const rival = @import("domain/rival.zig");
 pub const merc_company = @import("domain/merc_company.zig");
+pub const merc_band = @import("domain/merc_band.zig");
 pub const logo = @import("domain/logo.zig");
 pub const officer = @import("domain/officer.zig");
 

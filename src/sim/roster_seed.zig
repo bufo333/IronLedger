@@ -15,6 +15,7 @@ const chassis_mod = @import("../domain/chassis.zig");
 const hull_mod = @import("../domain/hull_instance.zig");
 const rival_mod = @import("../domain/rival.zig");
 const merc_company_mod = @import("../domain/merc_company.zig");
+const merc_band = @import("../domain/merc_band.zig");
 const roster_gen = @import("../gen/roster_gen.zig");
 const logo = @import("../domain/logo.zig");
 const merc_lifecycle = @import("merc_lifecycle.zig");
@@ -24,14 +25,12 @@ const GameState = @import("state.zig").GameState;
 /// Maximum entries in faction.table; used for fixed stack arrays.
 const max_factions = 32;
 
-/// Upper bound for merc-company stack arrays; tuning.generation.merc_company_count
-/// must not exceed this (the comptime sanity check below enforces it).
+/// Upper bound for merc-company stack arrays; `merc_band.seedTotal()` must not
+/// exceed this (the comptime sanity check below enforces it).
 const max_merc_companies: usize = 256;
 comptime {
-    if (tuning.generation.merc_company_count > max_merc_companies)
-        @compileError("merc_company_count exceeds max_merc_companies; raise the constant");
-    if (tuning.generation.merc_company_count + 1 > logo.all_keys.len)
-        @compileError("merc_company_count + 1 exceeds the data/logos catalog; add more PNG files to data/logos/");
+    if (merc_band.seedTotal() > max_merc_companies)
+        @compileError("data/tables/merc_bands.zon: seed_companies sum exceeds max_merc_companies; raise the constant");
 }
 
 /// Seed every manufacturing faction's hull pool at campaign creation.
@@ -165,24 +164,29 @@ pub fn seedFactionRosters(gs: *GameState) !void {
 ///              (infallible); gs.rng, gs.next_merc_company_id, and
 ///              gs.next_hull_instance_id updated last.
 ///
+/// Seeds `merc_band.seedTotal()` companies in the band table's fixed mix
+/// (docs/p5d-conflict-world-design.md §L8, D23–D25): each company's band is
+/// drawn without replacement from the multiset of every row's
+/// `seed_companies` slots, and the company is founded with that band's
+/// `capital_cbills` and `merc_band.lineTarget` active mek hulls.
+///
 /// Draw order: per-company, archetype (.rivals), hiring faction (.rivals),
-/// identity (.rivals), logo (.rivals), then pool hulls (.rosters stream).
-/// Within a company, identity/logo draws precede all pool draws, so the
-/// stream-consumption order is fixed for any given seed: company 0 identity,
-/// company 0 logo, company 0 pool hull 0..N-1, company 1 identity, … The
-/// eligible logo pool is the sorted catalog minus gs.player_logo_key (if any).
+/// identity (.rivals), logo (.rivals), band (.rivals), then pool hulls
+/// (.rosters stream). Within a company, identity/logo/band draws precede all
+/// pool draws, so the stream-consumption order is fixed for any given seed:
+/// company 0 identity, company 0 logo, company 0 band, company 0 pool hull
+/// 0..N-1, company 1 identity, … The eligible logo pool is the sorted catalog
+/// minus gs.player_logo_key (if any).
 /// Each unit_name is `merc_identity.unitName` over the names seeded before it,
 /// so seeded names are distinct (ignoring ASCII case) without an extra draw.
 /// This order is documented here so any change to it requires a deliberate
 /// re-pin of the golden digest (and the stream-isolation test will catch it).
 ///
-/// Every seeded company gets a roster entry (state.zig), which is empty when
-/// tuning.generation.merc_company_hulls_each == 0. Each company's founding line
-/// is logged in company-id order (`merc_lifecycle.foundingLine`).
+/// Every seeded company gets a roster entry (state.zig). Each company's
+/// founding line is logged in company-id order (`merc_lifecycle.foundingLine`).
 pub fn seedMercCompanies(gs: *GameState) !void {
     const alloc = gs.allocator();
-    const tg = tuning.generation;
-    const count: usize = @as(usize, tg.merc_company_count);
+    const count = merc_band.seedTotal();
     if (count == 0) return;
 
     // ---- Prepare ----
@@ -197,8 +201,18 @@ pub fn seedMercCompanies(gs: *GameState) !void {
     }
     if (num_hiring == 0) return;
 
-    const hulls_each: u32 = @as(u32, tg.merc_company_hulls_each);
-    const total_hulls: u32 = @as(u32, count) * hulls_each;
+    // One slot per seeded company, `seed_companies` slots per band; the hull
+    // total is fixed by the mix whatever order the draw assigns it in.
+    var band_slots: [max_merc_companies]*const merc_band.Band = undefined;
+    var slots_len: usize = 0;
+    var total_hulls: usize = 0;
+    for (merc_band.table.bands) |*band| {
+        for (0..band.seed_companies) |_| {
+            band_slots[slots_len] = band;
+            slots_len += 1;
+        }
+        total_hulls += @as(usize, band.seed_companies) * merc_band.lineTarget(band);
+    }
 
     // Draw from a rng copy so gs.rng is only updated on success.
     var rng_copy = gs.rng;
@@ -245,6 +259,12 @@ pub fn seedMercCompanies(gs: *GameState) !void {
         pool[logo_j] = pool[pool_len - 1];
         pool_len -= 1;
 
+        // Draw the band without replacement from the remaining slots (on .rivals stream).
+        const band_j = rng_copy.random(.rivals).uintLessThan(usize, slots_len);
+        const band = band_slots[band_j];
+        band_slots[band_j] = band_slots[slots_len - 1];
+        slots_len -= 1;
+
         // Allocate unit_name (fallible, arena lifetime = campaign lifetime),
         // distinct from every name seeded before it (merc_identity.unitName).
         const unit_name = try merc_identity.unitName(alloc, seeded_names[0..ci], identity.last, archetype.unit_noun);
@@ -259,36 +279,36 @@ pub fn seedMercCompanies(gs: *GameState) !void {
             .faction_key = f.key, // static catalog memory
             .side = identity.side,
             .doctrine = identity.doctrine,
-            .cbills = tuning.generation.merc_replacement_cbill_floor,
+            .cbills = band.capital_cbills,
             .founded_day = 0,
             .dissolved_day = 0,
             .logo_key = chosen_logo,
+            .band_key = band.key, // static table memory
         };
 
         // Roll this company's hull pool on .rosters stream.
-        if (hulls_each > 0) {
-            try roster_lists[ci].ensureTotalCapacity(alloc, hulls_each);
-            for (0..hulls_each) |_| {
-                const hid: types.HullInstanceId = @enumFromInt(next_hid);
-                next_hid += 1;
+        const hulls_each = merc_band.lineTarget(band);
+        try roster_lists[ci].ensureTotalCapacity(alloc, hulls_each);
+        for (0..hulls_each) |_| {
+            const hid: types.HullInstanceId = @enumFromInt(next_hid);
+            next_hid += 1;
 
-                const ch = roster_gen.rollFactionPoolOne(&rng_copy, .rosters, f.key, year);
-                var inst: hull_mod.HullInstance = .{
-                    .id = hid,
-                    .base_key = ch.key, // static catalog memory
-                    .status = .active,
-                    .intro_year = ch.intro_year,
-                    .pre_campaign = true,
-                    .owner = .{ .merc_company = mid },
-                };
-                // Copy design loadout (docs/p3c-economy-design.md §2).
-                for (ch.loadout) |slot| {
-                    try inst.loadout.append(alloc, .{ .part_key = slot.part });
-                }
-                roster_lists[ci].appendAssumeCapacity(hid);
-                built_hulls[hull_idx] = inst;
-                hull_idx += 1;
+            const ch = roster_gen.rollFactionPoolOne(&rng_copy, .rosters, f.key, year);
+            var inst: hull_mod.HullInstance = .{
+                .id = hid,
+                .base_key = ch.key, // static catalog memory
+                .status = .active,
+                .intro_year = ch.intro_year,
+                .pre_campaign = true,
+                .owner = .{ .merc_company = mid },
+            };
+            // Copy design loadout (docs/p3c-economy-design.md §2).
+            for (ch.loadout) |slot| {
+                try inst.loadout.append(alloc, .{ .part_key = slot.part });
             }
+            roster_lists[ci].appendAssumeCapacity(hid);
+            built_hulls[hull_idx] = inst;
+            hull_idx += 1;
         }
     }
 
@@ -488,58 +508,91 @@ test "seedFactionRosters: atomicity — any allocation failure leaves stateHash 
     }
 }
 
-test "seedMercCompanies: seeded shape matches tuning values" {
+/// The row index of the band named `key` in `merc_band.table`.
+fn bandIndex(key: []const u8) !usize {
+    for (merc_band.table.bands, 0..) |band, i| {
+        if (std.mem.eql(u8, band.key, key)) return i;
+    }
+    return error.TestUnexpectedResult;
+}
+
+/// Each seeded company's band row index, in company-id order.
+fn seededBandIndices(gs: *GameState, out: []usize) !void {
+    for (gs.merc_companies.values(), out) |mc, *index| index.* = try bandIndex(mc.band_key);
+}
+
+test "seedMercCompanies: each band seeds its companies, line and capital, and the seed draws the assignment" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7010 });
     defer gs.deinit();
     _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .line_officer);
     gs.clock.date.year = 3025;
     try seedMercCompanies(&gs);
 
-    const tg = tuning.generation;
-    try std.testing.expectEqual(@as(usize, tg.merc_company_count), gs.merc_companies.count());
+    try std.testing.expectEqual(@as(usize, 12), gs.merc_companies.count());
 
+    var per_band = [_]usize{0} ** merc_band.table.bands.len;
     var it = gs.merc_companies.iterator();
     while (it.next()) |entry| {
         const mc = entry.value_ptr;
-        // Pool must exist (hulls_each > 0) and have the expected size.
-        if (tg.merc_company_hulls_each > 0) {
-            const roster = gs.merc_company_rosters.get(mc.id) orelse {
-                std.debug.print("seedMercCompanies: no roster for merc company {d}\n", .{@intFromEnum(mc.id)});
+        const band = merc_band.find(mc.band_key) orelse return error.TestUnexpectedResult;
+        per_band[try bandIndex(band.key)] += 1;
+        try std.testing.expectEqual(band.capital_cbills, mc.cbills);
+
+        const roster = gs.merc_company_rosters.get(mc.id) orelse {
+            std.debug.print("seedMercCompanies: no roster for merc company {d}\n", .{@intFromEnum(mc.id)});
+            return error.TestUnexpectedResult;
+        };
+        try std.testing.expectEqual(@as(usize, 16), roster.items.len);
+        try std.testing.expectEqual(merc_band.lineTarget(band), roster.items.len);
+
+        // Campaign-start NPC pools are mek-only at the band's line target.
+        for (roster.items) |hid| {
+            const inst = gs.hull_instances.getPtr(hid) orelse {
+                std.debug.print("seedMercCompanies: hull {d} not in hull_instances\n", .{@intFromEnum(hid)});
                 return error.TestUnexpectedResult;
             };
-            try std.testing.expectEqual(@as(usize, tg.merc_company_hulls_each), roster.items.len);
+            try std.testing.expectEqual(mc.id, switch (inst.owner) {
+                .merc_company => |id| id,
+                else => return error.TestUnexpectedResult,
+            });
+            try std.testing.expect(inst.pre_campaign);
+            try std.testing.expectEqual(hull_mod.HullStatus.active, inst.status);
+            try std.testing.expectEqual(@import("../domain/unit.zig").UnitKind.mek, chassis_mod.find(inst.base_key).?.kind);
 
-            // Campaign-start NPC pools remain mek-only at the named target.
-            for (roster.items) |hid| {
-                const inst = gs.hull_instances.getPtr(hid) orelse {
-                    std.debug.print("seedMercCompanies: hull {d} not in hull_instances\n", .{@intFromEnum(hid)});
-                    return error.TestUnexpectedResult;
-                };
-                try std.testing.expectEqual(mc.id, switch (inst.owner) {
-                    .merc_company => |id| id,
-                    else => return error.TestUnexpectedResult,
-                });
-                try std.testing.expect(inst.pre_campaign);
-                try std.testing.expectEqual(hull_mod.HullStatus.active, inst.status);
-                try std.testing.expectEqual(@import("../domain/unit.zig").UnitKind.mek, chassis_mod.find(inst.base_key).?.kind);
-
-                // Exactly one open .initial interval per hull.
-                var found: usize = 0;
-                for (gs.hull_ownership_history.items) |h| {
-                    if (h.hull_instance_id != hid) continue;
-                    found += 1;
-                    try std.testing.expectEqual(hull_mod.AcquisitionType.initial, h.acquisition_type);
-                    try std.testing.expectEqual(@as(u32, 0), h.from_day);
-                    try std.testing.expectEqual(@as(?u32, null), h.to_day);
-                    try std.testing.expectEqualStrings(mc.faction_key, h.prior_owner_key);
-                }
-                try std.testing.expectEqual(@as(usize, 1), found);
+            // Exactly one open .initial interval per hull.
+            var found: usize = 0;
+            for (gs.hull_ownership_history.items) |h| {
+                if (h.hull_instance_id != hid) continue;
+                found += 1;
+                try std.testing.expectEqual(hull_mod.AcquisitionType.initial, h.acquisition_type);
+                try std.testing.expectEqual(@as(u32, 0), h.from_day);
+                try std.testing.expectEqual(@as(?u32, null), h.to_day);
+                try std.testing.expectEqualStrings(mc.faction_key, h.prior_owner_key);
             }
-        } else {
-            // Empty pool: the roster entry is present and empty (state.zig invariant).
-            try std.testing.expectEqual(@as(usize, 0), gs.merc_company_rosters.get(mc.id).?.items.len);
+            try std.testing.expectEqual(@as(usize, 1), found);
         }
     }
+    // The table's mix, band by band.
+    for (merc_band.table.bands, per_band) |band, seeded| {
+        try std.testing.expectEqual(@as(usize, band.seed_companies), seeded);
+    }
+
+    // Another seed draws a different band-to-company assignment from the same mix.
+    var other = GameState.init(std.testing.allocator, .{ .seed = 7016 });
+    defer other.deinit();
+    _ = try @import("founding.zig").createCommander(&other, "T", .LC, .line_officer);
+    other.clock.date.year = 3025;
+    try seedMercCompanies(&other);
+    var first: [12]usize = undefined;
+    var second: [12]usize = undefined;
+    try seededBandIndices(&gs, &first);
+    try seededBandIndices(&other, &second);
+    try std.testing.expect(!std.mem.eql(usize, &first, &second));
+    var sorted_first = first;
+    var sorted_second = second;
+    std.mem.sort(usize, &sorted_first, {}, std.sort.asc(usize));
+    std.mem.sort(usize, &sorted_second, {}, std.sort.asc(usize));
+    try std.testing.expectEqualSlices(usize, &sorted_first, &sorted_second);
     // next_merc_company_id is past all seeded ids.
     var max_mid: u32 = 0;
     var mit = gs.merc_companies.iterator();
@@ -567,7 +620,7 @@ test "seedMercCompanies logs one founding line per company in company-id order" 
     try seedMercCompanies(&gs);
 
     const lines = gs.event_log.items[log_before..];
-    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_count), lines.len);
+    try std.testing.expectEqual(merc_band.seedTotal(), lines.len);
     // The log follows the map, and the map is in ascending company id.
     for (lines, gs.merc_companies.values()) |entry, company| {
         const expected = try merc_lifecycle.foundingLine(std.testing.allocator, company);
@@ -707,30 +760,30 @@ test "seedMercCompanies: empty player_logo_key draws from the full catalog" {
 }
 
 test "a campaign whose seeded base names collide founds every company under a distinct name" {
-    // Seed 26 draws "Baxter Guard" for companies 1 and 5.
+    // Seed 26 draws "Quintana Assault" for companies 6 and 11.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 26 });
     defer gs.deinit();
     _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
     const companies = gs.merc_companies.values();
-    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_count), companies.len);
+    try std.testing.expectEqual(merc_band.seedTotal(), companies.len);
 
     // Every identity field except the name, and every pool hull, is the
     // seeding draw's; only the name avoids earlier names.
     var fingerprint = std.hash.Wyhash.init(0);
     for (companies) |company| {
-        for ([_][]const u8{ company.archetype_key, company.commander_first, company.commander_last, company.faction_key, company.logo_key, @tagName(company.side), @tagName(company.doctrine) }) |field| {
+        for ([_][]const u8{ company.archetype_key, company.commander_first, company.commander_last, company.faction_key, company.logo_key, company.band_key, @tagName(company.side), @tagName(company.doctrine) }) |field| {
             fingerprint.update(field);
             fingerprint.update("\x00");
         }
         for (gs.merc_company_rosters.get(company.id).?.items) |hull_id| fingerprint.update(gs.hull_instances.get(hull_id).?.base_key);
     }
-    try std.testing.expectEqual(@as(u64, 11323097951568880364), fingerprint.final());
+    try std.testing.expectEqual(@as(u64, 9167329222349959627), fingerprint.final());
 
     for (companies, 0..) |company, i| {
         for (companies[0..i]) |earlier| try std.testing.expect(!std.ascii.eqlIgnoreCase(company.unit_name, earlier.unit_name));
     }
-    try std.testing.expectEqualStrings("Baxter Guard", gs.merc_companies.get(@enumFromInt(1)).?.unit_name);
-    try std.testing.expectEqualStrings("Baxter Guard II", gs.merc_companies.get(@enumFromInt(5)).?.unit_name);
+    try std.testing.expectEqualStrings("Quintana Assault", gs.merc_companies.get(@enumFromInt(6)).?.unit_name);
+    try std.testing.expectEqualStrings("Quintana Assault II", gs.merc_companies.get(@enumFromInt(11)).?.unit_name);
 }
 
 /// Seed the Periphery/pirates (PER) faction hull pool at campaign creation

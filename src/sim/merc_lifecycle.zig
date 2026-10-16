@@ -20,6 +20,7 @@ const rival_mod = @import("../domain/rival.zig");
 const faction_mod = @import("../domain/faction.zig");
 const black_market = @import("black_market.zig");
 const merc_company_mod = @import("../domain/merc_company.zig");
+const merc_band = @import("../domain/merc_band.zig");
 const logo = @import("../domain/logo.zig");
 const merc_identity = @import("merc_identity.zig");
 const logo_name = @import("../gen/logo_name.zig");
@@ -85,6 +86,7 @@ pub fn buyHullsForCompany(
 
     var planned_company = PlannedCompany{
         .id = company_id,
+        .band = try rivals.mercCompanyBand(company),
         .cbills = company.cbills,
         .counts = rivals.mercCompanyHullCounts(gs, company_id),
         .dissolved_day = company.dissolved_day,
@@ -114,7 +116,8 @@ pub fn buyHullsForCompany(
 /// catalog key no company, active or dissolved, has ever held and never the
 /// player's reserved `player_logo_key`, or `""` once the catalog is used up.
 /// Its name is `merc_identity.unitName`, distinct from every company's name.
-/// Sets cbills to `merc_replacement_cbill_floor` and uses
+/// It is founded at `merc_band.replacementBand` with that band's capital
+/// (docs/p5d-conflict-world-design.md §L8) and uses
 /// the shared purchase plan to form the hull pool from market supply. The
 /// company holds a roster entry, empty when nothing was bought, and its
 /// founding is logged. Planning and the taken-name list use an arena over
@@ -139,6 +142,7 @@ pub fn spawnReplacementCompany(
     for (gs.merc_companies.keys(), gs.merc_companies.values()) |id, company| {
         companies.appendAssumeCapacity(.{
             .id = id,
+            .band = try rivals.mercCompanyBand(company),
             .cbills = company.cbills,
             .counts = rivals.mercCompanyHullCounts(gs, id),
             .dissolved_day = company.dissolved_day,
@@ -171,6 +175,7 @@ const PlannedListing = struct {
 
 const PlannedCompany = struct {
     id: types.MercCompanyId,
+    band: *const merc_band.Band,
     cbills: types.CBills,
     counts: rivals.MercHullCounts,
     dissolved_day: u32,
@@ -296,6 +301,7 @@ pub fn runMercLifecycle(gs: *GameState) !void {
     for (gs.merc_companies.keys(), gs.merc_companies.values()) |id, mc| {
         companies.appendAssumeCapacity(.{
             .id = id,
+            .band = try rivals.mercCompanyBand(mc),
             .cbills = mc.cbills,
             .counts = rivals.mercCompanyHullCounts(gs, id),
             .dissolved_day = mc.dissolved_day,
@@ -412,13 +418,14 @@ fn planReplacement(scratch: std.mem.Allocator, gs: *const GameState, companies: 
 
     const id: types.MercCompanyId = @enumFromInt(next_company_id.*);
     next_company_id.* += 1;
-    var company = PlannedCompany{ .id = id, .cbills = tuning.generation.merc_replacement_cbill_floor, .counts = .{}, .dissolved_day = 0, .logo_key = logo_key };
+    const band = merc_band.replacementBand();
+    var company = PlannedCompany{ .id = id, .band = band, .cbills = band.capital_cbills, .counts = .{}, .dissolved_day = 0, .logo_key = logo_key };
     try companies.append(scratch, company);
     const buy = try planBuy(scratch, gs, listings, &company, day, rng, next_hull_instance_id);
     companies.items[companies.items.len - 1].counts = company.counts;
     companies.items[companies.items.len - 1].cbills = company.cbills;
     return .{
-        .company = .{ .id = id, .archetype_key = archetype.key, .commander_first = identity.first, .commander_last = identity.last, .faction_key = faction.key, .side = identity.side, .doctrine = identity.doctrine, .cbills = tuning.generation.merc_replacement_cbill_floor, .founded_day = day, .logo_key = logo_key },
+        .company = .{ .id = id, .archetype_key = archetype.key, .commander_first = identity.first, .commander_last = identity.last, .faction_key = faction.key, .side = identity.side, .doctrine = identity.doctrine, .cbills = band.capital_cbills, .founded_day = day, .logo_key = logo_key, .band_key = band.key },
         .unit_name_parts = .{ .last = identity.last, .noun = archetype.unit_noun },
         .buy = if (buy.purchases.len > 0) buy else null,
     };
@@ -429,7 +436,8 @@ fn planReplacement(scratch: std.mem.Allocator, gs: *const GameState, companies: 
 /// Failed availability or affordability searches draw no RNG.
 fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *const GameState, listings: *std.ArrayListUnmanaged(PlannedListing), company: *PlannedCompany, day: u32, rng: *rng_mod.Rng, next_hull_instance_id: *u32) !?Purchase {
     const counts = company.counts;
-    var wanted_kind: unit.UnitKind = if (rivals.mercCompanyNeedsHull(counts, .mek)) .mek else if (rivals.mercCompanyNeedsHull(counts, .vehicle)) .vehicle else if (rivals.mercCompanyNeedsHull(counts, .aerospace)) .aerospace else return null;
+    const band = company.band;
+    var wanted_kind: unit.UnitKind = if (rivals.mercCompanyNeedsHull(band, counts, .mek)) .mek else if (rivals.mercCompanyNeedsHull(band, counts, .vehicle)) .vehicle else if (rivals.mercCompanyNeedsHull(band, counts, .aerospace)) .aerospace else return null;
     var candidates = std.ArrayListUnmanaged(usize).empty;
     collect: while (true) {
         for (listings.items, 0..) |planned, i| {
@@ -444,11 +452,11 @@ fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *const GameState, listin
             try candidates.append(scratch, i);
         }
         if (candidates.items.len > 0) break :collect;
-        if (wanted_kind == .mek and rivals.mercCompanyNeedsHull(counts, .vehicle)) {
+        if (wanted_kind == .mek and rivals.mercCompanyNeedsHull(band, counts, .vehicle)) {
             wanted_kind = .vehicle;
             continue :collect;
         }
-        if (wanted_kind != .aerospace and rivals.mercCompanyNeedsHull(counts, .aerospace)) {
+        if (wanted_kind != .aerospace and rivals.mercCompanyNeedsHull(band, counts, .aerospace)) {
             wanted_kind = .aerospace;
             continue :collect;
         }
@@ -670,6 +678,14 @@ fn indexOfListing(listings: []const market.Listing, id: types.ListingId) usize {
 const digest = @import("digest.zig");
 const founding = @import("founding.zig");
 
+/// The band of the fixture companies below: one whose line takes vehicles, so
+/// vehicle substitution applies to them.
+const test_band = "band_3";
+
+fn testLineTarget() usize {
+    return merc_band.lineTarget(merc_band.find(test_band).?);
+}
+
 test "liquidateMercCompany: transfers hulls to market, clears roster, sets dissolved_day" {
     // Rule 67: each hull becomes .market-owned with a regular (non-black-market) listing;
     // roster is cleared; dissolved_day == day; next_listing_id advanced by N.
@@ -685,6 +701,7 @@ test "liquidateMercCompany: transfers hulls to market, clears roster, sets disso
         .archetype_key = "enemy_raiders",
         .unit_name = "Doomed Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .dissolved_day = 0,
     });
 
@@ -748,6 +765,7 @@ test "liquidateMercCompany: OOM atomicity — stateHash unchanged on failure" {
         .archetype_key = "enemy_raiders",
         .unit_name = "Doomed Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .dissolved_day = 0,
     });
     const hid: types.HullInstanceId = @enumFromInt(1);
@@ -789,6 +807,7 @@ test "buyHullsForCompany: buys affordable+eligible hulls, spends cbills, asset-s
         .archetype_key = "enemy_raiders",
         .unit_name = "Buying Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .dissolved_day = 0,
         .cbills = cbills_start,
     });
@@ -820,8 +839,8 @@ test "buyHullsForCompany: buys affordable+eligible hulls, spends cbills, asset-s
     try std.testing.expectEqual(@as(usize, 2), roster.items.len);
     try std.testing.expectEqual(cbills_start - 2 * cheap_price, mc.cbills);
     try std.testing.expectEqual(initial_funds, gs.funds);
-    // Company is still under strength (2 < merc_company_hulls_each=8).
-    try std.testing.expect(roster.items.len < tuning.generation.merc_company_hulls_each);
+    // Company is still under its band's line target.
+    try std.testing.expect(roster.items.len < testLineTarget());
 }
 
 test "selectNpcProcurement: affordable mek beats affordable vehicle" {
@@ -830,9 +849,9 @@ test "selectNpcProcurement: affordable mek beats affordable vehicle" {
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Procurement Co", .faction_key = "DC", .cbills = 10 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Procurement Co", .faction_key = "DC", .band_key = test_band, .cbills = 10 });
     var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
-    for (0..tuning.generation.merc_company_hulls_each - 1) |_| {
+    for (0..testLineTarget() - 1) |_| {
         const id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
         gs.next_hull_instance_id += 1;
         try gs.hull_instances.put(gs.allocator(), id, .{ .id = id, .base_key = "LCT-1V", .owner = .{ .merc_company = company_id } });
@@ -848,7 +867,7 @@ test "selectNpcProcurement: affordable mek beats affordable vehicle" {
     var rng = gs.rng;
     try buyHullsForCompany(&gs, a, company_id, 1, &rng);
     const counts = rivals.mercCompanyHullCounts(&gs, company_id);
-    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_hulls_each), counts.meks);
+    try std.testing.expectEqual(@as(usize, testLineTarget()), counts.meks);
     try std.testing.expectEqual(@as(usize, 0), counts.vehicles);
     try std.testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
     try std.testing.expectEqualStrings("SCP-1N", gs.market_listings.items[0].item_key);
@@ -864,7 +883,7 @@ test "selectNpcProcurement: a later mek remains eligible after vehicle substitut
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Substitution Co", .faction_key = "DC", .cbills = 10 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Substitution Co", .faction_key = "DC", .band_key = test_band, .cbills = 10 });
     const mek: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
     gs.next_hull_instance_id += 1;
     const later_mek: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
@@ -893,15 +912,15 @@ test "selectNpcProcurement: fighters fill only the air reserve" {
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Air Reserve Co", .faction_key = "DC", .cbills = 100 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Air Reserve Co", .faction_key = "DC", .band_key = test_band, .cbills = 100 });
     var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
-    for (0..tuning.generation.merc_company_hulls_each) |i| {
+    for (0..testLineTarget()) |i| {
         const id: types.HullInstanceId = @enumFromInt(1 + @as(u32, @intCast(i)));
         try gs.hull_instances.put(gs.allocator(), id, .{ .id = id, .base_key = "LCT-1V", .owner = .{ .merc_company = company_id } });
         try roster.append(gs.allocator(), id);
     }
     try gs.merc_company_rosters.put(gs.allocator(), company_id, roster);
-    gs.next_hull_instance_id = @intCast(tuning.generation.merc_company_hulls_each + 1);
+    gs.next_hull_instance_id = @intCast(testLineTarget() + 1);
     const air_target = @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size;
     for (0..air_target + 1) |i| {
         try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1 + @as(u32, @intCast(i))), .kind = .unit, .item_key = "TR-7", .rarity = .common, .price = 1 });
@@ -911,7 +930,7 @@ test "selectNpcProcurement: fighters fill only the air reserve" {
     try buyHullsForCompany(&gs, a, company_id, 1, &rng);
 
     const counts = rivals.mercCompanyHullCounts(&gs, company_id);
-    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_hulls_each), counts.meks);
+    try std.testing.expectEqual(@as(usize, testLineTarget()), counts.meks);
     try std.testing.expectEqual(@as(usize, 0), counts.vehicles);
     try std.testing.expectEqual(air_target, counts.aerospace);
     try std.testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
@@ -923,7 +942,7 @@ test "selectNpcProcurement: fighters never fill line positions" {
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Fighter Only Co", .faction_key = "DC", .cbills = 100 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Fighter Only Co", .faction_key = "DC", .band_key = test_band, .cbills = 100 });
     try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "TR-7", .rarity = .common, .price = 1 });
 
     var rng = gs.rng;
@@ -936,35 +955,100 @@ test "selectNpcProcurement: fighters never fill line positions" {
     try std.testing.expectEqual(@as(usize, 0), gs.market_listings.items.len);
 }
 
+/// A company of `band_key` one mek short of its line target, its air reserve
+/// full or empty, facing a market of one affordable minted vehicle (and one
+/// affordable fighter while its reserve is short) and no mek.
+fn seedBandProcurementFixture(gs: *GameState, band_key: []const u8, reserve_full: bool) !types.MercCompanyId {
+    _ = try founding.createCommander(gs, "T", .LC, .line_officer);
+    gs.market_listings.clearRetainingCapacity();
+    const alloc = gs.allocator();
+    const company_id: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(alloc, company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Band Co", .faction_key = "DC", .band_key = band_key, .cbills = 100 });
+    const meks = merc_band.lineTarget(merc_band.find(band_key).?) - 1;
+    const fighters = if (reserve_full) @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size else 0;
+    var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
+    for (0..meks + fighters) |i| {
+        const id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+        gs.next_hull_instance_id += 1;
+        const key = if (i < meks) "LCT-1V" else "TR-7";
+        try gs.hull_instances.put(alloc, id, .{ .id = id, .base_key = key, .owner = .{ .merc_company = company_id } });
+        try roster.append(alloc, id);
+    }
+    try gs.merc_company_rosters.put(alloc, company_id, roster);
+    try gs.market_listings.append(alloc, .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1 });
+    if (!reserve_full) try gs.market_listings.append(alloc, .{ .id = @enumFromInt(2), .kind = .unit, .item_key = "TR-7", .rarity = .common, .price = 1 });
+    return company_id;
+}
+
+test "selectNpcProcurement: a band that fills its line with meks only never buys a vehicle" {
+    const a = std.testing.allocator;
+    // band_4 under target with its reserve full: nothing to buy, no RNG draw.
+    {
+        var gs = GameState.init(a, .{ .seed = 2031 });
+        defer gs.deinit();
+        const company_id = try seedBandProcurementFixture(&gs, "band_4", true);
+        const before = digest.stateHash(&gs);
+        var rng = gs.rng;
+        const rng_before = rng;
+        try buyHullsForCompany(&gs, a, company_id, 1, &rng);
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+        try std.testing.expectEqual(rng_before, rng);
+        try std.testing.expectEqual(@as(usize, 0), rivals.mercCompanyHullCounts(&gs, company_id).vehicles);
+    }
+    // band_4 under target with its reserve short: the fighter, never the vehicle.
+    {
+        var gs = GameState.init(a, .{ .seed = 2032 });
+        defer gs.deinit();
+        const company_id = try seedBandProcurementFixture(&gs, "band_4", false);
+        var rng = gs.rng;
+        try buyHullsForCompany(&gs, a, company_id, 1, &rng);
+        const counts = rivals.mercCompanyHullCounts(&gs, company_id);
+        try std.testing.expectEqual(@as(usize, 0), counts.vehicles);
+        try std.testing.expectEqual(@as(usize, 1), counts.aerospace);
+        try std.testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
+        try std.testing.expectEqualStrings("SCP-1N", gs.market_listings.items[0].item_key);
+    }
+    // band_3 in the same market as the first case: it buys the vehicle.
+    {
+        var gs = GameState.init(a, .{ .seed = 2031 });
+        defer gs.deinit();
+        const company_id = try seedBandProcurementFixture(&gs, "band_3", true);
+        var rng = gs.rng;
+        try buyHullsForCompany(&gs, a, company_id, 1, &rng);
+        try std.testing.expectEqual(@as(usize, 1), rivals.mercCompanyHullCounts(&gs, company_id).vehicles);
+        try std.testing.expectEqual(@as(usize, 0), gs.market_listings.items.len);
+    }
+}
+
 test "selectNpcProcurement: a full vehicle line does not block a later mek" {
     const a = std.testing.allocator;
     var gs = GameState.init(a, .{ .seed = 20272 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Ground Co", .faction_key = "DC", .cbills = 100 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Ground Co", .faction_key = "DC", .band_key = test_band, .cbills = 100 });
     var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
-    for (0..tuning.generation.merc_company_hulls_each) |i| {
+    for (0..testLineTarget()) |i| {
         const id: types.HullInstanceId = @enumFromInt(1 + @as(u32, @intCast(i)));
         try gs.hull_instances.put(gs.allocator(), id, .{ .id = id, .base_key = "SCP-1N", .owner = .{ .merc_company = company_id } });
         try roster.append(gs.allocator(), id);
         try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1 + @as(u32, @intCast(i))), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1 });
     }
     try gs.merc_company_rosters.put(gs.allocator(), company_id, roster);
-    gs.next_hull_instance_id = @intCast(tuning.generation.merc_company_hulls_each + 1);
+    gs.next_hull_instance_id = @intCast(testLineTarget() + 1);
     const later_mek: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
     gs.next_hull_instance_id += 1;
     try gs.hull_instances.put(gs.allocator(), later_mek, .{ .id = later_mek, .base_key = "LCT-1V", .owner = .market });
-    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(tuning.generation.merc_company_hulls_each + 1), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = later_mek });
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(testLineTarget() + 1), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = later_mek });
 
     var rng = gs.rng;
     try buyHullsForCompany(&gs, a, company_id, 1, &rng);
 
     const counts = rivals.mercCompanyHullCounts(&gs, company_id);
     try std.testing.expectEqual(@as(usize, 1), counts.meks);
-    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_hulls_each), counts.vehicles);
+    try std.testing.expectEqual(@as(usize, testLineTarget()), counts.vehicles);
     try std.testing.expectEqual(@as(usize, 0), counts.aerospace);
-    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_hulls_each), gs.market_listings.items.len);
+    try std.testing.expectEqual(@as(usize, testLineTarget()), gs.market_listings.items.len);
     try std.testing.expectEqual(hull_instance_mod.HullOwner{ .merc_company = company_id }, gs.hull_instances.get(later_mek).?.owner);
 }
 
@@ -974,15 +1058,15 @@ test "selectNpcProcurement: a full vehicle line buys air reserve before a later 
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Air Reserve Substitution Co", .faction_key = "DC", .cbills = 100 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Air Reserve Substitution Co", .faction_key = "DC", .band_key = test_band, .cbills = 100 });
     var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
-    for (0..tuning.generation.merc_company_hulls_each) |i| {
+    for (0..testLineTarget()) |i| {
         const id: types.HullInstanceId = @enumFromInt(1 + @as(u32, @intCast(i)));
         try gs.hull_instances.put(gs.allocator(), id, .{ .id = id, .base_key = "SCP-1N", .owner = .{ .merc_company = company_id } });
         try roster.append(gs.allocator(), id);
     }
     try gs.merc_company_rosters.put(gs.allocator(), company_id, roster);
-    gs.next_hull_instance_id = @intCast(tuning.generation.merc_company_hulls_each + 1);
+    gs.next_hull_instance_id = @intCast(testLineTarget() + 1);
     const later_mek: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
     gs.next_hull_instance_id += 1;
     try gs.hull_instances.put(gs.allocator(), later_mek, .{ .id = later_mek, .base_key = "LCT-1V", .owner = .market });
@@ -996,7 +1080,7 @@ test "selectNpcProcurement: a full vehicle line buys air reserve before a later 
     try buyHullsForCompany(&gs, a, company_id, 1, &rng);
     var counts = rivals.mercCompanyHullCounts(&gs, company_id);
     try std.testing.expectEqual(@as(usize, 0), counts.meks);
-    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_hulls_each), counts.vehicles);
+    try std.testing.expectEqual(@as(usize, testLineTarget()), counts.vehicles);
     try std.testing.expectEqual(air_target, counts.aerospace);
     try std.testing.expectEqual(hull_instance_mod.HullOwner.market, gs.hull_instances.get(later_mek).?.owner);
     try std.testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
@@ -1004,7 +1088,7 @@ test "selectNpcProcurement: a full vehicle line buys air reserve before a later 
     try buyHullsForCompany(&gs, a, company_id, 2, &rng);
     counts = rivals.mercCompanyHullCounts(&gs, company_id);
     try std.testing.expectEqual(@as(usize, 1), counts.meks);
-    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_hulls_each), counts.vehicles);
+    try std.testing.expectEqual(@as(usize, testLineTarget()), counts.vehicles);
     try std.testing.expectEqual(air_target, counts.aerospace);
     try std.testing.expectEqual(hull_instance_mod.HullOwner{ .merc_company = company_id }, gs.hull_instances.get(later_mek).?.owner);
     try std.testing.expectEqual(@as(usize, 0), gs.market_listings.items.len);
@@ -1016,7 +1100,7 @@ test "selectNpcProcurement: minted vehicle has design loadout and purchase prove
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Mint Co", .faction_key = "DC", .cbills = 10 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Mint Co", .faction_key = "DC", .band_key = test_band, .cbills = 10 });
     const minted_id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
     try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1 });
     var rng = gs.rng;
@@ -1039,6 +1123,7 @@ test "buyHullsForCompany: saturated minted hull ID refuses without mutation or R
         .archetype_key = "enemy_raiders",
         .unit_name = "Saturated Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .cbills = 10,
     });
     try gs.market_listings.append(gs.allocator(), .{
@@ -1066,7 +1151,7 @@ test "selectNpcProcurement: future listing admits no candidate, mutation, or RNG
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Waiting Co", .faction_key = "DC", .cbills = 10 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Waiting Co", .faction_key = "DC", .band_key = test_band, .cbills = 10 });
     try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1, .available_after = 2 });
     const before = digest.stateHash(&gs);
     var rng = gs.rng;
@@ -1090,6 +1175,7 @@ test "buyHullsForCompany: OOM atomicity — stateHash unchanged on failure" {
         .archetype_key = "enemy_raiders",
         .unit_name = "Buying Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .dissolved_day = 0,
         .cbills = 10_000_000,
     });
@@ -1121,6 +1207,7 @@ test "buyHullsForCompany: late transaction OOM leaves no roster entry or retaine
             .archetype_key = "enemy_raiders",
             .unit_name = "Buying Co",
             .faction_key = "DC",
+            .band_key = test_band,
             .cbills = 10_000_000,
         });
         try gs.hull_instances.put(gs.allocator(), hull_id, .{ .id = hull_id, .base_key = "LCT-1V", .owner = .market });
@@ -1149,12 +1236,14 @@ test "buyHullsForCompany: late transaction OOM leaves no roster entry or retaine
     }
 }
 
-test "spawnReplacementCompany: unique id, founded_day, dissolved_day==0, cbills==floor, logo distinct from active" {
+test "spawnReplacementCompany: unique id, founded_day, dissolved_day==0, lowest band and its capital, logo distinct from active" {
     const a = std.testing.allocator;
     var gs = GameState.init(a, .{ .seed = 3001 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const alloc = gs.allocator();
+    // An empty market: the replacement buys nothing, so it keeps its founding capital.
+    gs.market_listings.clearRetainingCapacity();
 
     // Seed one active company with the first logo key to verify the spawn picks a different one.
     const existing_id: types.MercCompanyId = @enumFromInt(1);
@@ -1163,6 +1252,7 @@ test "spawnReplacementCompany: unique id, founded_day, dissolved_day==0, cbills=
         .archetype_key = "enemy_raiders",
         .unit_name = "Existing Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .dissolved_day = 0,
         .logo_key = logo.all_keys[0],
     });
@@ -1186,7 +1276,10 @@ test "spawnReplacementCompany: unique id, founded_day, dissolved_day==0, cbills=
     const spawned = gs.merc_companies.getPtr(new_id) orelse return error.TestFailed;
     try std.testing.expectEqual(@as(u32, 60), spawned.founded_day);
     try std.testing.expectEqual(@as(u32, 0), spawned.dissolved_day);
-    try std.testing.expectEqual(tuning.generation.merc_replacement_cbill_floor, spawned.cbills);
+    const band = merc_band.replacementBand();
+    try std.testing.expectEqual(&merc_band.table.bands[0], band);
+    try std.testing.expectEqualStrings(band.key, spawned.band_key);
+    try std.testing.expectEqual(band.capital_cbills, spawned.cbills);
     // Logo is not the one held by the existing active company.
     try std.testing.expect(!std.mem.eql(u8, spawned.logo_key, logo.all_keys[0]));
     // next_merc_company_id advanced.
@@ -1224,6 +1317,7 @@ test "spawnReplacementCompany never reuses a logo a dissolved company held" {
         .archetype_key = "enemy_raiders",
         .unit_name = "Dissolved Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .dissolved_day = 5,
         .logo_key = logo.all_keys[0],
     });
@@ -1248,6 +1342,7 @@ test "spawnReplacementCompany founds logo-less companies under distinct names on
             .archetype_key = "enemy_raiders",
             .unit_name = try std.fmt.allocPrint(gs.allocator(), "Holder {d}", .{i}),
             .faction_key = "DC",
+            .band_key = test_band,
             .dissolved_day = if (i % 2 == 0) 5 else 0,
             .logo_key = key,
         });
@@ -1382,6 +1477,7 @@ test "spawnReplacementCompany: planning scratch comes from gs.scratch() and is r
             .archetype_key = "enemy_raiders",
             .unit_name = try std.fmt.allocPrint(gs.allocator(), "Holder {d}", .{i}),
             .faction_key = "DC",
+            .band_key = test_band,
             .logo_key = logo.all_keys[i],
         });
     }
@@ -1413,6 +1509,7 @@ test "runMercLifecycle: (a) insolvent company liquidated+replaced, active count 
         .archetype_key = "enemy_raiders",
         .unit_name = "Insolvent Raiders",
         .faction_key = "DC",
+        .band_key = test_band,
         .dissolved_day = 0,
         .logo_key = logo.all_keys[0],
     });
@@ -1456,6 +1553,7 @@ test "runMercLifecycle: (b) bankrupt company (cbills < 0) triggers liquidation e
         .archetype_key = "enemy_raiders",
         .unit_name = "Bankrupt Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .dissolved_day = 0,
         .cbills = -1,
         .logo_key = logo.all_keys[0],
@@ -1492,6 +1590,7 @@ test "runMercLifecycle: bankrupt company without a roster is dissolved and repla
         .archetype_key = "enemy_raiders",
         .unit_name = "Empty Bankrupt Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .cbills = -1,
         .logo_key = logo.all_keys[0],
     });
@@ -1524,6 +1623,7 @@ test "runMercLifecycle: (c) determinism — two same-seed campaigns hash equal a
             .archetype_key = "enemy_raiders",
             .unit_name = "Insolvent Raiders",
             .faction_key = "DC",
+            .band_key = test_band,
             .dissolved_day = 0,
             .logo_key = logo.all_keys[0],
         });
@@ -1556,6 +1656,7 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
         .archetype_key = "enemy_raiders",
         .unit_name = "Bankrupt Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .cbills = -1,
         .logo_key = logo.all_keys[0],
     });
@@ -1564,6 +1665,7 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
         .archetype_key = "enemy_raiders",
         .unit_name = "Buying Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .cbills = 10_000_000,
         .logo_key = logo.all_keys[1],
     });
@@ -1572,6 +1674,7 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
         .archetype_key = "enemy_raiders",
         .unit_name = "Insolvent Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .cbills = 10_000_000,
         .logo_key = logo.all_keys[2],
     });
@@ -1598,7 +1701,8 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
         }
         try gs.merc_company_rosters.put(alloc, company_id, roster);
     }
-    for (0..20) |_| {
+    // Enough meks for the first replacement's line and company 2's top-up.
+    for (0..48) |_| {
         const hull_id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
         gs.next_hull_instance_id += 1;
         try gs.hull_instances.put(alloc, hull_id, .{ .id = hull_id, .base_key = "LCT-1V", .owner = .market });
@@ -1690,6 +1794,7 @@ test "a replacement that bought nothing is judged insolvent and dissolved the ne
         .archetype_key = "enemy_raiders",
         .unit_name = "Empty Bankrupt Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .cbills = -1,
         .logo_key = logo.all_keys[0],
     });
@@ -1743,7 +1848,7 @@ test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" 
         if (runMercLifecycle(&gs)) |_| {
             try std.testing.expect(digest.stateHash(&gs) != before);
             try std.testing.expect(gs.merc_companies.getPtr(@enumFromInt(1)).?.dissolved_day != 0);
-            try std.testing.expect(gs.merc_company_rosters.get(@enumFromInt(2)).?.items.len >= tuning.generation.merc_company_hulls_each);
+            try std.testing.expect(gs.merc_company_rosters.get(@enumFromInt(2)).?.items.len >= testLineTarget());
             gs.deinit();
             break;
         } else |err| {
@@ -1776,6 +1881,7 @@ test "runMercLifecycle: repeated active monthly passes retain bounded staging me
         .archetype_key = "enemy_raiders",
         .unit_name = "Under Strength Co",
         .faction_key = "DC",
+        .band_key = test_band,
         .cbills = 1,
         .logo_key = logo.all_keys[0],
     });

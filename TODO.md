@@ -83,11 +83,13 @@ A package has one primary invariant or subsystem outcome.
   company still needs (`rivals.mercCompanyNeedsHull`, shared with the lifecycle
   buy) within its remaining cash, the unpaid-draw defect its regression
   reproduced; pirates are unchanged.
-- [ ] P5d.4b NPC roster bands: a band on every company from a validated
-  `merc_bands.zon`; band-scaled seed of 12 companies with four lances (16
-  active mechs) and capital per D25 (50M at `band_4`); shared mech-market
-  replacement and readiness read band targets instead of the flat 8. Needs
-  P5d.4a and D23–D25.
+- [x] P5d.4b NPC roster bands: every merc company carries a band from the
+  validated `merc_bands.zon` (`merc_band.zig`; schema v68 `band_key`); the 12
+  seeded companies are drawn 3/4/3/2 across four bands, each with four lances
+  (16 meks) and its band's capital (50M at `band_4`); fill-to-target, the paid
+  black-market draw and OpFor readiness read the band target, vehicles fill
+  the line only below `band_4`, and replacements start at `band_1_2` with its
+  capital (D23–D25, R1).
 - [ ] P5d.4c NPC dissolution safeguard: dissolution only on cash below zero, a
   12-month understrength runway and no active commitment; `understrength_since`
   persisted; the cause is logged. Needs P5d.4b.

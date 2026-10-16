@@ -1,0 +1,53 @@
+// NPC merc-company bands: the intrinsic company tier, distinct from the
+// per-contract skull rating (docs/p5d-conflict-world-design.md §L8, decisions
+// D23–D25). Typed against src/domain/merc_band.zig `Table`.
+//
+// Source: project-tuned, no sourcebook basis. Every band fields four lances
+// (the P5d.4 owner-approved 16-mek target, D23); `band_4` capital is the P5d.4
+// owner-approved 50M C-bills and the other bands scale from it (D25).
+//
+//   key                 stable key a save stores (merc_company.band_key)
+//   label               display text
+//   seed_companies      companies of this band seeded at campaign creation
+//   line_lances         line target in lances of force.lance_size meks
+//   capital_cbills      C-bills a company of this band is founded with
+//   vehicles_fill_line  vehicles may fill line positions meks leave open
+//
+// Rows ascend in tier. The first row is the band a replacement company is
+// founded at.
+.{
+    .bands = .{
+        .{
+            .key = "band_1_2",
+            .label = "1-2 skull",
+            .seed_companies = 3, // TUNE
+            .line_lances = 4, // TUNE
+            .capital_cbills = 20_000_000, // TUNE
+            .vehicles_fill_line = true,
+        },
+        .{
+            .key = "band_3",
+            .label = "3 skull",
+            .seed_companies = 4, // TUNE
+            .line_lances = 4, // TUNE
+            .capital_cbills = 35_000_000, // TUNE
+            .vehicles_fill_line = true,
+        },
+        .{
+            .key = "band_4",
+            .label = "4 skull",
+            .seed_companies = 3, // TUNE
+            .line_lances = 4, // TUNE
+            .capital_cbills = 50_000_000, // TUNE
+            .vehicles_fill_line = false,
+        },
+        .{
+            .key = "band_5",
+            .label = "5 skull",
+            .seed_companies = 2, // TUNE
+            .line_lances = 4, // TUNE
+            .capital_cbills = 75_000_000, // TUNE
+            .vehicles_fill_line = false,
+        },
+    },
+}

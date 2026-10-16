@@ -12,6 +12,7 @@ mymod/
   tables/scenarios.zon   # scenario table per contract kind
   tables/opfor.zon       # opposing force per contract kind
   tables/skulls.zon      # contract difficulty bands in half skulls
+  tables/merc_bands.zon  # rival merc-company tiers: seed mix, line, capital
 ```
 
 Build with the overlay:
@@ -59,6 +60,7 @@ overlay of each family and checks that every one fails; CI runs it.
 | `tables/scenarios.zon` | `domain/scenario.zig` `Table` | scenario types and the d6 table per contract kind (with `recovery_mod` for a lost field) |
 | `tables/opfor.zon` | `domain/opfor.zig` `Table` | the opposing force per contract kind: lances, quality roll, reinforcements |
 | `tables/skulls.zon` | `domain/skulls.zig` `Table` | half-skull bands by power ratio (keep them aligned with `battle.ratioBonus`), the outmatched line, the checklist warning level |
+| `tables/merc_bands.zon` | `domain/merc_band.zig` `Table` | rival merc-company bands, lowest tier first (the first row is where replacement companies start): stable key, label, companies of the band seeded at campaign creation, line target in lances, founding capital in C-bills, and whether vehicles may fill line positions. The build refuses an empty table, a duplicate key, a band with no lances or no capital, and a mix that seeds no company or more companies than the logo catalog can mark |
 | `tables/terrain.zon` | `domain/terrain.zig` `Table` | terrain classes, weather, the 2d6 weather table |
 | `tables/arcs.zon` | `domain/arc.zig` `Table` | operation arc archetypes: narrative beats, finale options (each optionally gated on a world flag, `requires_world_flag`), opening templates per contract kind |
 | `tables/operations.zon` | `domain/operation.zig` `Table` | operation mission templates: arc ownership, combat flag, objectives, follow-up keys |

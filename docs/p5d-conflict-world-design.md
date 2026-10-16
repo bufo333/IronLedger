@@ -141,14 +141,14 @@ This table is the "today" baseline for §L.
 | Hull damage state | **Absent** | `HullStatus = enum { active, permanently_destroyed }` (`src/domain/hull_instance.zig` 35). An NPC hull carries no armor or slot condition; `market.HullCondition` (`src/econ/market.zig` 202–207) exists only as a price input. |
 | Maintenance and repair of damaged hulls | **Absent** | No merc-company reference in `src/sim/maintenance.zig` (outside the grep list). Lost-field wrecks within `enemy_recovery_capacity` (2, `data/tables/tuning.zon` 136) are re-homed to the company roster with `status = .active` at no cost or time (`src/sim/black_market.zig` 227–240); the rest go to dispersed black-market listings (140–143). |
 | Parts procurement | **Absent** | `selectNpcProcurement` skips `listing.kind != .unit` (`merc_lifecycle.zig` 398); the NPC black-market draw also takes only `.unit` listings (`black_market.zig` 369). |
-| Market purchase / loss replacement | Present (fill-to-target only) | Monthly `runMercLifecycle` (`merc_lifecycle.zig` 237–307), called last in `tick.runMarkets` (`src/sim/tick.zig` 565), buys toward a mek target of `merc_company_hulls_each` (8, `tuning.zon` 506), substitutes vehicles inside that line target, then a bounded aerospace reserve (`selectNpcProcurement` 389–436). Price is debited (`stageBuy`, 585). |
+| Market purchase / loss replacement | Present (fill-to-target only) | Monthly `runMercLifecycle` (`merc_lifecycle.zig` 237–307), called last in `tick.runMarkets` (`src/sim/tick.zig` 565), buys toward a mek target of `merc_company_hulls_each` (8, `tuning.zon` 506), substitutes vehicles inside that line target, then a bounded aerospace reserve (`selectNpcProcurement` 389–436). Price is debited (`stageBuy`, 585). **Changed by P5d.4b:** the mek and line target is the company's band `merc_band.lineTarget` (16), and vehicles substitute only in bands below `band_4` (§L8). |
 | Upgrade | **Absent** | The selector returns `null` once targets are met (393); no path sells or swaps a weaker hull for a better one. |
 | Sales / liquidation | Whole-company only | `planLiquidation` lists every roster hull at a fixed pristine condition (`armor_pct = 100`, `.quality = .f`, no damage) regardless of state (309–344) on dissolution. No partial or cash-pressure sale exists. |
-| Cash / solvency | Partial | Seed and replacement capital is `merc_replacement_cbill_floor` (5,000,000, `tuning.zon` 511; `src/sim/roster_seed.zig` 252; `merc_lifecycle.zig` 374). The field comment says "no income" (`merc_company.zig` 33). No operating cost, payroll or contract income on the grep surface. Insolvency is fieldable BV below `merc_company_insolvency_bv` (2000, `tuning.zon` 508; `src/sim/rivals.zig` 101–104); insolvent or negative-cash companies are dissolved and replaced in the same monthly pass (`merc_lifecycle.zig` 270–289). |
+| Cash / solvency | Partial | Seed and replacement capital is `merc_replacement_cbill_floor` (5,000,000, `tuning.zon` 511; `src/sim/roster_seed.zig` 252; `merc_lifecycle.zig` 374). The field comment says "no income" (`merc_company.zig` 33). No operating cost, payroll or contract income on the grep surface. Insolvency is fieldable BV below `merc_company_insolvency_bv` (2000, `tuning.zon` 508; `src/sim/rivals.zig` 101–104); insolvent or negative-cash companies are dissolved and replaced in the same monthly pass (`merc_lifecycle.zig` 270–289). **Changed by P5d.4b:** seed capital is the company's band `capital_cbills` (20M–75M, `data/tables/merc_bands.zon`); a replacement is founded at `band_1_2` with its capital, and `merc_replacement_cbill_floor` is gone. |
 | Unpaid acquisition (defect candidate) | Observed | `runNpcBlackMarketDraw` gives active merc companies up to `npc_black_market_draws_per_month` (2, `tuning.zon` 137) unit listings per month (`black_market.zig` 315–382) and `black_market.zig` contains no `cbills` reference, so this owner does not debit the buyer and does not check a roster target. Whether another owner charges it is unverified; P5d.4a proves it with a regression first. **Fixed by P5d.4a:** its regression confirmed the draw left cash unchanged; merc draws now pay the listing price and take only hulls the company needs and can afford. |
-| Roster composition at seed | Present (flat) | 12 companies (`merc_company_count`, `tuning.zon` 505), each 8 hulls rolled from the faction pool on `.rosters` (`seedMercCompanies`, `roster_seed.zig` 175–283; `roster_gen.rollFactionPoolOne` returns a mek chassis per its test, `src/gen/roster_gen.zig` 116). Archetypes (11 rows, `data/tables/rival_archetypes.zon`) carry key, name, doctrine, faction side, unit noun and arcs — no size, quality or skull band. |
+| Roster composition at seed | Present (flat) | 12 companies (`merc_company_count`, `tuning.zon` 505), each 8 hulls rolled from the faction pool on `.rosters` (`seedMercCompanies`, `roster_seed.zig` 175–283; `roster_gen.rollFactionPoolOne` returns a mek chassis per its test, `src/gen/roster_gen.zig` 116). Archetypes (11 rows, `data/tables/rival_archetypes.zon`) carry key, name, doctrine, faction side, unit noun and arcs — no size, quality or skull band. **Changed by P5d.4b:** every company has a `band_key`; the 12 companies are seeded in the band table's fixed mix (3/4/3/2), each with 16 hulls (`seedMercCompanies`). |
 | Roster progression | **Absent** | No band, experience, quality or growth field on `MercCompany`; strength changes only by the fill-to-target buy, battle loss/recovery and dissolution. |
-| Readiness to fight | Present | `mercCompanyEligibleAsOpFor` (`rivals.zig` 111–124): active, solvent, active meks ≥ `merc_company_hulls_each`. |
+| Readiness to fight | Present | `mercCompanyEligibleAsOpFor` (`rivals.zig` 111–124): active, solvent, active meks ≥ `merc_company_hulls_each`. **Changed by P5d.4b:** active meks ≥ the band's `merc_band.lineTarget` (16). |
 | Air | Partial | A reserve of `merc_company_air_reserve_lances` (1) × `force.lance_size` (4, `src/domain/force.zig` 191) aerospace hulls is bought automatically once the line is full (`merc_lifecycle.zig` 392–393). Not earned; whether NPC aerospace takes part in battles is unverified. |
 | Artillery | **Absent and refused** | Loading refuses any artillery-catalogue hull in a merc-company roster (`src/sim/artillery.zig` 345–347, 381). |
 | Design intent vs code | Mismatch noted | `docs/p2-conventional-combat-design.md` §NPC Policy (95–109) says NPC "combat, loss, repair, salvage, and persistence call the same P2 rule owners as the player" and assigns the 16-mek target to the later NPC economy increment. The code above has no NPC repair owner. ROADMAP P5d.4 records the owner-approved target: 12 companies, 16 active mechs, 50M C-bills. |
@@ -1136,15 +1136,26 @@ whose design depends on a different choice is re-planned.
   by weight mix, quality, capital and growth rights; vehicles substitute only
   below `band_4`. *Alternative:* lances scale with band (1–2 skull = 1–2
   lances … 5 skull = 4 lances plus support), which conflicts with the approved
-  flat 16-mek target unless John replaces it.
+  flat 16-mek target unless John replaces it. **John's choice (P5d.4b plan):**
+  the recommendation — four lances for every band, vehicles fill line positions
+  only below `band_4`.
 - **D24 — band scale.** *Recommended:* four bands `1–2`, `3`, `4`, `5` skulls as
   an intrinsic tier, distinct from the per-contract skull rating computed by
   `skulls.zig`. *Alternatives:* five whole-skull bands; half-skull bands
-  matching `skulls.zon`.
+  matching `skulls.zon`. **John's choice (P5d.4b plan):** the recommendation —
+  `band_1_2`, `band_3`, `band_4`, `band_5`.
 - **D25 — seed capital and population.** *Recommended:* keep 12 companies;
   50M is the `band_4` capital, other bands scale (`// TUNE`), with a fixed
   seed band mix. *Alternative:* flat 50M for every band, as the P5d.4 entry
-  literally says.
+  literally says. **John's choice (P5d.4b plan):** the recommendation — 12
+  companies seeded 3 / 4 / 3 / 2 across `band_1_2` / `band_3` / `band_4` /
+  `band_5`, with capital 20M / 35M / 50M / 75M C-bills (`// TUNE`,
+  project-tuned, `data/tables/merc_bands.zon`).
+- **R1 — replacement companies.** A replacement forms at the lowest band,
+  `band_1_2`, with that band's capital, and `merc_replacement_cbill_floor` is
+  deleted (one capital number per band). *Alternative:* `band_1_2` with the 5M
+  floor kept. **John's choice (P5d.4b plan):** the first. Promotion and demotion
+  stay in P5d.4j.
 - **D26 — air and artillery growth.** *Recommended:* air is earned (band and
   cash margin) and replaces today's automatic aerospace reserve; artillery is
   deferred to D29. *Alternatives:* keep the automatic air reserve; allow both

@@ -28,6 +28,15 @@ def mutate(rel, pattern, repl, flags=0):
     return out
 
 
+def mutate_all(rel, pattern, repl):
+    """The stock file `rel` with every match of `pattern` (at least one) replaced."""
+    text = open(os.path.join(ROOT, "data", rel), encoding="utf-8").read()
+    out, n = re.subn(pattern, repl, text)
+    if n == 0 or out == text:
+        raise SystemExit(f"fixture mutation no longer applies to data/{rel}: {pattern!r}")
+    return out
+
+
 def stock(rel):
     return open(os.path.join(ROOT, "data", rel), encoding="utf-8").read()
 
@@ -73,6 +82,11 @@ CASES = [
     ("a conventional chassis with the wrong source revision", lambda: {"chassis.zon": mutate("chassis.zon", r'(\.key = "SCP-1N".*?\.source_revision = )"[^"]+"', r'\1"__wrong_revision__"', re.S)}, True),
     ("an unaudited conventional chassis admitted to market", lambda: {"chassis.zon": mutate("chassis.zon", r'(\.key = "VDT".*?\.source_path = "[^"]+")', r'\1, .market_eligible = true', re.S)}, True),
     ("an approved conventional chassis quarantined from market", lambda: {"chassis.zon": mutate("chassis.zon", r'(\.key = "SCP-1N".*?\.market_eligible = )true', r'\1false', re.S)}, True),
+    ("two merc bands with one key", lambda: {"tables/merc_bands.zon": mutate("tables/merc_bands.zon", r'\.key = "band_3"', '.key = "band_1_2"')}, True),
+    ("an empty merc band table", lambda: {"tables/merc_bands.zon": mutate("tables/merc_bands.zon", r"\.bands = \.\{.*?\n    \},", ".bands = .{},", re.S)}, True),
+    ("a merc band with no line lances", lambda: {"tables/merc_bands.zon": mutate("tables/merc_bands.zon", r"\.line_lances = \d+,", ".line_lances = 0,")}, True),
+    ("a merc band founded with no capital", lambda: {"tables/merc_bands.zon": mutate("tables/merc_bands.zon", r"\.capital_cbills = [\d_]+,", ".capital_cbills = 0,")}, True),
+    ("merc bands that seed no company", lambda: {"tables/merc_bands.zon": mutate_all("tables/merc_bands.zon", r"\.seed_companies = \d+,", ".seed_companies = 0,")}, True),
 ]
 
 

@@ -1047,7 +1047,7 @@ non-PER listings. A merc company pays the listing price, debited in the same
 commit as the hull transfer, and takes only a hull it still needs and can
 afford, so the draw never spends it below zero; pirates pay nothing.
 `rivals.mercCompanyNeedsHull` owns that need test for both the draw and the
-lifecycle buy. `runPirateReplenishment` then mints a monthly hull trickle
+lifecycle buy, against the company's band (below). `runPirateReplenishment` then mints a monthly hull trickle
 into the PER roster independently of the market. Schema v57 adds both
 `planet_key` and `available_after` columns to the `listing` table with `ADD
 COLUMN NOT NULL DEFAULT` migrations (docs/p3f-faction-loop-design.md §2.3, §3).
@@ -1078,6 +1078,26 @@ lifecycle change it records. `src/sim/merc_identity.zig` owns merc-company
 identity: names are campaign-unique (a collision takes a Roman-numeral suffix)
 and each catalog logo goes to at most one company, after which new companies
 are logo-less (docs/p3f-faction-loop-design.md §5.3).
+
+**Merc-company bands (P5d.4b).** Every merc company has a band, its intrinsic
+tier — distinct from the per-contract skull rating — from the validated
+`data/tables/merc_bands.zon` (`band_1_2`, `band_3`, `band_4`, `band_5`),
+owned by `src/domain/merc_band.zig` (docs/p5d-conflict-world-design.md §L8,
+decisions D23–D25). A band row gives the companies of that band seeded at
+campaign creation, the line target in lances (`merc_band.lineTarget`: four
+lances of `force.lance_size`, 16 meks, for every band), the founding capital,
+and whether vehicles may fill line positions meks leave open (only below
+`band_4`). `roster_seed.seedMercCompanies` seeds the table's total (12) in its
+fixed mix: each company draws its band without replacement on `.rivals` right
+after its logo, then rolls its band's line target in mek hulls on `.rosters`
+and starts with its band's capital. `rivals.mercCompanyNeedsHull` wants a mek
+below the band's line target, a vehicle only where the band lets vehicles fill
+the line, and aerospace below the unchanged air reserve;
+`rivals.mercCompanyEligibleAsOpFor` requires the band's line target in active
+meks. A replacement company is founded at the first, lowest band
+(`merc_band.replacementBand`) with that band's capital. The company's
+`band_key` persists in the `merc_company` table from schema v68, and a save
+naming a band no row has is refused as `CorruptSave`.
 
 **Hulls are priced by what they are.** A listed mek carries a rolled
 condition — armor, quality grade, damaged and destroyed slots, missing
@@ -1286,8 +1306,8 @@ a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
 **Current format boundary.** New empty stores
-initialize schema 67 transactionally. Existing store and campaign versions
-must both be 67; older formats (66 included) are refused intact and newer formats retain
+initialize schema 68 transactionally. Existing store and campaign versions
+must both be 68; older formats (67 included) are refused intact and newer formats retain
 their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
 missing tables or rows. No automatic reset, deletion, rewrite, backfill or

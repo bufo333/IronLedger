@@ -293,6 +293,13 @@ with the reason: insolvent (too little fighting strength left) or bankrupt.
 A company that folds is replaced the same month; one that cannot buy a single
 hull is itself judged insolvent the month after.
 
+Rival merc companies come in tiers, from "1-2 skull" outfits up to "5 skull"
+ones — a company's own standing, not the difficulty of any one contract. Every
+tier fields four lances of meks; higher tiers start with more money, and the
+lower tiers stand in vehicles where they are short of meks. A company is not
+ready to take the field against you until its four lances are all meks. New
+companies that replace a folded one start at the bottom tier.
+
 ## The Lab: construction editor (P3d)
 
 The **Lab screen** (F8) shows the selected hull's per-location critical-slot

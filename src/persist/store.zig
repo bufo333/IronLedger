@@ -41,6 +41,7 @@ const operation_mod = @import("../domain/operation.zig");
 const actor_mod = @import("../domain/actor.zig");
 const rival_mod = @import("../domain/rival.zig");
 const merc_company_mod = @import("../domain/merc_company.zig");
+const merc_band = @import("../domain/merc_band.zig");
 const officer_dom = @import("../domain/officer.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 const world_state_rules = @import("../sim/world_state.zig");
@@ -52,7 +53,7 @@ const artillery_battle_store = @import("artillery_battle_store.zig");
 const artillery = @import("../sim/artillery.zig");
 const artillery_catalogue = @import("../domain/artillery_catalogue.zig");
 
-pub const schema_version = 67;
+pub const schema_version = 68;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -122,7 +123,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS maintenance_entry (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL, day INTEGER NOT NULL DEFAULT 0, tech INTEGER NOT NULL DEFAULT 0, action TEXT NOT NULL DEFAULT 'repair', description TEXT NOT NULL DEFAULT '', battle_id INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS hull_ownership_history (cid INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0), from_day INTEGER NOT NULL DEFAULT 0 CHECK (from_day BETWEEN 0 AND 4294967295), to_day INTEGER CHECK (to_day IS NULL OR (to_day BETWEEN from_day AND 4294967295)), acquisition_type TEXT NOT NULL DEFAULT 'initial', prior_owner_key TEXT NOT NULL DEFAULT '', UNIQUE (cid,ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS faction_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction_key TEXT NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS merc_company (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, cbills INTEGER NOT NULL DEFAULT 0, founded_day INTEGER NOT NULL DEFAULT 0, dissolved_day INTEGER NOT NULL DEFAULT 0, logo_key TEXT NOT NULL DEFAULT '', PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS merc_company (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, cbills INTEGER NOT NULL DEFAULT 0, founded_day INTEGER NOT NULL DEFAULT 0, dissolved_day INTEGER NOT NULL DEFAULT 0, logo_key TEXT NOT NULL DEFAULT '', band_key TEXT NOT NULL, PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS merc_company_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, merc_company_id INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, merc_company_id) REFERENCES merc_company(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS artillery_formation (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0), id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295), hull INTEGER NOT NULL CHECK (hull BETWEEN 1 AND 4294967295), acquisition_day INTEGER NOT NULL CHECK (acquisition_day BETWEEN 0 AND 4294967295), paid_price INTEGER NOT NULL CHECK (paid_price > 0), placement TEXT NOT NULL CHECK (placement IN ('hq_pool','company','freight','sold','destroyed','field_freight','field_return')), pool_hq INTEGER, company INTEGER, from_hq INTEGER, to_hq INTEGER, dispatch_day INTEGER, eta_day INTEGER, paid_cost INTEGER, quality TEXT NOT NULL DEFAULT 'c' CHECK(typeof(quality)='text' AND quality IN ('a','b','c','d','e','f')), armor INTEGER NOT NULL DEFAULT 100 CHECK(typeof(armor)='integer' AND armor BETWEEN 0 AND 100), last_maintenance INTEGER CHECK(last_maintenance IS NULL OR (typeof(last_maintenance)='integer' AND last_maintenance BETWEEN 0 AND 4294967295)), tech INTEGER CHECK(tech IS NULL OR (typeof(tech)='integer' AND tech BETWEEN 1 AND 4294967295)), FOREIGN KEY(cid,tech) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED, PRIMARY KEY (cid,id), UNIQUE (cid,ord), UNIQUE (cid,hull), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,hull) REFERENCES hull_instance(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,pool_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,company) REFERENCES force(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,from_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,to_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK ((pool_hq IS NOT NULL) = (placement='hq_pool')), CHECK ((company IS NOT NULL) = (placement IN ('company','field_freight'))), CHECK ((from_hq IS NOT NULL) = (placement IN ('freight','field_freight'))), CHECK ((to_hq IS NOT NULL) = (placement IN ('freight','field_return'))), CHECK ((dispatch_day IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK ((eta_day IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK ((paid_cost IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK (pool_hq IS NULL OR pool_hq BETWEEN 1 AND 4294967295), CHECK (company IS NULL OR company BETWEEN 1 AND 4294967295), CHECK (from_hq IS NULL OR from_hq BETWEEN 1 AND 4294967295), CHECK (to_hq IS NULL OR to_hq BETWEEN 1 AND 4294967295), CHECK (placement!='freight' OR from_hq!=to_hq), CHECK (placement NOT IN ('freight','field_freight','field_return') OR (dispatch_day BETWEEN 0 AND 4294967295 AND eta_day > dispatch_day AND eta_day <= 4294967295 AND paid_cost >= 0)));
     \\CREATE TABLE IF NOT EXISTS artillery_crew (cid INTEGER NOT NULL CHECK(typeof(cid)='integer'), formation INTEGER NOT NULL CHECK(typeof(formation)='integer' AND formation BETWEEN 1 AND 4294967295), seat TEXT NOT NULL CHECK(typeof(seat)='text' AND seat IN ('commander','gunner','driver','loader')), person INTEGER CHECK(person IS NULL OR (typeof(person)='integer' AND person BETWEEN 1 AND 4294967295)), PRIMARY KEY(cid,formation,seat), UNIQUE(cid,person), FOREIGN KEY(cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,formation) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,person) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED);
@@ -1688,7 +1689,7 @@ pub const Store = struct {
 
     // P3e entity split: save and load persistent world merc companies.
     fn saveMercCompanies(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO merc_company VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)");
+        const st = try self.db.prepare("INSERT INTO merc_company VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)");
         defer st.finalize();
         var it = gs.merc_companies.iterator();
         var ord: i64 = 0;
@@ -1709,6 +1710,7 @@ pub const Store = struct {
                 @as(i64, mc.founded_day),
                 @as(i64, mc.dissolved_day),
                 mc.logo_key,
+                mc.band_key,
             });
             try st.run();
         }
@@ -1716,12 +1718,14 @@ pub const Store = struct {
 
     fn loadMercCompanies(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT id, archetype_key, commander_first, commander_last, unit_name, faction_key, side, doctrine, cbills, founded_day, dissolved_day, logo_key FROM merc_company WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT id, archetype_key, commander_first, commander_last, unit_name, faction_key, side, doctrine, cbills, founded_day, dissolved_day, logo_key, band_key FROM merc_company WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
             const archetype_key = try st.text(1, alloc);
             if (rival_mod.find(archetype_key) == null) return error.CorruptSave;
+            // An unknown band is corruption, never a default band (rule 47).
+            const band = merc_band.find(try st.text(12, alloc)) orelse return error.CorruptSave;
             const side_str = try st.text(6, alloc);
             const side = std.meta.stringToEnum(merc_company_mod.FactionSide, side_str) orelse return error.CorruptSave;
             const doctrine_str = try st.text(7, alloc);
@@ -1741,6 +1745,7 @@ pub const Store = struct {
                 .founded_day = try st.intAs(u32, 9),
                 .dissolved_day = try st.intAs(u32, 10),
                 .logo_key = try st.text(11, alloc),
+                .band_key = band.key,
             };
             const gop = try gs.merc_companies.getOrPut(alloc, mc.id);
             if (gop.found_existing) return error.CorruptSave;
@@ -5641,8 +5646,8 @@ test "a played current campaign round trips and its downgraded store is refused 
     try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("UPDATE setting SET value = 36 WHERE key = 'schema_version'");
     defer raw.close();
-    try std.testing.expectEqual(@as(u64, 202945039740275209), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 1220401730871389752), hash_before);
+    try std.testing.expectEqual(@as(u64, 382748399249782819), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 412064738307275049), hash_before);
     try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
@@ -6066,8 +6071,8 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     // service requires available, physically local technicians and local pool
     // teams (docs/p2-artillery-operations-design.md,
     // Condition, maintenance, repairs and shared hours).
-    try std.testing.expectEqual(@as(u64, 202945039740275209), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 1220401730871389752), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 382748399249782819), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 412064738307275049), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -8195,7 +8200,7 @@ fn buildOwnerGs(alloc: std.mem.Allocator) !GameState {
     }
     // Hull 3: merc-company-owned — add one merc company first
     const mid: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(a, mid, merc_company_mod.MercCompany{ .id = mid, .archetype_key = "enemy_raiders", .commander_first = "Ann", .commander_last = "Smith", .unit_name = "Smith Raiders", .faction_key = "DC", .side = .enemy, .doctrine = .aggressive });
+    try gs.merc_companies.put(a, mid, merc_company_mod.MercCompany{ .id = mid, .archetype_key = "enemy_raiders", .commander_first = "Ann", .commander_last = "Smith", .unit_name = "Smith Raiders", .faction_key = "DC", .side = .enemy, .doctrine = .aggressive, .band_key = "band_4" });
     try gs.merc_company_rosters.put(a, mid, .empty);
     gs.next_merc_company_id = 2;
     {
@@ -8364,6 +8369,7 @@ fn buildRosterGs(alloc: std.mem.Allocator) !GameState {
         .faction_key = "DC",
         .side = .enemy,
         .doctrine = .aggressive,
+        .band_key = "band_4",
     });
     gs.next_merc_company_id = 2;
 
@@ -8589,6 +8595,7 @@ test "merc companies survive a save/load round-trip with identical stateHash (P3
         .faction_key = "DC",
         .side = .enemy,
         .doctrine = .aggressive,
+        .band_key = "band_4",
     };
     const mc2: merc_company_mod.MercCompany = .{
         .id = @enumFromInt(2),
@@ -8599,6 +8606,7 @@ test "merc companies survive a save/load round-trip with identical stateHash (P3
         .faction_key = "LC",
         .side = .employer,
         .doctrine = .cautious,
+        .band_key = "band_1_2",
     };
     try gs.merc_companies.put(a, mc1.id, mc1);
     try gs.merc_companies.put(a, mc2.id, mc2);
@@ -8626,13 +8634,13 @@ test "merc companies survive a save/load round-trip with identical stateHash (P3
 }
 
 test "a suffixed merc company name and a logo-less merc company survive save and load" {
-    // Seed 26 founds "Baxter Guard" and "Baxter Guard II" (merc_identity.unitName).
+    // Seed 26 founds "Quintana Assault" and "Quintana Assault II" (merc_identity.unitName).
     var gs = GameState.init(std.testing.allocator, .{ .seed = 26 });
     defer gs.deinit();
     const commands = @import("../sim/commands.zig");
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
-    const suffixed: types.MercCompanyId = @enumFromInt(5);
-    try std.testing.expectEqualStrings("Baxter Guard II", gs.merc_companies.get(suffixed).?.unit_name);
+    const suffixed: types.MercCompanyId = @enumFromInt(11);
+    try std.testing.expectEqualStrings("Quintana Assault II", gs.merc_companies.get(suffixed).?.unit_name);
     const logo_less: types.MercCompanyId = @enumFromInt(gs.next_merc_company_id);
     try gs.merc_companies.put(gs.allocator(), logo_less, .{
         .id = logo_less,
@@ -8641,6 +8649,7 @@ test "a suffixed merc company name and a logo-less merc company survive save and
         .commander_last = "Rex",
         .unit_name = "Rex Raiders",
         .faction_key = "DC",
+        .band_key = "band_1_2",
     });
     try gs.merc_company_rosters.put(gs.allocator(), logo_less, .empty);
     gs.next_merc_company_id += 1;
@@ -8655,7 +8664,7 @@ test "a suffixed merc company name and a logo-less merc company survive save and
     var diff_buf: [128]u8 = undefined;
     try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
     try std.testing.expectEqual(before, digest.stateHash(&loaded));
-    try std.testing.expectEqualStrings("Baxter Guard II", loaded.merc_companies.get(suffixed).?.unit_name);
+    try std.testing.expectEqualStrings("Quintana Assault II", loaded.merc_companies.get(suffixed).?.unit_name);
     try std.testing.expectEqualStrings("", loaded.merc_companies.get(logo_less).?.logo_key);
 }
 
@@ -8738,6 +8747,7 @@ test "MercCompany save/load round-trip with all four new fields non-default (P3f
         .founded_day = 42,
         .dissolved_day = 90,
         .logo_key = "ashfall_lancers",
+        .band_key = "band_5",
     };
     try gs.merc_companies.put(a, mc1.id, mc1);
     try gs.merc_company_rosters.put(a, mc1.id, .empty);
@@ -8760,6 +8770,7 @@ test "MercCompany save/load round-trip with all four new fields non-default (P3f
     try std.testing.expectEqual(@as(u32, 42), lmc.founded_day);
     try std.testing.expectEqual(@as(u32, 90), lmc.dissolved_day);
     try std.testing.expectEqualStrings("ashfall_lancers", lmc.logo_key);
+    try std.testing.expectEqualStrings("band_5", lmc.band_key);
 }
 
 test "v57 historical fixture is refused without mutation" {
@@ -8777,6 +8788,7 @@ test "v57 historical fixture is refused without mutation" {
         .faction_key = "DC",
         .side = .enemy,
         .doctrine = .aggressive,
+        .band_key = "band_4",
     };
     try gs.merc_companies.put(a, mc1.id, mc1);
     try gs.merc_company_rosters.put(a, mc1.id, .empty);
@@ -8863,7 +8875,6 @@ test "seeded merc company hull pool survives a save/load round-trip with identic
     // saveMercCompanyRosters/loadMercCompanyRosters on the production seeded
     // shape (owner + provenance + membership).
     const commands = @import("../sim/commands.zig");
-    const tuning = @import("../domain/tuning.zig").t;
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50011 });
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{
@@ -8877,19 +8888,31 @@ test "seeded merc company hull pool survives a save/load round-trip with identic
     // Merc companies and rosters must be non-empty after seeding.
     try std.testing.expect(gs.merc_companies.count() > 0);
     try std.testing.expect(gs.merc_company_rosters.count() > 0);
-    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_count), gs.merc_companies.count());
+    try std.testing.expectEqual(merc_band.seedTotal(), gs.merc_companies.count());
 
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
-    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
+    {
+        var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+        defer loaded.deinit();
 
-    var diff_buf: [128]u8 = undefined;
-    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
-    try std.testing.expectEqual(before, digest.stateHash(&loaded));
-    try std.testing.expectEqual(gs.merc_companies.count(), loaded.merc_companies.count());
-    try std.testing.expectEqual(gs.merc_company_rosters.count(), loaded.merc_company_rosters.count());
+        var diff_buf: [128]u8 = undefined;
+        try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+        try std.testing.expectEqual(before, digest.stateHash(&loaded));
+        try std.testing.expectEqual(gs.merc_companies.count(), loaded.merc_companies.count());
+        try std.testing.expectEqual(gs.merc_company_rosters.count(), loaded.merc_company_rosters.count());
+        // Every company's band survives, resolved to its static table row.
+        for (gs.merc_companies.values(), loaded.merc_companies.values()) |saved, restored| {
+            try std.testing.expectEqualStrings(saved.band_key, restored.band_key);
+            try std.testing.expectEqual(merc_band.find(saved.band_key).?.key.ptr, restored.band_key.ptr);
+        }
+    }
+
+    // A band key no table row names is corruption, never a default band.
+    var sql: [128:0]u8 = undefined;
+    try store.db.exec(try std.fmt.bufPrintZ(&sql, "UPDATE merc_company SET band_key = 'band_6' WHERE cid = {d} AND id = 1", .{gs.campaign_id}));
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
 }
 
 test "P3e.6: surplus listing hull_instance_id round-trips through save/load" {
@@ -10463,6 +10486,7 @@ test "old and future campaign load and overwrite refuse before gameplay decoding
         .{ .version = 64, .expected = error.SaveOlderThanGame },
         .{ .version = 65, .expected = error.SaveOlderThanGame },
         .{ .version = 66, .expected = error.SaveOlderThanGame },
+        .{ .version = 67, .expected = error.SaveOlderThanGame },
         .{ .version = schema_version + 1, .expected = error.SaveNewerThanGame },
     }) |case| {
         var sql: [128:0]u8 = undefined;
@@ -11276,6 +11300,28 @@ test "a store or a campaign at format 66 is refused before any change, artillery
     try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
     var sql: [128:0]u8 = undefined;
     try raw.exec(try std.fmt.bufPrintZ(&sql, "UPDATE setting SET value = {d} WHERE key = 'schema_version'; UPDATE campaign SET schema_version = 66", .{schema_version}));
+    store = try Store.fromDb(raw);
+    const memory_before = digest.stateHash(&gs);
+    const storage_before = try databaseFingerprintForTest(raw);
+    try std.testing.expectError(error.SaveOlderThanGame, store.load(std.testing.allocator, gs.campaign_id));
+    try std.testing.expectError(error.SaveOlderThanGame, store.save(&gs));
+    try std.testing.expectEqual(storage_before, try databaseFingerprintForTest(raw));
+    try std.testing.expectEqual(memory_before, digest.stateHash(&gs));
+}
+
+test "a store or a campaign at format 67 is refused before any change, merc companies seeded or not" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 6705 });
+    defer gs.deinit();
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    try std.testing.expect(gs.merc_companies.count() > 0);
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    var store = try Store.fromDb(raw);
+    try store.save(&gs);
+    try raw.exec("UPDATE setting SET value = 67 WHERE key = 'schema_version'");
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
+    var sql: [128:0]u8 = undefined;
+    try raw.exec(try std.fmt.bufPrintZ(&sql, "UPDATE setting SET value = {d} WHERE key = 'schema_version'; UPDATE campaign SET schema_version = 67", .{schema_version}));
     store = try Store.fromDb(raw);
     const memory_before = digest.stateHash(&gs);
     const storage_before = try databaseFingerprintForTest(raw);

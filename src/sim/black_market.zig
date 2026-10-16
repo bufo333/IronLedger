@@ -15,6 +15,7 @@ const planet_mod = @import("../domain/planet.zig");
 const tuning = @import("../domain/tuning.zig").t;
 const hull_instance_mod = @import("../domain/hull_instance.zig");
 const merc_company_mod = @import("../domain/merc_company.zig");
+const merc_band = @import("../domain/merc_band.zig");
 const roster_gen = @import("../gen/roster_gen.zig");
 const faction_mod = @import("../domain/faction.zig");
 const rivals = @import("rivals.zig");
@@ -491,8 +492,8 @@ const NpcDrawTake = struct { buyer_idx: usize, listing_idx: usize, price: types.
 /// instance that `buyer` can reach (`buyerEligible`; pirates and mercs reach
 /// disjoint worlds). Before each of up to `npc_black_market_draws_per_month`
 /// draws, a merc buyer's set narrows to known chassis the company still needs
-/// (`rivals.mercCompanyNeedsHull`) priced within its remaining C-bills; each
-/// take spends the price and counts the kind. An empty set ends the buyer's
+/// for its band (`rivals.mercCompanyNeedsHull`) priced within its remaining
+/// C-bills; each take spends the price and counts the kind. An empty set ends the buyer's
 /// turn without a draw. The `.market` draw and swap-remove order match a
 /// buyer whose set never narrows.
 fn planNpcBuyerDraws(
@@ -516,16 +517,18 @@ fn planNpcBuyerDraws(
     }
 
     const pays = buyer == .merc_company;
-    var cash: types.CBills = if (pays) gs.merc_companies.get(merc_id).?.cbills else 0;
+    const company: ?merc_company_mod.MercCompany = if (pays) gs.merc_companies.get(merc_id).? else null;
+    const band: ?*const merc_band.Band = if (company) |c| try rivals.mercCompanyBand(c) else null;
+    var cash: types.CBills = if (company) |c| c.cbills else 0;
     var counts: rivals.MercHullCounts = if (pays) rivals.mercCompanyHullCounts(gs, merc_id) else .{};
     var candidates: std.ArrayListUnmanaged(usize) = .empty;
     for (0..tuning.market.npc_black_market_draws_per_month) |_| {
         candidates.clearRetainingCapacity();
         for (elig.items) |i| {
             const l = gs.market_listings.items[i];
-            if (pays) {
+            if (band) |b| {
                 const chassis = chassis_mod.find(l.item_key) orelse continue;
-                if (!rivals.mercCompanyNeedsHull(counts, chassis.kind) or l.price > cash) continue;
+                if (!rivals.mercCompanyNeedsHull(b, counts, chassis.kind) or l.price > cash) continue;
             }
             try candidates.append(scratch, i);
         }
@@ -1056,7 +1059,7 @@ test "runNpcBlackMarketDraw: pirates consume only PER-world listings, mercs only
 
     // One merc company so buyers_buf includes a merc entry.
     const merc_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id });
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .band_key = merc_test_band });
 
     const day: u32 = 30;
     gs.clock.day_index = day;
@@ -1161,6 +1164,9 @@ test "runNpcBlackMarketDraw: dissolved merc companies do not buy listings" {
     try testing.expect(gs.merc_company_rosters.get(merc_id) == null);
 }
 
+/// The band of the merc buyers below: one whose line takes vehicles.
+const merc_test_band = "band_3";
+
 /// Add a market-owned hull and its merc-reachable (non-PER) black-market
 /// listing at `price`.
 fn addMercDrawListing(gs: *GameState, base_key: []const u8, price: types.CBills) !types.HullInstanceId {
@@ -1205,7 +1211,7 @@ test "runNpcBlackMarketDraw: a merc take debits the listing price" {
     const merc_id: types.MercCompanyId = @enumFromInt(1);
     const cash: types.CBills = 3_000_000;
     const price: types.CBills = 1_000_000;
-    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .cbills = cash });
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .band_key = merc_test_band, .cbills = cash });
     gs.clock.day_index = 30;
     const hid = try addMercDrawListing(&gs, "LCT-1V", price);
 
@@ -1220,7 +1226,7 @@ test "runNpcBlackMarketDraw: an unaffordable listing is refused without a market
     defer gs.deinit();
     const merc_id: types.MercCompanyId = @enumFromInt(1);
     const price: types.CBills = 1_000_000;
-    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .cbills = price - 1 });
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .band_key = merc_test_band, .cbills = price - 1 });
     gs.clock.day_index = 30;
     const hid = try addMercDrawListing(&gs, "LCT-1V", price);
     const rng_before = gs.rng;
@@ -1238,9 +1244,9 @@ test "runNpcBlackMarketDraw: a company at its procurement target refuses a mek" 
     defer gs.deinit();
     const merc_id: types.MercCompanyId = @enumFromInt(1);
     const cash: types.CBills = 100_000_000;
-    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .cbills = cash });
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .band_key = merc_test_band, .cbills = cash });
     gs.clock.day_index = 30;
-    try addMercRosterHulls(&gs, merc_id, "LCT-1V", tuning.generation.merc_company_hulls_each);
+    try addMercRosterHulls(&gs, merc_id, "LCT-1V", merc_band.lineTarget(merc_band.find(merc_test_band).?));
     try addMercRosterHulls(&gs, merc_id, "TR-7", @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size);
     const hid = try addMercDrawListing(&gs, "LCT-1V", 1);
     const rng_before = gs.rng;
@@ -1259,7 +1265,7 @@ test "runNpcBlackMarketDraw: remaining cash bounds a merc company's second take"
     const merc_id: types.MercCompanyId = @enumFromInt(1);
     const price: types.CBills = 1_000_000;
     const cash: types.CBills = 2 * price - 1;
-    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .cbills = cash });
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .band_key = merc_test_band, .cbills = cash });
     gs.clock.day_index = 30;
     _ = try addMercDrawListing(&gs, "LCT-1V", price);
     _ = try addMercDrawListing(&gs, "LCT-1V", price);
@@ -1277,7 +1283,7 @@ test "runNpcBlackMarketDraw: a merc company takes needed vehicles but no infantr
     const merc_id: types.MercCompanyId = @enumFromInt(1);
     const cash: types.CBills = 100_000_000;
     const price: types.CBills = 1_000_000;
-    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .cbills = cash });
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .band_key = merc_test_band, .cbills = cash });
     gs.clock.day_index = 30;
     const infantry = try addMercDrawListing(&gs, "SEC-PLT", price);
     const rng_before = gs.rng;
@@ -1297,13 +1303,36 @@ test "runNpcBlackMarketDraw: a merc company takes needed vehicles but no infantr
     try testing.expectEqual(cash - price, gs.merc_companies.get(merc_id).?.cbills);
 }
 
+test "runNpcBlackMarketDraw: a merc company whose band fills its line with meks only refuses a vehicle" {
+    var gs = GameState.init(testing.allocator, .{ .seed = 57113 });
+    defer gs.deinit();
+    const merc_id: types.MercCompanyId = @enumFromInt(1);
+    const cash: types.CBills = 100_000_000;
+    const band = merc_band.find("band_4").?;
+    try testing.expect(!band.vehicles_fill_line);
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .band_key = band.key, .cbills = cash });
+    gs.clock.day_index = 30;
+    // Under its line target, with its air reserve full.
+    try addMercRosterHulls(&gs, merc_id, "LCT-1V", merc_band.lineTarget(band) - 1);
+    try addMercRosterHulls(&gs, merc_id, "TR-7", @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size);
+    const vehicle = try addMercDrawListing(&gs, "SCP-1N", 1);
+    const rng_before = gs.rng;
+
+    try runNpcBlackMarketDraw(&gs);
+
+    try testing.expectEqual(@as(usize, 1), gs.market_listings.items.len);
+    try testing.expectEqual(hull_instance_mod.HullOwner.market, gs.hull_instances.get(vehicle).?.owner);
+    try testing.expectEqual(cash, gs.merc_companies.get(merc_id).?.cbills);
+    try testing.expectEqual(rng_before, gs.rng);
+}
+
 /// The atomicity fixture's merc company funds and listing price.
 const npc_draw_fixture_cash: types.CBills = 10_000_000;
 const npc_draw_fixture_price: types.CBills = 1_000_000;
 
 fn seedNpcDrawAtomicityFixture(gs: *GameState) !void {
     const merc_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .cbills = npc_draw_fixture_cash });
+    try gs.merc_companies.put(gs.allocator(), merc_id, .{ .id = merc_id, .band_key = merc_test_band, .cbills = npc_draw_fixture_cash });
     gs.clock.day_index = 30;
 
     const listings = [_]struct { planet_key: []const u8, id: types.HullInstanceId }{

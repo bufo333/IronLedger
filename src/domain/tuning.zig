@@ -801,12 +801,6 @@ pub const Tuning = struct {
         /// at campaign creation (docs/p3c-economy-design.md §4 — size TBD).
         /// Pool size = replenishment_hulls_per_year × faction_roster_seed_years. // TUNE
         faction_roster_seed_years: u16,
-        /// World merc companies to seed at campaign creation
-        /// (docs/p3c-economy-design.md §8.D). // TUNE
-        merc_company_count: u16,
-        /// Hull pool size for each world merc company at campaign creation
-        /// (docs/p3c-economy-design.md §8.D). // TUNE
-        merc_company_hulls_each: u16,
         /// Bounded conventional air reserve for NPC merc companies: lances,
         /// multiplied by force.lance_size by the procurement selector
         /// (docs/p2-conventional-combat-design.md §NPC Policy). // TUNE
@@ -824,9 +818,6 @@ pub const Tuning = struct {
         /// Hulls the pirate pool gains per campaign year from dispersed
         /// black-market recovery (docs/p3f-faction-loop-design.md §2.6). // TUNE
         pirate_replenishment_hulls_per_year: u8,
-        /// Starting C-bill balance injected when a replacement merc company
-        /// forms (docs/p3f-faction-loop-design.md §2.6). // TUNE
-        merc_replacement_cbill_floor: types.CBills,
     },
     /// Real loss: how hulls die, what a rebuild needs, and when one is not
     /// worth it (TechManual hull destruction; CamOps salvage).

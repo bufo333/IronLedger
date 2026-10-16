@@ -38,6 +38,10 @@ pub const MercCompany = struct {
     dissolved_day: u32 = 0,
     /// Logo filename stem from data/logos/ (generated catalog); empty = no logo.
     logo_key: []const u8 = "",
+    /// Key of the company's row in data/tables/merc_bands.zon (`merc_band.find`),
+    /// held in static table memory. Set at seed and replacement; a loaded
+    /// company's key always resolves. Empty names no band.
+    band_key: []const u8 = "",
 };
 
 test "MercCompany defaults" {
@@ -51,4 +55,5 @@ test "MercCompany defaults" {
     try std.testing.expectEqual(@as(u32, 0), mc.founded_day);
     try std.testing.expectEqual(@as(u32, 0), mc.dissolved_day);
     try std.testing.expectEqualStrings("", mc.logo_key);
+    try std.testing.expectEqualStrings("", mc.band_key);
 }

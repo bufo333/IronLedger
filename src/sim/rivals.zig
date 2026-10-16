@@ -14,6 +14,7 @@ const person_gen = @import("../gen/person_gen.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 const merc_company_mod = @import("../domain/merc_company.zig");
+const merc_band = @import("../domain/merc_band.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const force = @import("../domain/force.zig");
 const unit = @import("../domain/unit.zig");
@@ -108,13 +109,16 @@ pub fn mercCompanyInsolvent(gs: *GameState, id: types.MercCompanyId) bool {
 
 /// Single owner of "may this merc company be a contract OpFor" (rule 20).
 /// Eligible iff active (dissolved_day == 0), solvent (!mercCompanyInsolvent),
-/// and at its named mek target. Vehicles and aerospace hulls contribute BV but
-/// never satisfy mek readiness. A company
-/// with no roster entry is under strength → ineligible (rule 1).
+/// and its active meks reach its band's `merc_band.lineTarget`
+/// (docs/p5d-conflict-world-design.md §L8, D23). Vehicles and aerospace hulls
+/// contribute BV but never satisfy mek readiness. A company with no roster
+/// entry, or whose `band_key` names no band, is under strength → ineligible
+/// (rule 1).
 pub fn mercCompanyEligibleAsOpFor(gs: *GameState, id: types.MercCompanyId) bool {
     const mc = gs.merc_companies.getPtr(id) orelse return false;
     if (mc.dissolved_day != 0) return false;
     if (mercCompanyInsolvent(gs, id)) return false;
+    const band = merc_band.find(mc.band_key) orelse return false;
     const roster = gs.merc_company_rosters.get(id) orelse return false;
     var active_meks: usize = 0;
     for (roster.items) |hid| {
@@ -123,7 +127,7 @@ pub fn mercCompanyEligibleAsOpFor(gs: *GameState, id: types.MercCompanyId) bool 
         const chassis = chassis_mod.find(inst.base_key) orelse continue;
         if (chassis.kind == .mek) active_meks += 1;
     }
-    return active_meks >= tuning.generation.merc_company_hulls_each;
+    return active_meks >= merc_band.lineTarget(band);
 }
 
 /// Active hulls in a merc company's roster, by procurement kind.
@@ -158,18 +162,26 @@ pub fn mercCompanyHullCounts(gs: *const GameState, id: types.MercCompanyId) Merc
     return counts;
 }
 
-/// Single owner of "does a merc company with `counts` still want a hull of
-/// `kind`" (rule 20/3). Meks fill the mek target, vehicles fill line positions
-/// meks leave open, and aerospace fills the air reserve; no other kind is
-/// procured. Targets: docs/p3c-economy-design.md §8.D (line and mek) and
-/// docs/p2-conventional-combat-design.md §NPC Policy (air reserve). Pure.
-pub fn mercCompanyNeedsHull(counts: MercHullCounts, kind: unit.UnitKind) bool {
-    const line_target: usize = tuning.generation.merc_company_hulls_each;
-    const mek_target = line_target;
+/// The band row of a merc company's `band_key`. Seeding, replacement and
+/// loading always set a known key, so an unknown one is a broken state
+/// invariant: `CorruptSave`, never a default band (rule 1).
+pub fn mercCompanyBand(company: merc_company_mod.MercCompany) error{CorruptSave}!*const merc_band.Band {
+    return merc_band.find(company.band_key) orelse error.CorruptSave;
+}
+
+/// Single owner of "does a merc company of `band` with `counts` still want a
+/// hull of `kind`" (rule 20/3). Meks fill the band's `merc_band.lineTarget`;
+/// vehicles fill line positions meks leave open only in a band whose
+/// `vehicles_fill_line` allows it; aerospace fills the air reserve; no other
+/// kind is procured. Targets: docs/p5d-conflict-world-design.md §L8 and D23
+/// (line and mek) and docs/p2-conventional-combat-design.md §NPC Policy (air
+/// reserve). Pure.
+pub fn mercCompanyNeedsHull(band: *const merc_band.Band, counts: MercHullCounts, kind: unit.UnitKind) bool {
+    const line_target = merc_band.lineTarget(band);
     const air_target: usize = @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size;
     return switch (kind) {
-        .mek => counts.meks < mek_target,
-        .vehicle => counts.meks + counts.vehicles < line_target,
+        .mek => counts.meks < line_target,
+        .vehicle => band.vehicles_fill_line and counts.meks + counts.vehicles < line_target,
         .aerospace => counts.aerospace < air_target,
         else => false,
     };
@@ -660,9 +672,10 @@ test "instantiateRivals: links each rival to an existing merc company, determini
     defer gs.deinit();
 
     // Insert three merc companies into the pool (via the arena so deinit frees them).
-    // Each company must have merc_company_hulls_each hulls to be eligible as OpFor
-    // (mercCompanyEligibleAsOpFor requires full-strength; P3f.4).
+    // Each company must hold its band's line target in meks to be eligible as
+    // OpFor (mercCompanyEligibleAsOpFor requires full strength).
     const alloc = gs.allocator();
+    const band = merc_band.find("band_4").?;
     var next_hid: u32 = 1;
     for ([_]u32{ 1, 2, 3 }) |raw| {
         const mcid: types.MercCompanyId = @enumFromInt(raw);
@@ -675,9 +688,10 @@ test "instantiateRivals: links each rival to an existing merc company, determini
             .faction_key = "DC",
             .side = .enemy,
             .doctrine = .aggressive,
+            .band_key = band.key,
         });
         var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
-        for (0..tuning.generation.merc_company_hulls_each) |_| {
+        for (0..merc_band.lineTarget(band)) |_| {
             const hid: types.HullInstanceId = @enumFromInt(next_hid);
             next_hid += 1;
             try gs.hull_instances.put(alloc, hid, .{ .id = hid, .base_key = "LCT-1V" });
@@ -734,9 +748,10 @@ test "instantiateRivals: links each rival to an existing merc company, determini
             .faction_key = "DC",
             .side = .enemy,
             .doctrine = .aggressive,
+            .band_key = band.key,
         });
         var roster2: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
-        for (0..tuning.generation.merc_company_hulls_each) |_| {
+        for (0..merc_band.lineTarget(band)) |_| {
             const hid2: types.HullInstanceId = @enumFromInt(next_hid2);
             next_hid2 += 1;
             try gs2.hull_instances.put(alloc2, hid2, .{ .id = hid2, .base_key = "LCT-1V" });
@@ -870,6 +885,7 @@ test "instantiateRivals: an insolvent merc company is not selected; a solvent on
     const mc_a: types.MercCompanyId = @enumFromInt(1);
     const mc_b: types.MercCompanyId = @enumFromInt(2);
 
+    const band = merc_band.find("band_4").?;
     try gs.merc_companies.put(alloc, mc_a, merc_company_mod.MercCompany{
         .id = mc_a,
         .archetype_key = "enemy_raiders",
@@ -879,6 +895,7 @@ test "instantiateRivals: an insolvent merc company is not selected; a solvent on
         .faction_key = "DC",
         .side = .enemy,
         .doctrine = .aggressive,
+        .band_key = band.key,
     });
     const ha: types.HullInstanceId = @enumFromInt(20);
     try gs.hull_instances.put(alloc, ha, .{ .id = ha, .base_key = "LCT-1V" }); // BV=432
@@ -886,8 +903,8 @@ test "instantiateRivals: an insolvent merc company is not selected; a solvent on
     try ra.append(alloc, ha);
     try gs.merc_company_rosters.put(alloc, mc_a, ra);
 
-    // Company B: has merc_company_hulls_each hulls — solvent and at full strength (eligible).
-    // Use LCT-1V for each hull; total BV = 432 * merc_company_hulls_each (well above 2000).
+    // Company B: holds its band's line target — solvent and at full strength (eligible).
+    // Use LCT-1V for each hull; total BV = 432 per hull (well above 2000).
     try gs.merc_companies.put(alloc, mc_b, merc_company_mod.MercCompany{
         .id = mc_b,
         .archetype_key = "enemy_raiders",
@@ -897,9 +914,10 @@ test "instantiateRivals: an insolvent merc company is not selected; a solvent on
         .faction_key = "DC",
         .side = .enemy,
         .doctrine = .cautious,
+        .band_key = band.key,
     });
     var rb: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
-    for (0..tuning.generation.merc_company_hulls_each) |i| {
+    for (0..merc_band.lineTarget(band)) |i| {
         const hb: types.HullInstanceId = @enumFromInt(21 + @as(u32, @intCast(i)));
         try gs.hull_instances.put(alloc, hb, .{ .id = hb, .base_key = "LCT-1V" });
         try rb.append(alloc, hb);
@@ -928,16 +946,18 @@ test "instantiateRivals: an insolvent merc company is not selected; a solvent on
     }
 }
 
-test "mercCompanyEligibleAsOpFor: active+full-strength=true; dissolved=false; insolvent=false; under-strength=false" {
+test "mercCompanyEligibleAsOpFor: active+band-target=true; dissolved=false; insolvent=false; under-strength=false" {
     // Rule 20/67: focused table test for the single OpFor eligibility owner.
     const a = std.testing.allocator;
     var gs = GameState.init(a, .{ .seed = 42 });
     defer gs.deinit();
     const alloc = gs.allocator();
 
-    const n = tuning.generation.merc_company_hulls_each;
+    const band = merc_band.find("band_4").?;
+    const n = merc_band.lineTarget(band);
+    try std.testing.expectEqual(@as(usize, 16), n);
 
-    // mc_active_full: dissolved_day==0, solvent, roster.len >= n → eligible.
+    // mc_active_full: dissolved_day==0, solvent, n active meks → eligible.
     const mc_full: types.MercCompanyId = @enumFromInt(1);
     try gs.merc_companies.put(alloc, mc_full, merc_company_mod.MercCompany{
         .id = mc_full,
@@ -945,6 +965,7 @@ test "mercCompanyEligibleAsOpFor: active+full-strength=true; dissolved=false; in
         .unit_name = "Full Company",
         .faction_key = "DC",
         .dissolved_day = 0,
+        .band_key = band.key,
     });
     {
         var r: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
@@ -965,6 +986,7 @@ test "mercCompanyEligibleAsOpFor: active+full-strength=true; dissolved=false; in
         .unit_name = "Dissolved Co",
         .faction_key = "DC",
         .dissolved_day = 30,
+        .band_key = band.key,
     });
     {
         var r: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
@@ -985,6 +1007,7 @@ test "mercCompanyEligibleAsOpFor: active+full-strength=true; dissolved=false; in
         .unit_name = "Insolvent Co",
         .faction_key = "DC",
         .dissolved_day = 0,
+        .band_key = band.key,
     });
     {
         // One hull with LCT-1V (BV=432) — well below insolvency threshold 2000.
@@ -996,7 +1019,7 @@ test "mercCompanyEligibleAsOpFor: active+full-strength=true; dissolved=false; in
     }
     try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, mc_insolvent));
 
-    // mc_under: active, solvent, but roster.len < n → under-strength → ineligible.
+    // mc_under: active, solvent, but n-1 active meks → under-strength → ineligible.
     const mc_under: types.MercCompanyId = @enumFromInt(4);
     try gs.merc_companies.put(alloc, mc_under, merc_company_mod.MercCompany{
         .id = mc_under,
@@ -1004,9 +1027,10 @@ test "mercCompanyEligibleAsOpFor: active+full-strength=true; dissolved=false; in
         .unit_name = "Under Strength Co",
         .faction_key = "DC",
         .dissolved_day = 0,
+        .band_key = band.key,
     });
     {
-        // n-1 hulls: solvent but under-strength.
+        // n-1 meks: solvent but under-strength.
         var r: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
         for (0..n - 1) |i| {
             const hid: types.HullInstanceId = @enumFromInt(400 + @as(u32, @intCast(i)));
@@ -1017,6 +1041,25 @@ test "mercCompanyEligibleAsOpFor: active+full-strength=true; dissolved=false; in
     }
     try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, mc_under));
 
+    // n-1 meks plus a vehicle and an aerospace hull: still n-1 meks → ineligible.
+    {
+        const r = gs.merc_company_rosters.getPtr(mc_under).?;
+        for ([_][]const u8{ "SCP-1N", "TR-7" }, 0..) |key, i| {
+            const hid: types.HullInstanceId = @enumFromInt(450 + @as(u32, @intCast(i)));
+            try gs.hull_instances.put(alloc, hid, .{ .id = hid, .base_key = key });
+            try r.append(alloc, hid);
+        }
+    }
+    try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, mc_under));
+
+    // The nth mek reaches the band target → eligible.
+    {
+        const hid: types.HullInstanceId = @enumFromInt(499);
+        try gs.hull_instances.put(alloc, hid, .{ .id = hid, .base_key = "LCT-1V" });
+        try gs.merc_company_rosters.getPtr(mc_under).?.append(alloc, hid);
+    }
+    try std.testing.expect(mercCompanyEligibleAsOpFor(&gs, mc_under));
+
     // mc_absent: active, no roster entry → under-strength → ineligible (rule 1).
     const mc_absent: types.MercCompanyId = @enumFromInt(5);
     try gs.merc_companies.put(alloc, mc_absent, merc_company_mod.MercCompany{
@@ -1025,17 +1068,46 @@ test "mercCompanyEligibleAsOpFor: active+full-strength=true; dissolved=false; in
         .unit_name = "Absent Roster Co",
         .faction_key = "DC",
         .dissolved_day = 0,
+        .band_key = band.key,
     });
     try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, mc_absent));
+
+    // A full roster under a key that names no band has no target → ineligible.
+    gs.merc_companies.getPtr(mc_full).?.band_key = "band_6";
+    try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, mc_full));
+    try std.testing.expectError(error.CorruptSave, mercCompanyBand(gs.merc_companies.get(mc_full).?));
+}
+
+test "mercCompanyNeedsHull: meks fill the band target; vehicles only in a band that fills the line with them" {
+    // Two bands that differ only in vehicle substitution (§L8, D23).
+    const fills: merc_band.Band = .{ .key = "fills", .label = "fills", .seed_companies = 1, .line_lances = 4, .capital_cbills = 1, .vehicles_fill_line = true };
+    const meks_only: merc_band.Band = .{ .key = "meks_only", .label = "meks only", .seed_companies = 1, .line_lances = 4, .capital_cbills = 1, .vehicles_fill_line = false };
+    const air_target = @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size;
+    for ([_]*const merc_band.Band{ &fills, &meks_only }) |band| {
+        try std.testing.expectEqual(@as(usize, 16), merc_band.lineTarget(band));
+        // A mek is wanted at 15 meks, not at 16.
+        try std.testing.expect(mercCompanyNeedsHull(band, .{ .meks = 15 }, .mek));
+        try std.testing.expect(!mercCompanyNeedsHull(band, .{ .meks = 16 }, .mek));
+        // A vehicle fills meks + vehicles = 15 only where the band allows it.
+        try std.testing.expectEqual(band.vehicles_fill_line, mercCompanyNeedsHull(band, .{ .meks = 10, .vehicles = 5 }, .vehicle));
+        try std.testing.expect(!mercCompanyNeedsHull(band, .{ .meks = 10, .vehicles = 6 }, .vehicle));
+        // Aerospace is wanted below the unchanged air reserve in both.
+        try std.testing.expect(mercCompanyNeedsHull(band, .{ .meks = 16, .aerospace = air_target - 1 }, .aerospace));
+        try std.testing.expect(!mercCompanyNeedsHull(band, .{ .meks = 16, .aerospace = air_target }, .aerospace));
+        // No other kind is procured.
+        try std.testing.expect(!mercCompanyNeedsHull(band, .{}, .infantry));
+    }
+    try std.testing.expect(!mercCompanyNeedsHull(&meks_only, .{}, .vehicle));
 }
 
 test "mercCompanyEligibleAsOpFor: conventional BV does not satisfy the active-mek target" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 43 });
     defer gs.deinit();
     const id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), id, .{ .id = id, .archetype_key = "enemy_raiders", .unit_name = "Reserve Co", .faction_key = "DC" });
+    const band = merc_band.find("band_3").?;
+    try gs.merc_companies.put(gs.allocator(), id, .{ .id = id, .archetype_key = "enemy_raiders", .unit_name = "Reserve Co", .faction_key = "DC", .band_key = band.key });
     var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
-    for (0..tuning.generation.merc_company_hulls_each) |i| {
+    for (0..merc_band.lineTarget(band)) |i| {
         const hull_id: types.HullInstanceId = @enumFromInt(1 + @as(u32, @intCast(i)));
         try gs.hull_instances.put(gs.allocator(), hull_id, .{ .id = hull_id, .base_key = "SCP-1N" });
         try roster.append(gs.allocator(), hull_id);

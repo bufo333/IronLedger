@@ -258,8 +258,10 @@ market.black_market_delay_days_max       // TUNE: maximum days before a disperse
 market.enemy_recovery_capacity           // TUNE: dispersed listings the enemy may recover on a lost field
 market.npc_black_market_draws_per_month  // TUNE: monthly draws per eligible NPC buyer
 generation.pirate_replenishment_hulls_per_year // TUNE: base PER hull trickle per year
-generation.merc_replacement_cbill_floor  // TUNE: merc-company replacement capital floor
 ```
+
+A replacement company's capital is its band's `capital_cbills` in
+`data/tables/merc_bands.zon` (docs/p5d-conflict-world-design.md §L8).
 
 ---
 
@@ -414,8 +416,9 @@ dissolution line logs. Every company holds a roster entry, so a company with
 no hulls is insolvent.
 `mercCompanyEligibleAsOpFor` (delivered P3f.4) is the single owner of the
 "may this company be an OpFor" rule: active (dissolved_day==0), solvent, and
-at its named mek target (`merc_company_hulls_each` active mek hulls). Vehicles
-and aerospace hulls contribute fieldable BV but do not satisfy mek readiness.
+at its band's mek target (`merc_band.lineTarget` active mek hulls,
+docs/p5d-conflict-world-design.md §L8). Vehicles and aerospace hulls
+contribute fieldable BV but do not satisfy mek readiness.
 
 **Tick hook:** `src/sim/merc_lifecycle.zig` `runMercLifecycle`, called from
 `tick.zig runMarkets` after `runPirateReplenishment` (lifecycle sees the
@@ -473,8 +476,9 @@ pub fn buyHullsForCompany(
 ) !void
 
 /// Single owner of replacement spawn (rule 20/76).
-/// Strength target: tuning.generation.merc_company_hulls_each (market listings only,
-/// no RAT mint — D-B). Starting cbills: tuning.generation.merc_replacement_cbill_floor.
+/// Founded at merc_band.replacementBand(); strength target: that band's
+/// merc_band.lineTarget (market listings only, no RAT mint — D-B). Starting
+/// cbills: that band's capital_cbills (docs/p5d-conflict-world-design.md §L8).
 /// Planning scratch is an arena over gs.scratch(), released on return; alloc is unused.
 /// Does NOT write gs.rng — the caller commits.
 pub fn spawnReplacementCompany(
@@ -506,7 +510,8 @@ the dissolved company's id order; buys log nothing.
 
 Four new fields appended to `MercCompany` after `doctrine` (field order fixes
 digest and column order):
-- `cbills: types.CBills = 0` — C-bills held; seeded to `merc_replacement_cbill_floor`
+- `cbills: types.CBills = 0` — C-bills held; seeded to the company's band capital
+  (`capital_cbills` in `data/tables/merc_bands.zon`, schema v68 `band_key`)
 - `founded_day: u32 = 0` — day_index founded (0 = pre-campaign seed)
 - `dissolved_day: u32 = 0` — 0 = active; nonzero = day_index dissolved (D-A)
 - `logo_key: []const u8 = ""` — logo basename from data/logos/ catalog; '' = legacy
@@ -582,8 +587,8 @@ The logo catalog is generated at build time, not hand-maintained:
 - `src/domain/logo.zig` is a checked-in pure shim:
   `pub const all_keys: []const []const u8 = &@import("logos_zon");`
   All consumers reference `logo.all_keys`; no hand-maintained key list exists.
-- A comptime guard in `roster_seed.zig` fails the build if
-  `merc_company_count > logo.all_keys.len`.
+- A comptime guard in `merc_band.zig` fails the build if the band table's
+  seeded company total + 1 exceeds `logo.all_keys.len`.
 - Adding a new `data/logos/<name>.png` and running `zig build test` surfaces
   `<name>` in `logo.all_keys` with no `.zig` edit.
 
@@ -725,8 +730,9 @@ replacement formation.  No caller re-implements any of these.
 references use `types.ListingId`.  No ID is cast, inferred, or constructed
 outside its mint point.
 
-**Rule 56 (integer C-bills, basis points):** The C-bill injection floor
-(`tuning.generation.merc_replacement_cbill_floor`) is an integer C-bill value.
+**Rule 56 (integer C-bills, basis points):** A replacement company's founding
+capital (its band's `capital_cbills`, `data/tables/merc_bands.zon`) is an
+integer C-bill value.
 All pricing calculations use the existing `types.CBills` + `types.Bp` pattern.
 
 **Rule 6/57 (named RNG streams, pinned salts, documented draw order):** All
@@ -777,8 +783,10 @@ market.black_market_delay_days_max         // TUNE
 market.enemy_recovery_capacity             // TUNE
 market.npc_black_market_draws_per_month    // TUNE
 generation.pirate_replenishment_hulls_per_year // TUNE
-generation.merc_replacement_cbill_floor    // TUNE (C-bill injection floor for P3f.4)
 ```
+
+A replacement company's founding capital is its band's `capital_cbills` in
+`data/tables/merc_bands.zon` (docs/p5d-conflict-world-design.md §L8).
 
 No chassis name, RAT composition, or C-bill value is stated in this doc.  The
 implementer sources those from `data/tables/` at implementation time or labels
