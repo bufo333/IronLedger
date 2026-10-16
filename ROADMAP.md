@@ -2019,13 +2019,41 @@ own names. The scope of each item is unchanged; P5d adds one rule to each so
 the player sees it. Nothing pushes back today, and expansion and money cannot
 matter until something does.
 
-- P5d.1 NPC world-contract design: shared world conflicts and typed opposing
-  forces (faction, pirate or named merc company); player offers, NPC
-  commitments, location and transit, pay, readiness, withdrawal, breach and
-  completion. Added rule: NPC companies bid on the same offers the player
-  sees. An offer can leave the board because a rival took it; the board says
-  who and at what price, and a lost bid names its cause: rating, standing,
-  price or speed.
+- P5d.1 Conflict-first world, designed in `docs/p5d-conflict-world-design.md`
+  (§A–§K). Every contract comes from a persisted, employer-backed world
+  conflict between named powers and personages, with a timeline fixed when it
+  opens; positions post per side from that timeline, and the opposition is
+  built from the defender's local force, the aggressor's house force and the
+  merc companies committed and present on the battle day. NPC companies travel
+  under the player's travel rule, hold commitments with a named employer and
+  mandate, and are never counter-hired by the player's acceptance; garrison
+  and cadre are the standing-duty exception whose threat comes later. Politics
+  progresses without the player, and news surfaces within 100 ly of a player
+  presence. Added rule kept: NPC companies bid on the positions the player
+  sees; a filled position says who and at what price, and a lost bid names its
+  cause (rating, standing, price or arrival). Increments in dependency order:
+  - P5d.1a personage record: procedural planetary rulers and faction leaders,
+    the `.politics` stream, REPL `who`.
+  - P5d.1b who's-who surface: TUI modal and query rows with provenance.
+  - P5d.1c personage relations: kin, liege, rival, ally and grudge.
+  - P5d.1d canon and authored rows: `personages.zon` with provenance,
+    validator, fixtures and corpus report; Sarna facts re-verified.
+  - P5d.1e conflict record: monthly schemes open conflicts with the timeline
+    and local and strike forces; NPC-only resolution; the board is unchanged.
+  - P5d.1f board from conflicts: offers only from conflicts, with side,
+    on-station and close days; `TooLateToArrive` and `OppositeSide`.
+  - P5d.1g news reach and Newswire.
+  - P5d.1h NPC operating base and location (after P5d.2, P5d.3 and P5d.4b).
+  - P5d.1i NPC movement under the shared travel rule.
+  - P5d.1j aggressor hires: commitments with employer, mandate, pay and
+    transport.
+  - P5d.1k present forces are the opposition; the counter-hire is deleted.
+    P5d.5 follows it.
+  - P5d.1l defender reaction and late hiring.
+  - P5d.1m quiet-contract threats for garrison and cadre.
+  - P5d.1n intrigue and beats.
+  - P5d.1o competition: NPC bids fill positions.
+  - P5d.1p political decisions in the inbox.
 - P5d.2 NPC merc-company identity: unique company names across the campaign;
   assign each unused logo once before creating any logo-less company, then
   leave `logo_key` empty and continue with collision-free generated names. NPC
@@ -2037,13 +2065,33 @@ matter until something does.
   play is unverified; a regression test comes first); a replacement company
   holds a roster row from spawn so `mercCompanyInsolvent` always has one to
   judge. Player financing is out of scope.
-- P5d.4 NPC merc-company economy: owner-approved new-campaign target of 12
-  companies with 16 active mechs and 50M C-bills; shared mech-market
-  replacement, player-equivalent operating costs, 12-month understrength
-  runway, contract income, and liquidation only after no-cash, understrength
-  and no active contract. Added rule: a rival based on the same world can
-  recruit a discontented person from the player's roster through the existing
-  retention rules; the departure names the rival.
+- P5d.4 NPC company operations, designed in
+  `docs/p5d-conflict-world-design.md` §L: every NPC company is a business with
+  an operating base, damaged hulls repaired at base by the player's
+  maintenance owners, a spares stock, post-contract refit, replacement and
+  upgrades, sales at real condition under an ordered cash-pressure ladder,
+  roster bands from 1–2 skull through 5 skull with four fighting lances and
+  earned air, and no durable passive decay. The owner-approved new-campaign
+  target of 12 companies with 16 active mechs and 50M C-bills is kept (P5d.4b),
+  as is liquidation only after no cash, understrength and no active contract
+  (P5d.4c, P5d.4g). Added rule kept: a rival based on or present at the
+  player's world can recruit a discontented person from the player's roster
+  through the existing retention rules; the departure names the rival
+  (P5d.4k). Increments in dependency order:
+  - P5d.4a paid NPC black-market buys (regression first).
+  - P5d.4b roster bands: 12 companies, four lances, band-scaled capital; shared
+    mech-market replacement reads band targets.
+  - P5d.4c dissolution safeguard: the 12-month understrength runway.
+  - P5d.4d hull condition and base repair (after P5d.1h).
+  - P5d.4e parts procurement.
+  - P5d.4f operating ledger: player-equivalent operating costs and contract
+    income (after P5d.1j).
+  - P5d.4g cash-pressure ladder and sales.
+  - P5d.4h post-contract recovery.
+  - P5d.4i replacement reach and upgrades.
+  - P5d.4j earned growth and air.
+  - P5d.4k co-located recruiting.
+  - P5d.4l NPC artillery, only if John chooses it (D29).
 - P5d.5 NPC contract and battle parity: committed companies fight their real
   roster, choose doctrine-based withdrawals, concede or breach when unable to
   field, and never produce zero-vs-zero victories. Added rule: a rival met as
@@ -2084,7 +2132,7 @@ change a plan to keep one of them alive.
   employer actor over pay, salvage, command rights, transport, support and
   advance. The command office and faction standing set the room; rounds are
   limited and each round can harden the employer.
-- P5f.2 Rival bids (P5d.1) set the clock: a contested offer closes sooner, and
+- P5f.2 Rival bids (P5d.1o) set the clock: a contested offer closes sooner, and
   the board says so.
 - P5f.3 Signed terms show the consequences they imply: salvage rights change
   what the recovery task may keep; command rights change which intents are
@@ -2101,14 +2149,15 @@ the player wants and something that can be taken.
 - P5g.1 HQ tier and facility levels gate access: which employers post to the
   outfit, the contract tier visible on the board, and which markets list rare
   hulls. Capacity growth stays but is no longer the reason to build.
-- P5g.2 Founding a field HQ is a charter from the local house with
-  obligations: a garrison expectation, a tithe or a right of first refusal.
-  Breaking it is a standing hit the charter screen shows before the player
-  signs.
+- P5g.2 Founding a field HQ is a charter from the local house, granted by the
+  world's planetary ruler personage (P5d.1a), with obligations: a garrison
+  expectation, a tithe or a right of first refusal. Breaking it is a standing
+  hit the charter screen shows before the player signs.
 - P5g.3 Home and field HQs are raidable. Pirates or a hostile rival can strike
   a lightly garrisoned base; the depot company and the reserve fight it with
-  the P5b battle. The raid warning is a stop (P5a) with the same contact
-  window as a contract engagement.
+  the P5b battle. The raid is a conflict against the player's HQ with a
+  travelling aggressor and the P5d conflict timeline; the raid warning is a
+  stop (P5a) on the conflict's discovery day (D17). Depends on P5d.1m.
 - P5g.4 Forward-depot stocking, as designed in its own section below,
   unchanged, delivered here because a contested, raidable field HQ is the first
   thing that makes a stocked shelf matter.
@@ -2120,7 +2169,8 @@ it, and defends what they built because it can be taken.
 
 - P5h.1 The new-campaign wizard offers one ambition from a short set: clear the
   founding debt, reach regiment strength, land a long-term house contract, or
-  settle a named grudge. Its milestones show on the Desk.
+  settle a named grudge (a personage grudge relation, P5d.1c). Its milestones
+  show on the Desk.
 - P5h.2 Each ambition has a final contract or finale and a scored campaign
   summary. The campaign can continue afterward, but it has an ending.
 - P5h.3 Contract history, the campaign summary and filtered logs extend as

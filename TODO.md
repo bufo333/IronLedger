@@ -61,11 +61,10 @@ A package has one primary invariant or subsystem outcome.
   month on seed 4200 against ROADMAP P5a's four to six, for John to judge in
   play; ROADMAP P5a.2's operation-available or arc-beat stop is not yet
   implemented.
-- [ ] P5d.1 NPC world-contract design: shared world conflicts and typed opposing
-  forces (faction, pirate, or named merc company); player offers, NPC
-  commitments, location/transit, pay, readiness, withdrawal, breach, and
-  completion; NPC companies bid on the offers the player sees and a lost bid
-  names its cause.
+- [x] P5d.1 conflict-world design: `docs/p5d-conflict-world-design.md` designs
+  the conflict-first world (§A–§K) and NPC company operations (§L), maps every
+  clause of the former P5d.1 and P5d.4 entries to an increment below, and
+  records decisions D1–D29.
 - [ ] P5d.2 NPC merc-company identity: unique company names across the campaign;
   assign each unused logo once before creating any logo-less company, then
   leave logo_key empty and continue with collision-free generated names. NPC
@@ -77,16 +76,94 @@ A package has one primary invariant or subsystem outcome.
   is unverified — a regression test comes first); a replacement company holds a
   roster row from spawn so `mercCompanyInsolvent` always has one to judge.
   Player financing is out of scope.
-- [ ] P5d.4 NPC merc-company economy: owner-approved new-campaign target of 12
-  companies with 16 active mechs and 50M C-bills; shared mech-market
-  replacement, player-equivalent operating costs, 12-month understrength
-  runway, contract income, and liquidation only after no-cash, understrength,
-  and no active contract; a co-located rival can recruit a discontented person
-  through the existing retention rules.
-- [ ] P5d.5 NPC contract and battle parity: committed companies fight their real
-  roster, choose doctrine-based withdrawals, concede or breach when unable to
-  field, and never produce zero-vs-zero victories; a rival met as opposing force
-  is named in the briefing and AAR and its standing moves.
+- [ ] P5d.4a paid NPC black-market buys: NPC black-market draws debit the listing
+  price and respect roster target and cash; a rule-68 regression comes first.
+  Needs P5d.3.
+- [ ] P5d.4b NPC roster bands: a band on every company from a validated
+  `merc_bands.zon`; band-scaled seed of 12 companies with four lances (16
+  active mechs) and capital per D25 (50M at `band_4`); shared mech-market
+  replacement and readiness read band targets instead of the flat 8. Needs
+  P5d.4a and D23–D25.
+- [ ] P5d.4c NPC dissolution safeguard: dissolution only on cash below zero, a
+  12-month understrength runway and no active commitment; `understrength_since`
+  persisted; the cause is logged. Needs P5d.4b.
+- [ ] P5d.1a personage record: every hiring world has a procedural planetary
+  ruler and every hiring faction a leader, persisted; a `.politics` stream;
+  REPL `who`. Needs D6 and D7.
+- [ ] P5d.1b who's-who surface: TUI who's-who modal and query rows with the
+  provenance label. Needs P5d.1a.
+- [ ] P5d.1c personage relations: kin, liege, rival, ally and grudge relations
+  generated and shown. Needs P5d.1a.
+- [ ] P5d.1d canon and authored personages: `personages.zon` with provenance,
+  validator, fixtures and a corpus report; Sarna facts re-verified against
+  their pages; Sarna credit. Needs P5d.1a and D6–D8.
+- [ ] P5d.1e conflict record: monthly schemes open conflicts from about 12
+  templates with the timeline and local and strike forces; NPC-only
+  resolution; REPL `conflicts`; log lines; the board is unchanged. Needs
+  P5d.1a and P5d.1c.
+- [ ] P5d.1f board from conflicts: offers come only from conflicts, with side,
+  on-station and close days and a cause line; `TooLateToArrive` and
+  `OppositeSide` refusals; the opposition is the local or strike force. Needs
+  P5d.1e.
+- [ ] P5d.1g news reach and Newswire: one reach owner (absorbing the
+  company-position rule), news items, the Newswire pane and REPL `news` for
+  conflict open, discovery and resolution. Needs P5d.1e.
+- [ ] P5d.1h NPC operating base and location: every NPC company has a base and
+  current world and a flat ready day; purchases limited to base market reach;
+  shown in the company list; no movement yet. Needs P5d.2, P5d.3 and P5d.4b.
+- [ ] P5d.4d NPC hull condition and base repair: a persisted condition per NPC
+  hull written by battle and lost-field recovery; repair at base priced by the
+  player's maintenance owners; fieldable BV and readiness read condition.
+  Needs P5d.1h.
+- [ ] P5d.4e NPC parts procurement: a spares stock bought within base reach;
+  repair consumes spares; "awaiting parts" deferral. Needs P5d.4d.
+- [ ] P5d.1i NPC movement: one movement per company under the shared travel
+  rule; status derived by one owner; return home. Needs P5d.1h.
+- [ ] P5d.1j aggressor hires: commitments with employer and mandate made while
+  a conflict prepares, with the arrival-by test; pay, transport fee and share;
+  release and break. Needs P5d.1e and P5d.1i.
+- [ ] P5d.4f NPC operating ledger: commitment pay and transport share in;
+  player-equivalent upkeep, payroll and transport fees out; reserve floor of
+  months × burn. Needs P5d.1j and P5d.4e.
+- [ ] P5d.4g NPC cash-pressure ladder and sales: one sale owner at real
+  condition price; ladder steps in order; dissolution liquidates through it.
+  Needs P5d.4c and P5d.4f.
+- [ ] P5d.4h NPC post-contract recovery: release, travel home and refit; ready
+  day derived from the projected repair backlog; the no-passive-decay recovery
+  invariant. Needs P5d.1j, P5d.4d and P5d.4e.
+- [ ] P5d.1k present forces are the opposition: committed companies present on
+  the battle day feed the opposition pool and the briefing; the counter-hire
+  is deleted; late-arrival notice. Needs P5d.1f and P5d.1j.
+- [ ] P5d.5 NPC contract and battle parity, minus the opposition route met by
+  P5d.1k: committed companies fight their real roster, choose doctrine-based
+  withdrawals, concede or breach when unable to field, and never produce
+  zero-vs-zero victories; a rival met as opposing force is named in the
+  briefing and AAR and its standing moves. Needs P5d.1k.
+- [ ] P5d.1l defender reaction and late hiring: discovery alerts, defender hires
+  and escalation hires, each with a cause. Needs P5d.1k.
+- [ ] P5d.1m quiet-contract threats: garrison and cadre threats as travelling
+  child conflicts; a stop on discovery. Needs P5d.1k.
+- [ ] P5d.4i NPC replacement reach and upgrades: replacement within base reach
+  and the reserve floor; one-for-one upgrades sold through the sale owner.
+  Needs P5d.4g.
+- [ ] P5d.4j NPC earned growth and air: band promotion and demotion with a
+  logged cause; the automatic aerospace reserve replaced by an earned optional
+  air lance. Needs P5d.4i and D26.
+- [ ] P5d.4k co-located recruiting: a rival based on or present at the player's
+  world recruits a discontented person through the existing retention rules;
+  the departure names the rival. Needs P5d.1h.
+- [ ] P5d.1n intrigue and beats: beat and intrigue event families; scheduled
+  beats. Needs P5d.1c and P5d.1g.
+- [ ] P5d.1o competition: NPC bids fill positions (`PositionFilled`, causes
+  including arrival); a fill becomes a commitment. Needs P5d.1j.
+- [ ] P5d.1p political decisions: in-reach, stake-bearing happenings raise
+  personage-owned inbox decisions with a deadline and default. Needs P5d.1g
+  and P5d.1n.
+- [ ] P5d.4l NPC artillery: only if John chooses NPC artillery (D29); an
+  architecture plan for NPC artillery ownership, then earned artillery growth.
+  Needs P5d.4j.
+- [ ] P5d content expansion: personage and scenario corpus growth toward the
+  design's target; data only. Needs P5d.1d and P5d.1n.
 - [ ] P5d.6–P5d.7 employer patience and Desk runway: a house can drop the outfit
   from its board for a shown period with the reason; months of runway from the
   ledger on the Desk, red below a `// TUNE` threshold.
@@ -96,11 +173,12 @@ A package has one primary invariant or subsystem outcome.
   want per person, named-loss situations, recruits with a strength, a flaw and
   a want.
 - [ ] P5f negotiation as play (ROADMAP P5f): bounded multi-round haggle with the
-  employer actor; rival bids set the clock; signed terms show their
-  consequences.
+  employer actor; rival bids set the clock (after P5d.1o); signed terms show
+  their consequences.
 - [ ] P5g reach, not capacity (ROADMAP P5g.1–P5g.3): HQ tier gates employers,
-  contract tier and rare markets; field-HQ charters with obligations; raidable
-  HQs fought with the P5b battle.
+  contract tier and rare markets; field-HQ charters granted by the planetary
+  ruler (after P5d.1a) with obligations; raidable HQs fought with the P5b
+  battle, the raid a conflict with a travelling aggressor (after P5d.1m).
 - [ ] P5g.4 Forward-depot stocking (ROADMAP "Forward-depot stocking"):
   keep-stocked lines at any HQ source from another HQ's shelf before the
   catalogue, the sender paying freight; failed keep-stocked and resupply lines
@@ -109,7 +187,8 @@ A package has one primary invariant or subsystem outcome.
   cap show on F6/F7; the found flow warns that a new field HQ is empty,
   unfunded and unstaffed. Updates ARCHITECTURE.md §9.5 and docs/tui.md.
 - [ ] P5h ambition and ending (ROADMAP P5h): one ambition chosen at founding with
-  Desk milestones, a final contract or finale, a scored campaign summary.
+  Desk milestones (a named grudge is a personage relation, after P5d.1c), a
+  final contract or finale, a scored campaign summary.
 - [ ] P5i.1 Desk quarterly P&L report: outfit-wide calendar-quarter index and
   drill-down modal using the ledger's authoritative income, expense, and net
   totals, beside the runway number.
