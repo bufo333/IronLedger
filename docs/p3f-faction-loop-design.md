@@ -475,10 +475,10 @@ pub fn buyHullsForCompany(
 /// Single owner of replacement spawn (rule 20/76).
 /// Strength target: tuning.generation.merc_company_hulls_each (market listings only,
 /// no RAT mint — D-B). Starting cbills: tuning.generation.merc_replacement_cbill_floor.
+/// Planning scratch is an arena over gs.scratch(), released on return.
 /// Does NOT write gs.rng — the caller commits.
 pub fn spawnReplacementCompany(
     gs: *GameState,
-    alloc: std.mem.Allocator,
     day: u32,
     rng: *rng_mod.Rng,
 ) !types.MercCompanyId

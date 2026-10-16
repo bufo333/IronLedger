@@ -8552,7 +8552,7 @@ test "a replacement company that bought nothing keeps its empty roster across sa
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     gs.market_listings.clearRetainingCapacity();
     var rng = gs.rng;
-    const spawned = try @import("../sim/merc_lifecycle.zig").spawnReplacementCompany(&gs, gs.allocator(), 0, &rng);
+    const spawned = try @import("../sim/merc_lifecycle.zig").spawnReplacementCompany(&gs, 0, &rng);
     gs.rng = rng;
     try std.testing.expectEqual(@as(usize, 0), gs.merc_company_rosters.get(spawned).?.items.len);
     const before = digest.stateHash(&gs);
