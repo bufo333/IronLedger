@@ -155,7 +155,7 @@ A package has one primary invariant or subsystem outcome.
 - [ ] P5d.1n intrigue and beats: beat and intrigue event families; scheduled
   beats. Needs P5d.1c and P5d.1g.
 - [ ] P5d.1o competition: NPC bids fill positions (`PositionFilled`, causes
-  including arrival); a fill becomes a commitment. Needs P5d.1j.
+  including arrival); a fill becomes a commitment. Needs P5d.1f and P5d.1j.
 - [ ] P5d.1p political decisions: in-reach, stake-bearing happenings raise
   personage-owned inbox decisions with a deadline and default. Needs P5d.1g
   and P5d.1n.
