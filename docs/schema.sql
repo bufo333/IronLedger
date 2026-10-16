@@ -1316,7 +1316,7 @@ CREATE TABLE merc_company (
     dissolved_day    INTEGER NOT NULL DEFAULT 0,        -- 0 = active; nonzero = day_index dissolved
     logo_key         TEXT    NOT NULL DEFAULT '',       -- logo basename; '' legacy
     band_key         TEXT    NOT NULL,                  -- -> data/tables/merc_bands.zon; unknown = CorruptSave (v68)
-    understrength_since INTEGER,                        -- day_index first found below its band's line; NULL = at its line; negative, non-integer or > campaign.day = CorruptSave (v69)
+    understrength_since INTEGER CHECK (understrength_since IS NULL OR (typeof(understrength_since)='integer' AND understrength_since BETWEEN 0 AND 4294967295)), -- day_index first found below its band's line; NULL = at its line; > campaign.day = CorruptSave (v69)
     PRIMARY KEY (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
