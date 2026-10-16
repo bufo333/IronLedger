@@ -410,10 +410,14 @@ tests.
 ### 5.1  Insolvency and bankruptcy detection
 
 **Owners:** `src/sim/rivals.zig` `mercCompanyInsolvent` (BV-based, delivered
-P3e.7) and `merc_lifecycle.dissolutionCause`, which tests insolvency and then
-`cbills < 0` (bankrupt) for `runMercLifecycle` and names the cause the
-dissolution line logs. Every company holds a roster entry, so a company with
-no hulls is insolvent.
+P3e.7) gates OpFor selection only. Every company holds a roster entry, so a
+company with no hulls is insolvent. **Replaced by P5d.4c:** insolvency and
+`cbills < 0` alone no longer dissolve a company. `merc_lifecycle.dissolutionCause`
+dissolves only when cash is below zero, the company has been below its band's
+line for `npc_understrength_runway_months` (12) whole months since its
+recorded `understrength_since`, and it holds no active commitment
+(docs/p5d-conflict-world-design.md §L7 "Dissolution"; ARCHITECTURE.md
+"Merc-company dissolution").
 `mercCompanyEligibleAsOpFor` (delivered P3f.4) is the single owner of the
 "may this company be an OpFor" rule: active (dissolved_day==0), solvent, and
 at its band's mek target (`merc_band.lineTarget` active mek hulls,
@@ -456,9 +460,11 @@ removed from state (D-A): `dissolved_day != 0` is the permanent record, and the
 dissolved company keeps its now-empty roster entry.
 
 Each dissolution writes one campaign-log line under the market category,
-`[merc] <unit name> dissolved: <cause>`, where the cause is `insolvent`,
-`bankrupt`, or — for a direct liquidation when neither holds — `liquidated`
-(`merc_lifecycle.dissolutionLine`). The line is prepared before the infallible
+`[merc] <unit name> dissolved: <cause>`, where the cause is `bankrupt,
+understrength <N> months, no commitment` with the actual months below the line,
+or — for a direct liquidation when that rule does not hold — `liquidated`
+(`merc_lifecycle.dissolutionLine`; the `insolvent` and bare `bankrupt` causes
+were replaced by P5d.4c). The line is prepared before the infallible
 commit and appended with it.
 
 ### 5.3  Replacement spawn and hull buy
@@ -498,13 +504,15 @@ ever held and that is not the player's, or none once the catalog is used up
 (`firstUnusedLogo`). Neither draws RNG.
 
 A spawned company holds an empty roster entry before any buy, so one that finds
-nothing affordable is insolvent and dissolves on the next monthly pass. Each
+nothing affordable is insolvent and no OpFor; it records its founding day as
+`understrength_since` and keeps its capital (P5d.4c: it no longer dissolves on
+the next monthly pass). Each
 founding — the seeded companies at campaign creation, in company-id order, and
 every replacement spawn — writes one campaign-log line under the market
 category, `[merc] <unit name> founded: commander <first> <last>, faction <key>`
 (`merc_lifecycle.foundingLine`). A monthly pass logs each replacement as its
 predecessor's dissolution line followed by the replacement's founding line, in
-the dissolved company's id order; buys log nothing.
+the dissolved company's id order; buys and understrength records log nothing.
 
 ### 5.4  New `MercCompany` fields (schema v58, P3f.4)
 

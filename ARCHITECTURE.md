@@ -1061,20 +1061,47 @@ can no longer be selected as the OpFor for a new arc contract. The predicate
 is derived, not persisted (no schema change); it is re-evaluated on each read
 and prevents selection for a new arc contract. It is not permanent: the monthly
 merc lifecycle buys eligible market hulls toward full strength, and the paid
-black-market draw can add further hulls the company still needs. A company that remains insolvent
-liquidates and a replacement company forms from the market. Every merc company,
+black-market draw can add further hulls the company still needs. Insolvency
+gates OpFor selection only; it never dissolves a company. Every merc company,
 active or dissolved, holds exactly one roster entry from its creation on, and an
 empty list is a real, durable state (saved as no rows, restored on load), so a
 company with no hulls — including a replacement that bought nothing — is
-insolvent and judged by the next monthly pass. The two single rule owners are
-`mercCompanyFieldableBv` and `mercCompanyInsolvent` in `src/sim/rivals.zig`;
-`merc_lifecycle.dissolutionCause` owns the monthly dissolution rule (insolvent
-before bankrupt). The insolvency filter is enforced in `instantiateRivals`
+insolvent and ineligible until it buys back. The two single rule owners are
+`mercCompanyFieldableBv` and `mercCompanyInsolvent` in `src/sim/rivals.zig`.
+The insolvency filter is enforced in `instantiateRivals`
 and surfaced read-only on the Operations rivals block via `RivalRow.insolvent`
 (docs/p3c-economy-design.md §4, §8.G). Each founding (campaign creation or
 replacement spawn) and each dissolution, with its cause, writes one `[merc]`
 line to the campaign log under the market category, committed with the
-lifecycle change it records. `src/sim/merc_identity.zig` owns merc-company
+lifecycle change it records.
+
+**Merc-company dissolution (P5d.4c).** `merc_lifecycle.dissolutionCause` owns
+the dissolution rule (docs/p5d-conflict-world-design.md §L7 "Dissolution"): a
+company dissolves only when all three hold together on the monthly pass — its
+C-bills are below zero; it has been below its band's line since its recorded
+`understrength_since` for at least `tuning.generation.npc_understrength_runway_months`
+(12) whole calendar months (`clock.Date.wholeMonthsBack`); and it holds no
+active commitment. Low fieldable BV or lost hulls alone never dissolve a company
+that can pay. `rivals.mercCompanyUnderstrength` owns "below the line" (active
+meks under `merc_band.lineTarget`; vehicles and aerospace never count) and is
+also the mek purchase target and the OpFor readiness test.
+`rivals.mercCompanyCommitted` owns "active commitment": a rival naming the
+company on a contract that `isRunning()` (decision C1; the rival overlay stands
+for §D commitment records). After each surviving company's buy,
+`runMercLifecycle` sets `MercCompany.understrength_since` to the pass day when
+the company is first found below its line, keeps it while it stays below, and
+clears it at the line; a replacement carries its founding day when its founding
+buy leaves it short. Only that monthly pass writes the field, so losses between
+passes are recorded at the next pass. The change commits with the rest of the
+pass, even when it is the pass's only change. A dissolution liquidates and
+spawns one replacement as before, and its line reads `dissolved: bankrupt,
+understrength N months, no commitment`; the direct `liquidateMercCompany` call
+logs `dissolved: liquidated` when the rule does not hold. Nothing yet takes a
+company's cash below zero (its buys and paid draws spend only within cash, and
+no upkeep exists), so no company dissolves in ordinary play until NPC costs
+arrive (decision C2). `understrength_since` persists in `merc_company` from
+schema v69 (NULL while at the line); a negative, non-integer or future value is
+refused as `CorruptSave`. `src/sim/merc_identity.zig` owns merc-company
 identity: names are campaign-unique (a collision takes a Roman-numeral suffix)
 and each catalog logo goes to at most one company, after which new companies
 are logo-less (docs/p3f-faction-loop-design.md §5.3).

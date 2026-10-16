@@ -119,15 +119,31 @@ pub fn mercCompanyEligibleAsOpFor(gs: *GameState, id: types.MercCompanyId) bool 
     if (mc.dissolved_day != 0) return false;
     if (mercCompanyInsolvent(gs, id)) return false;
     const band = merc_band.find(mc.band_key) orelse return false;
-    const roster = gs.merc_company_rosters.get(id) orelse return false;
-    var active_meks: usize = 0;
-    for (roster.items) |hid| {
-        const inst = gs.hull_instances.getPtr(hid) orelse continue;
-        if (inst.status != .active) continue;
-        const chassis = chassis_mod.find(inst.base_key) orelse continue;
-        if (chassis.kind == .mek) active_meks += 1;
+    return !mercCompanyUnderstrength(band, mercCompanyHullCounts(gs, id));
+}
+
+/// Single owner of "is a merc company of `band` with `counts` below its line"
+/// (rule 20/3): its active meks fall short of `merc_band.lineTarget`
+/// (docs/p5d-conflict-world-design.md §L7 step 5, §L8). Vehicles and
+/// aerospace hulls never count toward it. OpFor readiness, the mek purchase
+/// target and the dissolution runway all read this one test. Pure.
+pub fn mercCompanyUnderstrength(band: *const merc_band.Band, counts: MercHullCounts) bool {
+    return counts.meks < merc_band.lineTarget(band);
+}
+
+/// Single owner of "does this merc company hold an active commitment"
+/// (rule 20; docs/p5d-conflict-world-design.md §L7 "Dissolution", C1): some
+/// rival naming it sits on a contract that `isRunning()`, the same test
+/// `priorRival` applies. The rival overlay stands for the §D commitment
+/// records; callers rely only on this answer, never on the overlay. Pure.
+pub fn mercCompanyCommitted(gs: *const GameState, id: types.MercCompanyId) bool {
+    if (id == .none) return false;
+    for (gs.rivals.values()) |rv| {
+        if (rv.merc_company_id != id) continue;
+        const contract = gs.contracts.getPtr(rv.contract) orelse continue;
+        if (contract.isRunning()) return true;
     }
-    return active_meks >= merc_band.lineTarget(band);
+    return false;
 }
 
 /// Active hulls in a merc company's roster, by procurement kind.
@@ -180,7 +196,7 @@ pub fn mercCompanyNeedsHull(band: *const merc_band.Band, counts: MercHullCounts,
     const line_target = merc_band.lineTarget(band);
     const air_target: usize = @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size;
     return switch (kind) {
-        .mek => counts.meks < line_target,
+        .mek => mercCompanyUnderstrength(band, counts),
         .vehicle => band.vehicles_fill_line and counts.meks + counts.vehicles < line_target,
         .aerospace => counts.aerospace < air_target,
         else => false,
@@ -1117,4 +1133,68 @@ test "mercCompanyEligibleAsOpFor: conventional BV does not satisfy the active-me
     try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, id));
     for (roster.items) |hull_id| gs.hull_instances.getPtr(hull_id).?.base_key = "LCT-1V";
     try std.testing.expect(mercCompanyEligibleAsOpFor(&gs, id));
+}
+
+test "mercCompanyUnderstrength agrees with OpFor readiness at 15 and 16 meks; vehicles and fighters never count" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 44 });
+    defer gs.deinit();
+    const id: types.MercCompanyId = @enumFromInt(1);
+    const band = merc_band.find("band_3").?;
+    try std.testing.expectEqual(@as(usize, 16), merc_band.lineTarget(band));
+    try gs.merc_companies.put(gs.allocator(), id, .{ .id = id, .archetype_key = "enemy_raiders", .unit_name = "Line Co", .faction_key = "DC", .band_key = band.key });
+    var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
+    // 15 meks plus a vehicle and a fighter: one mek short, whatever else it holds.
+    for (0..17) |i| {
+        const hull_id: types.HullInstanceId = @enumFromInt(1 + @as(u32, @intCast(i)));
+        const key = if (i < 15) "LCT-1V" else if (i == 15) "SCP-1N" else "TR-7";
+        try gs.hull_instances.put(gs.allocator(), hull_id, .{ .id = hull_id, .base_key = key });
+        try roster.append(gs.allocator(), hull_id);
+    }
+    try gs.merc_company_rosters.put(gs.allocator(), id, roster);
+    try std.testing.expect(mercCompanyUnderstrength(band, mercCompanyHullCounts(&gs, id)));
+    try std.testing.expect(!mercCompanyEligibleAsOpFor(&gs, id));
+    try std.testing.expect(mercCompanyUnderstrength(band, .{ .meks = 15, .vehicles = 16, .aerospace = 16 }));
+
+    // The 16th mek reaches the line: both owners flip together.
+    const sixteenth: types.HullInstanceId = @enumFromInt(18);
+    try gs.hull_instances.put(gs.allocator(), sixteenth, .{ .id = sixteenth, .base_key = "LCT-1V" });
+    try gs.merc_company_rosters.getPtr(id).?.append(gs.allocator(), sixteenth);
+    try std.testing.expect(!mercCompanyUnderstrength(band, mercCompanyHullCounts(&gs, id)));
+    try std.testing.expect(mercCompanyEligibleAsOpFor(&gs, id));
+}
+
+test "mercCompanyCommitted: only a rival naming the company on a running contract commits it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 45 });
+    defer gs.deinit();
+    const alloc = gs.allocator();
+    const company: types.MercCompanyId = @enumFromInt(1);
+    const other: types.MercCompanyId = @enumFromInt(2);
+    const contract_id: types.ContractId = @enumFromInt(1);
+    try gs.contracts.put(alloc, contract_id, .{
+        .id = contract_id,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 3, .base_pay_month = 100_000 },
+    });
+    try gs.rivals.put(alloc, @enumFromInt(1), .{ .id = @enumFromInt(1), .contract = contract_id, .merc_company_id = company });
+    try gs.rivals.put(alloc, @enumFromInt(2), .{ .id = @enumFromInt(2), .contract = contract_id, .merc_company_id = .none });
+
+    // Not running: offered, accepted, closed.
+    for ([_]contract_mod.ContractStatus{ .offer, .accepted, .completed, .breached, .failed }) |status| {
+        gs.contracts.getPtr(contract_id).?.status = status;
+        try std.testing.expect(!mercCompanyCommitted(&gs, company));
+    }
+    // Running: in transit or active.
+    for ([_]contract_mod.ContractStatus{ .transit, .active }) |status| {
+        gs.contracts.getPtr(contract_id).?.status = status;
+        try std.testing.expect(mercCompanyCommitted(&gs, company));
+        // A rival naming another company, or none, commits nobody else.
+        try std.testing.expect(!mercCompanyCommitted(&gs, other));
+        try std.testing.expect(!mercCompanyCommitted(&gs, .none));
+    }
+    // A rival whose contract is gone commits nothing.
+    gs.rivals.getPtr(@enumFromInt(1)).?.contract = @enumFromInt(9);
+    try std.testing.expect(!mercCompanyCommitted(&gs, company));
 }

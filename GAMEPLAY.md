@@ -289,9 +289,11 @@ Rival companies pay the listing price, and buy only hulls they can afford and
 still need to reach strength.
 Wrecks on a field you held but claimed nothing from are struck off. The
 campaign log records each rival merc company's founding and its dissolution,
-with the reason: insolvent (too little fighting strength left) or bankrupt.
-A company that folds is replaced the same month; one that cannot buy a single
-hull is itself judged insolvent the month after.
+with the reason. A rival company folds only after a year below strength with
+no money left and no contract on; losing its meks alone does not end it. A
+company that has lost its hulls stays in the world, out of the fight, and buys
+back toward strength with the money it has. A company that folds is replaced
+the same month.
 
 Rival merc companies come in tiers, from "1-2 skull" outfits up to "5 skull"
 ones — a company's own standing, not the difficulty of any one contract. Every

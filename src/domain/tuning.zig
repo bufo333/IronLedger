@@ -809,6 +809,10 @@ pub const Tuning = struct {
         /// contract OpFor; below it the company is insolvent/inactive
         /// (docs/p3c-economy-design.md §4 "Rival insolvency", §8.G). // TUNE
         merc_company_insolvency_bv: i64,
+        /// Whole calendar months a world merc company may stay below its
+        /// band's line before it can dissolve (docs/p5d-conflict-world-design.md
+        /// §L7 "Dissolution": the owner-approved 12-month runway). // TUNE
+        npc_understrength_runway_months: u32,
         /// Flat starting hull-pool size for the Periphery/pirates faction (PER)
         /// at campaign creation. PER manufactures nothing
         /// (replenishment_hulls_per_year = 0) and is salvage-replenished only, so

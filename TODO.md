@@ -90,9 +90,11 @@ A package has one primary invariant or subsystem outcome.
   black-market draw and OpFor readiness read the band target, vehicles fill
   the line only below `band_4`, and replacements start at `band_1_2` with its
   capital (D23–D25, R1).
-- [ ] P5d.4c NPC dissolution safeguard: dissolution only on cash below zero, a
-  12-month understrength runway and no active commitment; `understrength_since`
-  persisted; the cause is logged. Needs P5d.4b.
+- [x] P5d.4c NPC dissolution safeguard: a merc company dissolves only on cash
+  below zero, 12 whole months below its band's line since its recorded
+  `understrength_since` (schema v69) and no active commitment (a rival on a
+  running contract, C1), with that cause in its log line; low BV alone no longer
+  dissolves, so none dissolves in play until NPC costs land (C2).
 - [ ] P5d.1a personage record: every hiring world has a procedural planetary
   ruler and every hiring faction a leader, persisted; a `.politics` stream;
   REPL `who`. Needs D6 and D7.

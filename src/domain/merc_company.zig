@@ -42,6 +42,13 @@ pub const MercCompany = struct {
     /// held in static table memory. Set at seed and replacement; a loaded
     /// company's key always resolves. Empty names no band.
     band_key: []const u8 = "",
+    /// Campaign day of the monthly lifecycle pass that first found the company
+    /// below its band's line (`rivals.mercCompanyUnderstrength`); null while it
+    /// is at its line. Only that pass writes it, after the month's buy, so
+    /// battle losses and black-market draws between passes show up at the next
+    /// pass: the granularity is one month. Never later than the campaign day
+    /// (docs/p5d-conflict-world-design.md §L7, §J).
+    understrength_since: ?u32 = null,
 };
 
 test "MercCompany defaults" {
@@ -56,4 +63,5 @@ test "MercCompany defaults" {
     try std.testing.expectEqual(@as(u32, 0), mc.dissolved_day);
     try std.testing.expectEqualStrings("", mc.logo_key);
     try std.testing.expectEqualStrings("", mc.band_key);
+    try std.testing.expectEqual(@as(?u32, null), mc.understrength_since);
 }

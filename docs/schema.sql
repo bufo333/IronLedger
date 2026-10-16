@@ -1,8 +1,8 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 68, the only supported store and campaign format.
+-- Matches schema_version 69, the only supported store and campaign format.
 -- Older and newer formats are refused before persistent mutation under
--- docs/engineering-contract.md rule 51; only empty stores initialize schema 68.
+-- docs/engineering-contract.md rule 51; only empty stores initialize schema 69.
 -- The executable DDL and dormant historical migration declarations live in
 -- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
@@ -70,7 +70,7 @@ CREATE TABLE campaign (
     commander       TEXT,
     day             INTEGER NOT NULL,                -- day_index at save
     date            TEXT    NOT NULL,                -- in-game date at save
-    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 68; older/newer versions are refused before load or overwrite
+    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 69; older/newer versions are refused before load or overwrite
     save_seq        INTEGER NOT NULL,                -- store-wide save counter, orders "most recent"
     player_id       INTEGER NOT NULL DEFAULT 0       -- -> player.id; 0 = none
 );
@@ -1316,6 +1316,7 @@ CREATE TABLE merc_company (
     dissolved_day    INTEGER NOT NULL DEFAULT 0,        -- 0 = active; nonzero = day_index dissolved
     logo_key         TEXT    NOT NULL DEFAULT '',       -- logo basename; '' legacy
     band_key         TEXT    NOT NULL,                  -- -> data/tables/merc_bands.zon; unknown = CorruptSave (v68)
+    understrength_since INTEGER,                        -- day_index first found below its band's line; NULL = at its line; negative, non-integer or > campaign.day = CorruptSave (v69)
     PRIMARY KEY (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );

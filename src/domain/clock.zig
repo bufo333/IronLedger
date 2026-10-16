@@ -58,6 +58,29 @@ pub const Date = struct {
         return @as(u32, daysInMonth(self.year, self.month)) - self.day + 1;
     }
 
+    /// Whole calendar months in the `elapsed_days` before this date: the
+    /// largest `k` such that the `k` months preceding this date's month hold
+    /// no more than `elapsed_days` days together. From one 1st of the month
+    /// to a later 1st it is exactly the number of months between them.
+    /// Counting stops at year 1, so the result is bounded for any input. Pure.
+    pub fn wholeMonthsBack(self: Date, elapsed_days: u32) u32 {
+        var remaining = elapsed_days;
+        var year = self.year;
+        var month = self.month;
+        var months: u32 = 0;
+        while (true) {
+            if (month == 1) {
+                if (year <= 1) return months;
+                year -= 1;
+                month = 12;
+            } else month -= 1;
+            const length = daysInMonth(year, month);
+            if (remaining < length) return months;
+            remaining -= length;
+            months += 1;
+        }
+    }
+
     /// True when the date values are calendar-legal for a BattleTech
     /// campaign (rule 47). Guards the `unreachable` branch in
     /// `daysInMonth` so a tampered month-13 row is rejected before it
@@ -106,6 +129,46 @@ test "date rollover incl. leap year" {
     try std.testing.expectEqual(Date{ .year = 3024, .month = 2, .day = 29 }, d); // 3024 is a leap year
     d = .{ .year = 3025, .month = 12, .day = 31 };
     try std.testing.expectEqual(Date{ .year = 3026, .month = 1, .day = 1 }, d.next());
+}
+
+test "wholeMonthsBack counts the preceding calendar months that fit the elapsed days" {
+    const mar_3025: Date = .{ .year = 3025, .month = 3, .day = 1 };
+    // Zero elapsed days is zero months.
+    try std.testing.expectEqual(@as(u32, 0), mar_3025.wholeMonthsBack(0));
+    // February 3025 has 28 days: one day short is no month, 28 is one.
+    try std.testing.expectEqual(@as(u32, 0), mar_3025.wholeMonthsBack(27));
+    try std.testing.expectEqual(@as(u32, 1), mar_3025.wholeMonthsBack(28));
+    // January's 31 days follow February: 28 + 31 = 59 is two, 58 is one.
+    try std.testing.expectEqual(@as(u32, 1), mar_3025.wholeMonthsBack(58));
+    try std.testing.expectEqual(@as(u32, 2), mar_3025.wholeMonthsBack(59));
+    // A 30-day month: April 3025.
+    const may_3025: Date = .{ .year = 3025, .month = 5, .day = 1 };
+    try std.testing.expectEqual(@as(u32, 0), may_3025.wholeMonthsBack(29));
+    try std.testing.expectEqual(@as(u32, 1), may_3025.wholeMonthsBack(30));
+    // A leap February: 3024 has a 29th.
+    const mar_3024: Date = .{ .year = 3024, .month = 3, .day = 1 };
+    try std.testing.expectEqual(@as(u32, 0), mar_3024.wholeMonthsBack(28));
+    try std.testing.expectEqual(@as(u32, 1), mar_3024.wholeMonthsBack(29));
+    // Across a year end: December precedes January.
+    const jan_3026: Date = .{ .year = 3026, .month = 1, .day = 1 };
+    try std.testing.expectEqual(@as(u32, 0), jan_3026.wholeMonthsBack(30));
+    try std.testing.expectEqual(@as(u32, 1), jan_3026.wholeMonthsBack(31));
+    try std.testing.expectEqual(@as(u32, 11), jan_3026.wholeMonthsBack(364));
+    try std.testing.expectEqual(@as(u32, 12), jan_3026.wholeMonthsBack(365));
+    // From one 1st to a later 1st, stepping the calendar day by day.
+    var d: Date = .{ .year = 3024, .month = 11, .day = 1 };
+    var elapsed: u32 = 0;
+    var firsts: u32 = 0;
+    while (firsts < 26) {
+        d = d.next();
+        elapsed += 1;
+        if (d.isPayday()) {
+            firsts += 1;
+            try std.testing.expectEqual(firsts, d.wholeMonthsBack(elapsed));
+        }
+    }
+    // The count is bounded at year 1.
+    try std.testing.expectEqual(@as(u32, 0), (Date{ .year = 1, .month = 1, .day = 1 }).wholeMonthsBack(std.math.maxInt(u32)));
 }
 
 test "Date.valid rejects out-of-range values and accepts legal ones" {
