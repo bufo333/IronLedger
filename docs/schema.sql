@@ -1323,6 +1323,8 @@ CREATE INDEX IF NOT EXISTS ix_merc_company_cid ON merc_company(cid);
 -- merc_company_roster: living merc-company hull pools (P3e entity split; replaces rival_roster).
 -- One row per owned hull per merc company. Same ord/order semantics as faction_roster.
 -- merc_company_id is a validated containment FK into merc_company; hull_instance_id likewise.
+-- Zero rows for an existing merc company mean its roster is empty; the loader
+-- restores that empty entry (every merc company has one).
 -- Column order matches runtime (saveMercCompanyRosters/loadMercCompanyRosters).
 CREATE TABLE merc_company_roster (
     cid              INTEGER NOT NULL,

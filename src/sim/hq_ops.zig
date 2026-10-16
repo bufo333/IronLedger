@@ -2251,6 +2251,10 @@ test "a due depot-repair bay job is unchanged — no RNG consumed, no treasury d
         .done_day = 0,
         .cost = 10_000,
     });
+    // The log starts empty so the first reservation is a fresh allocation;
+    // growing existing storage through an arena with no nodes is not a
+    // failure path.
+    gs.event_log.clearAndFree(gs.allocator());
 
     const before = digest.stateHash(&gs);
     const unit_status_before = gs.unit(uid).?.status;

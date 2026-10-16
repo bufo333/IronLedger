@@ -28,7 +28,8 @@ const GameState = state_mod.GameState;
 /// Single owner of merc-company liquidation (rule 20/76).
 /// Deterministic, no RNG. Transfers every hull in the company's roster to
 /// `.market` ownership and appends a regular (non-black-market) listing at
-/// factory-fresh pricing. Sets `dissolved_day` to `day`.
+/// factory-fresh pricing. Sets `dissolved_day` to `day` and logs the
+/// dissolution with its `dissolutionCause`, or `liquidated` when neither holds.
 ///
 /// Failure-atomic (rules 7, 11-13): reserve phase is entirely fallible;
 /// commit phase is infallible. On OOM the caller's stateHash is unchanged.
@@ -38,7 +39,7 @@ pub fn liquidateMercCompany(
     company_id: types.MercCompanyId,
     day: u32,
 ) !void {
-    if (!gs.merc_companies.contains(company_id)) return;
+    const company = gs.merc_companies.get(company_id) orelse return;
     const transaction_arena = try gs.lifecycleArena();
     errdefer gs.discardLifecycleArena(transaction_arena);
     const transaction_alloc = transaction_arena.arena.allocator();
@@ -46,11 +47,14 @@ pub fn liquidateMercCompany(
     const listings = try planLiquidation(transaction_alloc, gs, company_id, day, &next_listing_id);
     const actions = [_]LifecycleAction{.{ .liquidate = .{
         .company_id = company_id,
+        .cause = dissolutionCause(gs, company_id, company.cbills) orelse .liquidated,
         .listings = listings,
     } }};
     const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, next_listing_id, gs.next_merc_company_id, gs.next_hull_instance_id, day);
+    const log = try prepareLifecycleLog(gs, transaction_alloc, &actions);
     gs.replaceLifecycleArena(transaction_arena);
     commitLifecycleStage(gs, stage);
+    gs.commitLogBatch(log);
 }
 
 /// Single owner of "buy eligible hulls toward full strength" (rule 20/76).
@@ -108,7 +112,9 @@ pub fn buyHullsForCompany(
 /// `seedMercCompanies`. Picks the first logo from `logo.all_keys` not held
 /// by any active (dissolved_day == 0) company and never the player's reserved
 /// `player_logo_key`. Sets cbills to `merc_replacement_cbill_floor` and uses
-/// the shared purchase plan to form the hull pool from market supply.
+/// the shared purchase plan to form the hull pool from market supply. The
+/// company holds a roster entry, empty when nothing was bought, and its
+/// founding is logged.
 ///
 /// Does NOT write `gs.rng` — the caller commits the rng copy.
 pub fn spawnReplacementCompany(
@@ -145,8 +151,10 @@ pub fn spawnReplacementCompany(
     var actions = [_]LifecycleAction{.{ .spawn = replacement }};
     try allocateReplacementNames(transaction_alloc, &actions);
     const stage = try stageLifecycleCommit(gs, transaction_alloc, &actions, gs.next_listing_id, next_company_id, next_hull_instance_id, day);
+    const log = try prepareLifecycleLog(gs, transaction_alloc, &actions);
     gs.replaceLifecycleArena(transaction_arena);
     commitLifecycleStage(gs, stage);
+    gs.commitLogBatch(log);
     rng.* = rng_copy;
     return replacement.company.id;
 }
@@ -219,21 +227,73 @@ const LifecycleAction = union(enum) {
     buy: BuyPlan,
     liquidate: struct {
         company_id: types.MercCompanyId,
+        cause: DissolutionCause,
         listings: []const market.Listing,
     },
     spawn: ReplacementPlan,
     replace: struct {
         dissolved_id: types.MercCompanyId,
+        cause: DissolutionCause,
         liquidation_listings: []const market.Listing,
         replacement: ReplacementPlan,
     },
 };
 
+/// Why a merc company dissolved, as its campaign-log line names it.
+pub const DissolutionCause = enum {
+    /// Fieldable BV below `merc_company_insolvency_bv` (`rivals.mercCompanyInsolvent`).
+    insolvent,
+    /// C-bills below zero.
+    bankrupt,
+    /// Liquidated while neither held.
+    liquidated,
+};
+
+/// Single owner of the monthly dissolution rule (docs/p3f-faction-loop-design.md
+/// §5.2; rule 20): a company with `cbills` dissolves when insolvent, else when
+/// bankrupt, tested in that order. Null keeps it. Pure.
+pub fn dissolutionCause(gs: *GameState, company_id: types.MercCompanyId, cbills: types.CBills) ?DissolutionCause {
+    if (rivals.mercCompanyInsolvent(gs, company_id)) return .insolvent;
+    if (cbills < 0) return .bankrupt;
+    return null;
+}
+
+/// The campaign-log body of a merc company's founding (rule 28): its unit
+/// name, commander and faction key. The log adds the date.
+pub fn foundingLine(alloc: std.mem.Allocator, company: merc_company_mod.MercCompany) ![]const u8 {
+    return std.fmt.allocPrint(alloc, "[merc] {s} founded: commander {s} {s}, faction {s}", .{ company.unit_name, company.commander_first, company.commander_last, company.faction_key });
+}
+
+/// The campaign-log body of a merc company's dissolution (rule 28): its unit
+/// name and cause. The log adds the date.
+pub fn dissolutionLine(alloc: std.mem.Allocator, company: merc_company_mod.MercCompany, cause: DissolutionCause) ![]const u8 {
+    return std.fmt.allocPrint(alloc, "[merc] {s} dissolved: {s}", .{ company.unit_name, @tagName(cause) });
+}
+
+/// Prepare the lifecycle lines of `actions` in action order: a dissolution
+/// before its replacement's founding; buys log nothing. Bodies are formatted
+/// in `alloc` and copied into the campaign arena by the final allocation, so
+/// call this last, after staging (rule 12).
+fn prepareLifecycleLog(gs: *GameState, alloc: std.mem.Allocator, actions: []const LifecycleAction) !GameState.PreparedLogBatch {
+    var bodies = std.ArrayListUnmanaged([]const u8).empty;
+    for (actions) |action| switch (action) {
+        .buy => {},
+        .liquidate => |liquidation| try bodies.append(alloc, try dissolutionLine(alloc, gs.merc_companies.get(liquidation.company_id).?, liquidation.cause)),
+        .spawn => |replacement| try bodies.append(alloc, try foundingLine(alloc, replacement.company)),
+        .replace => |replace| {
+            try bodies.append(alloc, try dissolutionLine(alloc, gs.merc_companies.get(replace.dissolved_id).?, replace.cause));
+            try bodies.append(alloc, try foundingLine(alloc, replace.replacement.company));
+        },
+    };
+    return gs.prepareLogBatch(.market, .{}, bodies.items);
+}
+
 /// Monthly lifecycle pass (docs/p3f-faction-loop-design.md §5).
 /// It stages the complete initial-company pass in reclaimable scratch memory,
 /// then reserves persistent storage and commits every action with the staged
-/// RNG state. Company iteration and draw order match the monthly lifecycle
-/// rule; replacements are not processed until the next pass.
+/// RNG state and its campaign-log lines. Company iteration and draw order
+/// match the monthly lifecycle rule; replacements are not processed until the
+/// next pass.
 pub fn runMercLifecycle(gs: *GameState) !void {
     var scratch_arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer scratch_arena.deinit();
@@ -267,7 +327,7 @@ pub fn runMercLifecycle(gs: *GameState) !void {
         const company = &companies.items[i];
         if (company.dissolved_day != 0) continue;
 
-        if (rivals.mercCompanyInsolvent(gs, company.id) or company.cbills < 0) {
+        if (dissolutionCause(gs, company.id, company.cbills)) |cause| {
             const liquidation_listings = try planLiquidation(scratch, gs, company.id, day, &next_listing_id);
             for (liquidation_listings) |listing| try listings.append(scratch, .{ .listing = listing });
             company.dissolved_day = day;
@@ -284,6 +344,7 @@ pub fn runMercLifecycle(gs: *GameState) !void {
             );
             try actions.append(scratch, .{ .replace = .{
                 .dissolved_id = company.id,
+                .cause = cause,
                 .liquidation_listings = liquidation_listings,
                 .replacement = replacement,
             } });
@@ -300,9 +361,11 @@ pub fn runMercLifecycle(gs: *GameState) !void {
     const transaction_alloc = transaction_arena.arena.allocator();
     try allocateReplacementNames(transaction_alloc, actions.items);
     const stage = try stageLifecycleCommit(gs, transaction_alloc, actions.items, next_listing_id, next_company_id, next_hull_instance_id, day);
+    const log = try prepareLifecycleLog(gs, transaction_alloc, actions.items);
     gs.replaceLifecycleArena(transaction_arena);
 
     commitLifecycleStage(gs, stage);
+    gs.commitLogBatch(log);
     gs.rng = rng_copy;
 }
 
@@ -543,6 +606,8 @@ fn stageLiquidation(stage: *LifecycleStage, alloc: std.mem.Allocator, company_id
 
 fn stageReplacement(stage: *LifecycleStage, alloc: std.mem.Allocator, replacement: ReplacementPlan, day: u32) !void {
     try stage.merc_companies.put(alloc, replacement.company.id, replacement.company);
+    // A company holds its roster entry from spawn, even with nothing bought.
+    try stage.merc_company_rosters.put(alloc, replacement.company.id, .empty);
     if (replacement.buy) |buy| try stageBuy(stage, alloc, buy, day);
 }
 
@@ -1120,7 +1185,16 @@ test "spawnReplacementCompany: unique id, founded_day, dissolved_day==0, cbills=
     gs.next_merc_company_id = 2;
 
     var rng = gs.rng;
+    const log_before = gs.event_log.items.len;
     const new_id = try spawnReplacementCompany(&gs, alloc, 60, &rng);
+
+    // Exactly one founding line, naming the new company.
+    try std.testing.expectEqual(log_before + 1, gs.event_log.items.len);
+    const expected_line = try foundingLine(a, gs.merc_companies.get(new_id).?);
+    defer a.free(expected_line);
+    try std.testing.expect(std.mem.endsWith(u8, gs.event_log.items[log_before].text, expected_line));
+    // Its roster entry exists from spawn.
+    try std.testing.expect(gs.merc_company_rosters.contains(new_id));
 
     // A new company was added.
     try std.testing.expectEqual(@as(usize, 2), gs.merc_companies.count());
@@ -1340,6 +1414,7 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
 
     const bankrupt: types.MercCompanyId = @enumFromInt(1);
     const under_strength: types.MercCompanyId = @enumFromInt(2);
+    const insolvent: types.MercCompanyId = @enumFromInt(3);
     try gs.merc_companies.put(alloc, bankrupt, .{
         .id = bankrupt,
         .archetype_key = "enemy_raiders",
@@ -1356,10 +1431,20 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
         .cbills = 10_000_000,
         .logo_key = logo.all_keys[1],
     });
+    try gs.merc_companies.put(alloc, insolvent, .{
+        .id = insolvent,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Insolvent Co",
+        .faction_key = "DC",
+        .cbills = 10_000_000,
+        .logo_key = logo.all_keys[2],
+    });
 
-    for ([_]types.MercCompanyId{ bankrupt, under_strength }) |company_id| {
+    // Five LCT-1V (5 × 432 BV) keep the first two solvent; the insolvent
+    // company's single hull is below `merc_company_insolvency_bv`.
+    for ([_]types.MercCompanyId{ bankrupt, under_strength, insolvent }) |company_id| {
         var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
-        for (0..5) |_| {
+        for (0..@as(usize, if (company_id == insolvent) 1 else 5)) |_| {
             const hull_id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
             gs.next_hull_instance_id += 1;
             try gs.hull_instances.put(alloc, hull_id, .{
@@ -1407,7 +1492,93 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
         });
         gs.next_listing_id += 1;
     }
-    gs.next_merc_company_id = 3;
+    gs.next_merc_company_id = 4;
+}
+
+test "runMercLifecycle logs each dissolution with its cause, then its replacement's founding" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 4007 });
+    defer gs.deinit();
+    try seedLifecycleAtomicityFixture(&gs);
+    try std.testing.expectEqual(DissolutionCause.bankrupt, dissolutionCause(&gs, @enumFromInt(1), gs.merc_companies.get(@enumFromInt(1)).?.cbills).?);
+    try std.testing.expectEqual(@as(?DissolutionCause, null), dissolutionCause(&gs, @enumFromInt(2), gs.merc_companies.get(@enumFromInt(2)).?.cbills));
+    try std.testing.expectEqual(DissolutionCause.insolvent, dissolutionCause(&gs, @enumFromInt(3), gs.merc_companies.get(@enumFromInt(3)).?.cbills).?);
+    const log_before = gs.event_log.items.len;
+
+    try runMercLifecycle(&gs);
+
+    // Companies 1 and 3 dissolve in id order, replaced by 4 and 5; the
+    // buying company 2 adds no line.
+    const lines = gs.event_log.items[log_before..];
+    try std.testing.expectEqual(@as(usize, 4), lines.len);
+    const expected = [_][]const u8{
+        try dissolutionLine(a, gs.merc_companies.get(@enumFromInt(1)).?, .bankrupt),
+        try foundingLine(a, gs.merc_companies.get(@enumFromInt(4)).?),
+        try dissolutionLine(a, gs.merc_companies.get(@enumFromInt(3)).?, .insolvent),
+        try foundingLine(a, gs.merc_companies.get(@enumFromInt(5)).?),
+    };
+    defer for (expected) |line| a.free(line);
+    for (lines, expected) |entry, line| {
+        try std.testing.expect(std.mem.endsWith(u8, entry.text, line));
+        try std.testing.expectEqual(gs.clock.day_index, entry.day);
+        try std.testing.expectEqual(state_mod.LogCategory.market, entry.category);
+    }
+    try std.testing.expect(std.mem.endsWith(u8, lines[0].text, "[merc] Bankrupt Co dissolved: bankrupt"));
+    try std.testing.expect(std.mem.endsWith(u8, lines[2].text, "[merc] Insolvent Co dissolved: insolvent"));
+    // Every company, dissolved or new, holds a roster entry.
+    for (gs.merc_companies.keys()) |id| try std.testing.expect(gs.merc_company_rosters.contains(id));
+}
+
+test "liquidateMercCompany logs its dissolution as liquidated when no dissolution rule holds" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 4008 });
+    defer gs.deinit();
+    try seedLifecycleAtomicityFixture(&gs);
+    const solvent: types.MercCompanyId = @enumFromInt(2);
+    const log_before = gs.event_log.items.len;
+    try liquidateMercCompany(&gs, gs.allocator(), solvent, gs.clock.day_index);
+    try std.testing.expectEqual(log_before + 1, gs.event_log.items.len);
+    try std.testing.expect(std.mem.endsWith(u8, gs.event_log.items[log_before].text, "[merc] Buying Co dissolved: liquidated"));
+}
+
+test "a replacement that bought nothing is judged insolvent and dissolved the next month" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 4009 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    gs.market_listings.clearRetainingCapacity();
+    gs.clock.advance();
+    const bankrupt: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(gs.allocator(), bankrupt, .{
+        .id = bankrupt,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Empty Bankrupt Co",
+        .faction_key = "DC",
+        .cbills = -1,
+        .logo_key = logo.all_keys[0],
+    });
+    try gs.merc_company_rosters.put(gs.allocator(), bankrupt, .empty);
+    gs.next_merc_company_id = 2;
+
+    try runMercLifecycle(&gs);
+    const replacement: types.MercCompanyId = @enumFromInt(2);
+    try std.testing.expectEqual(@as(usize, 0), gs.merc_company_rosters.get(replacement).?.items.len);
+    try std.testing.expect(rivals.mercCompanyInsolvent(&gs, replacement));
+    try std.testing.expect(!rivals.mercCompanyEligibleAsOpFor(&gs, replacement));
+
+    gs.clock.advance();
+    const log_before = gs.event_log.items.len;
+    try runMercLifecycle(&gs);
+    try std.testing.expectEqual(gs.clock.day_index, gs.merc_companies.get(replacement).?.dissolved_day);
+    const successor: types.MercCompanyId = @enumFromInt(3);
+    try std.testing.expectEqual(@as(u32, 0), gs.merc_companies.get(successor).?.dissolved_day);
+    try std.testing.expectEqual(log_before + 2, gs.event_log.items.len);
+    const dissolved_line = try dissolutionLine(a, gs.merc_companies.get(replacement).?, .insolvent);
+    defer a.free(dissolved_line);
+    try std.testing.expect(std.mem.endsWith(u8, gs.event_log.items[log_before].text, dissolved_line));
+    const founded_line = try foundingLine(a, gs.merc_companies.get(successor).?);
+    defer a.free(founded_line);
+    try std.testing.expect(std.mem.endsWith(u8, gs.event_log.items[log_before + 1].text, founded_line));
 }
 
 test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" {

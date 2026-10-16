@@ -283,6 +283,11 @@ weeks, not hours, to wake back up.
 Lost-field wrecks do not vanish. The enemy recovers a limited number; the rest
 become delayed, dispersed black-market listings. Pirate bands and active rival
 merc companies may buy those listings before the player returns to the board.
+Wrecks on a field you held but claimed nothing from are struck off. The
+campaign log records each rival merc company's founding and its dissolution,
+with the reason: insolvent (too little fighting strength left) or bankrupt.
+A company that folds is replaced the same month; one that cannot buy a single
+hull is itself judged insolvent the month after.
 
 ## The Lab: construction editor (P3d)
 

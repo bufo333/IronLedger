@@ -379,8 +379,11 @@ pub const GameState = struct {
 
     /// Living merc-company hull pools (P3e entity split). Keyed by MercCompanyId (FK into
     /// GameState.merc_companies); value is the ordered set of owned HullInstance ids.
-    /// Same empty-pool-is-absence invariant and canonical-owner role as
-    /// faction_rosters. Empty until P3e.5 — no producer this increment.
+    /// Its keys are exactly the keys of merc_companies: every company, active or
+    /// dissolved, has one entry from creation on, and an empty list is a real,
+    /// durable state (unlike faction_rosters' absence invariant). Same
+    /// canonical-owner role as faction_rosters: HullInstance.owner
+    /// (.merc_company) is the per-hull mirror its producers keep consistent.
     merc_company_rosters: std.AutoArrayHashMapUnmanaged(types.MercCompanyId, std.ArrayListUnmanaged(types.HullInstanceId)) = .empty,
 
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
@@ -727,6 +730,59 @@ pub const GameState = struct {
     /// Append a prepared log entry without allocation.
     pub fn commitLog(self: *GameState, entry: LogEntry) void {
         self.event_log.appendAssumeCapacity(entry);
+    }
+
+    /// Log entries prepared with a single campaign-arena allocation that holds
+    /// their text and, when event_log lacks room, its grown storage. Valid
+    /// until event_log next changes; `commitLogBatch` publishes it.
+    pub const PreparedLogBatch = struct {
+        log_len: usize,
+        count: usize,
+        /// event_log's replacement storage holding its current entries and the
+        /// batch; null when the batch fits event_log's spare capacity.
+        storage: ?[]LogEntry,
+    };
+
+    /// Prepare one entry per body, dated today under `category` and `ctx`.
+    /// Bodies are copied, so they may live in any allocator. The one
+    /// allocation is the only fallible step: on failure neither the campaign
+    /// arena nor event_log has changed (rules 11–13).
+    pub fn prepareLogBatch(self: *GameState, category: LogCategory, ctx: LogCtx, bodies: []const []const u8) !PreparedLogBatch {
+        const log_len = self.event_log.items.len;
+        if (bodies.len == 0) return .{ .log_len = log_len, .count = 0, .storage = null };
+        var date_buf: [10]u8 = undefined;
+        const date = self.clock.date.text(&date_buf);
+        var text_bytes: usize = 0;
+        for (bodies) |body| text_bytes += date.len + 1 + body.len;
+        const needed = log_len + bodies.len;
+        const capacity: usize = if (needed <= self.event_log.capacity) 0 else std.ArrayListUnmanaged(LogEntry).growCapacity(needed);
+        const entry_bytes = capacity * @sizeOf(LogEntry);
+        const block = try self.allocator().alignedAlloc(u8, .of(LogEntry), entry_bytes + text_bytes);
+
+        const storage: ?[]LogEntry = if (capacity == 0) null else blk: {
+            const entries: [*]LogEntry = @ptrCast(block.ptr);
+            @memcpy(entries[0..log_len], self.event_log.items);
+            break :blk entries[0..capacity];
+        };
+        // Unpublished room: event_log's spare capacity or the new storage.
+        const room: []LogEntry = (storage orelse self.event_log.allocatedSlice())[log_len..needed];
+        var text = block[entry_bytes..];
+        for (bodies, room) |body, *entry| {
+            const line = text[0 .. date.len + 1 + body.len];
+            @memcpy(line[0..date.len], date);
+            line[date.len] = ' ';
+            @memcpy(line[date.len + 1 ..], body);
+            text = text[line.len..];
+            entry.* = .{ .day = self.clock.day_index, .category = category, .company = ctx.company, .hq = ctx.hq, .contract = ctx.contract, .text = line };
+        }
+        return .{ .log_len = log_len, .count = bodies.len, .storage = storage };
+    }
+
+    /// Publish a prepared batch without allocation.
+    pub fn commitLogBatch(self: *GameState, prepared: PreparedLogBatch) void {
+        std.debug.assert(self.event_log.items.len == prepared.log_len);
+        if (prepared.storage) |storage| self.event_log = .{ .items = storage[0..prepared.log_len], .capacity = storage.len };
+        self.event_log.items.len += prepared.count;
     }
 
     // ------------------------------------------- physical stock
@@ -1244,7 +1300,9 @@ pub const GameState = struct {
     /// mark the hull permanently destroyed, set owner to `.destroyed`, and close
     /// any open ownership interval. Infallible — no allocation (terminal, no new
     /// ownership row). Called by `takeSalvage` after the chosen hulls are
-    /// transferred; every remaining pool-path candidate calls this.
+    /// transferred, for every remaining pool-path candidate, and by
+    /// `claimSpoils` for every destroyed drawn hull of a held field with no
+    /// claim.
     pub fn finalizeDestroyedWreck(self: *GameState, hid: types.HullInstanceId) void {
         const inst = self.hull_instances.getPtr(hid) orelse return;
         inst.status = .permanently_destroyed;

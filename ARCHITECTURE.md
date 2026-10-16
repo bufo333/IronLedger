@@ -1058,12 +1058,19 @@ is derived, not persisted (no schema change); it is re-evaluated on each read
 and prevents selection for a new arc contract. It is not permanent: the monthly
 merc lifecycle buys eligible market hulls toward full strength, and its
 black-market draw can add further hulls. A company that remains insolvent
-liquidates and a replacement company forms from the market. A company without a
-roster entry is not an economy participant and is treated as solvent. The two
-single rule owners are `mercCompanyFieldableBv` and `mercCompanyInsolvent` in
-`src/sim/rivals.zig`; the insolvency filter is enforced in `instantiateRivals`
+liquidates and a replacement company forms from the market. Every merc company,
+active or dissolved, holds exactly one roster entry from its creation on, and an
+empty list is a real, durable state (saved as no rows, restored on load), so a
+company with no hulls — including a replacement that bought nothing — is
+insolvent and judged by the next monthly pass. The two single rule owners are
+`mercCompanyFieldableBv` and `mercCompanyInsolvent` in `src/sim/rivals.zig`;
+`merc_lifecycle.dissolutionCause` owns the monthly dissolution rule (insolvent
+before bankrupt). The insolvency filter is enforced in `instantiateRivals`
 and surfaced read-only on the Operations rivals block via `RivalRow.insolvent`
-(docs/p3c-economy-design.md §4, §8.G).
+(docs/p3c-economy-design.md §4, §8.G). Each founding (campaign creation or
+replacement spawn) and each dissolution, with its cause, writes one `[merc]`
+line to the campaign log under the market category, committed with the
+lifecycle change it records.
 
 **Hulls are priced by what they are.** A listed mek carries a rolled
 condition — armor, quality grade, damaged and destroyed slots, missing

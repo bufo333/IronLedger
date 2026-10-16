@@ -80,7 +80,7 @@ pub fn statusFor(standing: i16) rival_mod.RivalStatus {
 
 /// Single named owner: sum of chassis BV over all `.active` hulls in a
 /// merc company's pool (docs/p3c-economy-design.md §4, §8.G; rule 20/24).
-/// Returns 0 when the company has no roster entry (not an economy participant).
+/// Returns 0 when the id has no roster entry (no campaign company).
 /// Pure, no allocation, no I/O.
 pub fn mercCompanyFieldableBv(gs: *GameState, id: types.MercCompanyId) i64 {
     const roster = gs.merc_company_rosters.get(id) orelse return 0;
@@ -97,7 +97,8 @@ pub fn mercCompanyFieldableBv(gs: *GameState, id: types.MercCompanyId) i64 {
 /// Single named owner: a merc company is insolvent when it HAS a roster
 /// and its fieldable BV is below the insolvency threshold
 /// (docs/p3c-economy-design.md §4 "Rival insolvency", §8.G; rule 20/24).
-/// A company with no roster entry is NOT insolvent (it is a non-economy fixture).
+/// Every campaign company has a roster entry (`GameState.merc_company_rosters`),
+/// so a company with no hulls is insolvent; an id with no entry is not.
 pub fn mercCompanyInsolvent(gs: *GameState, id: types.MercCompanyId) bool {
     return gs.merc_company_rosters.getPtr(id) != null and
         mercCompanyFieldableBv(gs, id) < tuning.generation.merc_company_insolvency_bv;

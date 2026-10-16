@@ -1888,6 +1888,9 @@ pub const Store = struct {
 
     /// Load merc_company_rosters from the merc_company_roster table. merc_company_id and
     /// member hull ids are validated centrally by validateReferences (rule 47).
+    /// An empty roster is stored as no rows, so a loaded company without rows
+    /// gets its empty entry (`GameState.merc_company_rosters`); loadMercCompanies
+    /// runs first.
     fn loadMercCompanyRosters(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
         const st = try self.db.prepare("SELECT merc_company_id, hull_instance_id FROM merc_company_roster WHERE cid = ?1 ORDER BY ord");
@@ -1901,6 +1904,10 @@ pub const Store = struct {
             const gop = try gs.merc_company_rosters.getOrPut(alloc, mid);
             if (!gop.found_existing) gop.value_ptr.* = .empty;
             try gop.value_ptr.append(alloc, hid);
+        }
+        for (gs.merc_companies.keys()) |mid| {
+            const gop = try gs.merc_company_rosters.getOrPut(alloc, mid);
+            if (!gop.found_existing) gop.value_ptr.* = .empty;
         }
     }
 
@@ -5634,8 +5641,8 @@ test "a played current campaign round trips and its downgraded store is refused 
     try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("UPDATE setting SET value = 36 WHERE key = 'schema_version'");
     defer raw.close();
-    try std.testing.expectEqual(@as(u64, 14648742197069686759), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 17182843811130526815), hash_before);
+    try std.testing.expectEqual(@as(u64, 202945039740275209), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 1220401730871389752), hash_before);
     try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
@@ -6059,8 +6066,8 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     // service requires available, physically local technicians and local pool
     // teams (docs/p2-artillery-operations-design.md,
     // Condition, maintenance, repairs and shared hours).
-    try std.testing.expectEqual(@as(u64, 14648742197069686759), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 17182843811130526815), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 202945039740275209), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 1220401730871389752), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -8189,6 +8196,7 @@ fn buildOwnerGs(alloc: std.mem.Allocator) !GameState {
     // Hull 3: merc-company-owned — add one merc company first
     const mid: types.MercCompanyId = @enumFromInt(1);
     try gs.merc_companies.put(a, mid, merc_company_mod.MercCompany{ .id = mid, .archetype_key = "enemy_raiders", .commander_first = "Ann", .commander_last = "Smith", .unit_name = "Smith Raiders", .faction_key = "DC", .side = .enemy, .doctrine = .aggressive });
+    try gs.merc_company_rosters.put(a, mid, .empty);
     gs.next_merc_company_id = 2;
     {
         const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
@@ -8456,6 +8464,28 @@ test "faction and merc-company rosters survive a save/load round-trip with ident
     try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
 }
 
+test "a dissolved merc company's empty roster survives a save/load round-trip" {
+    // Rules 47, 53: every merc company keeps a roster entry, and an empty one
+    // has no rows; the loader restores it, so the digest is unchanged.
+    var gs = try buildRosterGs(std.testing.allocator);
+    defer gs.deinit();
+    const mcid1: types.MercCompanyId = @enumFromInt(1);
+    try @import("../sim/merc_lifecycle.zig").liquidateMercCompany(&gs, gs.allocator(), mcid1, 1);
+    try std.testing.expectEqual(@as(usize, 0), gs.merc_company_rosters.get(mcid1).?.items.len);
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    try std.testing.expectEqual(@as(usize, 0), loaded.merc_company_rosters.get(mcid1).?.items.len);
+}
+
 test "v52 historical fixture is refused without mutation" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 50002 });
     defer gs.deinit();
@@ -8500,6 +8530,45 @@ test "a merc_company_roster row naming no merc company rejects the load as corru
     ));
 }
 
+test "a merc_company_roster row keyed by no company id rejects the load as corrupt" {
+    // Rule 47: zero rows are an empty roster, but a row keyed by `.none` is corruption.
+    try std.testing.expectError(error.CorruptSave, loadRosterAfterTampering(
+        "UPDATE merc_company_roster SET merc_company_id = 0 WHERE merc_company_id = 1",
+    ));
+}
+
+test "a merc_company_roster row naming no hull instance rejects the load as corrupt" {
+    // Rule 47: every merc_company_roster hull_instance_id must resolve to a live hull instance.
+    try std.testing.expectError(error.CorruptSave, loadRosterAfterTampering(
+        "UPDATE merc_company_roster SET hull_instance_id = 99999 WHERE hull_instance_id = 3",
+    ));
+}
+
+test "a replacement company that bought nothing keeps its empty roster across save/load" {
+    // Rules 47, 53: a spawn on an empty market holds an empty roster entry,
+    // and the reloaded campaign has the same entry and digest.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 50040 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    gs.market_listings.clearRetainingCapacity();
+    var rng = gs.rng;
+    const spawned = try @import("../sim/merc_lifecycle.zig").spawnReplacementCompany(&gs, gs.allocator(), 0, &rng);
+    gs.rng = rng;
+    try std.testing.expectEqual(@as(usize, 0), gs.merc_company_rosters.get(spawned).?.items.len);
+    const before = digest.stateHash(&gs);
+
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+
+    var diff_buf: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &diff_buf) orelse "");
+    try std.testing.expectEqual(before, digest.stateHash(&loaded));
+    try std.testing.expectEqual(@as(usize, 0), loaded.merc_company_rosters.get(spawned).?.items.len);
+}
+
 // P3e entity split: merc company save/load and migration tests.
 
 test "merc companies survive a save/load round-trip with identical stateHash (P3e entity split)" {
@@ -8533,6 +8602,8 @@ test "merc companies survive a save/load round-trip with identical stateHash (P3
     };
     try gs.merc_companies.put(a, mc1.id, mc1);
     try gs.merc_companies.put(a, mc2.id, mc2);
+    try gs.merc_company_rosters.put(a, mc1.id, .empty);
+    try gs.merc_company_rosters.put(a, mc2.id, .empty);
     gs.next_merc_company_id = 3;
 
     const before = digest.stateHash(&gs);
@@ -8635,6 +8706,7 @@ test "MercCompany save/load round-trip with all four new fields non-default (P3f
         .logo_key = "ashfall_lancers",
     };
     try gs.merc_companies.put(a, mc1.id, mc1);
+    try gs.merc_company_rosters.put(a, mc1.id, .empty);
     gs.next_merc_company_id = 2;
 
     const before = digest.stateHash(&gs);
@@ -8673,6 +8745,7 @@ test "v57 historical fixture is refused without mutation" {
         .doctrine = .aggressive,
     };
     try gs.merc_companies.put(a, mc1.id, mc1);
+    try gs.merc_company_rosters.put(a, mc1.id, .empty);
     gs.next_merc_company_id = 2;
 
     const raw = try sqlite.Db.open(":memory:");

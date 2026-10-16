@@ -17,6 +17,7 @@ const rival_mod = @import("../domain/rival.zig");
 const merc_company_mod = @import("../domain/merc_company.zig");
 const roster_gen = @import("../gen/roster_gen.zig");
 const logo = @import("../domain/logo.zig");
+const merc_lifecycle = @import("merc_lifecycle.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Maximum entries in faction.table; used for fixed stack arrays.
@@ -156,10 +157,12 @@ pub fn seedFactionRosters(gs: *GameState) !void {
 ///              rng_copy; allocate unit_names and pre-build every HullInstance
 ///              (including loadout) into a flat arena slice; pre-build roster
 ///              ID lists. No gs.* mutation.
-///   Reserve  — ensureUnusedCapacity on all four affected collections;
-///              all fallible; on any error gs.* entries are unchanged.
-///   Commit   — insert pre-built records into gs.* (infallible); gs.rng,
-///              gs.next_merc_company_id, and gs.next_hull_instance_id updated last.
+///   Reserve  — ensureUnusedCapacity on all four affected collections, then
+///              prepare the founding log lines; all fallible; on any error
+///              gs.* entries are unchanged.
+///   Commit   — insert pre-built records and the log lines into gs.*
+///              (infallible); gs.rng, gs.next_merc_company_id, and
+///              gs.next_hull_instance_id updated last.
 ///
 /// Draw order: per-company, archetype (.rivals), hiring faction (.rivals),
 /// identity (.rivals), logo (.rivals), then pool hulls (.rosters stream).
@@ -170,8 +173,9 @@ pub fn seedFactionRosters(gs: *GameState) !void {
 /// This order is documented here so any change to it requires a deliberate
 /// re-pin of the golden digest (and the stream-isolation test will catch it).
 ///
-/// Respects the empty-pool-is-absence invariant (state.zig): if
-/// tuning.generation.merc_company_hulls_each == 0, no roster entry is inserted.
+/// Every seeded company gets a roster entry (state.zig), which is empty when
+/// tuning.generation.merc_company_hulls_each == 0. Each company's founding line
+/// is logged in company-id order (`merc_lifecycle.foundingLine`).
 pub fn seedMercCompanies(gs: *GameState) !void {
     const alloc = gs.allocator();
     const tg = tuning.generation;
@@ -285,12 +289,19 @@ pub fn seedMercCompanies(gs: *GameState) !void {
     // ---- Reserve ----
     // All gs.* capacity reservations happen here, before any gs.* count changes.
     // A failure here leaves gs.merc_companies, gs.merc_company_rosters,
-    // gs.hull_instances, gs.hull_ownership_history, gs.rng,
+    // gs.hull_instances, gs.hull_ownership_history, gs.event_log, gs.rng,
     // gs.next_merc_company_id, and gs.next_hull_instance_id unchanged.
     try gs.merc_companies.ensureUnusedCapacity(alloc, count);
     try gs.merc_company_rosters.ensureUnusedCapacity(alloc, count);
     try gs.hull_instances.ensureUnusedCapacity(alloc, total_hulls);
     try gs.hull_ownership_history.ensureUnusedCapacity(alloc, total_hulls);
+    var line_arena = std.heap.ArenaAllocator.init(gs.scratch());
+    defer line_arena.deinit();
+    var founding_lines: [max_merc_companies][]const u8 = undefined;
+    for (built_companies[0..count], founding_lines[0..count]) |company, *line| {
+        line.* = try merc_lifecycle.foundingLine(line_arena.allocator(), company);
+    }
+    const log = try gs.prepareLogBatch(.market, .{}, founding_lines[0..count]);
 
     // ---- Commit ----
     // All operations here are infallible; gs.* is only mutated in this phase.
@@ -299,11 +310,8 @@ pub fn seedMercCompanies(gs: *GameState) !void {
         const mc = &built_companies[ci];
         gs.merc_companies.putAssumeCapacity(mc.id, mc.*);
 
-        // Empty-pool-is-absence invariant (state.zig): only insert a roster
-        // entry if the pool is non-empty.
-        if (roster_lists[ci].items.len > 0) {
-            gs.merc_company_rosters.putAssumeCapacity(mc.id, roster_lists[ci]);
-        }
+        // Every merc company has a roster entry, empty or not (state.zig).
+        gs.merc_company_rosters.putAssumeCapacity(mc.id, roster_lists[ci]);
 
         for (roster_lists[ci].items) |hid| {
             gs.hull_instances.putAssumeCapacity(hid, built_hulls[hull_idx]);
@@ -319,6 +327,8 @@ pub fn seedMercCompanies(gs: *GameState) !void {
             });
         }
     }
+
+    gs.commitLogBatch(log);
 
     // Update counters last (infallible).
     gs.next_merc_company_id = next_mid;
@@ -520,8 +530,8 @@ test "seedMercCompanies: seeded shape matches tuning values" {
                 try std.testing.expectEqual(@as(usize, 1), found);
             }
         } else {
-            // Empty pool: roster entry must be absent (state.zig invariant).
-            try std.testing.expect(gs.merc_company_rosters.get(mc.id) == null);
+            // Empty pool: the roster entry is present and empty (state.zig invariant).
+            try std.testing.expectEqual(@as(usize, 0), gs.merc_company_rosters.get(mc.id).?.items.len);
         }
     }
     // next_merc_company_id is past all seeded ids.
@@ -540,6 +550,31 @@ test "seedMercCompanies: seeded shape matches tuning values" {
         if (raw > max_hid) max_hid = raw;
     }
     try std.testing.expect(gs.next_hull_instance_id > max_hid);
+}
+
+test "seedMercCompanies logs one founding line per company in company-id order" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7015 });
+    defer gs.deinit();
+    _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .line_officer);
+    gs.clock.date.year = 3025;
+    const log_before = gs.event_log.items.len;
+    try seedMercCompanies(&gs);
+
+    const lines = gs.event_log.items[log_before..];
+    try std.testing.expectEqual(@as(usize, tuning.generation.merc_company_count), lines.len);
+    // The log follows the map, and the map is in ascending company id.
+    for (lines, gs.merc_companies.values()) |entry, company| {
+        const expected = try merc_lifecycle.foundingLine(std.testing.allocator, company);
+        defer std.testing.allocator.free(expected);
+        try std.testing.expect(std.mem.endsWith(u8, entry.text, expected));
+        try std.testing.expect(std.mem.startsWith(u8, entry.text, "3025-"));
+        try std.testing.expect(std.mem.indexOf(u8, entry.text, company.unit_name) != null);
+        try std.testing.expectEqual(@import("state.zig").LogCategory.market, entry.category);
+        try std.testing.expectEqual(@as(u32, 0), entry.day);
+    }
+    for (gs.merc_companies.keys()[1..], gs.merc_companies.keys()[0 .. gs.merc_companies.count() - 1]) |id, prior| {
+        try std.testing.expect(@intFromEnum(id) > @intFromEnum(prior));
+    }
 }
 
 test "seedMercCompanies: determinism and stream isolation" {

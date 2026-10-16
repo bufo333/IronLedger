@@ -404,7 +404,10 @@ tests.
 ### 5.1  Insolvency and bankruptcy detection
 
 **Owners:** `src/sim/rivals.zig` `mercCompanyInsolvent` (BV-based, delivered
-P3e.7) and the `cbills < 0` (bankrupt) check in `runMercLifecycle`.
+P3e.7) and `merc_lifecycle.dissolutionCause`, which tests insolvency and then
+`cbills < 0` (bankrupt) for `runMercLifecycle` and names the cause the
+dissolution line logs. Every company holds a roster entry, so a company with
+no hulls is insolvent.
 `mercCompanyEligibleAsOpFor` (delivered P3f.4) is the single owner of the
 "may this company be an OpFor" rule: active (dissolved_day==0), solvent, and
 at its named mek target (`merc_company_hulls_each` active mek hulls). Vehicles
@@ -442,7 +445,14 @@ pub fn liquidateMercCompany(
 The listing pattern reuses `faction_surplus.runMonthly`'s surplus-listing path
 (owner-transfer to `.market` + listing append; `market.hullPrice` with the
 fixed roll specified above). Dissolved companies are never
-removed from state (D-A): `dissolved_day != 0` is the permanent record.
+removed from state (D-A): `dissolved_day != 0` is the permanent record, and the
+dissolved company keeps its now-empty roster entry.
+
+Each dissolution writes one campaign-log line under the market category,
+`[merc] <unit name> dissolved: <cause>`, where the cause is `insolvent`,
+`bankrupt`, or — for a direct liquidation when neither holds — `liquidated`
+(`merc_lifecycle.dissolutionLine`). The line is prepared before the infallible
+commit and appended with it.
 
 ### 5.3  Replacement spawn and hull buy
 
@@ -469,6 +479,15 @@ pub fn spawnReplacementCompany(
     rng: *rng_mod.Rng,
 ) !types.MercCompanyId
 ```
+
+A spawned company holds an empty roster entry before any buy, so one that finds
+nothing affordable is insolvent and dissolves on the next monthly pass. Each
+founding — the seeded companies at campaign creation, in company-id order, and
+every replacement spawn — writes one campaign-log line under the market
+category, `[merc] <unit name> founded: commander <first> <last>, faction <key>`
+(`merc_lifecycle.foundingLine`). A monthly pass logs each replacement as its
+predecessor's dissolution line followed by the replacement's founding line, in
+the dissolved company's id order; buys log nothing.
 
 ### 5.4  New `MercCompany` fields (schema v58, P3f.4)
 

@@ -1236,11 +1236,11 @@ fn writeHullCombatRecords(
         });
         if (oc != .destroyed) continue;
         // Destroyed hull: remove from the pool so the enemy cannot field it
-        // again. The final disposition — permanently_destroyed (unchosen
-        // wreck) or transferred to the player / employer — is deferred to
-        // takeSalvage / gs.finalizeDestroyedWreck / the exchange branch,
-        // which run after the salvage decision is made. Until then the hull
-        // stays active, enemy-owned, pool-removed (a wreck on the field).
+        // again. Its final disposition belongs to the salvage owners: on a
+        // held field the exchange branch or a zero claim in `claimSpoils`
+        // has already given it; a claim leaves it active, enemy-owned and
+        // pool-removed (a wreck on the field) until `takeSalvage` answers the
+        // decision; a lost field's dispersal follows these records.
         // Remove from pool by id-match (orderedRemove preserves remaining
         // order for future draws; the pool pointer from opforPool is still
         // valid — no map key was deleted, only a value element removed).
@@ -1509,7 +1509,7 @@ test "non artillery engagement reference preserves every gameplay field and stre
         defer gs.deinit();
         const id = try engagementFixture(&gs, real_pool);
         try resolveEngagement(&gs, gs.contracts.getPtr(id).?);
-        try std.testing.expectEqual(if (real_pool) @as(u64, 15346420800007241948) else @as(u64, 17972723067113467580), digest.nonArtilleryReferenceHash(&gs));
+        try std.testing.expectEqual(if (real_pool) @as(u64, 11545390818089760355) else @as(u64, 17972723067113467580), digest.nonArtilleryReferenceHash(&gs));
     }
 }
 
@@ -2067,7 +2067,16 @@ fn claimSpoils(
     // Roll (or build from drawn hulls) what is out there once, then see
     // whether the claim buys a real choice. If it does, nothing is taken
     // yet — the commander divides the haul from the inbox.
-    if (salvage_bv <= 0) return out; // nothing to divide, nothing to roll
+    if (salvage_bv <= 0) {
+        // Pool path, held field, nothing claimed: no decision follows, so
+        // every destroyed drawn hull is an unchosen wreck now.
+        if (pool_path and held_field) {
+            for (drawn, opfor_outcomes) |hid, oc| {
+                if (oc == .destroyed) gs.finalizeDestroyedWreck(hid);
+            }
+        }
+        return out; // nothing to divide, nothing to roll
+    }
     if (pool_path) {
         // Pool path: candidates ARE the drawn destroyed hulls. ALWAYS defer
         // to the inbox — the salvage_priority decision is mandatory and
@@ -5576,6 +5585,156 @@ test "pool-path takeSalvage: chosen hull transfers, unchosen is finalized" {
     for (gs.hull_ownership_history.items) |h| {
         if (h.hull_instance_id == hid1) try testing.expect(h.to_day != null);
     }
+}
+
+/// A merc company owning `n` LCT-1V hulls on its roster, an enemy rival linked
+/// to it, and an active contract against that rival under `terms`, so
+/// `opforPool` draws from the company's roster.
+fn seedMercPoolContract(gs: *GameState, co: types.ForceId, n: usize, terms: contract_mod.Terms) !*contract_mod.Contract {
+    const a = gs.allocator();
+    const company_id: types.MercCompanyId = @enumFromInt(gs.next_merc_company_id);
+    gs.next_merc_company_id += 1;
+    try gs.merc_companies.put(a, company_id, .{
+        .id = company_id,
+        .archetype_key = "enemy_raiders",
+        .unit_name = "Pool Raiders",
+        .faction_key = "DC",
+        .side = .enemy,
+    });
+    var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+    for (0..n) |_| {
+        const hid: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+        gs.next_hull_instance_id += 1;
+        try gs.hull_instances.put(a, hid, .{ .id = hid, .base_key = "LCT-1V", .owner = .{ .merc_company = company_id } });
+        try gs.hull_ownership_history.append(a, .{ .hull_instance_id = hid, .acquisition_type = .initial, .prior_owner_key = "DC" });
+        try roster.append(a, hid);
+    }
+    try gs.merc_company_rosters.put(a, company_id, roster);
+    const rival_id: types.RivalId = @enumFromInt(gs.next_rival_id);
+    gs.next_rival_id += 1;
+    try gs.rivals.put(a, rival_id, .{ .id = rival_id, .unit_name = "Pool Raiders", .faction_key = "DC", .side = .enemy, .merc_company_id = company_id });
+    const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    var contract: contract_mod.Contract = .{
+        .id = cid,
+        .kind = .recon_raid,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = terms,
+        .status = .active,
+        .assigned_company = co,
+        .monthly_net = 300_000,
+        .enemy_lances = 1,
+    };
+    try contract.rival_ids.append(a, rival_id);
+    try gs.contracts.put(a, cid, contract);
+    const site: types.Site = .{ .company = co };
+    try gs.addStock(site, "armor", 60);
+    for (part_mod.munition_keys) |key| try gs.addStock(site, key, 40);
+    return gs.contracts.getPtr(cid).?;
+}
+
+/// The merc owner/roster mirror (`GameState.merc_company_rosters`): every
+/// active merc-owned hull is on its owner's roster or is a candidate of a
+/// pending salvage decision, and every roster member is owned by that company.
+fn expectMercRosterMirror(gs: *GameState) !void {
+    var it = gs.hull_instances.iterator();
+    while (it.next()) |entry| {
+        const hull = entry.value_ptr;
+        const owner = switch (hull.owner) {
+            .merc_company => |id| id,
+            else => continue,
+        };
+        if (hull.status != .active) continue;
+        const roster = gs.merc_company_rosters.get(owner) orelse return error.TestUnexpectedResult;
+        if (std.mem.indexOfScalar(types.HullInstanceId, roster.items, hull.id) != null) continue;
+        var pending_candidate = false;
+        for (gs.event_queue.pending.items) |ev| {
+            if (ev.kind != .salvage_priority) continue;
+            const report = gs.battle_reports.find(ev.battle) orelse continue;
+            for (report.salvage.candidates) |cand| pending_candidate = pending_candidate or cand.hull_instance_id == hull.id;
+        }
+        if (!pending_candidate) return error.TestUnexpectedResult;
+    }
+    for (gs.merc_company_rosters.keys(), gs.merc_company_rosters.values()) |id, roster| {
+        for (roster.items) |hid| {
+            try std.testing.expectEqual(@as(hull_instance_for_pool.HullOwner, .{ .merc_company = id }), gs.hull_instances.get(hid).?.owner);
+        }
+    }
+}
+
+test "a held field with no salvage claim strikes the merc company's destroyed hulls off" {
+    // Rule 68 regression: a held field whose claim is zero (here salvage_pct
+    // 0) queues no salvage decision, so its destroyed drawn hulls must reach
+    // their terminal disposition in the engagement itself.
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{ .seed = 4011 });
+    defer gs.deinit();
+    gs.clock.day_index = 1;
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const c = try seedMercPoolContract(&gs, co, 8, .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 0, .battle_loss_pct = 30 });
+    const company_id: types.MercCompanyId = @enumFromInt(1);
+
+    var held_wrecks: usize = 0;
+    var battles: u32 = 0;
+    while (battles < 6 and c.status == .active) : (battles += 1) {
+        const records_before = gs.hull_combat_records.items.len;
+        try resolveEngagement(&gs, c);
+        const report = &gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1];
+        if (report.held_field) {
+            try testing.expectEqual(@as(i64, 0), report.salvage.unclaimed_bv);
+            for (gs.hull_combat_records.items[records_before..]) |rec| {
+                if (!rec.destroyed or rec.contract_id != c.id) continue;
+                held_wrecks += 1;
+                const hull = gs.hull_instances.get(rec.hull_instance_id).?;
+                try testing.expectEqual(hull_instance_for_pool.HullStatus.permanently_destroyed, hull.status);
+                try testing.expectEqual(hull_instance_for_pool.OwnerType.destroyed, std.meta.activeTag(hull.owner));
+                for (gs.hull_ownership_history.items) |h| {
+                    if (h.hull_instance_id == rec.hull_instance_id) try testing.expect(!h.isOpen());
+                }
+                try testing.expect(std.mem.indexOfScalar(types.HullInstanceId, gs.merc_company_rosters.get(company_id).?.items, rec.hull_instance_id) == null);
+            }
+        }
+        try answerBattleDecisions(&gs);
+        try expectMercRosterMirror(&gs);
+    }
+    try testing.expect(held_wrecks > 0);
+}
+
+test "the merc owner/roster mirror holds after every salvage disposition" {
+    // Held field with a claim and its decision, held field with no claim,
+    // the salvage exchange, and lost fields (recovery then dispersal) each
+    // leave every merc-owned active hull on its owner's roster.
+    const testing = std.testing;
+    const variants = [_]contract_mod.Terms{
+        .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 100, .battle_loss_pct = 30 },
+        .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 0, .battle_loss_pct = 30 },
+        .{ .length_months = 6, .base_pay_month = 400_000, .salvage_pct = 60, .battle_loss_pct = 30, .salvage_exchange = true },
+    };
+    var held: usize = 0;
+    var lost: usize = 0;
+    for (variants, 0..) |terms, i| {
+        var gs = GameState.init(testing.allocator, .{ .seed = 4012 + i });
+        defer gs.deinit();
+        gs.clock.day_index = 1;
+        gs.difficulty = .veteran;
+        _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+        const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+        const c = try seedMercPoolContract(&gs, co, 12, terms);
+        var battles: u32 = 0;
+        while (battles < 8 and c.status == .active) : (battles += 1) {
+            try resolveEngagement(&gs, c);
+            const report = &gs.battle_reports.kept.items[gs.battle_reports.kept.items.len - 1];
+            if (report.held_field) held += 1 else lost += 1;
+            try expectMercRosterMirror(&gs);
+            try answerBattleDecisions(&gs);
+            try expectMercRosterMirror(&gs);
+        }
+    }
+    try testing.expect(held > 0);
+    try testing.expect(lost > 0);
 }
 
 test "pool-path salvage decision holds the turn until resolved" {

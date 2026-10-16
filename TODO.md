@@ -69,13 +69,14 @@ A package has one primary invariant or subsystem outcome.
   assign each unused logo once before creating any logo-less company, then
   leave logo_key empty and continue with collision-free generated names. NPC
   logo display remains deferred.
-- [ ] P5d.3 NPC merc-company lifecycle visibility and hull disposition: log every
-  merc company founding and dissolution as a campaign-log event; an enemy hull
-  cored on a pool-path battle leaves the losing company's roster when the
-  battle's disposition resolves (cause of the stale active hulls seen in play
-  is unverified — a regression test comes first); a replacement company holds a
-  roster row from spawn so `mercCompanyInsolvent` always has one to judge.
-  Player financing is out of scope.
+- [x] P5d.3 NPC merc-company lifecycle visibility and hull disposition: every
+  merc company founding and dissolution (with its cause) is a `[merc]`
+  campaign-log line; a held field with no salvage claim strikes the destroyed
+  drawn hulls off (`finalizeDestroyedWreck`), the stale-active-hull defect its
+  regression reproduced; every merc company holds a roster entry from creation,
+  durable when empty, so `mercCompanyInsolvent` judges a replacement that
+  bought nothing. Lost-field recovery is unchanged; player financing is out of
+  scope.
 - [ ] P5d.4a paid NPC black-market buys: NPC black-market draws debit the listing
   price and respect roster target and cash; a rule-68 regression comes first.
   Needs P5d.3.
