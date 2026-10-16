@@ -1200,7 +1200,6 @@ fn addMercRosterHulls(gs: *GameState, merc_id: types.MercCompanyId, base_key: []
 }
 
 test "runNpcBlackMarketDraw: a merc take debits the listing price" {
-    // Rule 68: the draw transferred the hull and left the company's cash unchanged.
     var gs = GameState.init(testing.allocator, .{ .seed = 57108 });
     defer gs.deinit();
     const merc_id: types.MercCompanyId = @enumFromInt(1);
