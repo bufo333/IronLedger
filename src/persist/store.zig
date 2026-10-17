@@ -1788,7 +1788,8 @@ pub const Store = struct {
         }
     }
 
-    /// Decode each row exactly; an unknown enum, a non-integer or
+    /// Decode each row exactly; an unknown enum (matched on the column's full
+    /// bytes, so a valid tag before an embedded NUL is unknown), a non-integer or
     /// out-of-range value, a duplicate id, or an ordinal other than the
     /// row's position (`savePersonages` writes 0, 1, 2, …) is `CorruptSave`
     /// (rule 47). `personages.validate` then checks keys, seats and coverage.
@@ -1802,14 +1803,14 @@ pub const Store = struct {
             if (st.int(11) != @as(i64, @intCast(gs.personages.count()))) return error.CorruptSave;
             const p: personage_mod.Personage = .{
                 .id = try toId(types.PersonageId, st.int(0)),
-                .role = st.enumValue(personage_mod.Role, 1) orelse return error.CorruptSave,
+                .role = std.meta.stringToEnum(personage_mod.Role, try st.text(1, alloc)) orelse return error.CorruptSave,
                 .first_name = try st.text(2, alloc),
                 .last_name = try st.text(3, alloc),
                 .faction_key = try st.text(4, alloc),
                 .seat_planet_key = try st.text(5, alloc),
                 .motives = personage_mod.motivesFromMask(try st.intAs(u16, 6)) orelse return error.CorruptSave,
                 .ambition = try st.intAs(u8, 7),
-                .provenance = st.enumValue(personage_mod.Provenance, 8) orelse return error.CorruptSave,
+                .provenance = std.meta.stringToEnum(personage_mod.Provenance, try st.text(8, alloc)) orelse return error.CorruptSave,
                 .generator_version = try st.intAs(u16, 9),
             };
             const gop = try gs.personages.getOrPut(alloc, p.id);
@@ -11673,6 +11674,46 @@ test "a tampered personage row, seat, counter or politics stream refuses to load
     try store.db.exec("DELETE FROM commander; DELETE FROM personage");
     var commanderless = try store.load(std.testing.allocator, gs.campaign_id);
     commanderless.deinit();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+}
+
+test "a personage role or provenance holding a valid tag, a NUL and more refuses to load" {
+    // Rules 1, 47, 50, 70: the loader matches the column's full stored bytes,
+    // not the text before its first NUL.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 70005 });
+    defer gs.deinit();
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    const Case = struct { column: []const u8, update: [:0]const u8, check: [:0]const u8, malformed: []const u8 };
+    for ([_]Case{
+        .{ .column = "role", .update = "UPDATE personage SET role = ?1 WHERE cid = ?2 AND id = 1", .check = "SELECT role, typeof(role) = 'text' FROM personage WHERE cid = ?1 AND id = 1", .malformed = "planetary_ruler\x00invalid" },
+        .{ .column = "provenance", .update = "UPDATE personage SET provenance = ?1 WHERE cid = ?2 AND id = 1", .check = "SELECT provenance, typeof(provenance) = 'text' FROM personage WHERE cid = ?1 AND id = 1", .malformed = "procedural\x00invalid" },
+    }) |case| {
+        errdefer std.debug.print("personage embedded-NUL column: {s}\n", .{case.column});
+        try store.save(&gs);
+        try expectCurrentRoundTripForTest(store, &gs);
+        try store.db.exec("PRAGMA ignore_check_constraints=ON");
+        const update = try store.db.prepare(case.update);
+        defer update.finalize();
+        try update.bindAll(.{ case.malformed, gs.campaign_id });
+        try update.run();
+        try store.db.exec("PRAGMA ignore_check_constraints=OFF");
+        const check = try store.db.prepare(case.check);
+        defer check.finalize();
+        try check.bindAll(.{gs.campaign_id});
+        try std.testing.expect(try check.next());
+        try std.testing.expectEqual(@as(i64, 1), check.int(1));
+        const bytes = try check.text(0, std.testing.allocator);
+        defer std.testing.allocator.free(bytes);
+        try std.testing.expectEqualSlices(u8, case.malformed, bytes);
+        if (store.load(std.testing.allocator, gs.campaign_id)) |loaded| {
+            var truncated = loaded;
+            truncated.deinit();
+            return error.TestExpectedError;
+        } else |err| try std.testing.expectEqual(error.CorruptSave, err);
+    }
     try store.save(&gs);
     try expectCurrentRoundTripForTest(store, &gs);
 }
