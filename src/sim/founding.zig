@@ -241,6 +241,11 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
         for (logo.all_keys) |k| if (std.mem.eql(u8, k, c.logo_key)) break :blk k; // static catalog memory
         break :blk ""; // not a catalog key → reserve nothing (fail-closed)
     };
+    // Every world's ruler and every power's leader
+    // (docs/p5d-conflict-world-design.md §B), drawn and reserved before the
+    // first mutation so a seeding failure leaves the campaign unchanged
+    // (rules 11–12); committed after the last fallible step below.
+    const seeding = try personages.prepareSeeding(gs);
     _ = try createCommander(gs, c.name, c.origin, c.profession);
     gs.clock.date.year = c.start_year;
     // Until renamed, the outfit carries the commander's name — it
@@ -260,9 +265,7 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
     try roster_seed.seedMercCompanies(gs);
     // Seed the Periphery/pirates (PER) salvage pool (P3e.5b-1, §8.C).
     try roster_seed.seedPirateRoster(gs);
-    // Seat every world's ruler and every power's leader
-    // (docs/p5d-conflict-world-design.md §B).
-    try personages.seedPersonages(gs);
+    personages.commitSeeding(gs, &seeding);
     return .{};
 }
 
@@ -336,12 +339,14 @@ test "createCommander yields the same commander, HQ, staff and stock regardless 
 }
 
 test "a failed commander creation leaves the clock year untouched" {
-    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 2 });
-    var gs = GameState.init(failing.allocator(), .{ .seed = 8103 });
+    // `createCommander` refuses after the personage seeding is prepared; the
+    // year is set only once it succeeds.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8103 });
     defer gs.deinit();
+    gs.next_hq_id = std.math.maxInt(u32);
     const initial_year = gs.clock.date.year;
 
-    try std.testing.expectError(error.OutOfMemory, commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster, .start_year = 3040 } }));
+    try std.testing.expectError(error.HqIdExhausted, commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster, .start_year = 3040 } }));
     try std.testing.expectEqual(initial_year, gs.clock.date.year);
 }
 

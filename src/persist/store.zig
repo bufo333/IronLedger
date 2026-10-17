@@ -1789,15 +1789,17 @@ pub const Store = struct {
     }
 
     /// Decode each row exactly; an unknown enum, a non-integer or
-    /// out-of-range value, or a duplicate id is `CorruptSave` (rule 47).
-    /// `personages.validate` then checks keys, seats and coverage.
+    /// out-of-range value, a duplicate id, or an ordinal other than the
+    /// row's position (`savePersonages` writes 0, 1, 2, …) is `CorruptSave`
+    /// (rule 47). `personages.validate` then checks keys, seats and coverage.
     fn loadPersonages(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT id, role, first_name, last_name, faction_key, seat_planet_key, motives, ambition, provenance, generator_version, typeof(id)='integer' AND typeof(motives)='integer' AND typeof(ambition)='integer' AND typeof(generator_version)='integer' AND typeof(role)='text' AND typeof(first_name)='text' AND typeof(last_name)='text' AND typeof(faction_key)='text' AND typeof(seat_planet_key)='text' AND typeof(provenance)='text' FROM personage WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT id, role, first_name, last_name, faction_key, seat_planet_key, motives, ambition, provenance, generator_version, typeof(ord)='integer' AND typeof(id)='integer' AND typeof(motives)='integer' AND typeof(ambition)='integer' AND typeof(generator_version)='integer' AND typeof(role)='text' AND typeof(first_name)='text' AND typeof(last_name)='text' AND typeof(faction_key)='text' AND typeof(seat_planet_key)='text' AND typeof(provenance)='text', ord FROM personage WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
             if (st.int(10) != 1) return error.CorruptSave;
+            if (st.int(11) != @as(i64, @intCast(gs.personages.count()))) return error.CorruptSave;
             const p: personage_mod.Personage = .{
                 .id = try toId(types.PersonageId, st.int(0)),
                 .role = st.enumValue(personage_mod.Role, 1) orelse return error.CorruptSave,
@@ -4759,7 +4761,7 @@ test "nonempty unversioned databases are refused without creating a schema" {
 pub fn foundCampaignForTest(gs: *GameState, name: []const u8, origin: commander_mod.Faction, profession: commander_mod.Profession) !types.HqId {
     std.debug.assert(@import("builtin").is_test);
     const home = try founding.createCommander(gs, name, origin, profession);
-    try personage_rules.seedPersonages(gs);
+    try personage_rules.seedForTest(gs);
     return home;
 }
 
@@ -5397,7 +5399,7 @@ test "confirmed battle orders survive a save" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 8301 });
     defer gs.deinit();
     const f = try contract_events.damagedCompanyForTest(&gs, 0);
-    try personage_rules.seedPersonages(&gs);
+    try personage_rules.seedForTest(&gs);
     f.c.next_battle_day = gs.clock.day_index + 2;
     f.c.orders_day = f.c.next_battle_day;
     gs.next_contract_id = @intFromEnum(f.c.id) + 1;
@@ -5990,7 +5992,7 @@ test "a field repair decision comes back from a save with its three orders" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 12069 });
     defer gs.deinit();
     const f = try contract_events.damagedCompanyForTest(&gs, 2);
-    try personage_rules.seedPersonages(&gs);
+    try personage_rules.seedForTest(&gs);
     gs.next_contract_id = @intFromEnum(f.c.id) + 1;
     try contract_events.queueFieldRepair(&gs, f.c, .none);
     try std.testing.expect(gs.event_queue.blocking() != null);
@@ -10264,7 +10266,7 @@ test "operational save continues through shared service injury repair reload and
     var gs = GameState.init(std.testing.allocator, .{ .seed = 625 });
     defer gs.deinit();
     const id = try operations.fixtureForTest(&gs, true);
-    try personage_rules.seedPersonages(&gs);
+    try personage_rules.seedForTest(&gs);
     const f = gs.artillery_formations.getPtr(id).?;
     f.slots[@intFromEnum(rules.Slot.communications)].condition = .missing;
     f.armor_pct = 80;
@@ -10316,7 +10318,7 @@ test "artillery bay targets round trip and malformed mutually exclusive targets 
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
     const id = try operations.fixtureForTest(&gs, false);
-    try personage_rules.seedPersonages(&gs);
+    try personage_rules.seedForTest(&gs);
     _ = try gs.addUnit("SCP-1N");
     try gs.bay_jobs.append(gs.allocator(), .{ .hq = gs.seat(), .kind = .artillery_depot_repair, .artillery = id, .duration_days = 2, .queued_day = 0 });
     const store = try Store.open(":memory:");
@@ -10380,7 +10382,7 @@ test "attached artillery accident replacement preserves complete assignment thro
     var gs = GameState.init(std.testing.allocator, .{});
     defer gs.deinit();
     const id = try operations.fixtureForTest(&gs, true);
-    try personage_rules.seedPersonages(&gs);
+    try personage_rules.seedForTest(&gs);
     const original = gs.artillery_formations.get(id).?;
     const replacement = try gs.hirePerson("Spare", "Mechanic", .tech_mechanic);
     gs.person(replacement).?.weekly_hours = 100;
@@ -10403,7 +10405,7 @@ test "absent pool mechanic and captive operating crew retain valid saved assignm
         var gs = GameState.init(std.testing.allocator, .{});
         defer gs.deinit();
         const id = try operations.fixtureForTest(&gs, true);
-        try personage_rules.seedPersonages(&gs);
+        try personage_rules.seedForTest(&gs);
         const f = gs.artillery_formations.get(id).?;
         if (pooled) {
             _ = try artillery.detach(&gs, id);
@@ -10438,7 +10440,7 @@ test "operational row write failures preserve first-save and overwrite identity 
         var gs = GameState.init(std.testing.allocator, .{});
         defer gs.deinit();
         const id = try operations.fixtureForTest(&gs, true);
-        try personage_rules.seedPersonages(&gs);
+        try personage_rules.seedForTest(&gs);
         gs.artillery_formations.getPtr(id).?.slots[@intFromEnum(rules.Slot.long_tom_bin_1)].rounds = 3;
         const store = try Store.open(":memory:");
         defer store.close();
@@ -10480,7 +10482,7 @@ test "queued and started artillery depot work survives normal departure station 
         var gs = GameState.init(std.testing.allocator, .{ .seed = 625 });
         defer gs.deinit();
         const id = try operations.fixtureForTest(&gs, true);
-        try personage_rules.seedPersonages(&gs);
+        try personage_rules.seedForTest(&gs);
         const f = gs.artillery_formations.getPtr(id).?;
         const company = f.placement.company;
         const home = gs.seat();
@@ -10717,7 +10719,7 @@ fn battleInProgressForTest(gs: *GameState) !types.ContractId {
     const battle = @import("../sim/battle.zig");
     const commands = @import("../sim/commands.zig");
     const id = try battle.dueEngagementForTest(gs, true, 30);
-    try personage_rules.seedPersonages(gs);
+    try personage_rules.seedForTest(gs);
     for ([_]battle_phase_mod.Order{ .engage, .{ .roe = .cautious }, .press_on }) |order| {
         _ = try commands.execute(gs, .{ .battle_order = .{ .contract = id, .order = order } });
     }
@@ -10738,7 +10740,7 @@ test "a battle saved mid-fight loads, finishes and plays on exactly as one never
         var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
         defer gs.deinit();
         const id = try @import("../sim/battle.zig").dueEngagementForTest(&gs, true, 30);
-        try personage_rules.seedPersonages(&gs);
+        try personage_rules.seedForTest(&gs);
         const given = [_]battle_phase_mod.Order{ .engage, .{ .roe = .cautious }, .press_on };
         for (given[0..orders_given]) |order| _ = try @import("../sim/commands.zig").execute(&gs, .{ .battle_order = .{ .contract = id, .order = order } });
         {
@@ -10914,7 +10916,7 @@ test "a due engagement not yet engaged, and a finished one, load with no battle 
     var gs = GameState.init(std.testing.allocator, .{ .seed = 3007 });
     defer gs.deinit();
     const id = try @import("../sim/battle.zig").dueEngagementForTest(&gs, true, 30);
-    try personage_rules.seedPersonages(&gs);
+    try personage_rules.seedForTest(&gs);
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
@@ -10992,7 +10994,7 @@ test "a battle report whose phase rows are removed refuses to load; a concession
         var one_step = GameState.init(std.testing.allocator, .{ .seed = 3007 });
         defer one_step.deinit();
         const id = try @import("../sim/battle.zig").dueEngagementForTest(&one_step, forfeited, 100);
-        try personage_rules.seedPersonages(&one_step);
+        try personage_rules.seedForTest(&one_step);
         if (forfeited) {
             one_step.faction_rosters.getPtr("DC").?.clearRetainingCapacity();
         } else {
@@ -11059,7 +11061,7 @@ test "a battle in progress whose stored pauses its replay does not reach refuses
     var locked = GameState.init(std.testing.allocator, .{ .seed = 3007 });
     defer locked.deinit();
     const lid = try @import("../sim/battle.zig").dueEngagementForTest(&locked, true, 30);
-    try personage_rules.seedPersonages(&locked);
+    try personage_rules.seedForTest(&locked);
     for ([_]battle_phase_mod.Order{ .engage, .{ .roe = .cautious } }) |order| {
         _ = try @import("../sim/commands.zig").execute(&locked, .{ .battle_order = .{ .contract = lid, .order = order } });
     }
@@ -11100,7 +11102,7 @@ const lever_course_for_test = [_]battle_phase_mod.Order{ .engage, .commit_reserv
 /// with a reserve lance, has the first `n` of `lever_course_for_test` given.
 fn leverBattleInProgressForTest(gs: *GameState, n: usize) !types.ContractId {
     const id = try @import("../sim/battle.zig").leverEngagementForTest(gs, 30, 4);
-    try personage_rules.seedPersonages(gs);
+    try personage_rules.seedForTest(gs);
     for (lever_course_for_test[0..n]) |order| {
         _ = try @import("../sim/commands.zig").execute(gs, .{ .battle_order = .{ .contract = id, .order = order } });
     }
@@ -11244,7 +11246,7 @@ test "a battle report's levers round trip, and missing, malformed or forged leve
     var conceded = GameState.init(std.testing.allocator, .{ .seed = 3007 });
     defer conceded.deinit();
     const cid = try @import("../sim/battle.zig").dueEngagementForTest(&conceded, false, 100);
-    try personage_rules.seedPersonages(&conceded);
+    try personage_rules.seedForTest(&conceded);
     for (conceded.units.values()) |*u| u.status = .destroyed;
     _ = try @import("../sim/commands.zig").execute(&conceded, .{ .battle_order = .{ .contract = cid, .order = .engage } });
     try std.testing.expect(conceded.battle_reports.kept.items[conceded.battle_reports.kept.items.len - 1].conceded);
@@ -11261,7 +11263,7 @@ test "a battle report's levers round trip, and missing, malformed or forged leve
 fn situationCampaignForTest(gs: *GameState) !*contract_mod.Contract {
     const situations = @import("../sim/situations.zig");
     const c = try situations.garrisonContractForTest(gs);
-    try personage_rules.seedPersonages(gs);
+    try personage_rules.seedForTest(gs);
     try std.testing.expect(try situations.queueDue(gs, c));
     try contract_events.resolveChoice(gs, gs.event_queue.pending.items[0].id, 0);
     c.arc_beat = 1;
@@ -11624,20 +11626,22 @@ test "a tampered personage row, seat, counter or politics stream refuses to load
     const spare = gs.next_personage_id; // an id an added row may take
     var buf: [512:0]u8 = undefined;
     const Case = struct { []const u8, []const u8 };
+    // A case that adds or deletes a row keeps the ordinals 0, 1, 2, …, so its
+    // refusal is the named defect's, not the ordinal check's.
     const cases = [_]Case{
         .{ "unknown role", "UPDATE personage SET role = 'heir' WHERE id = $R" },
         .{ "unknown faction", "UPDATE personage SET faction_key = 'XX' WHERE id = $L" },
         .{ "unknown planet", "UPDATE personage SET seat_planet_key = 'nowhere' WHERE id = $R" },
         .{ "unknown provenance", "UPDATE personage SET provenance = 'canon' WHERE id = $R" },
         .{ "unknown generator version", "UPDATE personage SET generator_version = 2 WHERE id = $R" },
-        .{ "ruler on a world that does not hire", "INSERT INTO personage SELECT cid, 999, $S, role, first_name, 'Extra', 'CS', 'terra', motives, ambition, provenance, generator_version FROM personage WHERE id = $R; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+        .{ "ruler on a world that does not hire", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', 'CS', 'terra', motives, ambition, provenance, generator_version FROM personage WHERE id = $R; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
         .{ "ruler of another faction than its world's", "UPDATE personage SET faction_key = CASE WHEN faction_key = 'DC' THEN 'LC' ELSE 'DC' END WHERE id = $R" },
-        .{ "two rulers on one world", "INSERT INTO personage SELECT cid, 999, $S, role, first_name, 'Extra', faction_key, seat_planet_key, motives, ambition, provenance, generator_version FROM personage WHERE id = $R; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
-        .{ "a hiring world without a ruler", "DELETE FROM personage WHERE id = $R" },
+        .{ "two rulers on one world", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', faction_key, seat_planet_key, motives, ambition, provenance, generator_version FROM personage WHERE id = $R; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+        .{ "a hiring world without a ruler", "DELETE FROM personage WHERE id = $R; UPDATE personage SET ord = -1 - ord; UPDATE personage SET ord = (SELECT COUNT(*) FROM personage AS q WHERE q.cid = personage.cid AND q.id < personage.id)" },
         .{ "a leader off its capital", "UPDATE personage SET seat_planet_key = 'skye' WHERE id = $L" },
-        .{ "two leaders for one faction", "INSERT INTO personage SELECT cid, 999, $S, role, first_name, 'Extra', faction_key, seat_planet_key, motives, ambition, provenance, generator_version FROM personage WHERE id = $L; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
-        .{ "a leader for the catch-all faction", "INSERT INTO personage SELECT cid, 999, $S, role, first_name, 'Extra', 'PER', 'galatea', motives, ambition, provenance, generator_version FROM personage WHERE id = $L; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
-        .{ "a leader-bearing faction without a leader", "DELETE FROM personage WHERE id = $L" },
+        .{ "two leaders for one faction", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', faction_key, seat_planet_key, motives, ambition, provenance, generator_version FROM personage WHERE id = $L; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+        .{ "a leader for the catch-all faction", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', 'PER', 'galatea', motives, ambition, provenance, generator_version FROM personage WHERE id = $L; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+        .{ "a leader-bearing faction without a leader", "DELETE FROM personage WHERE id = $L; UPDATE personage SET ord = -1 - ord; UPDATE personage SET ord = (SELECT COUNT(*) FROM personage AS q WHERE q.cid = personage.cid AND q.id < personage.id)" },
         .{ "personages without a commander", "DELETE FROM commander" },
         .{ "one motive", "UPDATE personage SET motives = 1 WHERE id = $R" },
         .{ "four motives", "UPDATE personage SET motives = 15 WHERE id = $R" },
@@ -11650,6 +11654,9 @@ test "a tampered personage row, seat, counter or politics stream refuses to load
         .{ "an id at the counter", "UPDATE meta SET value = $C WHERE key = 'next_personage_id'" },
         .{ "a counter of 0", "UPDATE meta SET value = 0 WHERE key = 'next_personage_id'" },
         .{ "a missing counter", "DELETE FROM meta WHERE key = 'next_personage_id'" },
+        .{ "a negative ordinal", "UPDATE personage SET ord = -1 WHERE id = $R" },
+        .{ "a fractional ordinal", "UPDATE personage SET ord = 0.5 WHERE id = $R" },
+        .{ "an ordinal gap", "UPDATE personage SET ord = ord + 1 WHERE id = $C" },
         .{ "a missing politics stream", "DELETE FROM rng_stream WHERE stream = 'politics'" },
     };
     for (cases) |case| {
@@ -11690,6 +11697,8 @@ test "the personage schema refuses out-of-range rows without the loader" {
         "UPDATE personage SET first_name = '' WHERE id = 1",
         "UPDATE personage SET id = 0 WHERE id = 1",
         "UPDATE personage SET id = 2 WHERE id = 1",
+        "UPDATE personage SET ord = -1 WHERE id = 1",
+        "UPDATE personage SET ord = 0.5 WHERE id = 1",
     }) |tamper| try std.testing.expectError(error.ConstraintViolation, store.db.exec(tamper));
     try expectCurrentRoundTripForTest(store, &gs);
 }

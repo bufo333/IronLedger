@@ -38,7 +38,7 @@ pub const Stream = enum(u8) {
             .actors => 0xC2B2AE3D27D4EB4F, // P4i actor identity generation
             .rivals => 0xA3F84D2E6B1C9057, // P4i rival company identity generation
             .rosters => 0xBF58476D1CE4E5B9, // P3e.4 faction hull-pool seeding (save-meaning)
-            .politics => 0x94D049BB133111EB, // P5d.1a personage generation
+            .politics => 0x94D049BB133111EB, // personage generation (save-meaning)
         };
     }
 };

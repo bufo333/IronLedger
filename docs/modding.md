@@ -31,7 +31,10 @@ every 2d6 threshold reachable and in order, the rank ladder one row per
 rank in order, skull bands descending to a catch-all, and every catalogue
 mek's own loadout legal under the MekLab rules. A table a generator draws
 from (the name pools, the rank ladder, the skull bands) that is empty or
-the wrong length fails the compile with the file's name. Every build's
+the wrong length fails the compile with the file's name. So does a first
+or last name pool with an empty or repeated entry, or first and last
+pools that together make fewer full names than the world has
+personages. Every build's
 install waits on the checks, a mod's or not.
 
 Files you leave out fall back to the stock ones in `data/`. The settings

@@ -285,8 +285,11 @@ cheap, copyable, and impossible to mix up.
   by `personage.titleText`, never stored. Unlike the contract-scoped
   **Actor**, a personage exists from campaign creation whether or not any
   contract names it, and no game rule reads one yet. Seeding and the load
-  check are `sim/personages.zig` (`seedPersonages`, `validate`); `who` lists
-  them through `queries.personageRows`.
+  check are `sim/personages.zig` (`prepareSeeding`, `commitSeeding`,
+  `validate`): `create_commander` prepares the seeding before its first
+  mutation and commits it after its last fallible step, so a seeding
+  failure leaves the campaign unchanged. `who` lists them through
+  `queries.personageRows`.
 - **Actor** — a contract-introduced NPC (liaison, official, enemy commander,
   etc.) that persists across contracts. Each actor carries four relationship
   dimensions (trust, debt, respect, hostility; −100…100) and typed **flags**
@@ -1425,10 +1428,11 @@ and a return leg to a missing HQ.
 **Personages are saved** (schema 70): one `personage` row each (role, names,
 faction and seat keys, the motive set as a bitmask with bit = the motive's
 declared value, ambition, provenance and generator version) and the meta
-counter `next_personage_id`. SQL checks bound the role, motive count (two or
-three), ambition (0–100), provenance and generator version; the loader
-(`personages.validate`) refuses an unknown key, seat, enum or motive bit, a
-ruler on a world that does not hire or of another faction than its world's,
+counter `next_personage_id`. SQL checks bound the ordinal, role, motive
+count (two or three), ambition (0–100), provenance and generator version;
+the loader refuses an ordinal that is not an integer equal to the row's
+position (0, 1, 2, … as saved), and `personages.validate` refuses an
+unknown key, seat, enum or motive bit, a ruler on a world that does not hire or of another faction than its world's,
 two rulers on one world, a leader for a faction that gets none, off its
 capital or doubled, a campaign with a commander missing any ruler or leader,
 personages in a campaign without one, and an id at or above the counter.

@@ -16,8 +16,30 @@ const names = @import("person_gen.zig").names;
 pub const version: u16 = 1;
 
 /// Distinct full names the tables can make: every first name with every
-/// last name.
+/// last name. Distinct indices are distinct names because the build
+/// refuses a pool with an empty or repeated entry (below).
 pub const name_space: usize = names.first.len * names.last.len;
+
+/// Why `pool` cannot name personages, or null: every entry must be nonempty
+/// (a saved name is never empty) and no entry may repeat (rule 58).
+pub fn poolProblem(pool: []const []const u8) ?[]const u8 {
+    for (pool, 0..) |entry, i| {
+        if (entry.len == 0) return "has an empty entry";
+        for (pool[0..i]) |earlier| {
+            if (std.mem.eql(u8, earlier, entry)) return "repeats an entry";
+        }
+    }
+    return null;
+}
+
+// Every build checks the pools the generator names personages from, a
+// mod's names.zon too.
+comptime {
+    @setEvalBranchQuota(1_000_000);
+    for (.{ .{ "first", names.first }, .{ "last", names.last } }) |pool| {
+        if (poolProblem(pool[1])) |problem| @compileError("data/tables/names.zon: `" ++ pool[0] ++ "` " ++ problem ++ "; every personage needs a distinct, nonempty name");
+    }
+}
 
 /// Full names already drawn, as ascending indices into the first × last
 /// space, in a buffer the caller owns. Drawing without replacement keeps
@@ -100,6 +122,14 @@ test "a full draw of the name space hands out every name exactly once" {
     }
     for (seen) |s| try std.testing.expect(s);
     for (buf[1..], buf[0 .. buf.len - 1]) |later, earlier| try std.testing.expect(later > earlier);
+}
+
+test "a name pool with an empty or repeated entry cannot name personages" {
+    try std.testing.expectEqual(@as(?[]const u8, null), poolProblem(names.first));
+    try std.testing.expectEqual(@as(?[]const u8, null), poolProblem(names.last));
+    try std.testing.expectEqual(@as(?[]const u8, null), poolProblem(&.{ "Ann", "Bo" }));
+    try std.testing.expectEqualStrings("has an empty entry", poolProblem(&.{ "Ann", "" }).?);
+    try std.testing.expectEqualStrings("repeats an entry", poolProblem(&.{ "Ann", "Bo", "Ann" }).?);
 }
 
 test "motives and ambition stay inside the tuned bounds" {
