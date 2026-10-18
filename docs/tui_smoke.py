@@ -177,6 +177,10 @@ assert "CONTRACT BOARD" in plain() and "HISTORY" in plain(), plain()[-3000:]
 send("b", 0.8)                 # bargain: negotiation term picker on the offer under the cursor
 assert "NEGOTIATE" in plain()[-30000:] and "salvage" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)
+send("w", 0.8)                 # who's who for the offer under the cursor (P5d.1b)
+p = plain()[-30000:]
+assert "WHO'S WHO" in p and "Governor of" in p and "[procedural]" in p, plain()[-3000:]
+send("\x1b", 0.6)
 send("\t"); send("\t", 0.6)    # focus the history pane; read-only
 send("j"); send("c", 0.6)
 assert "no closed contracts yet" in plain()[-30000:], plain()[-2000:]

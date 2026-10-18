@@ -548,7 +548,7 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
             \\          shop | supplies | demand | bays | projects | staff | lab <unit> | readiness | rating | summary | manning co:<id>
             \\          artillery [<formation-id>]   (artillery list or formation detail)
             \\          mech <unit id>   (hull lifecycle: combat history, maintenance log, ownership chain)
-            \\          who [<faction>|<world>]   (leaders; a faction's leader and governors; a world's governor)
+            \\          who [<faction>|<world>|<contract id>]   (leaders; a faction's leader and governors; a world's governor; a contract's governor and leaders)
             \\          briefing <contract id>   (battle orders before contact: `confirm`, `rush`, `roe`, `role`)
             \\turn:     day [n] [force]   (the checklist gates it)
             \\commands: `help` lists every verb with its usage — the same verbs the TUI's `:` line takes
@@ -683,17 +683,33 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                 },
             }
         } else if (std.mem.eql(u8, verb, "who")) {
-            const filter = q.parseWhoFilter(tokens.next(), tokens.next()) catch |err| {
-                std.debug.print("{s} — usage: who [<faction-key>|<planet-key>]\n", .{game.cli.errorText(err)});
+            const request = q.parseWho(tokens.next(), tokens.next()) catch |err| {
+                std.debug.print("{s} — usage: who [<faction-key>|<planet-key>|<contract-id>]\n", .{game.cli.errorText(err)});
                 continue;
             };
-            const rows = q.personageRows(al, gs, filter) catch |err| {
-                showError(err);
-                continue;
+            const texts: []const []const u8 = switch (request) {
+                .personages => |filter| blk: {
+                    const rows = q.personageRows(al, gs, filter) catch |err| {
+                        showError(err);
+                        continue;
+                    };
+                    if (rows.len == 0) std.debug.print("no personage holds a seat there.\n", .{});
+                    const out = try al.alloc([]const u8, rows.len);
+                    for (rows, out) |r, *t| t.* = r.text;
+                    break :blk out;
+                },
+                .contract => |cid| blk: {
+                    const rows = q.contractWhosWho(al, gs, cid) catch |err| {
+                        showError(err);
+                        continue;
+                    };
+                    const out = try al.alloc([]const u8, rows.len);
+                    for (rows, out) |r, *t| t.* = r.text;
+                    break :blk out;
+                },
             };
-            if (rows.len == 0) std.debug.print("no personage holds a seat there.\n", .{});
-            for (rows) |r| {
-                const text = q.stripMarks(al, r.text) catch |err| {
+            for (texts) |raw| {
+                const text = q.stripMarks(al, raw) catch |err| {
                     showError(err);
                     continue;
                 };

@@ -163,6 +163,9 @@ const Modal = union(enum) {
     leaderboard,
     /// Detail sheet for one NPC merc company, entered from the leaderboard.
     leaderboard_detail: types.MercCompanyId,
+    /// Read-only who's who for one contract or offer (F4 `w`): its world's
+    /// governor, its employer's and its enemy's leaders (P5d.1b).
+    whos_who: types.ContractId,
     /// Artillery formation detail (narrow terminals: no side pane).
     arty_detail: types.ArtilleryFormationId,
     /// The stop screen (docs/tui.md, Modals: Stop screen): why an advance-until-stop stopped,
@@ -1511,7 +1514,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_arty_crew, .pick_arty_tech, .pick_arty_unassign, .pick_arty_send, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail, .stop_report => try self.drawList(al),
+            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_arty_crew, .pick_arty_tech, .pick_arty_unassign, .pick_arty_send, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .whos_who, .arty_detail, .stop_report => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -3621,6 +3624,24 @@ pub const App = struct {
                     .max_h = full_h,
                 };
             },
+            .whos_who => |cid| {
+                const w = layout.modal.log_entry_w;
+                var rows: std.ArrayListUnmanaged([]const u8) = .empty;
+                if (q.contractWhosWho(al, self.state(), cid)) |seats| {
+                    for (seats) |seat| try rows.appendSlice(al, try screen_mod.wrap(al, seat.text, self.modalTextWidth(w)));
+                } else |err| switch (err) {
+                    error.UnknownContract => try rows.append(al, "{d}that contract is no longer on record{/}"),
+                    else => return err,
+                }
+                return .{
+                    .title = try listTitle(al, try std.fmt.allocPrint(al, "WHO'S WHO · CONTRACT [{d}]", .{@intFromEnum(cid)}), null, "close", false),
+                    .rows = rows.items,
+                    .scroll = true,
+                    .read_only = true,
+                    .w = w,
+                    .max_h = full_h,
+                };
+            },
             .log_entry => |idx| {
                 const view = try q.desk(al, self.state(), q.desk_log_rows);
                 const w = layout.modal.log_entry_w;
@@ -4937,7 +4958,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_arty_crew, .pick_arty_tech, .pick_arty_unassign, .pick_arty_send, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .arty_detail, .stop_report => try self.listKey(key),
+            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_arty_crew, .pick_arty_tech, .pick_arty_unassign, .pick_arty_send, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .whos_who, .arty_detail, .stop_report => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {
@@ -6217,4 +6238,41 @@ test "a decision taller than its modal scrolls under a fixed hint, and its keys 
     try pressForTest(c, .{ .char = '3' });
     try std.testing.expect(c.app.modal == .none);
     try std.testing.expect(!try Pending.has(c, id));
+}
+
+test "the who's who sheet reads its contract each frame and says when the contract is gone" {
+    // Rule 40: the modal holds only the contract id. P5d.1b.
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    const gs = c.app.state();
+    // An active contract on a world with a governor.
+    const cid: types.ContractId = @enumFromInt(99);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "skye",
+        .terms = .{ .length_months = 6, .base_pay_month = 100_000 },
+        .status = .active,
+    });
+    for ([_][2]u16{ .{ 200, 50 }, .{ 80, 24 } }) |size| {
+        try c.app.screen.resize(size[0], size[1]);
+        c.app.openModal(.{ .whos_who = cid });
+        try c.app.draw();
+        const al = c.app.a();
+        const view = try c.app.listView(al);
+        try std.testing.expect(std.mem.indexOf(u8, view.title, "WHO'S WHO · CONTRACT [") != null);
+        const text = try std.mem.join(al, "\n", view.rows);
+        try std.testing.expect(std.mem.indexOf(u8, text, "Governor of Skye") != null);
+        try std.testing.expect(std.mem.indexOf(u8, text, "Leader, Draconis Combine") != null);
+        // The provenance label survives the wrap at either width.
+        try std.testing.expect(std.mem.indexOf(u8, text, "[procedural]") != null);
+    }
+    // The contract leaves the record while the sheet is open: one dim line, no error.
+    try std.testing.expect(gs.contracts.swapRemove(cid));
+    try c.app.draw();
+    const gone = try c.app.listView(c.app.a());
+    try std.testing.expectEqual(@as(usize, 1), gone.rows.len);
+    try std.testing.expect(std.mem.indexOf(u8, gone.rows[0], "no longer on record") != null);
 }

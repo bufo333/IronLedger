@@ -100,8 +100,10 @@ A package has one primary invariant or subsystem outcome.
   `PER` (P1), drawn on a new `.politics` stream and persisted at schema v70,
   with a load that refuses a dangling or missing seat; REPL `who` lists them
   with their provenance label (D6, D7).
-- [ ] P5d.1b who's-who surface: TUI who's-who modal and query rows with the
-  provenance label. Needs P5d.1a.
+- [x] P5d.1b who's-who surface: `w` on any F4 offer, active or closed contract
+  opens a read-only who's-who sheet (world governor, employer leader, enemy
+  leader, each with its provenance label; a dim line for an empty seat), and
+  REPL `who <contract id>` prints the same rows.
 - [ ] P5d.1c personage relations: kin, liege, rival, ally and grudge relations
   generated and shown. Needs P5d.1a.
 - [ ] P5d.1d canon and authored personages: `personages.zon` with provenance,

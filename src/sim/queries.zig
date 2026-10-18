@@ -11105,15 +11105,34 @@ pub const WhoFilter = union(enum) {
     planet: []const u8,
 };
 
-/// `who [<faction-key>|<planet-key>]`: no key lists the leaders; a key
-/// names a faction, else a world. `BadArguments` for a key that names
-/// neither, or a second token.
-pub fn parseWhoFilter(key: ?[]const u8, extra: ?[]const u8) error{BadArguments}!WhoFilter {
+/// What `who` shows: personages a filter selects (`personageRows`), or the
+/// seats behind one contract (`contractWhosWho`).
+pub const WhoRequest = union(enum) {
+    personages: WhoFilter,
+    contract: types.ContractId,
+};
+
+/// `who [<faction-key>|<planet-key>|<contract-id>]`: no key lists the
+/// leaders; an unsigned integer names a contract; a key names a faction,
+/// else a world. `BadArguments` for a key that names none of them, or a
+/// second token.
+pub fn parseWho(key: ?[]const u8, extra: ?[]const u8) error{BadArguments}!WhoRequest {
     if (extra != null) return error.BadArguments;
-    const k = key orelse return .leaders;
-    if (@import("../domain/faction.zig").find(k)) |f| return .{ .faction = f.key };
-    if (planet_mod.find(k)) |p| return .{ .planet = p.key };
+    const k = key orelse return .{ .personages = .leaders };
+    if (std.fmt.parseInt(u32, k, 10)) |raw| return .{ .contract = @enumFromInt(raw) } else |_| {}
+    if (@import("../domain/faction.zig").find(k)) |f| return .{ .personages = .{ .faction = f.key } };
+    if (planet_mod.find(k)) |p| return .{ .personages = .{ .planet = p.key } };
     return error.BadArguments;
+}
+
+/// The one test of "this personage rules that world" (`.planet`, contracts).
+fn rulesWorld(p: *const personage_dom.Personage, planet_key: []const u8) bool {
+    return p.role == .planetary_ruler and std.mem.eql(u8, p.seat_planet_key, planet_key);
+}
+
+/// The one test of "this personage leads that faction" (`.leaders`, contracts).
+fn leadsFaction(p: *const personage_dom.Personage, faction_key: []const u8) bool {
+    return p.role == .faction_leader and std.mem.eql(u8, p.faction_key, faction_key);
 }
 
 /// One `who` row: the personage it shows, and its line — title, name,
@@ -11130,7 +11149,7 @@ pub fn personageRows(alloc: Alloc, gs: *GameState, filter: WhoFilter) ![]Persona
     var rows: std.ArrayListUnmanaged(PersonageRow) = .empty;
     switch (filter) {
         .leaders => for (@import("../domain/faction.zig").table) |f| {
-            for (gs.personages.values()) |*p| if (p.role == .faction_leader and std.mem.eql(u8, p.faction_key, f.key)) {
+            for (gs.personages.values()) |*p| if (leadsFaction(p, f.key)) {
                 try rows.append(alloc, try personageRow(alloc, p));
             };
         },
@@ -11141,11 +11160,71 @@ pub fn personageRows(alloc: Alloc, gs: *GameState, filter: WhoFilter) ![]Persona
                 };
             }
         },
-        .planet => |key| for (gs.personages.values()) |*p| if (p.role == .planetary_ruler and std.mem.eql(u8, p.seat_planet_key, key)) {
+        .planet => |key| for (gs.personages.values()) |*p| if (rulesWorld(p, key)) {
             try rows.append(alloc, try personageRow(alloc, p));
         },
     }
     return rows.toOwnedSlice(alloc);
+}
+
+/// Which seat behind a contract a `ContractWhoRow` shows.
+pub const ContractWhoPart = enum {
+    world,
+    employer,
+    enemy,
+
+    fn label(self: ContractWhoPart) []const u8 {
+        return switch (self) {
+            .world => "world   ",
+            .employer => "employer",
+            .enemy => "enemy   ",
+        };
+    }
+};
+
+/// One seat behind a contract: the personage holding it (null when the
+/// seat has none) and its line — the part's label, then the `who` row, or
+/// a dim line naming what is missing.
+pub const ContractWhoRow = struct {
+    part: ContractWhoPart,
+    id: ?types.PersonageId,
+    text: []const u8,
+};
+
+/// Who stands behind a contract (offer, active or closed; rules 29–32):
+/// its world's governor, its employer's leader and its enemy's leader, in
+/// that order. A seat the personage map does not fill reads as absent.
+/// Offers and contracts share one id space. `UnknownContract` when neither
+/// a contract nor a board offer has the id.
+pub fn contractWhosWho(alloc: Alloc, gs: *GameState, cid: types.ContractId) ![]ContractWhoRow {
+    const c: *const contract_mod.Contract = gs.contracts.getPtr(cid) orelse findOfferPtr(gs, cid) orelse return error.UnknownContract;
+    const faction = @import("../domain/faction.zig");
+    const rows = try alloc.alloc(ContractWhoRow, 3);
+    for (rows, [_]ContractWhoPart{ .world, .employer, .enemy }) |*row, part| {
+        const key = switch (part) {
+            .world => c.planet_key,
+            .employer => c.employer_key,
+            .enemy => c.enemy_key,
+        };
+        const holder: ?*const personage_dom.Personage = for (gs.personages.values()) |*p| {
+            if (if (part == .world) rulesWorld(p, key) else leadsFaction(p, key)) break p;
+        } else null;
+        if (holder) |p| {
+            const line = try personageRow(alloc, p);
+            row.* = .{ .part = part, .id = p.id, .text = try std.fmt.allocPrint(alloc, "{s}  {s}", .{ part.label(), line.text }) };
+        } else {
+            const name = if (part == .world)
+                (if (planet_mod.find(key)) |w| w.name else key)
+            else
+                (if (faction.find(key)) |f| f.name else key);
+            row.* = .{ .part = part, .id = null, .text = try std.fmt.allocPrint(alloc, "{s}  {{d}}{s} has no {s}{{/}}", .{
+                part.label(),
+                try table.plain(alloc, name),
+                if (part == .world) "governor" else "leader",
+            }) };
+        }
+    }
+    return rows;
 }
 
 fn personageRow(alloc: Alloc, p: *const personage_dom.Personage) !PersonageRow {
@@ -11178,7 +11257,7 @@ test "who lists the leaders in faction order, a faction's leader then its rulers
     const faction = @import("../domain/faction.zig");
 
     // Bare `who`: exactly the leaders, in factions.zon order.
-    const leaders = try personageRows(a, &gs, try parseWhoFilter(null, null));
+    const leaders = try personageRows(a, &gs, (try parseWho(null, null)).personages);
     var expected: usize = 0;
     for (faction.table) |*f| {
         if (!personage_dom.factionHasLeader(f)) continue;
@@ -11190,7 +11269,7 @@ test "who lists the leaders in faction order, a faction's leader then its rulers
     try std.testing.expectEqual(expected, leaders.len);
 
     // A faction: its leader first, then exactly its rulers.
-    const lc = try personageRows(a, &gs, try parseWhoFilter("LC", null));
+    const lc = try personageRows(a, &gs, (try parseWho("LC", null)).personages);
     try std.testing.expectEqual(personage_dom.Role.faction_leader, gs.personages.get(lc[0].id).?.role);
     var lc_worlds: usize = 0;
     for (planet_mod.catalog) |w| if (std.mem.eql(u8, w.faction, "LC")) {
@@ -11204,13 +11283,13 @@ test "who lists the leaders in faction order, a faction's leader then its rulers
     }
 
     // A world: its one ruler, whose line names the world.
-    const skye = try personageRows(a, &gs, try parseWhoFilter("skye", null));
+    const skye = try personageRows(a, &gs, (try parseWho("skye", null)).personages);
     try std.testing.expectEqual(@as(usize, 1), skye.len);
     try std.testing.expectEqualStrings("skye", gs.personages.get(skye[0].id).?.seat_planet_key);
     try std.testing.expect(std.mem.indexOf(u8, skye[0].text, "Governor of Skye") != null);
     // A world that does not hire and a faction with no leader list nobody.
-    try std.testing.expectEqual(@as(usize, 0), (try personageRows(a, &gs, try parseWhoFilter("terra", null))).len);
-    try std.testing.expectEqual(@as(usize, 0), (try personageRows(a, &gs, try parseWhoFilter("CS", null))).len);
+    try std.testing.expectEqual(@as(usize, 0), (try personageRows(a, &gs, (try parseWho("terra", null)).personages)).len);
+    try std.testing.expectEqual(@as(usize, 0), (try personageRows(a, &gs, (try parseWho("CS", null)).personages)).len);
 
     // Every row shows its provenance label and its personage's name.
     for ([_][]const PersonageRow{ leaders, lc, skye }) |rows| for (rows) |row| {
@@ -11220,9 +11299,74 @@ test "who lists the leaders in faction order, a faction's leader then its rulers
     };
 
     // Unknown keys and trailing tokens are refused.
-    try std.testing.expectError(error.BadArguments, parseWhoFilter("nosuchkey", null));
-    try std.testing.expectError(error.BadArguments, parseWhoFilter("LC", "skye"));
+    try std.testing.expectError(error.BadArguments, parseWho("nosuchkey", null));
+    try std.testing.expectError(error.BadArguments, parseWho("LC", "skye"));
     try std.testing.expectError(error.OutOfMemory, personageRows(std.testing.failing_allocator, &gs, .leaders));
+}
+
+test "who names a contract by its id, and nothing else by a number" {
+    try std.testing.expectEqual(WhoRequest{ .contract = @enumFromInt(9) }, try parseWho("9", null));
+    try std.testing.expectEqualStrings("LC", (try parseWho("LC", null)).personages.faction);
+    try std.testing.expectEqualStrings("skye", (try parseWho("skye", null)).personages.planet);
+    try std.testing.expectEqual(WhoFilter.leaders, (try parseWho(null, null)).personages);
+    try std.testing.expectError(error.BadArguments, parseWho("9", "skye"));
+    try std.testing.expectError(error.BadArguments, parseWho("-9", null));
+    try std.testing.expectError(error.BadArguments, parseWho("nosuchkey", null));
+}
+
+test "a contract's who's who is its world's governor, its employer's leader and its enemy's leader" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 70203 });
+    defer gs.deinit();
+    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const Expect = struct {
+        fn holder(g: *GameState, part: ContractWhoPart, key: []const u8) ?types.PersonageId {
+            for (g.personages.values()) |*p| switch (part) {
+                .world => if (p.role == .planetary_ruler and std.mem.eql(u8, p.seat_planet_key, key)) return p.id,
+                .employer, .enemy => if (p.role == .faction_leader and std.mem.eql(u8, p.faction_key, key)) return p.id,
+            };
+            return null;
+        }
+    };
+
+    // Every board offer: world, employer, enemy, each the seat's holder in
+    // the personage map; a present row is the `who` line, label included.
+    try std.testing.expect(gs.contract_offers.items.len > 0);
+    for (gs.contract_offers.items) |c| {
+        const rows = try contractWhosWho(a, &gs, c.id);
+        try std.testing.expectEqual(@as(usize, 3), rows.len);
+        for (rows, [_]ContractWhoPart{ .world, .employer, .enemy }, [_][]const u8{ c.planet_key, c.employer_key, c.enemy_key }) |row, part, key| {
+            try std.testing.expectEqual(part, row.part);
+            try std.testing.expectEqual(Expect.holder(&gs, part, key), row.id);
+            if (row.id) |pid| {
+                try std.testing.expect(std.mem.indexOf(u8, row.text, "[procedural]") != null);
+                try std.testing.expect(std.mem.indexOf(u8, row.text, gs.personages.get(pid).?.last_name) != null);
+            } else try std.testing.expect(std.mem.indexOf(u8, row.text, " has no ") != null);
+        }
+        if (std.mem.eql(u8, c.enemy_key, personage_dom.catch_all_faction_key)) try std.testing.expect(rows[2].id == null);
+    }
+
+    // A contract (not an offer) on a world with no ruler for a leaderless
+    // employer: both seats read as absent, and the enemy's leader still shows.
+    const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    var held = gs.contract_offers.items[0];
+    held.id = cid;
+    try gs.contracts.put(gs.allocator(), cid, held);
+    const c = gs.contracts.getPtr(cid).?;
+    c.planet_key = "terra";
+    c.employer_key = personage_dom.catch_all_faction_key;
+    c.enemy_key = "DC";
+    const absent = try contractWhosWho(a, &gs, cid);
+    try std.testing.expect(absent[0].id == null and absent[1].id == null);
+    try std.testing.expect(std.mem.indexOf(u8, absent[0].text, "Terra has no governor") != null);
+    try std.testing.expect(std.mem.indexOf(u8, absent[1].text, " has no leader") != null);
+    try std.testing.expectEqual(Expect.holder(&gs, .enemy, "DC").?, absent[2].id.?);
+
+    try std.testing.expectError(error.UnknownContract, contractWhosWho(a, &gs, @enumFromInt(99999)));
+    try std.testing.expectError(error.OutOfMemory, contractWhosWho(std.testing.failing_allocator, &gs, cid));
 }
 
 test "a personage name is escaped in its who row" {

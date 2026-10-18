@@ -109,7 +109,7 @@ pub fn move(self: *App, delta: i32) anyerror!void {
     if (self.focus == 0) self.moveCursor(0, delta, view.board.len) else if (self.focus == 1) self.moveCursor(1, delta, view.active.len) else self.moveCursor(2, delta, (try q.contractHistory(al, g)).len);
 }
 
-const Action = enum { prev_hq, next_hq, accept, bargain, active_log, history_log, complete, recall, ops_board, task_assign, ops_report };
+const Action = enum { prev_hq, next_hq, accept, bargain, active_log, history_log, complete, recall, ops_board, task_assign, ops_report, whos_who };
 
 pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('['), .action = .prev_hq, .label = "other HQ", .group = .navigate, .shown = "[ ]", .title = 0, .help = "previous / next HQ's board" },
@@ -123,6 +123,7 @@ pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = app.keys.Match.char('g'), .action = .ops_board, .label = "operations", .group = .act, .pane = 1, .help = "open the arc operations board for the active contract (Enter opens the intent picker, then commits; r sets tempo posture; i opens intervention picker for committed combat ops; x declines); G opens the read-only operation report" },
     .{ .match = app.keys.Match.char('t'), .action = .task_assign, .label = "lance tasks", .group = .act, .pane = 1, .help = "assign lance tasks for the committed combat operation (P4e)" },
     .{ .match = app.keys.Match.char('G'), .action = .ops_report, .label = "op report", .group = .act, .pane = 1, .help = "open the operation report for the active contract (history, decision costs, what each operation changed; read-only)" },
+    .{ .match = app.keys.Match.char('w'), .action = .whos_who, .label = "who's who", .group = .act, .help = "who's who for the contract under the cursor: its world's governor, its employer's and its enemy's leaders" },
 };
 pub const legend = app.keys.entries(Action, &bindings);
 
@@ -223,6 +224,23 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
             self.modal_cursor = 0;
             self.openModal(.{ .operation_report = sel.id });
         },
+        // The contract under the focused pane's cursor: an offer, an
+        // active contract or a closed one.
+        .whos_who => {
+            const id: types.ContractId = switch (self.focus) {
+                0 => if (view.board.len > 0) view.board[@min(self.cur(0).*, view.board.len - 1)].id else return true,
+                1 => if (view.active.len > 0) view.active[@min(self.cur(1).*, view.active.len - 1)].id else return true,
+                else => blk: {
+                    const history = try q.contractHistory(al, g);
+                    break :blk if (history.len > 0) history[@min(self.cur(2).*, history.len - 1)].id else return true;
+                },
+            };
+            if (id == .none) {
+                self.say(.dim, "no contract under the cursor", .{});
+                return true;
+            }
+            self.openModal(.{ .whos_who = id });
+        },
     }
     return true;
 }
@@ -267,4 +285,66 @@ test "T6: G on pane 1 with an active contract opens the operation report modal" 
     try app.pressForTest(c, .{ .char = 'G' });
     try std.testing.expect(c.app.modal == .operation_report);
     try std.testing.expectEqual(cid, c.app.modal.operation_report);
+}
+
+test "w opens the who's who for the offer, the active contract or the closed contract under the cursor" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    const gs = c.app.state();
+    try toTab(c, .contracts);
+
+    // The board: the offer under the cursor.
+    c.app.focus = 0;
+    const view = try q.contracts(c.app.a(), gs, @enumFromInt(try c.app.hqSelId(gs)));
+    try std.testing.expect(view.board.len > 0);
+    const offer = view.board[@min(c.app.cur(0).*, view.board.len - 1)].id;
+    try app.pressForTest(c, .{ .char = 'w' });
+    try std.testing.expect(c.app.modal == .whos_who);
+    try std.testing.expectEqual(offer, c.app.modal.whos_who);
+    try app.pressForTest(c, .escape);
+    try std.testing.expect(c.app.modal == .none);
+
+    // An active contract, injected as in the G test.
+    const cid: types.ContractId = @enumFromInt(99);
+    try gs.contracts.put(gs.allocator(), cid, .{
+        .id = cid,
+        .kind = .garrison_duty,
+        .employer_key = "LC",
+        .enemy_key = "DC",
+        .planet_key = "galatea",
+        .terms = .{ .length_months = 6, .base_pay_month = 100_000 },
+        .status = .active,
+    });
+    c.app.focus = 1;
+    try app.pressForTest(c, .{ .char = 'w' });
+    try std.testing.expect(c.app.modal == .whos_who);
+    try std.testing.expectEqual(cid, c.app.modal.whos_who);
+    try app.pressForTest(c, .escape);
+
+    // A closed contract in the history pane.
+    gs.contracts.getPtr(cid).?.status = .completed;
+    c.app.focus = 2;
+    try app.pressForTest(c, .{ .char = 'w' });
+    try std.testing.expect(c.app.modal == .whos_who);
+    try std.testing.expectEqual(cid, c.app.modal.whos_who);
+}
+
+test "w on an active posture row opens nothing" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    const gs = c.app.state();
+    // A company on a garrison contract is recalled: it is on its way home,
+    // the active pane's only row, and has no contract.
+    _ = try app.game.situations.raisedSituationForTest(gs);
+    const before = try q.contracts(c.app.a(), gs, @enumFromInt(try c.app.hqSelId(gs)));
+    try std.testing.expectEqual(@as(usize, 1), before.active.len);
+    try std.testing.expect(c.app.execResult(.{ .recall_company = before.active[0].company }) != null);
+    c.app.modal = .none; // the key must reach the screen, not a modal
+    try toTab(c, .contracts);
+    c.app.focus = 1;
+    const view = try q.contracts(c.app.a(), gs, @enumFromInt(try c.app.hqSelId(gs)));
+    try std.testing.expectEqual(@as(usize, 1), view.active.len);
+    try std.testing.expectEqual(types.ContractId.none, view.active[0].id);
+    try app.pressForTest(c, .{ .char = 'w' });
+    try std.testing.expect(c.app.modal == .none);
 }

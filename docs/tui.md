@@ -151,7 +151,7 @@ no room.
 | F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs · Reports (Campaign summary · Readiness · Battles · Merc companies leaderboard — Enter drills into a per-company detail sheet) |
 | F2 | Map | Star map · World |
 | F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool · Artillery panel (last `]` view) |
-| F4 | Contracts | Board · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log |
+| F4 | Contracts | Board · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log · `w` who's who (the contract's world governor, employer and enemy leaders) |
 | F5 | Ledger | Treasuries · P&L · Ledger |
 | F6 | Supply | Sites · Demand · Order form · Shop |
 | F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall |
@@ -252,6 +252,7 @@ filters to the active context (see the Keys description above).
 | `g` | active | open the arc operations board for the active contract (Enter opens the intent picker, then commits; r sets tempo posture; i opens intervention picker for committed combat ops; x declines); G opens the read-only operation report |
 | `t` | active | assign lance tasks for the committed combat operation (P4e) |
 | `G` | active | open the operation report for the active contract (history, decision costs, what each operation changed; read-only) |
+| `w` | any | who's who for the contract under the cursor: its world's governor, its employer's and its enemy's leaders |
 
 ### F5 Ledger
 
@@ -814,6 +815,10 @@ and the TUI:
   (`ListingRow`) carry a typed `BoardItem`: a `.listing` (Enter sends
   `buy_listing`) or, on an HQ board only and last, that HQ's available
   `.artillery_offer` (Enter sends `buy_artillery` for the board's HQ)
+- `personageRows(filter)` and `contractWhosWho(id)` (who's-who rows, each
+  ending in its provenance label: the REPL `who` view, and the F4 `w` sheet
+  for an offer, active or closed contract — world governor, employer
+  leader, enemy leader, with a dim line for a seat no personage holds)
 
 Every query is pure and allocator-parameterized so the TUI can rebuild its
 view model each frame from an arena.

@@ -459,10 +459,17 @@ for every kind.
   Contracts detail and the conflict view in the TUI) shows:
   - title, seat, liege, kin, motives and backstory;
   - provenance label (`canon — sarna.net/wiki/…` / `project character` /
-    `generated`);
+    `procedural`, the label P5d.1a landed for generated rows);
   - standing with you;
   - conflicts instigated or targeted;
   - for a merc commander, the company's location and commitment.
+
+  P5d.1b landed the Contracts entry point: `w` on any F4 offer, active or
+  closed contract opens a read-only sheet of the contract's world governor,
+  employer leader and enemy leader, each the `who` row with its provenance
+  label, and REPL `who <contract id>` prints the same rows. The conflict-view
+  entry comes with the conflict view; liege, kin, backstory, standing,
+  conflicts and the merc commander come with the increments that create them.
 - **Conflicts list.** REPL `conflicts` and a TUI pane list open conflicts in
   your rings, with sides, the timeline, known hires and the player's position.
 - **Log.** Log lines for:

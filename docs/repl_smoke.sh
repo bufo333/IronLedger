@@ -71,6 +71,8 @@ printf '%s\n' \
   'shiparty 1' \
   'sellarty 1' \
   'candidates 9' \
+  'who 9' \
+  'who 99999' \
   'accept 9 1' \
   'day 3 force' \
   'inbox' \
@@ -260,4 +262,9 @@ check 'Governor of Tharkad'
 check 'Governor of Skye'
 check '\[procedural\]'
 check 'those arguments do not fit the verb — usage: who'
+# P5d.1b: `who <contract id>` names the governor of the offer's world and its
+# employer's and enemy's leaders; an id no contract has is refused.
+check 'world  *#[0-9]*  Governor of'
+check 'employer  #[0-9]*  Leader, '
+check 'could not show that: no contract has that id'
 echo "REPL SMOKE OK"

@@ -289,7 +289,9 @@ cheap, copyable, and impossible to mix up.
   `validate`): `create_commander` prepares the seeding before its first
   mutation and commits it after its last fallible step, so a seeding
   failure leaves the campaign unchanged. `who` lists them through
-  `queries.personageRows`.
+  `queries.personageRows`; `who <contract id>` and the F4 `w` who's-who
+  sheet read `queries.contractWhosWho` (the contract's world governor,
+  employer leader and enemy leader, a dim line for an empty seat).
 - **Actor** — a contract-introduced NPC (liaison, official, enemy commander,
   etc.) that persists across contracts. Each actor carries four relationship
   dimensions (trust, debt, respect, hostility; −100…100) and typed **flags**
