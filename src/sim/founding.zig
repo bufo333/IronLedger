@@ -19,6 +19,7 @@ const commands = @import("commands.zig");
 const artillery = @import("artillery.zig");
 const roster_seed = @import("roster_seed.zig");
 const personages = @import("personages.zig");
+const campaign_backup = @import("campaign_backup.zig");
 
 pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld, UnknownSite, ArtilleryIdExhausted, HqIdExhausted, CorruptSave } || std.mem.Allocator.Error;
 
@@ -261,9 +262,24 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
     // personages (docs/p5d-conflict-world-design.md §B), seated and
     // reserved before the first mutation so a seeding failure leaves the
     // campaign unchanged (rules 11–12); committed after the last fallible
-    // step below.
+    // step in `foundCampaign`.
     const seeding = try personages.prepareSeeding(gs, c.start_year);
     defer seeding.deinit(gs);
+    // The boards and rosters cannot be prepared before the commander and HQ
+    // exist, so a failure after `createCommanderAt` commits restores this
+    // backup (rule 11's rollback fallback).
+    var backup = try campaign_backup.take(gs);
+    foundCampaign(gs, c, reserved_logo, &seeding) catch |err| {
+        campaign_backup.restore(gs, backup);
+        return err;
+    };
+    campaign_backup.discard(&backup);
+    return .{};
+}
+
+/// The founding steps of `execCreateCommander` from the commander's
+/// creation on; on error the caller restores its backup.
+fn foundCampaign(gs: *GameState, c: @FieldType(Command, "create_commander"), reserved_logo: []const u8, seeding: *const personages.Seeding) Error!void {
     _ = try createCommanderAt(gs, c.name, c.origin, c.profession, c.start_year);
     // Until renamed, the outfit carries the commander's name — it
     // reads far better in the campaign registry.
@@ -282,8 +298,7 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
     try roster_seed.seedMercCompanies(gs);
     // Seed the Periphery/pirates (PER) salvage pool (P3e.5b-1, §8.C).
     try roster_seed.seedPirateRoster(gs);
-    personages.commitSeeding(gs, &seeding);
-    return .{};
+    personages.commitSeeding(gs, seeding);
 }
 
 test "foundHq produces an HQ with exactly the facilities from prepareHq" {
@@ -383,6 +398,30 @@ test "a failed createCommander leaves state and RNG unchanged" {
 
     try std.testing.expectError(error.OutOfMemory, createCommander(&gs, "T", .LC, .line_officer));
     try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "create_commander that fails at any allocation leaves the campaign unchanged" {
+    // Every allocation fails in turn, including those after the commander
+    // and HQ are on the books: the outfit name, the board refreshes and the
+    // roster seeding. The full digest covers the year, RNG, ID counters,
+    // funds, boards and personages.
+    const digest = @import("digest.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8105 });
+    defer gs.deinit();
+    const before = digest.stateHash(&gs);
+    const command: Command = .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster, .start_year = 3020 } };
+    const backing = gs.arena.child_allocator;
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(backing, .{ .fail_index = fail_index });
+        gs.arena.child_allocator = failing.allocator();
+        const result = commands.execute(&gs, command);
+        gs.arena.child_allocator = backing;
+        if (result) |_| break else |err| try std.testing.expectEqual(error.OutOfMemory, err);
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+    }
+    try std.testing.expect(fail_index > 0);
+    try std.testing.expectEqual(@as(u16, 3020), gs.clock.date.year);
 }
 
 test "the start year sets the calendar and gates the catalogue" {

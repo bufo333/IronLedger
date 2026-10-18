@@ -1,8 +1,9 @@
 //! A whole-campaign backup: an independent deep copy of a `GameState` that
 //! the multi-day advance commands restore when they fail, because no
-//! preparation can undo a day already committed (engineering contract rule
-//! 11's rollback fallback, ARCHITECTURE.md §4). No MekHQ counterpart is
-//! mapped (docs/mekhq-map.md).
+//! preparation can undo a day already committed, and that `create_commander`
+//! restores when a step after the commander's creation fails (engineering
+//! contract rule 11's rollback fallback, ARCHITECTURE.md §4). No MekHQ
+//! counterpart is mapped (docs/mekhq-map.md).
 //!
 //! The copy covers the type set the golden-master digest accepts
 //! (`digest.update`): scalars, enums, optionals, arrays, slices, lists,

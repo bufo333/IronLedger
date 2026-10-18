@@ -149,7 +149,10 @@ section explains the shape, the contract states the rules.
   retried tick applies each unit of work exactly once (rule 17). No
   preparation can undo a day already committed, so the multi-day advance
   commands take a whole-campaign backup (`campaign_backup`) at their start
-  and restore it on any error (rule 11's rollback fallback).
+  and restore it on any error (rule 11's rollback fallback). `create_commander`
+  does the same once its validation and preparation are done, because the
+  boards and rosters it opens cannot be prepared before the commander and HQ
+  exist.
 - **The campaign log is structured** (Stage 9A): every entry carries day,
   category, and company/HQ/contract tags, so any entity's complete history —
   battles, decisions and their outcomes, deliveries, construction, medical —
