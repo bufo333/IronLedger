@@ -2140,8 +2140,8 @@ pub const Store = struct {
     /// (matched on the column's full bytes), a value of the wrong type or
     /// out of range, a duplicate id, or an ordinal other than the row's
     /// position (`saveConflicts` writes 0, 1, 2, …) is `CorruptSave` (rule
-    /// 47). `politics.validate` then checks references, the timeline,
-    /// staging, status and caps.
+    /// 47). `politics.validate` then checks id order, references, the
+    /// timeline, staging, status and caps.
     fn loadConflicts(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
         const st = try self.db.prepare(
@@ -12556,6 +12556,8 @@ test "a tampered conflict refuses to load" {
         .{ .name = "a text day", .sql = "UPDATE conflict SET opened_day = 'spring' WHERE ord = 0" },
         .{ .name = "an id of 0", .sql = "UPDATE conflict SET id = 0 WHERE ord = 0" },
         .{ .name = "an ordinal out of position", .sql = "UPDATE conflict SET ord = ord + 100 WHERE ord = 0" },
+        // Ordinals 0, 1, 2, … in place, but the first two ids reversed.
+        .{ .name = "contiguous ordinals over ids out of order", .sql = "UPDATE conflict SET ord = ord + 1000; UPDATE conflict SET ord = 1 WHERE ord = 1000; UPDATE conflict SET ord = 0 WHERE ord = 1001; UPDATE conflict SET ord = ord - 1000 WHERE ord >= 1000" },
     };
     for (cases) |case| {
         errdefer std.debug.print("conflict tamper case: {s}\n", .{case.name});
@@ -12569,6 +12571,33 @@ test "a tampered conflict refuses to load" {
     }
     try store.save(&gs);
     try expectCurrentRoundTripForTest(store, &gs);
+}
+
+test "a conflict holding the largest forces the schema admits loads and resolves" {
+    // Rules 25, 47: the schema admits any lance BV from 0 to the i64
+    // maximum, so loading accepts it and resolution draws against the
+    // forces' ratio without overflowing.
+    const commands = @import("../sim/commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73204 });
+    defer gs.deinit();
+    try conflictCampaignForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try store.db.exec(std.fmt.comptimePrint("UPDATE conflict SET strike_lances = {d}, strike_lance_bv = {d}, local_lances = {d}, local_lance_bv = {d} WHERE ord = {s}", .{ std.math.maxInt(u8), std.math.maxInt(i64), std.math.maxInt(u8), std.math.maxInt(i64), conflict_sql.unresolved }));
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var target: ?types.ConflictId = null;
+    for (loaded.conflicts.values()) |c| {
+        if (c.strike_force.lance_bv == std.math.maxInt(i64)) target = c.id;
+    }
+    const id = target.?;
+    const expires = loaded.conflicts.get(id).?.expires_day;
+    while (loaded.clock.day_index < expires) {
+        try @import("../sim/tick.zig").clearHolds(&loaded);
+        _ = try commands.execute(&loaded, .{ .advance_days = 1 });
+    }
+    try std.testing.expect(loaded.conflicts.get(id).?.outcome != null);
 }
 
 test "the conflict schema refuses malformed rows without the loader" {

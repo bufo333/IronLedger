@@ -82,12 +82,21 @@ pub fn status(c: *const Conflict, day: u32) Status {
 /// (§C resolution; decision E4): `strike BV / (strike BV + local BV)` of
 /// `types.full_bp`, rounded down. Certain when only the local force has no
 /// BV, nil when only the strike force has none, and even when both have
-/// none. Pure.
+/// none. Exact over every force a save holds (lance BV up to the i64
+/// maximum, up to 255 lances): the sums are taken in i128, so no BV
+/// overflows. Pure.
 pub fn aggressorWinChanceBp(strike: Force, local: Force) types.Bp {
-    const s: types.Bp = @max(0, strike.bv());
-    const l: types.Bp = @max(0, local.bv());
+    const s = forceBv(strike);
+    const l = forceBv(local);
     if (s == 0 and l == 0) return @divTrunc(types.full_bp, 2);
-    return @divTrunc(s * types.full_bp, s + l);
+    return @intCast(@divTrunc(s * types.full_bp, s + l));
+}
+
+/// A force's whole BV, `Force.bv` widened to i128 so the largest saved
+/// force (i64 maximum × 255 lances) and the chance's scaled sum fit.
+/// Negative lance BV counts as none.
+fn forceBv(f: Force) i128 {
+    return @as(i128, @max(0, f.lance_bv)) * f.lances;
 }
 
 /// The day the defender learns of a conflict (§A discovery, D12; decision
@@ -169,6 +178,27 @@ test "the aggressor's chance is its share of the two forces' BV" {
     try std.testing.expectEqual(types.full_bp, aggressorWinChanceBp(lance(2, 1_000), lance(1, 0)));
     try std.testing.expectEqual(@as(types.Bp, 0), aggressorWinChanceBp(lance(1, 0), lance(2, 1_000)));
     try std.testing.expectEqual(@divTrunc(types.full_bp, 2), aggressorWinChanceBp(lance(1, 0), lance(1, 0)));
+}
+
+test "the aggressor's chance keeps its ratio at the largest forces a save holds" {
+    // Rules 25, 47: a save holds any lance BV from 0 to the i64 maximum and
+    // 1–255 lances (the `conflict` table's checks).
+    const max_bv = std.math.maxInt(i64);
+    const max_lances = std.math.maxInt(u8);
+    const lance = struct {
+        fn of(lances: u8, bv: i64) Force {
+            return .{ .lances = lances, .quality = .regular, .lance_bv = bv, .lance_tons = 0 };
+        }
+    }.of;
+    try std.testing.expectEqual(@divTrunc(types.full_bp, 2), aggressorWinChanceBp(lance(max_lances, max_bv), lance(max_lances, max_bv)));
+    try std.testing.expectEqual(@divTrunc(types.full_bp, 2), aggressorWinChanceBp(lance(1, max_bv), lance(1, max_bv)));
+    // 255 equal lances against one: 255 / 256 of the whole, rounded down.
+    try std.testing.expectEqual(@as(types.Bp, @divTrunc(max_lances * types.full_bp, max_lances + 1)), aggressorWinChanceBp(lance(max_lances, max_bv), lance(1, max_bv)));
+    try std.testing.expectEqual(types.full_bp, aggressorWinChanceBp(lance(max_lances, max_bv), lance(max_lances, 0)));
+    try std.testing.expectEqual(@as(types.Bp, 0), aggressorWinChanceBp(lance(max_lances, 0), lance(max_lances, max_bv)));
+    // A one-BV strike against the largest local force is not certain loss
+    // by overflow but a share that rounds down to nil.
+    try std.testing.expectEqual(@as(types.Bp, 0), aggressorWinChanceBp(lance(1, 1), lance(max_lances, max_bv)));
 }
 
 test "discovery is the earlier of intelligence and detection, and an intelligence chief brings it forward" {

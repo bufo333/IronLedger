@@ -1583,8 +1583,10 @@ a broken day order, a strike day whose preparation (less the travel) or
 fighting days fall outside their tuned ranges, an opening after today, an
 unresolved conflict at or past its expiry or a resolved one before it, two
 unresolved conflicts on one world, more than `max_open_conflicts`
-unresolved, a force without a lance or with negative BV or tonnage, and an
-id at or above the counter. A save made under a `political_events.zon`
+unresolved, a force without a lance or with negative BV or tonnage, an id
+not above the previous row's (ordinal order must be id order), and an id at
+or above the counter. Any lance BV the schema admits resolves exactly: the
+win chance is computed in i128. A save made under a `political_events.zon`
 without a template a conflict uses is refused.
 
 **Personage relations are saved** (schema 71): one `personage_relation` row

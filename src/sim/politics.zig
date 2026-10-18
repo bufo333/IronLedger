@@ -684,10 +684,12 @@ fn appendPersonage(alloc: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), g
 /// A loaded campaign's conflicts keep every invariant opening and
 /// progression keep (rule 47; docs/p5d-conflict-world-design.md §J). Runs
 /// after the personage and relation checks. `CorruptSave` for: an id that
-/// is none, differs from its key or is at or past `next_conflict_id`; an
-/// unknown template, world or faction; a personage that is not in the
-/// campaign; an instigator that is not the side personage its template
-/// names; a staging world other than `stagingWorld`'s; days out of order;
+/// is none, differs from its key, is not above the one before it (due
+/// days, draws and the conflicts view go in id order) or is at or past
+/// `next_conflict_id`; an unknown template, world or faction; a personage
+/// that is not in the campaign; an instigator that is not the side
+/// personage its template names; a staging world other than
+/// `stagingWorld`'s; days out of order;
 /// `strike_day` less the travel not `opened_day` plus a preparation in
 /// range, or fighting days out of range; `opened_day` after today; an
 /// unresolved conflict at or past its `expires_day`, or a resolved one
@@ -701,8 +703,10 @@ pub fn validate(gs: *const GameState) error{CorruptSave}!void {
     for (gs.conflicts.values()) |*c| unresolved += @intFromBool(c.outcome == null);
     if (unresolved > pol.max_open_conflicts) return error.CorruptSave;
     var contested = [_]bool{false} ** world_count;
+    var previous: u32 = @intFromEnum(types.ConflictId.none);
     for (gs.conflicts.keys(), gs.conflicts.values()) |id, *c| {
-        if (c.id != id or id == .none or @intFromEnum(id) >= gs.next_conflict_id) return error.CorruptSave;
+        if (c.id != id or @intFromEnum(id) <= previous or @intFromEnum(id) >= gs.next_conflict_id) return error.CorruptSave;
+        previous = @intFromEnum(id);
         const row = political_event.find(c.template_key) orelse return error.CorruptSave;
         const wi = worldIndex(c.planet_key) orelse return error.CorruptSave;
         const target = &planet.catalog[wi];
@@ -1206,6 +1210,25 @@ test "resolution draws the outcome against the force chance and moves the world 
         try std.testing.expectEqual(delta.enemy_influence, ws.enemy_influence);
         try std.testing.expectEqual(delta.infrastructure_strain, ws.infrastructure_strain);
         try std.testing.expectEqual(gs.clock.day_index, ws.last_cause_day);
+    }
+}
+
+test "resolution at the largest forces a save holds draws against their exact chance" {
+    // Rules 25, 47: lance BV up to the i64 maximum is a valid save; the
+    // chance is still the forces' ratio, here even.
+    const max_bv = std.math.maxInt(i64);
+    for ([_]bool{ true, false }) |low| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 73015 });
+        defer gs.deinit();
+        const id = try skyeConflictForTest(&gs, max_bv, max_bv);
+        const c = gs.conflicts.get(id).?;
+        try validate(&gs);
+        const chance = conflict.aggressorWinChanceBp(c.strike_force, c.local_force);
+        try std.testing.expectEqual(@divTrunc(types.full_bp, 2), chance);
+        gs.rng.prngs[@intFromEnum(rng_mod.Stream.politics)] = rng_mod.Rng.fresh(politicsSeedForTest(chance, low), .politics);
+        try advanceOnForTest(&gs, c.expires_day);
+        const outcome: conflict.Outcome = if (low) .aggressor_won else .defender_held;
+        try std.testing.expectEqual(@as(?conflict.Outcome, outcome), gs.conflicts.get(id).?.outcome);
     }
 }
 
