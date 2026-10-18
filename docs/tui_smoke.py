@@ -180,6 +180,8 @@ send("\x1b", 0.6)
 send("w", 0.8)                 # who's who for the offer under the cursor
 p = plain()[-30000:]
 assert "WHO'S WHO" in p and "Governor of" in p and "[procedural]" in p, plain()[-3000:]
+# Every present seat lists its relations, or says it has none.
+assert re.search(r"liege  Leader, |fealty of \d+ governor|no relations|(kin|rival|ally|grudge against|grudge borne by)  Governor of ", p), plain()[-3000:]
 send("\x1b", 0.6)
 send("\t"); send("\t", 0.6)    # focus the history pane; read-only
 send("j"); send("c", 0.6)

@@ -11184,11 +11184,13 @@ pub const ContractWhoPart = enum {
 
 /// One seat behind a contract: the personage holding it (null when the
 /// seat has none) and its line — the part's label, then the `who` row, or
-/// a dim line naming what is missing.
+/// a dim line naming what is missing — and the holder's relations
+/// (`personageRelationRows`), empty for an absent seat.
 pub const ContractWhoRow = struct {
     part: ContractWhoPart,
     id: ?types.PersonageId,
     text: []const u8,
+    relations: []const RelationRow,
 };
 
 /// Who stands behind a contract (offer, active or closed; rules 29–32):
@@ -11211,13 +11213,18 @@ pub fn contractWhosWho(alloc: Alloc, gs: *GameState, cid: types.ContractId) ![]C
         } else null;
         if (holder) |p| {
             const line = try personageRow(alloc, p);
-            row.* = .{ .part = part, .id = p.id, .text = try std.fmt.allocPrint(alloc, "{s}  {s}", .{ part.label(), line.text }) };
+            row.* = .{
+                .part = part,
+                .id = p.id,
+                .text = try std.fmt.allocPrint(alloc, "{s}  {s}", .{ part.label(), line.text }),
+                .relations = try personageRelationRows(alloc, gs, p.id),
+            };
         } else {
             const name = if (part == .world)
                 (if (planet_mod.find(key)) |w| w.name else key)
             else
                 (if (faction.find(key)) |f| f.name else key);
-            row.* = .{ .part = part, .id = null, .text = try std.fmt.allocPrint(alloc, "{s}  {{d}}{s} has no {s}{{/}}", .{
+            row.* = .{ .part = part, .id = null, .relations = &.{}, .text = try std.fmt.allocPrint(alloc, "{s}  {{d}}{s} has no {s}{{/}}", .{
                 part.label(),
                 try table.plain(alloc, name),
                 if (part == .world) "governor" else "leader",
@@ -11245,6 +11252,98 @@ fn personageRow(alloc: Alloc, p: *const personage_dom.Personage) !PersonageRow {
         p.provenance.label(),
     });
     return .{ .id = p.id, .text = text };
+}
+
+/// What one `RelationRow` shows, in the order `personageRelationRows`
+/// lists them.
+pub const RelationRowKind = enum {
+    /// The personage's own liege, weighted by its loyalty.
+    liege,
+    /// A leader's vassals, collapsed into one row.
+    fealty,
+    kin,
+    rival,
+    ally,
+    grudge_against,
+    grudge_borne,
+    /// The personage holds no relation.
+    none,
+};
+
+/// One relation of a personage, from its side: the other personage (null
+/// for the collapsed fealty row and the "no relations" row) and its line,
+/// indented to sit under the personage's own row.
+pub const RelationRow = struct {
+    kind: RelationRowKind,
+    other: ?types.PersonageId,
+    text: []const u8,
+};
+
+/// One personage's relations as display rows (rules 29–32): its liege, then
+/// for a leader one "fealty of N governors" row for every liege relation
+/// held toward it, then kin, rivals, allies, grudges it holds and grudges
+/// held against it, each group in relation order. A personage with none
+/// gets one dim "no relations" row. Names are escaped. `CorruptSave` when a
+/// relation names no personage.
+pub fn personageRelationRows(alloc: Alloc, gs: *GameState, id: types.PersonageId) ![]RelationRow {
+    const relations = gs.personage_relations.items;
+    var rows: std.ArrayListUnmanaged(RelationRow) = .empty;
+    for (relations) |rel| if (rel.kind == .liege and rel.from == id) {
+        try rows.append(alloc, try relationRow(alloc, gs, .liege, rel.to, rel.weight));
+    };
+    var vassals: usize = 0;
+    for (relations) |rel| vassals += @intFromBool(rel.kind == .liege and rel.to == id);
+    if (vassals > 0) try rows.append(alloc, .{
+        .kind = .fealty,
+        .other = null,
+        .text = try std.fmt.allocPrint(alloc, "{s}fealty of {d} governor{s}", .{ relation_indent, vassals, if (vassals == 1) "" else "s" }),
+    });
+    for ([_]personage_dom.RelationKind{ .kin, .rival, .ally }) |kind| {
+        for (relations) |rel| if (rel.kind == kind and (rel.from == id or rel.to == id)) {
+            const row_kind: RelationRowKind = switch (kind) {
+                .kin => .kin,
+                .rival => .rival,
+                .ally => .ally,
+                .liege, .grudge => unreachable,
+            };
+            try rows.append(alloc, try relationRow(alloc, gs, row_kind, if (rel.from == id) rel.to else rel.from, rel.weight));
+        };
+    }
+    for (relations) |rel| if (rel.kind == .grudge and rel.from == id) {
+        try rows.append(alloc, try relationRow(alloc, gs, .grudge_against, rel.to, rel.weight));
+    };
+    for (relations) |rel| if (rel.kind == .grudge and rel.to == id) {
+        try rows.append(alloc, try relationRow(alloc, gs, .grudge_borne, rel.from, rel.weight));
+    };
+    if (rows.items.len == 0) try rows.append(alloc, .{ .kind = .none, .other = null, .text = relation_indent ++ "{d}no relations{/}" });
+    return rows.toOwnedSlice(alloc);
+}
+
+/// Where a relation row starts, under its personage's row.
+const relation_indent = "      ";
+
+/// The one relation line (rule 28): the relation, the other personage's
+/// title and escaped name, then the weight — loyalty for a liege.
+fn relationRow(alloc: Alloc, gs: *GameState, kind: RelationRowKind, other: types.PersonageId, weight: u8) !RelationRow {
+    const p = gs.personages.getPtr(other) orelse return error.CorruptSave;
+    const label = switch (kind) {
+        .liege => "liege",
+        .kin => "kin",
+        .rival => "rival",
+        .ally => "ally",
+        .grudge_against => "grudge against",
+        .grudge_borne => "grudge borne by",
+        .fealty, .none => unreachable,
+    };
+    return .{ .kind = kind, .other = other, .text = try std.fmt.allocPrint(alloc, "{s}{s}  {s}  {s} {s}  {s} {d}", .{
+        relation_indent,
+        label,
+        try table.plain(alloc, try personage_dom.titleText(alloc, p)),
+        try table.plain(alloc, p.first_name),
+        try table.plain(alloc, p.last_name),
+        if (kind == .liege) "loyalty" else "weight",
+        weight,
+    }) };
 }
 
 test "who lists the leaders in faction order, a faction's leader then its rulers, and a world's ruler" {
@@ -11343,7 +11442,14 @@ test "a contract's who's who is its world's governor, its employer's leader and 
             if (row.id) |pid| {
                 try std.testing.expect(std.mem.indexOf(u8, row.text, "[procedural]") != null);
                 try std.testing.expect(std.mem.indexOf(u8, row.text, gs.personages.get(pid).?.last_name) != null);
-            } else try std.testing.expect(std.mem.indexOf(u8, row.text, " has no ") != null);
+                // A present seat carries its holder's relation rows.
+                const expected = try personageRelationRows(a, &gs, pid);
+                try std.testing.expectEqual(expected.len, row.relations.len);
+                for (expected, row.relations) |want, got| try std.testing.expectEqualStrings(want.text, got.text);
+            } else {
+                try std.testing.expect(std.mem.indexOf(u8, row.text, " has no ") != null);
+                try std.testing.expectEqual(@as(usize, 0), row.relations.len);
+            }
         }
         if (std.mem.eql(u8, c.enemy_key, personage_dom.catch_all_faction_key)) try std.testing.expect(rows[2].id == null);
     }
@@ -11361,6 +11467,7 @@ test "a contract's who's who is its world's governor, its employer's leader and 
     c.enemy_key = "DC";
     const absent = try contractWhosWho(a, &gs, cid);
     try std.testing.expect(absent[0].id == null and absent[1].id == null);
+    try std.testing.expect(absent[0].relations.len == 0 and absent[1].relations.len == 0 and absent[2].relations.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, absent[0].text, "Terra has no governor") != null);
     try std.testing.expect(std.mem.indexOf(u8, absent[1].text, " has no leader") != null);
     try std.testing.expectEqual(Expect.holder(&gs, .enemy, "DC").?, absent[2].id.?);
@@ -11378,4 +11485,63 @@ test "a personage name is escaped in its who row" {
     gs.personages.values()[0].last_name = "{c}Red";
     const rows = try personageRows(arena.allocator(), &gs, .{ .planet = gs.personages.values()[0].seat_planet_key });
     try std.testing.expect(std.mem.indexOf(u8, rows[0].text, "{{c}Red") != null);
+}
+
+test "a personage's relation rows name its liege, a leader's fealty, both ends of a grudge, or no relations" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 71101 });
+    defer gs.deinit();
+    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const relations = gs.personage_relations.items;
+
+    // A ruler's rows begin with its liege, naming its leader and loyalty.
+    const fealty = for (relations) |rel| {
+        if (rel.kind == .liege) break rel;
+    } else return error.TestFixtureLacksRelationKind;
+    const vassal_rows = try personageRelationRows(a, &gs, fealty.from);
+    try std.testing.expectEqual(RelationRowKind.liege, vassal_rows[0].kind);
+    try std.testing.expectEqual(fealty.to, vassal_rows[0].other.?);
+    const leader = gs.personages.get(fealty.to).?;
+    try std.testing.expect(std.mem.indexOf(u8, vassal_rows[0].text, leader.last_name) != null);
+    try std.testing.expect(std.mem.indexOf(u8, vassal_rows[0].text, try std.fmt.allocPrint(a, "loyalty {d}", .{fealty.weight})) != null);
+
+    // A leader's vassals collapse into one row whose count is the relation list's.
+    var vassals: usize = 0;
+    for (relations) |rel| vassals += @intFromBool(rel.kind == .liege and rel.to == leader.id);
+    var fealty_rows: usize = 0;
+    for (try personageRelationRows(a, &gs, leader.id)) |row| if (row.kind == .fealty) {
+        fealty_rows += 1;
+        try std.testing.expectEqual(@as(?types.PersonageId, null), row.other);
+        try std.testing.expect(std.mem.indexOf(u8, row.text, try std.fmt.allocPrint(a, "fealty of {d} governor", .{vassals})) != null);
+    };
+    try std.testing.expectEqual(@as(usize, 1), fealty_rows);
+
+    // A grudge reads "against" on its holder and "borne by" on its target.
+    const grudge = for (relations) |rel| {
+        if (rel.kind == .grudge) break rel;
+    } else return error.TestFixtureLacksRelationKind;
+    const Find = struct {
+        fn one(rows: []const RelationRow, kind: RelationRowKind, other: types.PersonageId) !RelationRow {
+            for (rows) |row| if (row.kind == kind and row.other == other) return row;
+            return error.TestExpectedRow;
+        }
+    };
+    const against = try Find.one(try personageRelationRows(a, &gs, grudge.from), .grudge_against, grudge.to);
+    try std.testing.expect(std.mem.indexOf(u8, against.text, "grudge against") != null);
+    const borne = try Find.one(try personageRelationRows(a, &gs, grudge.to), .grudge_borne, grudge.from);
+    try std.testing.expect(std.mem.indexOf(u8, borne.text, "grudge borne by") != null);
+
+    // Names are escaped; a failing allocator is an error, not empty rows.
+    gs.personages.getPtr(leader.id).?.last_name = "{c}Red";
+    try std.testing.expect(std.mem.indexOf(u8, (try personageRelationRows(a, &gs, fealty.from))[0].text, "{{c}Red") != null);
+    try std.testing.expectError(error.OutOfMemory, personageRelationRows(std.testing.failing_allocator, &gs, fealty.from));
+
+    // Without relations a personage gets the one "no relations" row.
+    gs.personage_relations.clearRetainingCapacity();
+    const none = try personageRelationRows(a, &gs, fealty.from);
+    try std.testing.expectEqual(@as(usize, 1), none.len);
+    try std.testing.expectEqual(RelationRowKind.none, none[0].kind);
+    try std.testing.expect(std.mem.indexOf(u8, none[0].text, "no relations") != null);
 }

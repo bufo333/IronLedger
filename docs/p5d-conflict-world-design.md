@@ -333,10 +333,26 @@ for every kind.
   `procedural` provenance with its generator version; the title is derived
   ("Governor of …", "Leader, …"), not stored. Every hiring world has a ruler
   and every hiring faction except `PER` (P1) a leader on its capital, drawn
-  on `.politics` at `create_commander` and persisted at schema v70. `key`,
-  `family_key`, `loyalty`, relations and the other roles belong to 1c,
-  stable keys, backstory, canon titles and the `canon`/`authored` layers to
-  1d, and `status`, `standing_with_player` and flags to later increments.
+  on `.politics` at `create_commander` and persisted at schema v70.
+  Relations and `loyalty` belong to 1c (S1); `key`, `family_key`, the other
+  roles, stable keys, backstory, canon titles and the `canon`/`authored`
+  layers to 1d, and `status`, `standing_with_player` and flags to later
+  increments.
+- **Landed in P5d.1c.** `personage_relation` holds the five kinds, each with a
+  weight from 1 to 100: `liege` (vassal → liege) and `grudge` (holder →
+  target) are directed, `kin`, `rival` and `ally` symmetric. `loyalty` is the
+  weight of a ruler's liege relation, not a separate field, so it exists
+  exactly where a liege does. At `create_commander`, after every personage,
+  on `.politics`: every ruler of a leader-bearing faction owes fealty to its
+  leader; every pair of same-faction personages sharing a last name is kin
+  (K1); and each ruler may draw one rival (same faction), one ally (a faction
+  neither side lists as a foe) and one grudge (a faction either side lists)
+  toward a ruler within `relation_reach_ly` (60 ly, `// TUNE`; R1 (relations)).
+  Leaders hold only kin and receive lieges. Persisted at schema v71; the
+  loader refuses a dangling endpoint, a broken liege and rival plus ally on
+  one pair. Which pairs creation draws is not a load check, because later
+  increments relate others (§C resolution grudges, §K pacts and broken
+  alliances).
 
 ## §C World conflicts: the cause of every contract (D2)
 
@@ -467,9 +483,12 @@ for every kind.
   P5d.1b landed the Contracts entry point: `w` on any F4 offer, active or
   closed contract opens a read-only sheet of the contract's world governor,
   employer leader and enemy leader, each the `who` row with its provenance
-  label, and REPL `who <contract id>` prints the same rows. The conflict-view
-  entry comes with the conflict view; liege, kin, backstory, standing,
-  conflicts and the merc commander come with the increments that create them.
+  label, and REPL `who <contract id>` prints the same rows. P5d.1c added
+  liege and kin, with rivals, allies and grudges, as relation lines under each
+  seat on that sheet and under each personage in `who <world>` and
+  `who <contract id>`. The conflict-view entry comes with the conflict view;
+  backstory, standing, conflicts and the merc commander come with the
+  increments that create them.
 - **Conflicts list.** REPL `conflicts` and a TUI pane list open conflicts in
   your rings, with sides, the timeline, known hires and the player's position.
 - **Log.** Log lines for:
@@ -1198,6 +1217,27 @@ whose design depends on a different choice is re-planned.
   worlds still get planetary rulers. *Alternative:* every hiring faction,
   `PER` included, with a "Periphery / pirates" leader seated on Galatea.
   **John's choice (P5d.1a plan):** the recommendation.
+- **S1 — what P5d.1c covers.** The §B "Landed in P5d.1a" note gave `key`,
+  `family_key`, `loyalty`, relations and the other roles to 1c, while the
+  increment row and `TODO.md` scope 1c to relations. *Recommended:* 1c is
+  relations only; loyalty is the liege relation's weight; `key`,
+  `family_key` and the other roles go to 1d. *Alternative:* 1c also
+  generates procedural heirs and family members with new roles. **John's
+  choice (P5d.1c plan):** the recommendation.
+- **K1 — what makes two personages kin.** *Recommended:* two personages of
+  the same faction who share a last name are kin, one relation per pair;
+  kin never crosses factions. *Alternatives:* kin pairs drawn at random
+  within a faction; no kin until 1d's canon dynasties. **John's choice
+  (P5d.1c plan):** the recommendation.
+- **R1 (relations) — who holds rivalries, alliances and grudges** (the
+  P5d.1c plan's R1, distinct from the replacement-company R1 above).
+  *Recommended:* only planetary rulers, toward another ruler within
+  `relation_reach_ly` (60 ly, two jumps, `// TUNE`): a rival of the same
+  faction, an ally of a faction neither side lists as a foe, a grudge
+  against a ruler of a faction either side lists (`factions.zon` `foes`).
+  Leaders hold only kin and receive lieges. *Alternative:* leaders also hold
+  grudges against hostile leaders. **John's choice (P5d.1c plan):** the
+  recommendation.
 - **D26 — air and artillery growth.** *Recommended:* air is earned (band and
   cash margin) and replaces today's automatic aerospace reserve; artillery is
   deferred to D29. *Alternatives:* keep the automatic air reserve; allow both

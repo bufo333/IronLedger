@@ -246,6 +246,7 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
     // first mutation so a seeding failure leaves the campaign unchanged
     // (rules 11–12); committed after the last fallible step below.
     const seeding = try personages.prepareSeeding(gs);
+    defer seeding.deinit(gs);
     _ = try createCommander(gs, c.name, c.origin, c.profession);
     gs.clock.date.year = c.start_year;
     // Until renamed, the outfit carries the commander's name — it

@@ -267,4 +267,9 @@ check 'those arguments do not fit the verb — usage: who'
 check 'world  *#[0-9]*  Governor of'
 check 'employer  #[0-9]*  Leader, '
 check 'could not show that: no contract has that id'
+# `who <world>` and `who <contract id>` print each personage's relations
+# under its row: Skye's governor owes fealty to the Lyran leader, and a
+# contract's leader seat counts its governors' fealty.
+check '^      liege  Leader, Lyran Commonwealth  .*  loyalty [0-9]'
+check '^      fealty of [0-9]* governor'
 echo "REPL SMOKE OK"

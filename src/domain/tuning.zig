@@ -927,6 +927,19 @@ pub const Tuning = struct {
         /// Top of the ambition scale, in ambition points; the scale starts
         /// at 0 (§B: a 0–100 scale).
         ambition_max: u8,
+        /// Lowest and highest relation weight, in weight points; a liege
+        /// relation's weight is loyalty (§B: a 0–100 scale; a relation
+        /// that exists weighs at least 1).
+        relation_weight_min: u8,
+        relation_weight_max: u8,
+        /// Farthest a ruler's rival, ally or grudge sits, in light-years
+        /// between seats (§B relations; decision R1 (relations)).
+        relation_reach_ly: u32,
+        /// Chance each ruler draws a rival, an ally or a grudge when a
+        /// candidate is in reach, in basis points per ruler.
+        rival_chance_bp: types.Bp,
+        ally_chance_bp: types.Bp,
+        grudge_chance_bp: types.Bp,
     },
 };
 

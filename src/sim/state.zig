@@ -391,6 +391,9 @@ pub const GameState = struct {
     /// With a commander, exactly one ruler per hiring world and one leader per
     /// leader-bearing faction; without one, none (`personages.validate`).
     personages: std.AutoArrayHashMapUnmanaged(types.PersonageId, personage_mod.Personage) = .empty,
+    /// Relations between personages, in generation order (§B relations);
+    /// `(from, to, kind)` is each one's identity (`personage_relations.validate`).
+    personage_relations: std.ArrayListUnmanaged(personage_mod.Relation) = .empty,
 
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
@@ -1468,6 +1471,7 @@ pub const GameState = struct {
         .{ "merc_company_rosters", .persisted },
         .{ "world_states", .persisted },
         .{ "personages", .persisted },
+        .{ "personage_relations", .persisted },
         .{ "next_personage_id", .persisted },
     };
 

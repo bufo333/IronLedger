@@ -12,6 +12,7 @@ const planet = @import("../domain/planet.zig");
 const faction = @import("../domain/faction.zig");
 const personage = @import("../domain/personage.zig");
 const personage_gen = @import("../gen/personage_gen.zig");
+const personage_relations = @import("personage_relations.zig");
 const table = @import("table.zig");
 const rng_mod = @import("rng.zig");
 const GameState = @import("state.zig").GameState;
@@ -43,37 +44,48 @@ comptime {
         @compileError("data/tables/names.zon: first × last names are fewer than the personages seeded; every personage needs a distinct name");
 }
 
-/// Every procedural personage of a new campaign, drawn and with
-/// `personages` capacity reserved, but not yet on the books.
+/// Every procedural personage of a new campaign and their relations, drawn
+/// and with `personages` and `personage_relations` capacity reserved, but
+/// not yet on the books. `deinit` releases it, committed or not.
 pub const Seeding = struct {
     rows: [seed_count]personage.Personage,
+    /// `personage_relations.generate`'s rows, in operation scratch memory
+    /// (rule 78).
+    relations: []personage.Relation,
     /// `next_personage_id` before and after the seeded IDs.
     first_id: u32,
     next_id: u32,
     /// The `.politics` stream after every draw.
     politics: std.Random.DefaultPrng,
+
+    pub fn deinit(self: *const Seeding, gs: *GameState) void {
+        gs.scratch().free(self.relations);
+    }
 };
 
-/// Draw every procedural personage of a new campaign and reserve room for
-/// them; `commitSeeding` puts them on the books. Nothing in `gs` changes
-/// except `personages` capacity, so campaign creation prepares this before
-/// its first mutation and commits it after its last fallible step.
+/// Draw every procedural personage of a new campaign and their relations,
+/// and reserve room for them; `commitSeeding` puts them on the books.
+/// Nothing in `gs` changes except `personages` and `personage_relations`
+/// capacity, so campaign creation prepares this before its first mutation
+/// and commits it after its last fallible step.
 ///
 /// Draw order, all on `.politics`: one ruler per hiring world in
 /// `planets.zon` catalogue order, then one leader per leader-bearing faction
-/// in `factions.zon` order, each drawing `personage_gen.generate`'s sequence.
-/// IDs follow the same order from `next_personage_id`. A change to this
-/// order changes every campaign and needs a deliberate re-pin.
+/// in `factions.zon` order, each drawing `personage_gen.generate`'s sequence;
+/// then, after the last personage, `personage_relations.generate`'s
+/// sequence. IDs follow the personage order from `next_personage_id`. A
+/// change to this order changes every campaign and needs a deliberate
+/// re-pin.
 ///
 /// `CorruptSave` when the ID counter cannot hold the seeded IDs;
-/// `OutOfMemory` when the reservation fails.
+/// `OutOfMemory` when a relation allocation or a reservation fails.
 pub fn prepareSeeding(gs: *GameState) error{ CorruptSave, OutOfMemory }!Seeding {
     if (gs.next_personage_id > std.math.maxInt(u32) - seed_count) return error.CorruptSave;
 
     var rng_copy = gs.rng;
     var name_buf: [seed_count]u32 = undefined;
     var drawn = personage_gen.NameDraw.init(&name_buf);
-    var s: Seeding = .{ .rows = undefined, .first_id = gs.next_personage_id, .next_id = gs.next_personage_id, .politics = undefined };
+    var s: Seeding = .{ .rows = undefined, .relations = &.{}, .first_id = gs.next_personage_id, .next_id = gs.next_personage_id, .politics = undefined };
     var len: usize = 0;
     for (planet.catalog) |*world| {
         if (!personage.worldHasRuler(world)) continue;
@@ -88,19 +100,24 @@ pub fn prepareSeeding(gs: *GameState) error{ CorruptSave, OutOfMemory }!Seeding 
         len += 1;
     }
     std.debug.assert(len == seed_count);
+    s.relations = try personage_relations.generate(gs.scratch(), &rng_copy, &s.rows);
+    errdefer s.deinit(gs);
     s.politics = rng_copy.prngs[@intFromEnum(rng_mod.Stream.politics)];
 
     try gs.personages.ensureUnusedCapacity(gs.allocator(), seed_count);
+    try gs.personage_relations.ensureUnusedCapacity(gs.allocator(), s.relations.len);
     return s;
 }
 
-/// Put a prepared seeding on the books: the rows, then `next_personage_id`
-/// and the `.politics` stream. Infallible. Steps between preparing and
-/// committing may draw other streams but must leave `.politics`,
-/// `next_personage_id` and `personages` alone.
+/// Put a prepared seeding on the books: the rows and their relations, then
+/// `next_personage_id` and the `.politics` stream. Infallible. Steps
+/// between preparing and committing may draw other streams but must leave
+/// `.politics`, `next_personage_id`, `personages` and `personage_relations`
+/// alone.
 pub fn commitSeeding(gs: *GameState, s: *const Seeding) void {
-    std.debug.assert(gs.next_personage_id == s.first_id and gs.personages.count() == 0);
+    std.debug.assert(gs.next_personage_id == s.first_id and gs.personages.count() == 0 and gs.personage_relations.items.len == 0);
     for (s.rows) |p| gs.personages.putAssumeCapacity(p.id, p);
+    gs.personage_relations.appendSliceAssumeCapacity(s.relations);
     gs.next_personage_id = s.next_id;
     gs.rng.prngs[@intFromEnum(rng_mod.Stream.politics)] = s.politics;
 }
@@ -110,6 +127,7 @@ pub fn commitSeeding(gs: *GameState, s: *const Seeding) void {
 pub fn seedForTest(gs: *GameState) error{ CorruptSave, OutOfMemory }!void {
     std.debug.assert(@import("builtin").is_test);
     const s = try prepareSeeding(gs);
+    defer s.deinit(gs);
     commitSeeding(gs, &s);
 }
 
@@ -285,6 +303,7 @@ test "seeding personages advances only the politics stream" {
     const before = gs.rng;
     const hash = digest.stateHash(&gs);
     const s = try prepareSeeding(&gs);
+    defer s.deinit(&gs);
     try std.testing.expectEqual(hash, digest.stateHash(&gs));
     commitSeeding(&gs, &s);
     for (std.enums.values(rng_mod.Stream)) |stream| {
@@ -293,12 +312,26 @@ test "seeding personages advances only the politics stream" {
     }
 }
 
+test "drawing relations after the personages leaves every personage row as drawn without them" {
+    // The personage map and counter of one seed equal what the personage
+    // draws alone produce: relations draw only after the last personage.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 70107 });
+    defer gs.deinit();
+    try createdForTest(&gs);
+    var h = std.hash.Wyhash.init(0);
+    digest.update(&h, gs.personages);
+    digest.update(&h, gs.next_personage_id);
+    try std.testing.expectEqual(@as(u64, 4688277191565672504), h.final());
+}
+
 test "a create_commander whose personage reservation fails leaves the campaign unchanged and can be retried" {
-    // Rules 11, 12 and 69. Each attempt is a fresh campaign whose arena takes
-    // every allocation from an allocator failing at index `i`. Attempts run
-    // until one fails with the reservation already made; every attempt
-    // before it failed before the reservation was complete, and must leave
-    // the campaign as it was.
+    // Rules 11, 12 and 69. Each attempt is a fresh campaign whose arena and
+    // operation scratch take every allocation from an allocator failing at
+    // index `i`. Attempts run until one fails with the last reservation,
+    // the relations', already made; every attempt before it failed in the
+    // relation scratch or a reservation (the arena may serve a small
+    // reservation from memory it already holds), and must leave the campaign
+    // as it was.
     var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer outer.deinit();
     var fresh = GameState.init(outer.allocator(), .{ .seed = 70105 });
@@ -313,18 +346,20 @@ test "a create_commander whose personage reservation fails leaves the campaign u
         failing.* = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
         gs.arena.child_allocator = failing.allocator();
         try std.testing.expectError(error.OutOfMemory, commands.execute(gs, create_for_test));
-        if (gs.personages.capacity() >= seed_count) break;
+        if (gs.personage_relations.capacity > 0) break;
         try std.testing.expectEqual(before, digest.stateHash(gs));
         refused = gs;
     }
-    // At least one attempt failed inside the reservation itself.
+    // At least one attempt failed inside the preparation itself.
     const gs = refused orelse return error.TestExpectedRefusal;
 
     // The refused campaign creates cleanly once memory is available.
     gs.arena.child_allocator = outer.allocator();
     try createdForTest(gs);
     try std.testing.expectEqual(seed_count, gs.personages.count());
+    try std.testing.expect(gs.personage_relations.items.len > 0);
     try validate(gs);
+    try personage_relations.validate(gs);
 }
 
 test "a create_commander whose personage counter cannot hold the seeded ids refuses without change" {

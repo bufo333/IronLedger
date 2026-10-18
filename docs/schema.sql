@@ -1,8 +1,8 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 70, the only supported store and campaign format.
+-- Matches schema_version 71, the only supported store and campaign format.
 -- Older and newer formats are refused before persistent mutation under
--- docs/engineering-contract.md rule 51; only empty stores initialize schema 70.
+-- docs/engineering-contract.md rule 51; only empty stores initialize schema 71.
 -- The executable DDL and dormant historical migration declarations live in
 -- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
@@ -70,7 +70,7 @@ CREATE TABLE campaign (
     commander       TEXT,
     day             INTEGER NOT NULL,                -- day_index at save
     date            TEXT    NOT NULL,                -- in-game date at save
-    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 70; older/newer versions are refused before load or overwrite
+    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 71; older/newer versions are refused before load or overwrite
     save_seq        INTEGER NOT NULL,                -- store-wide save counter, orders "most recent"
     player_id       INTEGER NOT NULL DEFAULT 0       -- -> player.id; 0 = none
 );
@@ -1366,6 +1366,32 @@ CREATE TABLE personage (
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_personage_cid ON personage(cid);
+
+-- personage_relation: relations between personages
+-- (docs/p5d-conflict-world-design.md §B relations, v71). kin, rival and ally
+-- are symmetric and stored once with from_id < to_id; liege runs vassal ->
+-- liege and grudge holder -> target. A liege's weight is the vassal's
+-- loyalty. The loader (personage_relations.validate) also refuses a dangling
+-- endpoint, a liege from anyone but a ruler or to anyone but the leader of
+-- the ruler's own faction, a second liege, a ruler of a leader-bearing
+-- faction without one, rival and ally on one pair, and relations without
+-- personages.
+CREATE TABLE personage_relation (
+    cid      INTEGER NOT NULL,
+    ord      INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), -- generation order
+    from_id  INTEGER NOT NULL CHECK (typeof(from_id)='integer' AND from_id BETWEEN 1 AND 4294967295), -- PersonageId
+    to_id    INTEGER NOT NULL CHECK (typeof(to_id)='integer' AND to_id BETWEEN 1 AND 4294967295),     -- PersonageId
+    kind     TEXT    NOT NULL CHECK (typeof(kind)='text' AND kind IN ('liege','kin','rival','ally','grudge')),
+    weight   INTEGER NOT NULL CHECK (typeof(weight)='integer' AND weight BETWEEN 1 AND 100), -- tuning.politics relation weights
+    CHECK (from_id <> to_id),
+    CHECK (kind NOT IN ('kin','rival','ally') OR from_id < to_id),
+    PRIMARY KEY (cid, ord),
+    UNIQUE (cid, from_id, to_id, kind),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, from_id) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, to_id) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_personage_relation_cid ON personage_relation(cid);
 
 -- Artillery formation and HQ offer fields are persisted (schema v60).
 -- Catalogue facts and attached location are derived; quotes are scratch.

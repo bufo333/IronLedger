@@ -3628,7 +3628,10 @@ pub const App = struct {
                 const w = layout.modal.log_entry_w;
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 if (q.contractWhosWho(al, self.state(), cid)) |seats| {
-                    for (seats) |seat| try rows.appendSlice(al, try screen_mod.wrap(al, seat.text, self.modalTextWidth(w)));
+                    for (seats) |seat| {
+                        try rows.appendSlice(al, try screen_mod.wrap(al, seat.text, self.modalTextWidth(w)));
+                        for (seat.relations) |rel| try rows.appendSlice(al, try screen_mod.wrap(al, rel.text, self.modalTextWidth(w)));
+                    }
                 } else |err| switch (err) {
                     error.UnknownContract => try rows.append(al, "{d}that contract is no longer on record{/}"),
                     else => return err,

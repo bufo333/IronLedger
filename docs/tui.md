@@ -818,7 +818,14 @@ and the TUI:
 - `personageRows(filter)` and `contractWhosWho(id)` (who's-who rows, each
   ending in its provenance label: the REPL `who` view, and the F4 `w` sheet
   for an offer, active or closed contract — world governor, employer
-  leader, enemy leader, with a dim line for a seat no personage holds)
+  leader, enemy leader, with a dim line for a seat no personage holds); each
+  present seat's `relations` are its holder's `personageRelationRows`
+- `personageRelationRows(id)` (`RelationRow`: kind, the other personage's
+  `PersonageId` or null, and an indented line — liege with loyalty, a
+  leader's collapsed "fealty of N governors", kin, rival, ally, grudge
+  against, grudge borne by, or a dim "no relations"); the F4 `w` sheet draws
+  them under each seat's row through the same wrap, and REPL `who <world>`
+  and `who <contract id>` print them under each personage
 
 Every query is pure and allocator-parameterized so the TUI can rebuild its
 view model each frame from an arena.

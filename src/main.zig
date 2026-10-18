@@ -562,7 +562,7 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
     var stdin_reader = std.Io.File.stdin().readerStreaming(io, &stdin_buf);
     const in = &stdin_reader.interface;
 
-    while (true) {
+    repl: while (true) {
         std.debug.print("> ", .{});
         const raw_line = (try in.takeDelimiter('\n')) orelse break;
         // Windows consoles and piped files end lines with CRLF; drop the
@@ -687,28 +687,38 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                 std.debug.print("{s} — usage: who [<faction-key>|<planet-key>|<contract-id>]\n", .{game.cli.errorText(err)});
                 continue;
             };
-            const texts: []const []const u8 = switch (request) {
-                .personages => |filter| blk: {
+            // A world's ruler and a contract's seats each print their
+            // relation rows beneath them; the leader and faction lists do not.
+            var texts: std.ArrayListUnmanaged([]const u8) = .empty;
+            switch (request) {
+                .personages => |filter| {
                     const rows = q.personageRows(al, gs, filter) catch |err| {
                         showError(err);
                         continue;
                     };
                     if (rows.len == 0) std.debug.print("no personage holds a seat there.\n", .{});
-                    const out = try al.alloc([]const u8, rows.len);
-                    for (rows, out) |r, *t| t.* = r.text;
-                    break :blk out;
+                    for (rows) |r| {
+                        try texts.append(al, r.text);
+                        if (filter != .planet) continue;
+                        const relations = q.personageRelationRows(al, gs, r.id) catch |err| {
+                            showError(err);
+                            continue :repl;
+                        };
+                        for (relations) |rel| try texts.append(al, rel.text);
+                    }
                 },
-                .contract => |cid| blk: {
+                .contract => |cid| {
                     const rows = q.contractWhosWho(al, gs, cid) catch |err| {
                         showError(err);
                         continue;
                     };
-                    const out = try al.alloc([]const u8, rows.len);
-                    for (rows, out) |r, *t| t.* = r.text;
-                    break :blk out;
+                    for (rows) |r| {
+                        try texts.append(al, r.text);
+                        for (r.relations) |rel| try texts.append(al, rel.text);
+                    }
                 },
-            };
-            for (texts) |raw| {
+            }
+            for (texts.items) |raw| {
                 const text = q.stripMarks(al, raw) catch |err| {
                     showError(err);
                     continue;

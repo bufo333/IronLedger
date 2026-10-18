@@ -172,7 +172,8 @@ section explains the shape, the contract states the rules.
   `market.rollHullCondition`, `personnel.creditKills`) take the caller's stream:
   hall, market and hiring draw on `.market`, prisoners and salvage on `.battle`,
   event recruits on `.events`, the starter company on `.generation`, and the
-  world's personages (`personage_gen`) on `.politics`. All dice are
+  world's personages (`personage_gen`), then their relations
+  (`personage_relations.generate`, after the last personage), on `.politics`. All dice are
   2d6 unless the cited source or design rule says otherwise (`// TUNE`).
 - **Presentation markup is escaped at the source.** Screen text carries
   inline tags (`{a}` … `{/}`); `table.Tokenizer` is the one reader of it
@@ -292,6 +293,25 @@ cheap, copyable, and impossible to mix up.
   `queries.personageRows`; `who <contract id>` and the F4 `w` who's-who
   sheet read `queries.contractWhosWho` (the contract's world governor,
   employer leader and enemy leader, a dim line for an empty seat).
+- **Personage relation** — `personage.Relation { from, to, kind, weight }`
+  in `GameState.personage_relations`, in generation order; `(from, to, kind)`
+  is its identity. Kinds (§B): `liege` (vassal → liege), `kin`, `rival`,
+  `ally` and `grudge` (holder → target); kin, rival and ally are symmetric
+  (`RelationKind.symmetric`) and stored once with `from < to`. Weights run
+  1–100 (`tuning.politics`); a liege's weight is the vassal's loyalty, so
+  loyalty exists exactly where a liege does. `sim/personage_relations.zig`
+  draws them inside `prepareSeeding`, after every personage: each ruler of a
+  leader-bearing faction owes its leader fealty; personages of one faction
+  sharing a last name are kin (`personage.kinAtCreation`, decision K1); and
+  each ruler may draw one rival (same faction), ally (neither faction lists
+  the other as a foe) and grudge (one does) toward a ruler within
+  `relation_reach_ly` (`personage.inRelationReach`,
+  `drawnRelationFactionsAllowed`, `factionsHostile`; decision R1 (relations)).
+  Leaders hold only kin and receive lieges. `personage_relations.validate`
+  is the load check. `queries.personageRelationRows` lists one personage's
+  relations (a leader's lieges collapse into one "fealty of N governors"
+  row); `who <world>`, `who <contract id>` and the F4 sheet print them under
+  each personage's row. No game rule reads a relation yet.
 - **Actor** — a contract-introduced NPC (liaison, official, enemy commander,
   etc.) that persists across contracts. Each actor carries four relationship
   dimensions (trust, debt, respect, hostility; −100…100) and typed **flags**
@@ -1353,8 +1373,8 @@ a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
 **Current format boundary.** New empty stores
-initialize schema 70 transactionally. Existing store and campaign versions
-must both be 70; older formats (69 included) are refused intact and newer formats retain
+initialize schema 71 transactionally. Existing store and campaign versions
+must both be 71; older formats (70 included) are refused intact and newer formats retain
 their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
 missing tables or rows. No automatic reset, deletion, rewrite, backfill or
@@ -1427,7 +1447,7 @@ loader refuses a company member on a pool or travelling seat, field freight to
 a non-company force, inbound plus attached carriers over the company's cap,
 and a return leg to a missing HQ.
 
-**Personages are saved** (schema 70): one `personage` row each (role, names,
+**Personages are saved** (schema 70 and later): one `personage` row each (role, names,
 faction and seat keys, the motive set as a bitmask with bit = the motive's
 declared value, ambition, provenance and generator version) and the meta
 counter `next_personage_id`. SQL checks bound the ordinal, role, motive
@@ -1439,12 +1459,25 @@ two rulers on one world, a leader for a faction that gets none, off its
 capital or doubled, a campaign with a commander missing any ruler or leader,
 personages in a campaign without one, and an id at or above the counter.
 
+**Personage relations are saved** (schema 71): one `personage_relation` row
+each (ordinal, from and to personage ids, kind tag, weight). SQL checks bound
+the kind, the weight (1–100) and both ids, refuse a self-relation and a
+symmetric row without `from_id < to_id`, keep `(from_id, to_id, kind)`
+unique, and tie both ids to `personage` rows by foreign key. The loader
+decodes each row exactly (kind on its full bytes, checked integers, the
+ordinal equal to the row's position), and `personage_relations.validate`
+refuses a dangling endpoint, a self-relation, a reversed symmetric row, a
+duplicate, a weight off the tuned scale, a liege from anyone but a ruler or
+to anyone but its own faction's leader, a second liege, a ruler of a
+leader-bearing faction without one, rival and ally on one pair, and
+relations without personages.
+
 **RNG state is saved per stream**: the campaign seed plus one
 `rng_stream` row per named stream (format 1: the generator's words,
 little-endian). The approved current-format boundary requires the seed and
 exactly one valid row for every required named stream. Missing or malformed
 state, duplicate rows and unknown streams are `CorruptSave`; current rows never
-default to fresh streams, so a schema-70 save without its `politics` row is
+default to fresh streams, so a current-format save without its `politics` row is
 refused. Unsupported old stream blobs are not loaded. Adding
 an unused stream preserves existing stream identity and state; deterministic
 initialization in an older save would require an explicitly supported migration

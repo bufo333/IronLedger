@@ -401,7 +401,7 @@ Nobody piloted a mek. That's the game.
 
 ---
 
-## Who rules the Inner Sphere (P5d.1a, P5d.1b)
+## Who rules the Inner Sphere (P5d.1a, P5d.1b, P5d.1c)
 
 Every world whose house hires mercenaries has a governor, and every great
 power that hires has a leader seated on its capital; the Periphery's pirate
@@ -415,6 +415,16 @@ whose house does not hire has no governor); `who <contract id>` in the
 console shows the same. For now every one of them is generated when the
 campaign starts and labelled `procedural`: they are not the canon rulers of
 3025, and nothing in the game acts on them yet.
+
+They are also tied to one another. Every governor of a house with a leader
+owes that leader fealty, with a loyalty from 1 to 100. Personages of one
+house who share a surname are family (kin). Governors whose worlds lie within
+two jumps (60 light-years) may be rivals (same house), allies (houses that do
+not count each other as foes) or hold a grudge (houses that do). Leaders hold
+only family ties and their governors' fealty. `who skye` and `who <contract
+id>` list each personage's ties beneath it, and so does the F4 `w` sheet; a
+leader's governors show as one "fealty of N governors" line. These ties are
+fixed when the campaign starts and nothing in the game acts on them yet.
 
 ## Persistent actors (P4i)
 

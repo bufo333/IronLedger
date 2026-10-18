@@ -49,13 +49,14 @@ const actor_rules = @import("../sim/actors.zig");
 const situation_mod = @import("../domain/situation.zig");
 const personage_mod = @import("../domain/personage.zig");
 const personage_rules = @import("../sim/personages.zig");
+const personage_relation_rules = @import("../sim/personage_relations.zig");
 
 const artillery_store = @import("artillery_store.zig");
 const artillery_battle_store = @import("artillery_battle_store.zig");
 const artillery = @import("../sim/artillery.zig");
 const artillery_catalogue = @import("../domain/artillery_catalogue.zig");
 
-pub const schema_version = 70;
+pub const schema_version = 71;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -128,6 +129,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS merc_company (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, cbills INTEGER NOT NULL DEFAULT 0, founded_day INTEGER NOT NULL DEFAULT 0, dissolved_day INTEGER NOT NULL DEFAULT 0, logo_key TEXT NOT NULL DEFAULT '', band_key TEXT NOT NULL, understrength_since INTEGER CHECK (understrength_since IS NULL OR (typeof(understrength_since)='integer' AND understrength_since BETWEEN 0 AND 4294967295)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS merc_company_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, merc_company_id INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, merc_company_id) REFERENCES merc_company(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS personage (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), id INTEGER NOT NULL CHECK (typeof(id)='integer' AND id BETWEEN 1 AND 4294967295), role TEXT NOT NULL CHECK (role IN ('planetary_ruler','faction_leader')), first_name TEXT NOT NULL CHECK (typeof(first_name)='text' AND length(first_name) > 0), last_name TEXT NOT NULL CHECK (typeof(last_name)='text' AND length(last_name) > 0), faction_key TEXT NOT NULL CHECK (typeof(faction_key)='text'), seat_planet_key TEXT NOT NULL CHECK (typeof(seat_planet_key)='text'), motives INTEGER NOT NULL CHECK (typeof(motives)='integer' AND motives BETWEEN 1 AND 511 AND (motives & 1) + ((motives >> 1) & 1) + ((motives >> 2) & 1) + ((motives >> 3) & 1) + ((motives >> 4) & 1) + ((motives >> 5) & 1) + ((motives >> 6) & 1) + ((motives >> 7) & 1) + ((motives >> 8) & 1) BETWEEN 2 AND 3), ambition INTEGER NOT NULL CHECK (typeof(ambition)='integer' AND ambition BETWEEN 0 AND 100), provenance TEXT NOT NULL CHECK (provenance IN ('procedural')), generator_version INTEGER NOT NULL CHECK (typeof(generator_version)='integer' AND generator_version = 1), PRIMARY KEY (cid, id), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS personage_relation (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), from_id INTEGER NOT NULL CHECK (typeof(from_id)='integer' AND from_id BETWEEN 1 AND 4294967295), to_id INTEGER NOT NULL CHECK (typeof(to_id)='integer' AND to_id BETWEEN 1 AND 4294967295), kind TEXT NOT NULL CHECK (typeof(kind)='text' AND kind IN ('liege','kin','rival','ally','grudge')), weight INTEGER NOT NULL CHECK (typeof(weight)='integer' AND weight BETWEEN 1 AND 100), CHECK (from_id <> to_id), CHECK (kind NOT IN ('kin','rival','ally') OR from_id < to_id), PRIMARY KEY (cid, ord), UNIQUE (cid, from_id, to_id, kind), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, from_id) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, to_id) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS artillery_formation (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0), id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295), hull INTEGER NOT NULL CHECK (hull BETWEEN 1 AND 4294967295), acquisition_day INTEGER NOT NULL CHECK (acquisition_day BETWEEN 0 AND 4294967295), paid_price INTEGER NOT NULL CHECK (paid_price > 0), placement TEXT NOT NULL CHECK (placement IN ('hq_pool','company','freight','sold','destroyed','field_freight','field_return')), pool_hq INTEGER, company INTEGER, from_hq INTEGER, to_hq INTEGER, dispatch_day INTEGER, eta_day INTEGER, paid_cost INTEGER, quality TEXT NOT NULL DEFAULT 'c' CHECK(typeof(quality)='text' AND quality IN ('a','b','c','d','e','f')), armor INTEGER NOT NULL DEFAULT 100 CHECK(typeof(armor)='integer' AND armor BETWEEN 0 AND 100), last_maintenance INTEGER CHECK(last_maintenance IS NULL OR (typeof(last_maintenance)='integer' AND last_maintenance BETWEEN 0 AND 4294967295)), tech INTEGER CHECK(tech IS NULL OR (typeof(tech)='integer' AND tech BETWEEN 1 AND 4294967295)), FOREIGN KEY(cid,tech) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED, PRIMARY KEY (cid,id), UNIQUE (cid,ord), UNIQUE (cid,hull), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,hull) REFERENCES hull_instance(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,pool_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,company) REFERENCES force(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,from_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,to_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK ((pool_hq IS NOT NULL) = (placement='hq_pool')), CHECK ((company IS NOT NULL) = (placement IN ('company','field_freight'))), CHECK ((from_hq IS NOT NULL) = (placement IN ('freight','field_freight'))), CHECK ((to_hq IS NOT NULL) = (placement IN ('freight','field_return'))), CHECK ((dispatch_day IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK ((eta_day IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK ((paid_cost IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK (pool_hq IS NULL OR pool_hq BETWEEN 1 AND 4294967295), CHECK (company IS NULL OR company BETWEEN 1 AND 4294967295), CHECK (from_hq IS NULL OR from_hq BETWEEN 1 AND 4294967295), CHECK (to_hq IS NULL OR to_hq BETWEEN 1 AND 4294967295), CHECK (placement!='freight' OR from_hq!=to_hq), CHECK (placement NOT IN ('freight','field_freight','field_return') OR (dispatch_day BETWEEN 0 AND 4294967295 AND eta_day > dispatch_day AND eta_day <= 4294967295 AND paid_cost >= 0)));
     \\CREATE TABLE IF NOT EXISTS artillery_crew (cid INTEGER NOT NULL CHECK(typeof(cid)='integer'), formation INTEGER NOT NULL CHECK(typeof(formation)='integer' AND formation BETWEEN 1 AND 4294967295), seat TEXT NOT NULL CHECK(typeof(seat)='text' AND seat IN ('commander','gunner','driver','loader')), person INTEGER CHECK(person IS NULL OR (typeof(person)='integer' AND person BETWEEN 1 AND 4294967295)), PRIMARY KEY(cid,formation,seat), UNIQUE(cid,person), FOREIGN KEY(cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,formation) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,person) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS artillery_slot (cid INTEGER NOT NULL CHECK(typeof(cid)='integer'), formation INTEGER NOT NULL CHECK(typeof(formation)='integer' AND formation BETWEEN 1 AND 4294967295), slot TEXT NOT NULL CHECK(typeof(slot)='text' AND slot IN ('chassis','main_gun','machine_gun_right_1','machine_gun_right_2','machine_gun_left_1','machine_gun_left_2','long_tom_bin_1','long_tom_bin_2','long_tom_bin_3','long_tom_bin_4','machine_gun_bin','communications','hitch')), condition TEXT NOT NULL CHECK(typeof(condition)='text' AND condition IN ('ok','damaged','destroyed','missing')), rounds INTEGER, PRIMARY KEY(cid,formation,slot), FOREIGN KEY(cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,formation) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK((rounds IS NOT NULL)=(slot IN ('long_tom_bin_1','long_tom_bin_2','long_tom_bin_3','long_tom_bin_4','machine_gun_bin'))), CHECK(rounds IS NULL OR (typeof(rounds)='integer' AND rounds >= 0 AND rounds <= CASE WHEN slot='machine_gun_bin' THEN 100 ELSE 5 END)), CHECK(condition NOT IN ('destroyed','missing') OR rounds IS NULL OR rounds=0));
@@ -146,7 +148,7 @@ const tables = [_][]const u8{
     "operation_task",      "operation_intervention", "battle_report_task", "actor",                 "world_state",           "rival",               "officer_arc",            "hull_instance",            "hull_loadout",
     "artillery_formation", "artillery_crew",         "artillery_slot",     "artillery_offer",       "hull_combat_record",    "maintenance_entry",   "hull_ownership_history", "faction_roster",           "merc_company",
     "merc_company_roster", "retired_hq",             "artillery_battle",   "artillery_battle_seat", "artillery_battle_slot", "battle_report_phase", "battle_in_progress",     "battle_in_progress_order", "battle_report_lever",
-    "contract_situation",  "personage",
+    "contract_situation",  "personage",              "personage_relation",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
@@ -224,6 +226,7 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_merc_company_cid ON merc_company(cid);
     \\CREATE INDEX IF NOT EXISTS ix_merc_company_roster_cid ON merc_company_roster(cid);
     \\CREATE INDEX IF NOT EXISTS ix_personage_cid ON personage(cid);
+    \\CREATE INDEX IF NOT EXISTS ix_personage_relation_cid ON personage_relation(cid);
 ;
 
 /// The stream order of the single `rng` blob that saves before schema v32
@@ -857,6 +860,7 @@ pub const Store = struct {
         try self.saveFactionRosters(gs, cid);
         try self.saveMercCompanyRosters(gs, cid);
         try self.savePersonages(gs, cid);
+        try self.savePersonageRelations(gs, cid);
         try self.saveTxn(gs, cid);
         try self.saveLoan(gs, cid);
         try self.saveCourier(gs, cid);
@@ -1819,6 +1823,47 @@ pub const Store = struct {
         }
     }
 
+    // Relations between personages (docs/p5d-conflict-world-design.md §B, §J).
+    fn savePersonageRelations(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO personage_relation VALUES (?1,?2,?3,?4,?5,?6)");
+        defer st.finalize();
+        for (gs.personage_relations.items, 0..) |rel, ord| {
+            try st.bindAll(.{
+                cid,
+                @as(i64, @intCast(ord)),
+                @as(i64, @intFromEnum(rel.from)),
+                @as(i64, @intFromEnum(rel.to)),
+                @tagName(rel.kind),
+                @as(i64, rel.weight),
+            });
+            try st.run();
+        }
+    }
+
+    /// Decode each row exactly, as `loadPersonages` does: an unknown kind
+    /// (matched on the column's full bytes), a non-integer or out-of-range
+    /// value, or an ordinal other than the row's position
+    /// (`savePersonageRelations` writes 0, 1, 2, …) is `CorruptSave` (rule
+    /// 47). `personage_relations.validate` then checks endpoints, shape and
+    /// lieges.
+    fn loadPersonageRelations(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare("SELECT from_id, to_id, kind, weight, typeof(ord)='integer' AND typeof(from_id)='integer' AND typeof(to_id)='integer' AND typeof(weight)='integer' AND typeof(kind)='text', ord FROM personage_relation WHERE cid = ?1 ORDER BY ord");
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            if (st.int(4) != 1) return error.CorruptSave;
+            if (st.int(5) != @as(i64, @intCast(gs.personage_relations.items.len))) return error.CorruptSave;
+            const rel: personage_mod.Relation = .{
+                .from = try toId(types.PersonageId, st.int(0)),
+                .to = try toId(types.PersonageId, st.int(1)),
+                .kind = std.meta.stringToEnum(personage_mod.RelationKind, try st.text(2, alloc)) orelse return error.CorruptSave,
+                .weight = try st.intAs(u8, 3),
+            };
+            try gs.personage_relations.append(alloc, rel);
+        }
+    }
+
     // P4i: save and load persistent officer arcs.
     fn saveOfficerArcs(self: Store, gs: *GameState, cid: i64) !void {
         const st = try self.db.prepare("INSERT INTO officer_arc VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
@@ -2424,6 +2469,7 @@ pub const Store = struct {
         try self.loadFactionRosters(&gs, cid);
         try self.loadMercCompanyRosters(&gs, cid);
         try self.loadPersonages(&gs, cid);
+        try self.loadPersonageRelations(&gs, cid);
         try self.loadTxn(&gs, cid);
         try self.loadLoan(&gs, cid);
         try self.loadCourier(&gs, cid);
@@ -2455,6 +2501,7 @@ pub const Store = struct {
         try hq_ops.validateHqHistory(&gs);
         try artillery.validate(&gs);
         try personage_rules.validate(&gs);
+        try personage_relation_rules.validate(&gs);
         try validateCounters(&gs);
         try validateStoredStrings(&gs);
         // Last: the battle in progress replays from the complete, validated campaign.
@@ -5732,8 +5779,8 @@ test "a played current campaign round trips and its downgraded store is refused 
     try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("UPDATE setting SET value = 36 WHERE key = 'schema_version'");
     defer raw.close();
-    try std.testing.expectEqual(@as(u64, 4371932905005686475), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 12180291330747351351), hash_before);
+    try std.testing.expectEqual(@as(u64, 8256077945726463002), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 12293060296378331270), hash_before);
     try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
@@ -6158,8 +6205,8 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     // service requires available, physically local technicians and local pool
     // teams (docs/p2-artillery-operations-design.md,
     // Condition, maintenance, repairs and shared hours).
-    try std.testing.expectEqual(@as(u64, 4371932905005686475), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 12180291330747351351), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 8256077945726463002), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 12293060296378331270), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -10311,7 +10358,7 @@ test "operational save continues through shared service injury repair reload and
     defer continued.deinit();
     try std.testing.expectEqual(digest.stateHash(&loaded), digest.stateHash(&continued));
     // Pin the complete operational command script, including service and injury streams.
-    try std.testing.expectEqual(@as(u64, 1734066061162536952), digest.stateHash(&continued));
+    try std.testing.expectEqual(@as(u64, 15509639992824121628), digest.stateHash(&continued));
 }
 
 test "artillery bay targets round trip and malformed mutually exclusive targets reject loading" {
@@ -11540,6 +11587,29 @@ test "a store or a campaign at format 69 is refused before any change, personage
     try std.testing.expectEqual(memory_before, digest.stateHash(&gs));
 }
 
+test "a store or a campaign at format 70 is refused before any change, relations held or not" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 7005 });
+    defer gs.deinit();
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    try std.testing.expect(gs.personage_relations.items.len > 0);
+    try std.testing.expectEqual(@as(i64, 71), schema_version);
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    var store = try Store.fromDb(raw);
+    try store.save(&gs);
+    try raw.exec("UPDATE setting SET value = 70 WHERE key = 'schema_version'");
+    try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
+    var sql: [128:0]u8 = undefined;
+    try raw.exec(try std.fmt.bufPrintZ(&sql, "UPDATE setting SET value = {d} WHERE key = 'schema_version'; UPDATE campaign SET schema_version = 70", .{schema_version}));
+    store = try Store.fromDb(raw);
+    const memory_before = digest.stateHash(&gs);
+    const storage_before = try databaseFingerprintForTest(raw);
+    try std.testing.expectError(error.SaveOlderThanGame, store.load(std.testing.allocator, gs.campaign_id));
+    try std.testing.expectError(error.SaveOlderThanGame, store.save(&gs));
+    try std.testing.expectEqual(storage_before, try databaseFingerprintForTest(raw));
+    try std.testing.expectEqual(memory_before, digest.stateHash(&gs));
+}
+
 test "a created campaign's personages and their counter survive save and load, and the campaign plays on identically" {
     // Rules 46, 53, 70; docs/p5d-conflict-world-design.md §J.
     const commands = @import("../sim/commands.zig");
@@ -11568,11 +11638,27 @@ test "a created campaign's personages and their counter survive save and load, a
         try std.testing.expectEqual(p.provenance, q.provenance);
         try std.testing.expectEqual(p.generator_version, q.generator_version);
     }
-    // The personage fields and the counter are digest-covered.
+    // The relations come back in order, field for field.
+    try std.testing.expect(gs.personage_relations.items.len > 0);
+    try std.testing.expectEqualSlices(personage_mod.Relation, gs.personage_relations.items, loaded.personage_relations.items);
+    // The personage fields, the relations and the counter are digest-covered.
     const hash = digest.stateHash(&gs);
     gs.personages.values()[0].ambition ^= 1;
     try std.testing.expect(digest.stateHash(&gs) != hash);
     gs.personages.values()[0].ambition ^= 1;
+    const rel = &gs.personage_relations.items[0];
+    rel.weight ^= 1;
+    try std.testing.expect(digest.stateHash(&gs) != hash);
+    rel.weight ^= 1;
+    const kind = rel.kind;
+    rel.kind = if (kind == .grudge) .kin else .grudge;
+    try std.testing.expect(digest.stateHash(&gs) != hash);
+    rel.kind = kind;
+    const to = rel.to;
+    rel.to = rel.from;
+    try std.testing.expect(digest.stateHash(&gs) != hash);
+    rel.to = to;
+    try std.testing.expectEqual(hash, digest.stateHash(&gs));
     gs.next_personage_id += 1;
     try std.testing.expect(digest.stateHash(&gs) != hash);
     gs.next_personage_id -= 1;
@@ -11584,10 +11670,14 @@ test "a created campaign's personages and their counter survive save and load, a
     try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
 }
 
+/// After rows leave `personage_relation`, its ordinals renumbered 0, 1, 2, …
+/// in their former order, so a later refusal is not the ordinal check's.
+const relation_ords_renumbered = "UPDATE personage_relation SET ord = -1 - ord; UPDATE personage_relation SET ord = (SELECT COUNT(*) FROM personage_relation AS q WHERE q.cid = personage_relation.cid AND q.ord > personage_relation.ord); ";
+
 /// `template` with `$R` (a ruler's id), `$L` (a leader's id), `$S` (a free
 /// id), `$N` (the counter past it) and `$C` (the last id) filled in.
-fn personageTamperSqlForTest(buf: *[512:0]u8, template: []const u8, ids: [3]u32) ![:0]const u8 {
-    var w = std.Io.Writer.fixed(buf[0..511]);
+fn personageTamperSqlForTest(buf: *[1024:0]u8, template: []const u8, ids: [3]u32) ![:0]const u8 {
+    var w = std.Io.Writer.fixed(buf[0..1023]);
     var i: usize = 0;
     while (i < template.len) : (i += 1) {
         if (template[i] == '$' and i + 1 < template.len) {
@@ -11625,7 +11715,7 @@ test "a tampered personage row, seat, counter or politics stream refuses to load
     const ruler = 1; // the first hiring world's ruler
     const leader = personage_rules.ruler_count + 1; // the first leader
     const spare = gs.next_personage_id; // an id an added row may take
-    var buf: [512:0]u8 = undefined;
+    var buf: [1024:0]u8 = undefined;
     const Case = struct { []const u8, []const u8 };
     // A case that adds or deletes a row keeps the ordinals 0, 1, 2, …, so its
     // refusal is the named defect's, not the ordinal check's.
@@ -11638,11 +11728,11 @@ test "a tampered personage row, seat, counter or politics stream refuses to load
         .{ "ruler on a world that does not hire", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', 'CS', 'terra', motives, ambition, provenance, generator_version FROM personage WHERE id = $R; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
         .{ "ruler of another faction than its world's", "UPDATE personage SET faction_key = CASE WHEN faction_key = 'DC' THEN 'LC' ELSE 'DC' END WHERE id = $R" },
         .{ "two rulers on one world", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', faction_key, seat_planet_key, motives, ambition, provenance, generator_version FROM personage WHERE id = $R; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
-        .{ "a hiring world without a ruler", "DELETE FROM personage WHERE id = $R; UPDATE personage SET ord = -1 - ord; UPDATE personage SET ord = (SELECT COUNT(*) FROM personage AS q WHERE q.cid = personage.cid AND q.id < personage.id)" },
+        .{ "a hiring world without a ruler", "DELETE FROM personage_relation WHERE from_id = $R OR to_id = $R; " ++ relation_ords_renumbered ++ "DELETE FROM personage WHERE id = $R; UPDATE personage SET ord = -1 - ord; UPDATE personage SET ord = (SELECT COUNT(*) FROM personage AS q WHERE q.cid = personage.cid AND q.id < personage.id)" },
         .{ "a leader off its capital", "UPDATE personage SET seat_planet_key = 'skye' WHERE id = $L" },
         .{ "two leaders for one faction", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', faction_key, seat_planet_key, motives, ambition, provenance, generator_version FROM personage WHERE id = $L; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
         .{ "a leader for the catch-all faction", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', 'PER', 'galatea', motives, ambition, provenance, generator_version FROM personage WHERE id = $L; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
-        .{ "a leader-bearing faction without a leader", "DELETE FROM personage WHERE id = $L; UPDATE personage SET ord = -1 - ord; UPDATE personage SET ord = (SELECT COUNT(*) FROM personage AS q WHERE q.cid = personage.cid AND q.id < personage.id)" },
+        .{ "a leader-bearing faction without a leader", "DELETE FROM personage_relation WHERE from_id = $L OR to_id = $L; " ++ relation_ords_renumbered ++ "DELETE FROM personage WHERE id = $L; UPDATE personage SET ord = -1 - ord; UPDATE personage SET ord = (SELECT COUNT(*) FROM personage AS q WHERE q.cid = personage.cid AND q.id < personage.id)" },
         .{ "personages without a commander", "DELETE FROM commander" },
         .{ "one motive", "UPDATE personage SET motives = 1 WHERE id = $R" },
         .{ "four motives", "UPDATE personage SET motives = 15 WHERE id = $R" },
@@ -11669,9 +11759,9 @@ test "a tampered personage row, seat, counter or politics stream refuses to load
         try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
     }
     // Controls: without its commander the campaign loads once its personages
-    // go too, so the refusal above is the personages' own.
+    // and their relations go too, so the refusal above is the personages' own.
     try store.save(&gs);
-    try store.db.exec("DELETE FROM commander; DELETE FROM personage");
+    try store.db.exec("DELETE FROM commander; DELETE FROM personage_relation; DELETE FROM personage");
     var commanderless = try store.load(std.testing.allocator, gs.campaign_id);
     commanderless.deinit();
     try store.save(&gs);
@@ -11754,5 +11844,121 @@ test "a campaign without a commander holds no personages and loads" {
     var loaded = try store.load(std.testing.allocator, gs.campaign_id);
     defer loaded.deinit();
     try std.testing.expectEqual(@as(usize, 0), loaded.personages.count());
+    try std.testing.expectEqual(@as(usize, 0), loaded.personage_relations.items.len);
     try std.testing.expectEqual(@as(u32, 1), loaded.next_personage_id);
+}
+
+// Rows of a saved campaign's `personage_relation` table that relation tamper
+// cases name, as SQL subqueries.
+const relation_sql = struct {
+    const cid = "(SELECT cid FROM personage_relation LIMIT 1)";
+    const next_ord = "(SELECT MAX(ord) + 1 FROM personage_relation)";
+    const last_ord = "(SELECT MAX(ord) FROM personage_relation)";
+    const first_liege = "(SELECT MIN(ord) FROM personage_relation WHERE kind = 'liege')";
+    const first_kin = "(SELECT MIN(ord) FROM personage_relation WHERE kind = 'kin')";
+    const first_rival = "(SELECT MIN(ord) FROM personage_relation WHERE kind = 'rival')";
+    /// The first liege relation's vassal and liege.
+    const vassal = "(SELECT from_id FROM personage_relation WHERE ord = " ++ first_liege ++ ")";
+    const liege = "(SELECT to_id FROM personage_relation WHERE ord = " ++ first_liege ++ ")";
+    /// A leader of another faction than `liege`'s, and a ruler other than `vassal`.
+    const other_leader = "(SELECT id FROM personage WHERE role = 'faction_leader' AND id <> " ++ liege ++ " ORDER BY id LIMIT 1)";
+    const other_ruler = "(SELECT id FROM personage WHERE role = 'planetary_ruler' AND id <> " ++ vassal ++ " ORDER BY id LIMIT 1)";
+    const catch_all_ruler = "(SELECT id FROM personage WHERE role = 'planetary_ruler' AND faction_key = 'PER' ORDER BY id LIMIT 1)";
+};
+
+test "a tampered personage relation refuses to load" {
+    // Rules 47, 50, 70; docs/p5d-conflict-world-design.md §J "dangling refs".
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 71101 });
+    defer gs.deinit();
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    for ([_]personage_mod.RelationKind{ .liege, .kin, .rival }) |kind| {
+        for (gs.personage_relations.items) |rel| {
+            if (rel.kind == kind) break;
+        } else return error.TestFixtureLacksRelationKind;
+    }
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+
+    const s = relation_sql;
+    // `fk_off`: the executable schema's foreign keys would refuse the row,
+    // so they are off and the refusal is the loader's.
+    const Case = struct { name: []const u8, sql: [:0]const u8, fk_off: bool = false };
+    // A case that adds or deletes a row keeps the ordinals 0, 1, 2, …, so its
+    // refusal is the named defect's, not the ordinal check's.
+    const cases = [_]Case{
+        .{ .name = "a dangling from", .sql = "UPDATE personage_relation SET from_id = 4000000000 WHERE ord = " ++ s.first_liege, .fk_off = true },
+        .{ .name = "a dangling to", .sql = "UPDATE personage_relation SET to_id = 4000000000 WHERE ord = " ++ s.first_liege, .fk_off = true },
+        .{ .name = "a self-relation", .sql = "UPDATE personage_relation SET to_id = from_id WHERE ord = " ++ s.first_kin },
+        .{ .name = "an unknown kind", .sql = "UPDATE personage_relation SET kind = 'feud' WHERE ord = " ++ s.first_kin },
+        .{ .name = "weight 0", .sql = "UPDATE personage_relation SET weight = 0 WHERE ord = " ++ s.first_kin },
+        .{ .name = "weight 101", .sql = "UPDATE personage_relation SET weight = 101 WHERE ord = " ++ s.first_kin },
+        .{ .name = "a reversed symmetric row", .sql = "UPDATE personage_relation SET from_id = to_id, to_id = from_id WHERE ord = " ++ s.first_kin },
+        .{ .name = "a liege from a leader", .sql = "INSERT INTO personage_relation VALUES (" ++ s.cid ++ ", " ++ s.next_ord ++ ", " ++ s.liege ++ ", " ++ s.other_leader ++ ", 'liege', 50)" },
+        .{ .name = "a liege to a ruler", .sql = "UPDATE personage_relation SET to_id = " ++ s.other_ruler ++ " WHERE ord = " ++ s.first_liege },
+        .{ .name = "a liege to another faction's leader", .sql = "UPDATE personage_relation SET to_id = " ++ s.other_leader ++ " WHERE ord = " ++ s.first_liege },
+        .{ .name = "a missing liege", .sql = "DELETE FROM personage_relation WHERE ord = " ++ s.first_liege ++ "; " ++ relation_ords_renumbered },
+        .{ .name = "two lieges", .sql = "INSERT INTO personage_relation VALUES (" ++ s.cid ++ ", " ++ s.next_ord ++ ", " ++ s.vassal ++ ", " ++ s.other_leader ++ ", 'liege', 50)" },
+        .{ .name = "a catch-all ruler with a liege", .sql = "INSERT INTO personage_relation VALUES (" ++ s.cid ++ ", " ++ s.next_ord ++ ", " ++ s.catch_all_ruler ++ ", " ++ s.liege ++ ", 'liege', 50)" },
+        .{ .name = "rival and ally on one pair", .sql = "INSERT INTO personage_relation SELECT cid, " ++ s.next_ord ++ ", from_id, to_id, 'ally', weight FROM personage_relation WHERE ord = " ++ s.first_rival },
+        .{ .name = "a text weight", .sql = "UPDATE personage_relation SET weight = 'heavy' WHERE ord = " ++ s.first_kin },
+        .{ .name = "a fractional endpoint", .sql = "UPDATE personage_relation SET to_id = to_id + 0.5 WHERE ord = " ++ s.first_liege, .fk_off = true },
+        .{ .name = "an ordinal out of position", .sql = "UPDATE personage_relation SET ord = ord + 1 WHERE ord = " ++ s.last_ord },
+        .{ .name = "relations without personages", .sql = "DELETE FROM commander; DELETE FROM personage", .fk_off = true },
+    };
+    for (cases) |case| {
+        errdefer std.debug.print("personage relation tamper case: {s}\n", .{case.name});
+        try store.save(&gs);
+        if (case.fk_off) try store.db.exec("PRAGMA foreign_keys = OFF");
+        try store.db.exec("PRAGMA ignore_check_constraints=ON");
+        try store.db.exec(case.sql);
+        try store.db.exec("PRAGMA ignore_check_constraints=OFF");
+        if (case.fk_off) try store.db.exec("PRAGMA foreign_keys = ON");
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    }
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+}
+
+test "a duplicate personage relation refuses to load where the schema would let it in" {
+    // Rules 47, 50: the schema's UNIQUE refuses the row; a table without it
+    // still cannot hand the loader a duplicate.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 71101 });
+    defer gs.deinit();
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    const duplicate = "INSERT INTO personage_relation SELECT cid, " ++ relation_sql.next_ord ++ ", from_id, to_id, kind, weight FROM personage_relation WHERE ord = 0";
+    try std.testing.expectError(error.ConstraintViolation, store.db.exec(duplicate));
+    try store.db.exec("CREATE TABLE loose AS SELECT * FROM personage_relation; DROP TABLE personage_relation; ALTER TABLE loose RENAME TO personage_relation; " ++ duplicate);
+    try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+}
+
+test "the personage relation schema refuses malformed rows without the loader" {
+    // Rule 50: the executable schema enforces what SQLite can check.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 71101 });
+    defer gs.deinit();
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    const s = relation_sql;
+    for ([_][:0]const u8{
+        "UPDATE personage_relation SET kind = 'feud' WHERE ord = 0",
+        "UPDATE personage_relation SET weight = 0 WHERE ord = 0",
+        "UPDATE personage_relation SET weight = 101 WHERE ord = 0",
+        "UPDATE personage_relation SET weight = 'heavy' WHERE ord = 0",
+        "UPDATE personage_relation SET to_id = from_id WHERE ord = 0",
+        "UPDATE personage_relation SET from_id = 0 WHERE ord = 0",
+        "UPDATE personage_relation SET ord = -1 WHERE ord = 0",
+        "UPDATE personage_relation SET from_id = 4000000000 WHERE ord = 0",
+        "UPDATE personage_relation SET from_id = to_id, to_id = from_id WHERE ord = " ++ s.first_kin,
+        "INSERT INTO personage_relation SELECT cid, " ++ s.next_ord ++ ", from_id, to_id, kind, weight FROM personage_relation WHERE ord = 0",
+    }) |tamper| {
+        errdefer std.debug.print("personage relation schema case: {s}\n", .{tamper});
+        try std.testing.expectError(error.ConstraintViolation, store.db.exec(tamper));
+    }
+    try expectCurrentRoundTripForTest(store, &gs);
 }

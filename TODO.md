@@ -104,8 +104,11 @@ A package has one primary invariant or subsystem outcome.
   opens a read-only who's-who sheet (world governor, employer leader, enemy
   leader, each with its provenance label; a dim line for an empty seat), and
   REPL `who <contract id>` prints the same rows.
-- [ ] P5d.1c personage relations: kin, liege, rival, ally and grudge relations
-  generated and shown. Needs P5d.1a.
+- [x] P5d.1c personage relations: every ruler owes its leader fealty (its
+  loyalty), same-faction namesakes are kin (K1), and rulers within 60 ly may
+  draw a rival, ally or grudge (R1 (relations)), drawn on `.politics` after the
+  personages and persisted at schema v71 with a load that refuses a dangling
+  endpoint; `who <world>`, `who <contract id>` and the F4 sheet show them (S1).
 - [ ] P5d.1d canon and authored personages: `personages.zon` with provenance,
   validator, fixtures and a corpus report; Sarna facts re-verified against
   their pages; Sarna credit. Needs P5d.1a and D6–D8.

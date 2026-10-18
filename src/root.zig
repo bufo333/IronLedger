@@ -97,6 +97,7 @@ pub const black_market = @import("sim/black_market.zig");
 pub const merc_lifecycle = @import("sim/merc_lifecycle.zig");
 pub const merc_identity = @import("sim/merc_identity.zig");
 pub const personages = @import("sim/personages.zig");
+pub const personage_relations = @import("sim/personage_relations.zig");
 
 // persist/ — SQLite save files
 pub const sqlite = @import("persist/sqlite.zig");
