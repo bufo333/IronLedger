@@ -33,6 +33,7 @@ const officer_mod = @import("../domain/officer.zig");
 const artillery_dom = @import("../domain/artillery_formation.zig");
 const hull_instance_mod = @import("../domain/hull_instance.zig");
 const personage_mod = @import("../domain/personage.zig");
+const conflict_mod = @import("../domain/conflict.zig");
 
 pub const Config = struct {
     seed: u64 = 3025,
@@ -147,6 +148,9 @@ pub const LogCategory = enum {
     construction,
     market,
     misc,
+    /// The political world: conflicts discovered, fought and resolved
+    /// (docs/p5d-conflict-world-design.md §F, §K).
+    politics,
 };
 
 pub const LogCtx = struct {
@@ -394,6 +398,9 @@ pub const GameState = struct {
     /// Relations between personages, in generation order (§B relations);
     /// `(from, to, kind)` is each one's identity (`personage_relations.validate`).
     personage_relations: std.ArrayListUnmanaged(personage_mod.Relation) = .empty,
+    /// Every conflict opened, resolved ones included, in id order
+    /// (docs/p5d-conflict-world-design.md §C; `politics.validate`).
+    conflicts: std.AutoArrayHashMapUnmanaged(types.ConflictId, conflict_mod.Conflict) = .empty,
 
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
@@ -420,6 +427,7 @@ pub const GameState = struct {
     next_officer_arc_id: u32 = 1,
     next_hull_instance_id: u32 = 1,
     next_personage_id: u32 = 1,
+    next_conflict_id: u32 = 1,
 
     pub fn init(gpa: std.mem.Allocator, config: Config) GameState {
         return .{
@@ -1473,6 +1481,8 @@ pub const GameState = struct {
         .{ "personages", .persisted },
         .{ "personage_relations", .persisted },
         .{ "next_personage_id", .persisted },
+        .{ "conflicts", .persisted },
+        .{ "next_conflict_id", .persisted },
     };
 
     pub fn persistenceOf(comptime name: []const u8) Persistence {

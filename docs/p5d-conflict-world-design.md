@@ -424,6 +424,32 @@ for every kind.
 
   These feed later scheme preconditions ("the Duke lost Galtor last spring,
   now he wants revenge").
+- **Landed in P5d.1e.** `conflict` is persisted at schema v73 (with
+  `next_conflict_id`; a v72 store migrates with no conflict and the counter
+  at 1). It holds its template key, world, aggressor and defender (faction
+  plus personage), instigator, staging world, the §A days, `local_force`,
+  `strike_force` and `outcome`; `status` is derived from the days and the
+  outcome by one owner, never stored, and `cause` is rendered from the
+  template, never stored. `politics.runSchemes` opens at most
+  `schemes_per_month` conflicts on each 1st, under `max_open_conflicts`,
+  from 12 `opening` templates in `data/tables/political_events.zon`:
+  `border_grab`, `industrial_seizure`, `supply_raid`, `probing_raid`,
+  `punitive_raid`, `grudge_strike`, `rival_feud`, `secession_revolt`,
+  `sponsored_unrest`, `pirate_predation`, `allied_reprisal` and
+  `dynastic_claim` (E1: corporate seizure became `industrial_seizure` by a
+  ruler, insurrection `sponsored_unrest` by a hostile power, and pirate
+  predation is a `PER` world's ruler's). A candidate draws with weight
+  template weight × (1 + ambition); each draw removes the candidates sharing
+  its instigator or world, and no world or instigator holds two unresolved
+  conflicts. `local_force` is `opfor.roll` for `garrison_duty` scaled by
+  world security, `strike_force` `opfor.roll` for the template's strike
+  kind, and the strike force stages from the aggressor faction's nearest
+  other world. Resolution is NPC-only (E4): the aggressor wins with chance
+  `strike BV / (strike BV + local BV)` on one `.politics` draw; it writes
+  `outcome` and moves the world by `world_state.conflictWorldDelta` (E5).
+  Deferred: `stability` conflicts and every offer to 1f, `parent_conflict`
+  to 1m, personage consequences (deposition, grudges, standing) to 1n; the
+  faction weight in resolution and discovery is dropped (E4, E6).
 
 ## §D Commitments: hired companies with travel (D4, D13, D14)
 
@@ -703,6 +729,13 @@ it handles:
 
 A conflict draws its beat schedule (`next_beat_day`, `// TUNE` day ranges) on
 `.politics` when it opens.
+
+**Landed in P5d.1e.** `politics.advanceWorld` runs in the markets phase after
+the hiring halls churn and before the monthly refreshes. It implements steps
+2 and 3 without beats or intrigue: discovery, the strike and NPC-only
+resolution by (day, `ConflictId`), each with one `[politics]` log line (an
+opening is secret and logs nothing, E3), then `opening` templates on the
+1st. Step 1 (movements) belongs to 1i and beats to 1n.
 
 - **Rule:** player presence and visibility are never inputs to progression.
 - **Test (asymmetric, rule 71):** two campaigns on the same seed, with the HQ on
@@ -1178,6 +1211,28 @@ whose design depends on a different choice is re-planned.
   - *M1 — migrated campaigns.* The v71 → v72 migration keeps every existing
     personage procedural with empty `key` and `family_key` and adds no data
     row; a new 3025 campaign gets the canon figures.
+- **P5d.1e decisions. John's choices (P5d.1e plan):**
+  - *E1 — the first template set.* The 12 opening templates of the plan,
+    each buildable from today's roles, motives, relations, factions and
+    world data: corporate seizure becomes `industrial_seizure` by a ruler,
+    insurrection becomes `sponsored_unrest` by a hostile neighbour, and
+    pirate predation is instigated by a `PER` world's ruler. `stability`
+    moves to 1f.
+  - *E2 — what `conflicts` shows before news reach.* Every conflict whose
+    `discovery_day` has come, at any distance: threatened, open and
+    resolved. A `preparing` conflict is shown nowhere; 1g adds reach and 1f
+    ring-gated positions.
+  - *E3 — log lines.* In `LogCategory.politics`: on discovery, on fighting
+    starting and on resolution. Opening is not logged.
+  - *E4 — NPC-only resolution.* The aggressor wins with chance `strike BV /
+    (strike BV + local BV)` in basis points, decided by one `.politics`
+    draw; commitments join the sum in 1j, and no faction weight is added.
+  - *E5 — consequences of resolution.* Resolution writes `outcome` and moves
+    the target world's `world_states` through the existing owner; personage
+    consequences go to 1n.
+  - *E6 — defender intelligence.* One flat lag range, shortened by a fixed
+    `intel_chief_cut_days` when the defender faction has an
+    `intelligence_chief` personage.
 - **D9 — playtest gate.** The gate entry is unchecked on `main`, and no verdict
   from John is recorded on `main`. *Recommended:* check it, worded as John's
   verdict, once John confirms it. *Alternative:* leave it for separate

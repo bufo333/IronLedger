@@ -50,19 +50,40 @@ const situation_mod = @import("../domain/situation.zig");
 const personage_mod = @import("../domain/personage.zig");
 const personage_rules = @import("../sim/personages.zig");
 const personage_relation_rules = @import("../sim/personage_relations.zig");
+const conflict_mod = @import("../domain/conflict.zig");
+const politics = @import("../sim/politics.zig");
 
 const artillery_store = @import("artillery_store.zig");
 const artillery_battle_store = @import("artillery_battle_store.zig");
 const artillery = @import("../sim/artillery.zig");
 const artillery_catalogue = @import("../domain/artillery_catalogue.zig");
 
-pub const schema_version = 72;
+pub const schema_version = 73;
 
-/// The one older format this executable reads, by migrating it in place
-/// (`migrateV71ToV72`; rule 51, docs/p5d-conflict-world-design.md §J).
-pub const migratable_schema_version = 71;
+/// The oldest format this executable reads (rule 51). Every format from it
+/// up to `schema_version` opens through successive migrations in place:
+/// v71 → v72 (`migrateV71ToV72`), then v72 → v73 (`migrateV72ToV73`).
+pub const oldest_supported_schema_version = 71;
 
-const ddl =
+/// Every table of schema v73: schema v72's, unchanged, and `conflict`.
+const ddl = ddl_v72 ++ "\n" ++ conflict_v73_ddl;
+
+/// Schema v73's `conflict` table (docs/p5d-conflict-world-design.md §C, §J).
+/// A loaded row is checked by `politics.validate`.
+const conflict_v73_ddl =
+    \\CREATE TABLE IF NOT EXISTS conflict (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), id INTEGER NOT NULL CHECK (typeof(id)='integer' AND id BETWEEN 1 AND 4294967295), template_key TEXT NOT NULL CHECK (typeof(template_key)='text' AND length(template_key) > 0), planet_key TEXT NOT NULL CHECK (typeof(planet_key)='text' AND length(planet_key) > 0), aggressor_faction TEXT NOT NULL CHECK (typeof(aggressor_faction)='text' AND length(aggressor_faction) > 0), aggressor_personage INTEGER NOT NULL CHECK (typeof(aggressor_personage)='integer' AND aggressor_personage BETWEEN 1 AND 4294967295), defender_faction TEXT NOT NULL CHECK (typeof(defender_faction)='text' AND length(defender_faction) > 0), defender_personage INTEGER NOT NULL CHECK (typeof(defender_personage)='integer' AND defender_personage BETWEEN 1 AND 4294967295), instigator INTEGER NOT NULL CHECK (typeof(instigator)='integer' AND instigator BETWEEN 1 AND 4294967295), staging_planet_key TEXT NOT NULL CHECK (typeof(staging_planet_key)='text' AND length(staging_planet_key) > 0), opened_day INTEGER NOT NULL CHECK (typeof(opened_day)='integer' AND opened_day BETWEEN 0 AND 4294967295), discovery_day INTEGER NOT NULL CHECK (typeof(discovery_day)='integer' AND discovery_day BETWEEN 0 AND 4294967295), strike_day INTEGER NOT NULL CHECK (typeof(strike_day)='integer' AND strike_day BETWEEN 0 AND 4294967295), expires_day INTEGER NOT NULL CHECK (typeof(expires_day)='integer' AND expires_day BETWEEN 0 AND 4294967295), local_lances INTEGER NOT NULL CHECK (typeof(local_lances)='integer' AND local_lances BETWEEN 1 AND 255), local_quality TEXT NOT NULL CHECK (typeof(local_quality)='text' AND local_quality IN ('green','regular','veteran','elite')), local_lance_bv INTEGER NOT NULL CHECK (typeof(local_lance_bv)='integer' AND local_lance_bv >= 0), local_lance_tons INTEGER NOT NULL CHECK (typeof(local_lance_tons)='integer' AND local_lance_tons BETWEEN 0 AND 4294967295), strike_lances INTEGER NOT NULL CHECK (typeof(strike_lances)='integer' AND strike_lances BETWEEN 1 AND 255), strike_quality TEXT NOT NULL CHECK (typeof(strike_quality)='text' AND strike_quality IN ('green','regular','veteran','elite')), strike_lance_bv INTEGER NOT NULL CHECK (typeof(strike_lance_bv)='integer' AND strike_lance_bv >= 0), strike_lance_tons INTEGER NOT NULL CHECK (typeof(strike_lance_tons)='integer' AND strike_lance_tons BETWEEN 0 AND 4294967295), outcome TEXT CHECK (outcome IS NULL OR (typeof(outcome)='text' AND outcome IN ('aggressor_won','defender_held'))), CHECK (opened_day < discovery_day AND discovery_day < strike_day AND strike_day < expires_day), PRIMARY KEY (cid, id), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, aggressor_personage) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, defender_personage) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, instigator) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED);
+;
+
+/// Every index of schema v73: schema v72's and `ix_conflict_cid`.
+const index_ddl = index_ddl_v72 ++ "\n" ++ conflict_v73_index_ddl;
+
+const conflict_v73_index_ddl = "CREATE INDEX IF NOT EXISTS ix_conflict_cid ON conflict(cid);";
+
+/// Every table of schema v72, frozen: byte for byte the executable DDL of
+/// that format. `migrateV72ToV73` validates a v72 store against it, and
+/// schema v71 is derived from it (`ddl_v71`). Never edited: a later schema
+/// changes `ddl`, not this.
+const ddl_v72 =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS setting (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
     \\CREATE TABLE IF NOT EXISTS campaign (id INTEGER PRIMARY KEY, name TEXT NOT NULL, commander TEXT, day INTEGER NOT NULL, date TEXT NOT NULL, schema_version INTEGER NOT NULL CHECK (schema_version > 0), save_seq INTEGER NOT NULL, player_id INTEGER NOT NULL DEFAULT 0);
@@ -152,13 +173,14 @@ const tables = [_][]const u8{
     "operation_task",      "operation_intervention", "battle_report_task", "actor",                 "world_state",           "rival",               "officer_arc",            "hull_instance",            "hull_loadout",
     "artillery_formation", "artillery_crew",         "artillery_slot",     "artillery_offer",       "hull_combat_record",    "maintenance_entry",   "hull_ownership_history", "faction_roster",           "merc_company",
     "merc_company_roster", "retired_hq",             "artillery_battle",   "artillery_battle_seat", "artillery_battle_slot", "battle_report_phase", "battle_in_progress",     "battle_in_progress_order", "battle_report_lever",
-    "contract_situation",  "personage",              "personage_relation",
+    "contract_situation",  "personage",              "personage_relation", "conflict",
 };
 
 // Indexes for per-campaign tables (A28/D31): cid filters on every load;
 // composite shapes for the battle_report sub-tables whose loaders filter
 // on (cid, report_ord).  CREATE INDEX IF NOT EXISTS is idempotent.
-const index_ddl =
+// Schema v72's indexes, frozen like `ddl_v72`.
+const index_ddl_v72 =
     \\CREATE INDEX IF NOT EXISTS ix_artillery_battle_report ON artillery_battle(cid,report_ord);
     \\CREATE INDEX IF NOT EXISTS ix_artillery_battle_seat_report ON artillery_battle_seat(cid,report_ord);
     \\CREATE INDEX IF NOT EXISTS ix_artillery_battle_slot_report ON artillery_battle_slot(cid,report_ord);
@@ -238,7 +260,7 @@ const index_ddl =
 /// define differently. Schema v71 has no `key` or `family_key` column, its
 /// role CHECK admits only rulers and leaders, and its provenance CHECK only
 /// `procedural` with `generator_version = 1`. `migrateV71ToV72` validates a
-/// v71 store against it and rebuilds the table into the current DDL.
+/// v71 store against it and rebuilds the table into the v72 DDL.
 const personage_v71_ddl =
     \\CREATE TABLE IF NOT EXISTS personage (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), id INTEGER NOT NULL CHECK (typeof(id)='integer' AND id BETWEEN 1 AND 4294967295), role TEXT NOT NULL CHECK (role IN ('planetary_ruler','faction_leader')), first_name TEXT NOT NULL CHECK (typeof(first_name)='text' AND length(first_name) > 0), last_name TEXT NOT NULL CHECK (typeof(last_name)='text' AND length(last_name) > 0), faction_key TEXT NOT NULL CHECK (typeof(faction_key)='text'), seat_planet_key TEXT NOT NULL CHECK (typeof(seat_planet_key)='text'), motives INTEGER NOT NULL CHECK (typeof(motives)='integer' AND motives BETWEEN 1 AND 511 AND (motives & 1) + ((motives >> 1) & 1) + ((motives >> 2) & 1) + ((motives >> 3) & 1) + ((motives >> 4) & 1) + ((motives >> 5) & 1) + ((motives >> 6) & 1) + ((motives >> 7) & 1) + ((motives >> 8) & 1) BETWEEN 2 AND 3), ambition INTEGER NOT NULL CHECK (typeof(ambition)='integer' AND ambition BETWEEN 0 AND 100), provenance TEXT NOT NULL CHECK (provenance IN ('procedural')), generator_version INTEGER NOT NULL CHECK (typeof(generator_version)='integer' AND generator_version = 1), PRIMARY KEY (cid, id), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
 ;
@@ -252,12 +274,12 @@ fn tableLine(comptime text: []const u8, comptime table: []const u8) []const u8 {
     return text[begin..end];
 }
 
-/// Every table of schema v71: the current DDL with the frozen v71
-/// `personage` definition in place of the current one.
+/// Every table of schema v71: the frozen v72 DDL with the frozen v71
+/// `personage` definition in place of v72's.
 const ddl_v71: []const u8 = blk: {
-    const current = tableLine(ddl, "personage");
-    const at = std.mem.indexOf(u8, ddl, current).?;
-    break :blk ddl[0..at] ++ personage_v71_ddl ++ ddl[at + current.len ..];
+    const v72 = tableLine(ddl_v72, "personage");
+    const at = std.mem.indexOf(u8, ddl_v72, v72).?;
+    break :blk ddl_v72[0..at] ++ personage_v71_ddl ++ ddl_v72[at + v72.len ..];
 };
 
 /// The columns schema v71's `personage` has, in order; the migration copies
@@ -269,24 +291,36 @@ const personage_v71_columns = "cid, ord, id, role, first_name, last_name, factio
 /// rename of `personage` would rewrite `personage_relation`'s foreign keys
 /// to the renamed table, which is then dropped. Every v71 row is procedural,
 /// so each gains `key = ''` and `family_key = ''` and every other column is
-/// copied as stored.
+/// copied as stored. Ends with the store and every campaign at v72.
 const personage_v72_steps = [_][:0]const u8{
-    std.fmt.comptimePrint("CREATE TABLE personage__v72{s}", .{tableLine(ddl, "personage")["CREATE TABLE IF NOT EXISTS personage".len..]}),
+    std.fmt.comptimePrint("CREATE TABLE personage__v72{s}", .{tableLine(ddl_v72, "personage")["CREATE TABLE IF NOT EXISTS personage".len..]}),
     "INSERT INTO personage__v72 (" ++ personage_v71_columns ++ ", key, family_key) SELECT " ++ personage_v71_columns ++ ", '', '' FROM personage ORDER BY cid, ord",
     "DROP TABLE personage",
     "ALTER TABLE personage__v72 RENAME TO personage",
     "CREATE INDEX IF NOT EXISTS ix_personage_cid ON personage(cid)",
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_personage_key ON personage(cid, key) WHERE key <> ''",
-    std.fmt.comptimePrint("UPDATE campaign SET schema_version = {d}", .{schema_version}),
-    std.fmt.comptimePrint("UPDATE setting SET value = {d} WHERE key = 'schema_version'", .{schema_version}),
+    "UPDATE campaign SET schema_version = 72",
+    "UPDATE setting SET value = 72 WHERE key = 'schema_version'",
 };
 
-/// `personage_v72_steps` as one script, for the `migrations` registry.
-const personage_v72_script: [:0]const u8 = blk: {
-    var s: []const u8 = "";
-    for (personage_v72_steps, 0..) |step, i| s = s ++ (if (i == 0) "" else "; ") ++ step;
-    break :blk std.fmt.comptimePrint("{s}", .{s});
+/// The schema v72 → v73 steps, in order (`migrateV72ToV73`): the new
+/// `conflict` table and its index, a `next_conflict_id` of 1 for every
+/// campaign (a v72 campaign has no conflict), and the store and every
+/// campaign at v73. No existing table changes.
+const conflict_v73_steps = [_][:0]const u8{
+    std.fmt.comptimePrint("CREATE TABLE conflict{s}", .{tableLine(ddl, "conflict")["CREATE TABLE IF NOT EXISTS conflict".len..]}),
+    conflict_v73_index_ddl,
+    "INSERT INTO meta (cid, key, value) SELECT id, 'next_conflict_id', 1 FROM campaign",
+    "UPDATE campaign SET schema_version = 73",
+    "UPDATE setting SET value = 73 WHERE key = 'schema_version'",
 };
+
+/// Migration steps as one script, for the `migrations` registry.
+fn migrationScript(comptime steps: []const [:0]const u8) [:0]const u8 {
+    var s: []const u8 = "";
+    for (steps, 0..) |step, i| s = s ++ (if (i == 0) "" else "; ") ++ step;
+    return std.fmt.comptimePrint("{s}", .{s});
+}
 
 /// The stream order of the single `rng` blob that saves before schema v32
 /// hold: the generator states, one after another, in this order.
@@ -463,12 +497,15 @@ pub const Store = struct {
         .{ .from = 57, .to = 58, .table = "merc_company", .column = "founded_day", .sql = "ALTER TABLE merc_company ADD COLUMN founded_day INTEGER NOT NULL DEFAULT 0" },
         .{ .from = 57, .to = 58, .table = "merc_company", .column = "dissolved_day", .sql = "ALTER TABLE merc_company ADD COLUMN dissolved_day INTEGER NOT NULL DEFAULT 0" },
         .{ .from = 57, .to = 58, .table = "merc_company", .column = "logo_key", .sql = "ALTER TABLE merc_company ADD COLUMN logo_key TEXT NOT NULL DEFAULT ''" },
-        // v72: `personage` gains `key` and `family_key`, and its role and
-        // provenance CHECKs widen. A v71 store holds only procedural
+        // v71 → v72: `personage` gains `key` and `family_key`, and its role
+        // and provenance CHECKs widen. A v71 store holds only procedural
         // personages; each keeps every stored value and gains key = '' and
-        // family_key = '' through a table rebuild (`migrateV71ToV72`, the
-        // one migration this executable runs).
-        .{ .from = 71, .to = 72, .table = "personage", .column = "key", .sql = personage_v72_script },
+        // family_key = '' through a table rebuild (`migrateV71ToV72`).
+        .{ .from = 71, .to = 72, .table = "personage", .column = "key", .sql = migrationScript(&personage_v72_steps) },
+        // v72 → v73: the new `conflict` table, empty, and `next_conflict_id`
+        // = 1 for every campaign; no existing table changes
+        // (`migrateV72ToV73`).
+        .{ .from = 72, .to = 73, .table = "conflict", .column = "", .sql = migrationScript(&conflict_v73_steps) },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -495,23 +532,24 @@ pub const Store = struct {
         return version;
     }
 
-    /// Adopt only the current schema or initialize a genuinely empty database.
-    /// Unsupported formats and incomplete current schemas remain untouched.
-    /// Caller owns db until success; initialization is one guarded transaction.
+    /// Adopt the current schema, migrate a supported older one in place
+    /// (`migrate`), or initialize a genuinely empty database. Unsupported
+    /// formats and incomplete current schemas remain untouched. Caller owns
+    /// db until success; initialization is one guarded transaction.
     /// Source: engineering-contract.md rules 50–51.
     pub fn fromDb(db: sqlite.Db) !Store {
         return fromDbFaulting(db, null);
     }
 
-    /// `fromDb`, with a v71 → v72 migration failing just before its step
-    /// `fault_at` (below `migration_v72_step_count`) when non-null. Only
-    /// tests pass a fault.
+    /// `fromDb`, with the migration chain failing just before its step
+    /// `fault_at` (below `migrationStepCount`) when non-null. Only tests
+    /// pass a fault.
     fn fromDbFaulting(db: sqlite.Db, fault_at: ?usize) !Store {
         const version = try readStoreVersion(db);
         if (version) |stored| {
-            if (stored < migratable_schema_version) return error.StoreOlderThanGame;
+            if (stored < oldest_supported_schema_version) return error.StoreOlderThanGame;
             if (stored > schema_version) return error.StoreNewerThanGame;
-            if (stored == migratable_schema_version) try migrateV71ToV72(db, fault_at);
+            if (stored < schema_version) try migrate(db, stored, fault_at);
             try validateCurrentSchema(db);
         }
         try db.exec("PRAGMA foreign_keys = ON");
@@ -534,24 +572,79 @@ pub const Store = struct {
         return validateSchema(db, ddl);
     }
 
-    /// Steps of the v71 → v72 migration a test fault may name: each of
-    /// `personage_v72_steps`, then the foreign-key check, the v72 schema
-    /// check and COMMIT.
-    const migration_v72_step_count = personage_v72_steps.len + 3;
+    /// A test's fault in the migration chain: counts the chain's steps and
+    /// fails just before step `at`.
+    const Fault = struct {
+        at: ?usize,
+        next: usize = 0,
 
-    /// Schema v71 → v72 (rule 51; docs/p5d-conflict-world-design.md §J). A
-    /// v71 store differs from v72 only in `personage` (`personage_v71_ddl`).
-    /// Before any change: the store holds every v71 table and column, its
+        fn before(self: *Fault) error{SqliteError}!void {
+            defer self.next += 1;
+            if (self.at == self.next) return error.SqliteError;
+        }
+    };
+
+    /// Steps of the chain from schema `from` a test fault may name: for a
+    /// v71 store the v71 source check and each of `personage_v72_steps`;
+    /// then the v72 source check and each of `conflict_v73_steps`; then the
+    /// foreign-key check, the current schema check and COMMIT.
+    fn migrationStepCount(from: u32) usize {
+        const v71_part: usize = if (from == 71) 1 + personage_v72_steps.len else 0;
+        return v71_part + 1 + conflict_v73_steps.len + 3;
+    }
+
+    /// The migration chain (rule 51; docs/p5d-conflict-world-design.md §J):
+    /// a store at a supported older format `from` reaches the current one
+    /// through each migration in turn, all in one transaction with foreign
+    /// keys off. A v71 store runs `migrateV71ToV72` and then
+    /// `migrateV72ToV73`; a v72 store runs only `migrateV72ToV73`. Each
+    /// validates its frozen source format before its own statements, so a
+    /// malformed or mixed-version store is `CorruptStore` before any change.
+    /// The chain ends with an empty `PRAGMA foreign_key_check` (else
+    /// `CorruptStore`) and the current schema check before COMMIT. Any
+    /// failure rolls back and returns its error with the file still at
+    /// `from`. `fault_at` (tests only) fails the chain just before that step
+    /// (`migrationStepCount`).
+    fn migrate(db: sqlite.Db, from: u32, fault_at: ?usize) !void {
+        std.debug.assert(from >= oldest_supported_schema_version and from < schema_version);
+        var fault: Fault = .{ .at = fault_at };
+        try db.exec("PRAGMA foreign_keys = OFF");
+        // best-effort: the connection's foreign keys come back on whatever failed.
+        errdefer db.exec("PRAGMA foreign_keys = ON") catch {};
+        try db.exec("BEGIN");
+        // best-effort: preserve the migration error while undoing every step.
+        errdefer db.exec("ROLLBACK") catch {};
+        if (from == 71) try migrateV71ToV72(db, &fault);
+        try migrateV72ToV73(db, &fault);
+        try fault.before();
+        {
+            const dangling = try db.prepare("PRAGMA foreign_key_check");
+            defer dangling.finalize();
+            if (try dangling.next()) return error.CorruptStore;
+        }
+        try fault.before();
+        try validateCurrentSchema(db);
+        try fault.before();
+        try db.exec("COMMIT");
+    }
+
+    /// Every campaign of the store is at `version`; `CorruptStore` otherwise.
+    fn requireCampaignsAt(db: sqlite.Db, comptime version: u32) !void {
+        const off = try db.prepare("SELECT count(*) FROM campaign WHERE typeof(schema_version) <> 'integer' OR schema_version <> " ++ std.fmt.comptimePrint("{d}", .{version}));
+        defer off.finalize();
+        if (!try off.next() or off.int(0) != 0) return error.CorruptStore;
+    }
+
+    /// Schema v71 → v72, inside `migrate`'s transaction. Schema v71 differs
+    /// from v72 only in `personage` (`personage_v71_ddl`). The source check:
+    /// the store holds every v71 table and column (`ddl_v71`), its
     /// `personage` holds exactly the v71 columns, and every campaign is at
-    /// v71; otherwise `CorruptStore`. Then, in one transaction with foreign
-    /// keys off: `personage_v72_steps`, an empty `PRAGMA
-    /// foreign_key_check` (else `CorruptStore`), the v72 schema check, and
-    /// COMMIT. Any failure rolls back and returns its error with the file
-    /// still v71. No gameplay value, ID, counter, relation or RNG stream
-    /// changes, and no personage is added, so a migrated campaign loads and
-    /// plays on as it would have under v71. `fault_at` (tests only) fails
-    /// the migration just before that step.
-    fn migrateV71ToV72(db: sqlite.Db, fault_at: ?usize) !void {
+    /// v71; otherwise `CorruptStore`. Then `personage_v72_steps`. No gameplay
+    /// value, ID, counter, relation or RNG stream changes, and no personage
+    /// is added, so a migrated campaign loads and plays on as it would have
+    /// under v71.
+    fn migrateV71ToV72(db: sqlite.Db, fault: *Fault) !void {
+        try fault.before();
         try validateSchema(db, ddl_v71);
         {
             const columns = try db.prepare("SELECT count(*) FROM pragma_table_info('personage')");
@@ -560,31 +653,35 @@ pub const Store = struct {
             const v71_count = comptime std.mem.count(u8, personage_v71_columns, ",") + 1;
             if (columns.int(0) != v71_count) return error.CorruptStore;
         }
-        {
-            const off = try db.prepare("SELECT count(*) FROM campaign WHERE typeof(schema_version) <> 'integer' OR schema_version <> " ++ std.fmt.comptimePrint("{d}", .{migratable_schema_version}));
-            defer off.finalize();
-            if (!try off.next() or off.int(0) != 0) return error.CorruptStore;
-        }
-        try db.exec("PRAGMA foreign_keys = OFF");
-        // best-effort: the connection's foreign keys come back on whatever failed.
-        errdefer db.exec("PRAGMA foreign_keys = ON") catch {};
-        try db.exec("BEGIN");
-        // best-effort: preserve the migration error while undoing every step.
-        errdefer db.exec("ROLLBACK") catch {};
-        for (personage_v72_steps, 0..) |step, i| {
-            if (fault_at == i) return error.SqliteError;
+        try requireCampaignsAt(db, 71);
+        for (personage_v72_steps) |step| {
+            try fault.before();
             try db.exec(step);
         }
-        if (fault_at == personage_v72_steps.len) return error.SqliteError;
+    }
+
+    /// Schema v72 → v73, inside `migrate`'s transaction. Schema v73 adds the
+    /// `conflict` table and the `next_conflict_id` counter and changes no
+    /// existing table. The source check: the store holds every v72 table and
+    /// column (`ddl_v72`), no `conflict` table and no `next_conflict_id`
+    /// counter, and every campaign is at v72; otherwise `CorruptStore`. Then
+    /// `conflict_v73_steps`. The reconstruction: a v72 campaign has no
+    /// conflict, so each gets an empty conflict table and `next_conflict_id
+    /// = 1`; every other value, ID, counter and RNG stream is unchanged, so
+    /// a migrated campaign loads and plays on as it would have under v72.
+    fn migrateV72ToV73(db: sqlite.Db, fault: *Fault) !void {
+        try fault.before();
+        try validateSchema(db, ddl_v72);
         {
-            const dangling = try db.prepare("PRAGMA foreign_key_check");
-            defer dangling.finalize();
-            if (try dangling.next()) return error.CorruptStore;
+            const present = try db.prepare("SELECT (SELECT count(*) FROM sqlite_master WHERE name = 'conflict') + (SELECT count(*) FROM meta WHERE key = 'next_conflict_id')");
+            defer present.finalize();
+            if (!try present.next() or present.int(0) != 0) return error.CorruptStore;
         }
-        if (fault_at == personage_v72_steps.len + 1) return error.SqliteError;
-        try validateCurrentSchema(db);
-        if (fault_at == personage_v72_steps.len + 2) return error.SqliteError;
-        try db.exec("COMMIT");
+        try requireCampaignsAt(db, 72);
+        for (conflict_v73_steps) |step| {
+            try fault.before();
+            try db.exec(step);
+        }
     }
 
     /// Every table and column that `definitions` (one CREATE TABLE per
@@ -993,6 +1090,7 @@ pub const Store = struct {
         try self.saveMercCompanyRosters(gs, cid);
         try self.savePersonages(gs, cid);
         try self.savePersonageRelations(gs, cid);
+        try self.saveConflicts(gs, cid);
         try self.saveTxn(gs, cid);
         try self.saveLoan(gs, cid);
         try self.saveCourier(gs, cid);
@@ -1075,6 +1173,7 @@ pub const Store = struct {
             .{ "next_officer_arc_id", gs.next_officer_arc_id },         .{ "next_artillery_formation_id", gs.next_artillery_formation_id },
             .{ "next_artillery_offer_id", gs.next_artillery_offer_id }, .{ "next_hull_instance_id", gs.next_hull_instance_id },
             .{ "next_merc_company_id", gs.next_merc_company_id },       .{ "next_personage_id", gs.next_personage_id },
+            .{ "next_conflict_id", gs.next_conflict_id },
         };
         for (ints) |kv| {
             try st.bindAll(.{ cid, kv[0], kv[1] });
@@ -2002,6 +2101,101 @@ pub const Store = struct {
         }
     }
 
+    // World conflicts (docs/p5d-conflict-world-design.md §C, §J).
+    fn saveConflicts(self: Store, gs: *GameState, cid: i64) !void {
+        const st = try self.db.prepare("INSERT INTO conflict VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)");
+        defer st.finalize();
+        for (gs.conflicts.values(), 0..) |c, ord| {
+            try st.bindAll(.{
+                cid,
+                @as(i64, @intCast(ord)),
+                @as(i64, @intFromEnum(c.id)),
+                c.template_key,
+                c.planet_key,
+                c.aggressor.faction_key,
+                @as(i64, @intFromEnum(c.aggressor.personage)),
+                c.defender.faction_key,
+                @as(i64, @intFromEnum(c.defender.personage)),
+                @as(i64, @intFromEnum(c.instigator)),
+                c.staging_planet_key,
+                @as(i64, c.opened_day),
+                @as(i64, c.discovery_day),
+                @as(i64, c.strike_day),
+                @as(i64, c.expires_day),
+                @as(i64, c.local_force.lances),
+                @tagName(c.local_force.quality),
+                c.local_force.lance_bv,
+                @as(i64, c.local_force.lance_tons),
+                @as(i64, c.strike_force.lances),
+                @tagName(c.strike_force.quality),
+                c.strike_force.lance_bv,
+                @as(i64, c.strike_force.lance_tons),
+                if (c.outcome) |o| @as(?[]const u8, @tagName(o)) else null,
+            });
+            try st.run();
+        }
+    }
+
+    /// Decode each row exactly, as `loadPersonages` does: an unknown enum
+    /// (matched on the column's full bytes), a value of the wrong type or
+    /// out of range, a duplicate id, or an ordinal other than the row's
+    /// position (`saveConflicts` writes 0, 1, 2, …) is `CorruptSave` (rule
+    /// 47). `politics.validate` then checks references, the timeline,
+    /// staging, status and caps.
+    fn loadConflicts(self: Store, gs: *GameState, cid: i64) !void {
+        const alloc = gs.allocator();
+        const st = try self.db.prepare(
+            \\SELECT id, template_key, planet_key, aggressor_faction, aggressor_personage, defender_faction, defender_personage, instigator, staging_planet_key,
+            \\  opened_day, discovery_day, strike_day, expires_day,
+            \\  local_lances, local_quality, local_lance_bv, local_lance_tons, strike_lances, strike_quality, strike_lance_bv, strike_lance_tons, outcome,
+            \\  typeof(ord)='integer' AND typeof(id)='integer' AND typeof(template_key)='text' AND typeof(planet_key)='text'
+            \\  AND typeof(aggressor_faction)='text' AND typeof(aggressor_personage)='integer' AND typeof(defender_faction)='text'
+            \\  AND typeof(defender_personage)='integer' AND typeof(instigator)='integer' AND typeof(staging_planet_key)='text'
+            \\  AND typeof(opened_day)='integer' AND typeof(discovery_day)='integer' AND typeof(strike_day)='integer' AND typeof(expires_day)='integer'
+            \\  AND typeof(local_lances)='integer' AND typeof(local_quality)='text' AND typeof(local_lance_bv)='integer' AND typeof(local_lance_tons)='integer'
+            \\  AND typeof(strike_lances)='integer' AND typeof(strike_quality)='text' AND typeof(strike_lance_bv)='integer' AND typeof(strike_lance_tons)='integer'
+            \\  AND typeof(outcome) IN ('text','null'),
+            \\  ord
+            \\FROM conflict WHERE cid = ?1 ORDER BY ord
+        );
+        defer st.finalize();
+        try st.bindAll(.{cid});
+        while (try st.next()) {
+            if (st.int(22) != 1) return error.CorruptSave;
+            if (st.int(23) != @as(i64, @intCast(gs.conflicts.count()))) return error.CorruptSave;
+            const c: conflict_mod.Conflict = .{
+                .id = try toId(types.ConflictId, st.int(0)),
+                .template_key = try st.text(1, alloc),
+                .planet_key = try st.text(2, alloc),
+                .aggressor = .{ .faction_key = try st.text(3, alloc), .personage = try toId(types.PersonageId, st.int(4)) },
+                .defender = .{ .faction_key = try st.text(5, alloc), .personage = try toId(types.PersonageId, st.int(6)) },
+                .instigator = try toId(types.PersonageId, st.int(7)),
+                .staging_planet_key = try st.text(8, alloc),
+                .opened_day = try st.intAs(u32, 9),
+                .discovery_day = try st.intAs(u32, 10),
+                .strike_day = try st.intAs(u32, 11),
+                .expires_day = try st.intAs(u32, 12),
+                .local_force = try conflictForce(st, 13, alloc),
+                .strike_force = try conflictForce(st, 17, alloc),
+                .outcome = if (st.isNull(21)) null else std.meta.stringToEnum(conflict_mod.Outcome, try st.text(21, alloc)) orelse return error.CorruptSave,
+            };
+            const gop = try gs.conflicts.getOrPut(alloc, c.id);
+            if (gop.found_existing) return error.CorruptSave;
+            gop.value_ptr.* = c;
+        }
+    }
+
+    /// One conflict force from its four columns at `first`: lances, quality
+    /// (by its full bytes), lance BV and lance tons.
+    fn conflictForce(st: sqlite.Stmt, first: c_int, alloc: std.mem.Allocator) !conflict_mod.Force {
+        return .{
+            .lances = try st.intAs(u8, first),
+            .quality = std.meta.stringToEnum(types.ExperienceLevel, try st.text(first + 1, alloc)) orelse return error.CorruptSave,
+            .lance_bv = st.int(first + 2),
+            .lance_tons = try st.intAs(u32, first + 3),
+        };
+    }
+
     // P4i: save and load persistent officer arcs.
     fn saveOfficerArcs(self: Store, gs: *GameState, cid: i64) !void {
         const st = try self.db.prepare("INSERT INTO officer_arc VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
@@ -2575,7 +2769,7 @@ pub const Store = struct {
         try requireCampaignVersion(saved_version);
 
         const has_seed = try self.loadMeta(&gs, cid);
-        inline for (.{ "next_person_id", "next_unit_id", "next_force_id", "next_hq_id", "next_contract_id", "next_battle_id", "next_listing_id", "next_candidate_id", "next_loan_id", "next_operation_id", "next_actor_id", "next_rival_id", "next_officer_arc_id", "next_hull_instance_id", "next_merc_company_id", "next_personage_id" }) |key| {
+        inline for (.{ "next_person_id", "next_unit_id", "next_force_id", "next_hq_id", "next_contract_id", "next_battle_id", "next_listing_id", "next_candidate_id", "next_loan_id", "next_operation_id", "next_actor_id", "next_rival_id", "next_officer_arc_id", "next_hull_instance_id", "next_merc_company_id", "next_personage_id", "next_conflict_id" }) |key| {
             const counter = (try self.hqMetaUint(cid, key, true)).?;
             if (counter == 0) return error.CorruptSave;
             @field(gs, key) = counter;
@@ -2608,6 +2802,7 @@ pub const Store = struct {
         try self.loadMercCompanyRosters(&gs, cid);
         try self.loadPersonages(&gs, cid);
         try self.loadPersonageRelations(&gs, cid);
+        try self.loadConflicts(&gs, cid);
         try self.loadTxn(&gs, cid);
         try self.loadLoan(&gs, cid);
         try self.loadCourier(&gs, cid);
@@ -2640,6 +2835,7 @@ pub const Store = struct {
         try artillery.validate(&gs);
         try personage_rules.validate(&gs);
         try personage_relation_rules.validate(&gs);
+        try politics.validate(&gs);
         try validateCounters(&gs);
         try validateStoredStrings(&gs);
         // Last: the battle in progress replays from the complete, validated campaign.
@@ -2743,6 +2939,7 @@ pub const Store = struct {
             if (std.mem.eql(u8, key, "next_hull_instance_id")) gs.next_hull_instance_id = try fit(@TypeOf(gs.next_hull_instance_id), v);
             if (std.mem.eql(u8, key, "next_merc_company_id")) gs.next_merc_company_id = try fit(@TypeOf(gs.next_merc_company_id), v);
             if (std.mem.eql(u8, key, "next_personage_id")) gs.next_personage_id = try fit(@TypeOf(gs.next_personage_id), v);
+            if (std.mem.eql(u8, key, "next_conflict_id")) gs.next_conflict_id = try fit(@TypeOf(gs.next_conflict_id), v);
             if (std.mem.eql(u8, key, "rng_seed")) {
                 if (has_seed) return error.CorruptSave;
                 gs.rng.seed = @bitCast(v);
@@ -5917,8 +6114,8 @@ test "a played current campaign round trips and its downgraded store is refused 
     try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("UPDATE setting SET value = 36 WHERE key = 'schema_version'");
     defer raw.close();
-    try std.testing.expectEqual(@as(u64, 3307560644039167125), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 3945222852926955671), hash_before);
+    try std.testing.expectEqual(@as(u64, 16291677787080668812), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 9102534283586169281), hash_before);
     try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
@@ -6343,8 +6540,8 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     // service requires available, physically local technicians and local pool
     // teams (docs/p2-artillery-operations-design.md,
     // Condition, maintenance, repairs and shared hours).
-    try std.testing.expectEqual(@as(u64, 3307560644039167125), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 3945222852926955671), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 16291677787080668812), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 9102534283586169281), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -10496,7 +10693,7 @@ test "operational save continues through shared service injury repair reload and
     defer continued.deinit();
     try std.testing.expectEqual(digest.stateHash(&loaded), digest.stateHash(&continued));
     // Pin the complete operational command script, including service and injury streams.
-    try std.testing.expectEqual(@as(u64, 12566426983587953022), digest.stateHash(&continued));
+    try std.testing.expectEqual(@as(u64, 11348225332052638757), digest.stateHash(&continued));
 }
 
 test "artillery bay targets round trip and malformed mutually exclusive targets reject loading" {
@@ -11730,7 +11927,7 @@ test "a store or a campaign at format 70 is refused before any change, relations
     defer gs.deinit();
     _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
     try std.testing.expect(gs.personage_relations.items.len > 0);
-    try std.testing.expectEqual(@as(i64, 72), schema_version);
+    try std.testing.expectEqual(@as(i64, 73), schema_version);
     const raw = try sqlite.Db.open(":memory:");
     defer raw.close();
     var store = try Store.fromDb(raw);
@@ -12209,11 +12406,214 @@ test "the personage relation schema refuses malformed rows without the loader" {
     try expectCurrentRoundTripForTest(store, &gs);
 }
 
-// ---- schema v71 → v72 migration (rule 51; docs/p5d-conflict-world-design.md §J) ----
+// ---- conflicts (rules 45–50, 53; docs/p5d-conflict-world-design.md §C, §J) ----
+
+/// A 3025 campaign played day by day until it holds a threatened, an open
+/// and a resolved conflict at once.
+fn conflictCampaignForTest(gs: *GameState) !void {
+    const commands = @import("../sim/commands.zig");
+    _ = try commands.execute(gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    for (0..730) |_| {
+        try @import("../sim/tick.zig").clearHolds(gs);
+        _ = try commands.execute(gs, .{ .advance_days = 1 });
+        var seen = std.EnumSet(conflict_mod.Status).initEmpty();
+        for (gs.conflicts.values()) |*c| seen.insert(conflict_mod.status(c, gs.clock.day_index));
+        if (seen.contains(.threatened) and seen.contains(.open) and seen.contains(.resolved)) return;
+    }
+    return error.TestFixtureLacksConflictStatuses;
+}
+
+/// Swap `field` for `other`, require the digest to move from `hash`, and
+/// put it back.
+fn expectChangeMovesDigestForTest(gs: *GameState, hash: u64, field: anytype, other: @TypeOf(field.*)) !void {
+    const saved = field.*;
+    field.* = other;
+    defer field.* = saved;
+    try std.testing.expect(digest.stateHash(gs) != hash);
+}
+
+test "threatened, open and resolved conflicts and their counter survive save and load, every field is digest-covered, and the campaign plays on identically" {
+    // Rules 45, 46, 53, 70; docs/p5d-conflict-world-design.md §J.
+    const commands = @import("../sim/commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73201 });
+    defer gs.deinit();
+    try conflictCampaignForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    var difference: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &difference) orelse "");
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    try std.testing.expectEqual(gs.next_conflict_id, loaded.next_conflict_id);
+    try std.testing.expectEqual(gs.conflicts.count(), loaded.conflicts.count());
+    for (gs.conflicts.values(), loaded.conflicts.values()) |c, q| try std.testing.expectEqualDeep(c, q);
+
+    // Each conflict field, and the counter, moves the digest.
+    const hash = digest.stateHash(&gs);
+    const c = &gs.conflicts.values()[0];
+    try expectChangeMovesDigestForTest(&gs, hash, &c.id, @enumFromInt(999));
+    try expectChangeMovesDigestForTest(&gs, hash, &c.template_key, if (std.mem.eql(u8, c.template_key, "rival_feud")) "border_grab" else "rival_feud");
+    try expectChangeMovesDigestForTest(&gs, hash, &c.planet_key, if (std.mem.eql(u8, c.planet_key, "skye")) "tharkad" else "skye");
+    try expectChangeMovesDigestForTest(&gs, hash, &c.aggressor.faction_key, "XX");
+    try expectChangeMovesDigestForTest(&gs, hash, &c.aggressor.personage, c.defender.personage);
+    try expectChangeMovesDigestForTest(&gs, hash, &c.defender.faction_key, "XX");
+    try expectChangeMovesDigestForTest(&gs, hash, &c.defender.personage, c.aggressor.personage);
+    try expectChangeMovesDigestForTest(&gs, hash, &c.instigator, @enumFromInt(@intFromEnum(c.instigator) + 1));
+    try expectChangeMovesDigestForTest(&gs, hash, &c.staging_planet_key, "terra");
+    try expectChangeMovesDigestForTest(&gs, hash, &c.opened_day, c.opened_day + 1);
+    try expectChangeMovesDigestForTest(&gs, hash, &c.discovery_day, c.discovery_day + 1);
+    try expectChangeMovesDigestForTest(&gs, hash, &c.strike_day, c.strike_day + 1);
+    try expectChangeMovesDigestForTest(&gs, hash, &c.expires_day, c.expires_day + 1);
+    for ([_]*conflict_mod.Force{ &c.local_force, &c.strike_force }) |f| {
+        try expectChangeMovesDigestForTest(&gs, hash, &f.lances, f.lances + 1);
+        try expectChangeMovesDigestForTest(&gs, hash, &f.quality, if (f.quality == .elite) .green else .elite);
+        try expectChangeMovesDigestForTest(&gs, hash, &f.lance_bv, f.lance_bv + 1);
+        try expectChangeMovesDigestForTest(&gs, hash, &f.lance_tons, f.lance_tons + 1);
+    }
+    try expectChangeMovesDigestForTest(&gs, hash, &c.outcome, if (c.outcome == null) .aggressor_won else null);
+    try expectChangeMovesDigestForTest(&gs, hash, &gs.next_conflict_id, gs.next_conflict_id + 1);
+    try std.testing.expectEqual(hash, digest.stateHash(&gs));
+
+    // Continued evolution across a month start: the saved and the
+    // never-saved campaign play on alike.
+    for ([_]*GameState{ &gs, &loaded }) |g| {
+        var crossed = false;
+        while (!crossed) {
+            try @import("../sim/tick.zig").clearHolds(g);
+            _ = try commands.execute(g, .{ .advance_days = 1 });
+            crossed = g.clock.date.day == 1;
+        }
+    }
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&gs, &loaded, &difference) orelse "");
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+    try store.save(&loaded);
+    try expectCurrentRoundTripForTest(store, &loaded);
+}
+
+/// SQL naming rows of a saved campaign's `conflict` table for tamper cases.
+const conflict_sql = struct {
+    const today = "(SELECT value FROM meta WHERE key = 'day_index')";
+    const unresolved = "(SELECT MIN(ord) FROM conflict WHERE outcome IS NULL)";
+    const threatened = "(SELECT MIN(ord) FROM conflict WHERE outcome IS NULL AND strike_day > " ++ today ++ ")";
+    const resolved = "(SELECT MIN(ord) FROM conflict WHERE outcome IS NOT NULL)";
+    /// A conflict whose template puts the instigator on the aggressor's side.
+    const aggressor_side = "(SELECT MIN(ord) FROM conflict WHERE template_key <> 'secession_revolt')";
+    const columns_after_id = "template_key, planet_key, aggressor_faction, aggressor_personage, defender_faction, defender_personage, instigator, staging_planet_key, opened_day, discovery_day, strike_day, expires_day, local_lances, local_quality, local_lance_bv, local_lance_tons, strike_lances, strike_quality, strike_lance_bv, strike_lance_tons, outcome";
+    const counter_past_max = "UPDATE meta SET value = (SELECT MAX(id) + 1 FROM conflict) WHERE key = 'next_conflict_id'";
+    /// `n` more copies of the first unresolved conflict, each with the next
+    /// ordinal and id, and the counter past them.
+    fn copies(comptime n: u32) [:0]const u8 {
+        return std.fmt.comptimePrint("INSERT INTO conflict SELECT c.cid, (SELECT MAX(ord) FROM conflict) + k.n, (SELECT MAX(id) FROM conflict) + k.n, {s} FROM conflict AS c, (WITH RECURSIVE k(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM k WHERE n < {d}) SELECT n FROM k) AS k WHERE c.ord = {s}; {s}", .{ columns_after_id, n, unresolved, counter_past_max });
+    }
+};
+
+test "a tampered conflict refuses to load" {
+    // Rules 47, 48, 50, 70; docs/p5d-conflict-world-design.md §J: every
+    // `politics.validate` refusal and every decode refusal.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73202 });
+    defer gs.deinit();
+    try conflictCampaignForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+
+    const s = conflict_sql;
+    const pol = @import("../domain/tuning.zig").t.politics;
+    // `fk_off`: the executable schema's foreign keys would refuse the row,
+    // so they are off and the refusal is the loader's.
+    const Case = struct { name: []const u8, sql: [:0]const u8, fk_off: bool = false };
+    const cases = [_]Case{
+        .{ .name = "an unknown template", .sql = "UPDATE conflict SET template_key = 'nosuchtemplate' WHERE ord = 0" },
+        .{ .name = "an unknown world", .sql = "UPDATE conflict SET planet_key = 'nowhere' WHERE ord = 0" },
+        .{ .name = "an unknown faction", .sql = "UPDATE conflict SET aggressor_faction = 'XX' WHERE ord = 0" },
+        .{ .name = "a dangling aggressor personage", .sql = "UPDATE conflict SET aggressor_personage = 4000000000 WHERE ord = 0", .fk_off = true },
+        .{ .name = "a dangling defender personage", .sql = "UPDATE conflict SET defender_personage = 4000000000 WHERE ord = 0", .fk_off = true },
+        .{ .name = "a dangling instigator", .sql = "UPDATE conflict SET instigator = 4000000000 WHERE ord = 0", .fk_off = true },
+        .{ .name = "an instigator off its template's side", .sql = "UPDATE conflict SET instigator = defender_personage WHERE ord = " ++ s.aggressor_side },
+        .{ .name = "a staging world that is not the nearest", .sql = "UPDATE conflict SET staging_planet_key = 'terra' WHERE ord = 0" },
+        .{ .name = "discovery not after opening", .sql = "UPDATE conflict SET discovery_day = opened_day WHERE ord = 0" },
+        .{ .name = "the strike not after discovery", .sql = "UPDATE conflict SET strike_day = discovery_day WHERE ord = 0" },
+        .{ .name = "expiry not after the strike", .sql = "UPDATE conflict SET expires_day = strike_day WHERE ord = 0" },
+        .{ .name = "a preparation longer than the range", .sql = std.fmt.comptimePrint("UPDATE conflict SET strike_day = strike_day + {d}, expires_day = expires_day + {d} WHERE ord = {s}", .{ pol.scheme_prep_days_max + 1, pol.scheme_prep_days_max + 1, s.unresolved }) },
+        .{ .name = "fighting longer than the range", .sql = std.fmt.comptimePrint("UPDATE conflict SET expires_day = strike_day + {d} WHERE ord = {s}", .{ pol.fight_days_max + 1, s.unresolved }) },
+        .{ .name = "an unresolved conflict past its expiry", .sql = "UPDATE conflict SET outcome = NULL WHERE ord = " ++ s.resolved },
+        .{ .name = "a resolved conflict before its expiry", .sql = "UPDATE conflict SET outcome = 'aggressor_won' WHERE ord = " ++ s.threatened },
+        .{ .name = "an opening after today", .sql = "UPDATE conflict SET opened_day = opened_day + 1000, discovery_day = discovery_day + 1000, strike_day = strike_day + 1000, expires_day = expires_day + 1000 WHERE ord = " ++ s.threatened },
+        .{ .name = "two unresolved conflicts on one world", .sql = comptime s.copies(1) },
+        .{ .name = "more unresolved conflicts than the cap", .sql = comptime s.copies(pol.max_open_conflicts) },
+        .{ .name = "an id at the counter", .sql = "UPDATE meta SET value = (SELECT MAX(id) FROM conflict) WHERE key = 'next_conflict_id'" },
+        .{ .name = "a counter of 0", .sql = "UPDATE meta SET value = 0 WHERE key = 'next_conflict_id'" },
+        .{ .name = "a missing counter", .sql = "DELETE FROM meta WHERE key = 'next_conflict_id'" },
+        .{ .name = "a local force without a lance", .sql = "UPDATE conflict SET local_lances = 0 WHERE ord = 0" },
+        .{ .name = "a strike force without a lance", .sql = "UPDATE conflict SET strike_lances = 0 WHERE ord = 0" },
+        .{ .name = "an unknown quality", .sql = "UPDATE conflict SET local_quality = 'legendary' WHERE ord = 0" },
+        .{ .name = "a negative lance BV", .sql = "UPDATE conflict SET strike_lance_bv = -1 WHERE ord = 0" },
+        .{ .name = "an unknown outcome", .sql = "UPDATE conflict SET outcome = 'draw' WHERE ord = " ++ s.resolved },
+        .{ .name = "an outcome holding a valid tag, a NUL and more", .sql = "UPDATE conflict SET outcome = CAST(x'616767726573736f725f776f6e0078' AS TEXT) WHERE ord = " ++ s.resolved },
+        .{ .name = "a text day", .sql = "UPDATE conflict SET opened_day = 'spring' WHERE ord = 0" },
+        .{ .name = "an id of 0", .sql = "UPDATE conflict SET id = 0 WHERE ord = 0" },
+        .{ .name = "an ordinal out of position", .sql = "UPDATE conflict SET ord = ord + 100 WHERE ord = 0" },
+    };
+    for (cases) |case| {
+        errdefer std.debug.print("conflict tamper case: {s}\n", .{case.name});
+        try store.save(&gs);
+        if (case.fk_off) try store.db.exec("PRAGMA foreign_keys = OFF");
+        try store.db.exec("PRAGMA ignore_check_constraints=ON");
+        try store.db.exec(case.sql);
+        try store.db.exec("PRAGMA ignore_check_constraints=OFF");
+        if (case.fk_off) try store.db.exec("PRAGMA foreign_keys = ON");
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    }
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+}
+
+test "the conflict schema refuses malformed rows without the loader" {
+    // Rule 50: the executable schema enforces what SQLite can check.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73203 });
+    defer gs.deinit();
+    try conflictCampaignForTest(&gs);
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    const s = conflict_sql;
+    for ([_][:0]const u8{
+        "UPDATE conflict SET discovery_day = opened_day WHERE ord = 0",
+        "UPDATE conflict SET expires_day = strike_day WHERE ord = 0",
+        "UPDATE conflict SET opened_day = -1 WHERE ord = 0",
+        "UPDATE conflict SET opened_day = 'spring' WHERE ord = 0",
+        "UPDATE conflict SET local_lances = 0 WHERE ord = 0",
+        "UPDATE conflict SET strike_lances = 256 WHERE ord = 0",
+        "UPDATE conflict SET local_quality = 'legendary' WHERE ord = 0",
+        "UPDATE conflict SET strike_lance_bv = -1 WHERE ord = 0",
+        "UPDATE conflict SET local_lance_tons = -1 WHERE ord = 0",
+        "UPDATE conflict SET outcome = 'draw' WHERE ord = 0",
+        "UPDATE conflict SET template_key = '' WHERE ord = 0",
+        "UPDATE conflict SET id = 0 WHERE ord = 0",
+        "UPDATE conflict SET ord = -1 WHERE ord = 0",
+        // Foreign keys: a personage the campaign does not hold.
+        "UPDATE conflict SET aggressor_personage = 4000000000 WHERE ord = 0",
+        "UPDATE conflict SET defender_personage = 4000000000 WHERE ord = 0",
+        "UPDATE conflict SET instigator = 4000000000 WHERE ord = 0",
+        // Unique: a second row at an ordinal, and a second row with an id.
+        "INSERT INTO conflict SELECT cid, 0, (SELECT MAX(id) + 1 FROM conflict), " ++ s.columns_after_id ++ " FROM conflict WHERE ord = 0",
+        "INSERT INTO conflict SELECT cid, (SELECT MAX(ord) + 1 FROM conflict), id, " ++ s.columns_after_id ++ " FROM conflict WHERE ord = 0",
+    }) |tamper| {
+        errdefer std.debug.print("conflict schema case: {s}\n", .{tamper});
+        try std.testing.expectError(error.ConstraintViolation, store.db.exec(tamper));
+    }
+    try expectCurrentRoundTripForTest(store, &gs);
+}
+
+// ---- schema migrations v71 → v72 → v73 (rule 51; docs/p5d-conflict-world-design.md §J) ----
 
 /// A campaign as schema v71 held one: every personage procedural, its clock
-/// at `year`. A 3025 start seats data rows today, so that campaign's
-/// personages are the procedural set a year no window holds would seat.
+/// at `year`, and, before its first month start, no conflict. A 3025 start
+/// seats data rows today, so that campaign's personages are the procedural
+/// set a year no window holds would seat.
 fn v71CampaignForTest(gs: *GameState, year: u16) !void {
     const commands = @import("../sim/commands.zig");
     if (year == personage_data_for_test.reference_year) {
@@ -12231,12 +12631,42 @@ fn v71CampaignForTest(gs: *GameState, year: u16) !void {
     }
     try std.testing.expectEqual(year, gs.clock.date.year);
     _ = try commands.execute(gs, .{ .advance_days = 3 });
+    try std.testing.expectEqual(@as(usize, 0), gs.conflicts.count());
+}
+
+/// A campaign as schema v72 held one: a 3025 start with its data
+/// personages, saved at day 20, before any month start, so it has no
+/// conflict and `next_conflict_id` 1.
+fn v72CampaignForTest(gs: *GameState) !void {
+    const commands = @import("../sim/commands.zig");
+    _ = try commands.execute(gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    while (gs.clock.day_index < 20) {
+        try @import("../sim/tick.zig").clearHolds(gs);
+        _ = try commands.execute(gs, .{ .advance_days = 20 - gs.clock.day_index });
+    }
+    try std.testing.expectEqual(@as(u32, 20), gs.clock.day_index);
+    try std.testing.expect(gs.clock.date.day != 1 and gs.clock.date.month == 1);
+    try std.testing.expectEqual(@as(usize, 0), gs.conflicts.count());
+    try std.testing.expectEqual(@as(u32, 1), gs.next_conflict_id);
+}
+
+/// Rewrite a current store whose campaigns hold no conflict into the
+/// genuine v72 format: no `conflict` table or index, no `next_conflict_id`
+/// counter, every other table as the frozen v72 DDL defines it, and
+/// version 72 on the store and every campaign.
+fn downgradeToV72ForTest(db: sqlite.Db) !void {
+    try std.testing.expectEqual(@as(i64, 0), try countForTest(db, "SELECT count(*) FROM conflict"));
+    try db.exec("PRAGMA foreign_keys = OFF");
+    defer db.exec("PRAGMA foreign_keys = ON") catch {}; // best-effort: test fixture cleanup.
+    try db.exec("BEGIN; DROP TABLE conflict; DELETE FROM meta WHERE key = 'next_conflict_id'");
+    try db.exec("UPDATE campaign SET schema_version = 72; UPDATE setting SET value = 72 WHERE key = 'schema_version'; COMMIT");
 }
 
 /// Rewrite a current store holding v71-shaped campaigns into the genuine v71
-/// format: the frozen v71 `personage` table, every other table as the
-/// current DDL defines it, and version 71 on the store and every campaign.
+/// format: the v72 format (`downgradeToV72ForTest`) with the frozen v71
+/// `personage` table, and version 71 on the store and every campaign.
 fn downgradeToV71ForTest(db: sqlite.Db) !void {
+    try downgradeToV72ForTest(db);
     try db.exec("PRAGMA foreign_keys = OFF");
     defer db.exec("PRAGMA foreign_keys = ON") catch {}; // best-effort: test fixture cleanup.
     try db.exec("BEGIN");
@@ -12245,27 +12675,61 @@ fn downgradeToV71ForTest(db: sqlite.Db) !void {
     try db.exec("UPDATE campaign SET schema_version = 71; UPDATE setting SET value = 71 WHERE key = 'schema_version'; COMMIT");
 }
 
-/// A fingerprint of every v71 column of every personage row, and of every
-/// relation row, in stored order.
-fn personageRowsFingerprintForTest(db: sqlite.Db) !u64 {
+/// A fingerprint of every source row a migration must keep, in stored
+/// order: every column of every table but `conflict` and `personage`,
+/// leaving out only the version marks a migration moves (`campaign`'s
+/// `schema_version` and the `schema_version` setting) and the
+/// `next_conflict_id` counter it adds; and `personage_columns` of every
+/// personage row.
+fn sourceRowsFingerprintForTest(db: sqlite.Db, comptime personage_columns: []const u8) !u64 {
     var hash = std.hash.Wyhash.init(0);
     var scratch = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer scratch.deinit();
-    const Query = struct { sql: [:0]const u8, columns: c_int };
-    for ([_]Query{
-        .{ .sql = "SELECT " ++ personage_v71_columns ++ " FROM personage ORDER BY cid, ord", .columns = comptime std.mem.count(u8, personage_v71_columns, ",") + 1 },
-        .{ .sql = "SELECT cid, ord, from_id, to_id, kind, weight FROM personage_relation ORDER BY cid, ord", .columns = 6 },
-    }) |query| {
-        const st = try db.prepare(query.sql);
-        defer st.finalize();
-        while (try st.next()) {
+    const tables_query = try db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('conflict', 'personage') ORDER BY name");
+    defer tables_query.finalize();
+    while (try tables_query.next()) {
+        const table = try tables_query.text(0, std.testing.allocator);
+        defer std.testing.allocator.free(table);
+        var sql: [16384]u8 = undefined;
+        var writer = std.Io.Writer.fixed(&sql);
+        try writer.writeAll("SELECT ");
+        var pragma: [256]u8 = undefined;
+        const columns = try db.prepare(try std.fmt.bufPrint(&pragma, "PRAGMA table_info(\"{s}\")", .{table}));
+        defer columns.finalize();
+        var count: c_int = 0;
+        while (try columns.next()) {
+            _ = scratch.reset(.retain_capacity);
+            const name = try columns.text(1, scratch.allocator());
+            if (std.mem.eql(u8, table, "campaign") and std.mem.eql(u8, name, "schema_version")) continue;
+            if (count > 0) try writer.writeAll(",");
+            try writer.print("typeof(\"{s}\")||':'||hex(\"{s}\")", .{ name, name });
+            count += 1;
+        }
+        try writer.print(" FROM \"{s}\"", .{table});
+        if (std.mem.eql(u8, table, "meta")) try writer.writeAll(" WHERE key <> 'next_conflict_id'");
+        if (std.mem.eql(u8, table, "setting")) try writer.writeAll(" WHERE key <> 'schema_version'");
+        try writer.writeAll(" ORDER BY rowid");
+        const rows = try db.prepare(writer.buffered());
+        defer rows.finalize();
+        while (try rows.next()) {
             var column: c_int = 0;
-            while (column < query.columns) : (column += 1) {
+            while (column < count) : (column += 1) {
                 _ = scratch.reset(.retain_capacity);
-                const value = try st.text(column, scratch.allocator());
+                const value = try rows.text(column, scratch.allocator());
                 hash.update(std.mem.asBytes(&value.len));
                 hash.update(value);
             }
+        }
+    }
+    const personages_query = try db.prepare("SELECT " ++ personage_columns ++ " FROM personage ORDER BY cid, ord");
+    defer personages_query.finalize();
+    const personage_count = comptime std.mem.count(u8, personage_columns, ",") + 1;
+    while (try personages_query.next()) {
+        for (0..personage_count) |column| {
+            _ = scratch.reset(.retain_capacity);
+            const value = try personages_query.text(@intCast(column), scratch.allocator());
+            hash.update(std.mem.asBytes(&value.len));
+            hash.update(value);
         }
     }
     return hash.final();
@@ -12285,92 +12749,186 @@ fn countForTest(db: sqlite.Db, sql: [:0]const u8) !i64 {
     return st.int(0);
 }
 
-test "a v71 store migrates to v72 keeping every personage and relation, and its campaign plays on identically" {
+/// Save `gs` (a campaign without conflicts) into a store, rewrite it to
+/// schema `from`, open it, and prove rule 51's fixture obligations: the
+/// versions read current; every source row survives
+/// (`sourceRowsFingerprintForTest`); the reconstruction holds (no
+/// conflict, `next_conflict_id` 1 for every campaign, and from v71 every
+/// personage keyless); foreign keys check clean; the loaded campaign equals
+/// the same state saved directly at the current format; it plays on across
+/// two month starts as its never-migrated twin does, opening conflicts; it
+/// saves and loads as an ordinary current campaign; and a reopen migrates
+/// nothing more.
+fn expectMigratedFixtureForTest(gs: *GameState, comptime from: u32) !void {
     const commands = @import("../sim/commands.zig");
+    const personage_columns = if (from == 71) personage_v71_columns else personage_v71_columns ++ ", key, family_key";
+
+    // The same state saved directly at the current format, never migrated.
+    const direct = try Store.open(":memory:");
+    defer direct.close();
+    try direct.save(gs);
+    var direct_loaded = try direct.load(std.testing.allocator, gs.campaign_id);
+    defer direct_loaded.deinit();
+
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    try saveAsNewForTest(try Store.fromDb(raw), gs);
+    switch (from) {
+        71 => try downgradeToV71ForTest(raw),
+        72 => try downgradeToV72ForTest(raw),
+        else => comptime unreachable,
+    }
+    try std.testing.expectEqual(from == 72, try Store.hasColumnRt(raw, "personage", "key"));
+    try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM sqlite_master WHERE name = 'conflict'"));
+    const rows_before = try sourceRowsFingerprintForTest(raw, personage_columns);
+
+    const store = try Store.fromDb(raw);
+    try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
+    try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, std.fmt.comptimePrint("SELECT count(*) FROM campaign WHERE schema_version <> {d}", .{schema_version})));
+    try std.testing.expectEqual(rows_before, try sourceRowsFingerprintForTest(raw, personage_columns));
+    try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM conflict"));
+    try std.testing.expectEqual(try countForTest(raw, "SELECT count(*) FROM campaign"), try countForTest(raw, "SELECT count(*) FROM meta WHERE key = 'next_conflict_id' AND value = 1"));
+    try std.testing.expectEqual(try countForTest(raw, "SELECT count(*) FROM campaign"), try countForTest(raw, "SELECT count(*) FROM meta WHERE key = 'next_conflict_id'"));
+    try std.testing.expectEqual(@as(i64, 1), try countForTest(raw, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'ix_conflict_cid'"));
+    try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM pragma_foreign_key_check"));
+    try std.testing.expectEqual(@as(i64, 3), try countForTest(raw, "SELECT count(DISTINCT id) FROM pragma_foreign_key_list('conflict') WHERE \"table\" = 'personage'"));
+    if (from == 71) {
+        try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM personage WHERE key <> '' OR family_key <> ''"));
+        try std.testing.expectEqual(@as(i64, @intCast(gs.personages.count())), try countForTest(raw, "SELECT count(*) FROM personage"));
+        try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM pragma_foreign_key_list('personage_relation') WHERE \"table\" NOT IN ('campaign', 'personage')"));
+        try std.testing.expectEqual(@as(i64, 2), try countForTest(raw, "SELECT count(DISTINCT id) FROM pragma_foreign_key_list('personage_relation') WHERE \"table\" = 'personage'"));
+        try std.testing.expectEqual(@as(i64, 1), try countForTest(raw, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'ux_personage_key'"));
+    }
+
+    var migrated = try store.load(std.testing.allocator, gs.campaign_id);
+    defer migrated.deinit();
+    var difference: [128]u8 = undefined;
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(&direct_loaded, &migrated, &difference) orelse "");
+    try std.testing.expectEqual(digest.stateHash(&direct_loaded), digest.stateHash(&migrated));
+    try std.testing.expectEqual(digest.stateHash(gs), digest.stateHash(&migrated));
+    try std.testing.expectEqual(@as(u32, 1), migrated.next_conflict_id);
+
+    // Continued evolution across two month starts: the migrated campaign
+    // and its never-migrated twin.
+    for ([_]*GameState{ gs, &migrated }) |g| {
+        var firsts: usize = 0;
+        while (firsts < 2) {
+            try @import("../sim/tick.zig").clearHolds(g);
+            _ = try commands.execute(g, .{ .advance_days = 1 });
+            firsts += @intFromBool(g.clock.date.day == 1);
+        }
+    }
+    try std.testing.expectEqualStrings("", digest.firstStateDifference(gs, &migrated, &difference) orelse "");
+    try std.testing.expectEqual(digest.stateHash(gs), digest.stateHash(&migrated));
+    try std.testing.expect(migrated.conflicts.count() > 0);
+    // It saves and loads as an ordinary current campaign.
+    try store.save(&migrated);
+    try expectCurrentRoundTripForTest(store, &migrated);
+
+    // Reopening a migrated store runs no second migration.
+    const settled = try databaseFingerprintForTest(raw);
+    const again = try Store.fromDb(raw);
+    try std.testing.expectEqual(@as(i64, schema_version), again.getSetting("schema_version", 0));
+    try std.testing.expectEqual(settled, try databaseFingerprintForTest(raw));
+}
+
+test "a v71 store reaches v73 through both migrations, keeping every row, and its campaign plays on identically" {
     for ([_]u16{ 3020, personage_data_for_test.reference_year }) |year| {
         errdefer std.debug.print("v71 fixture from a {d} start\n", .{year});
         var gs = GameState.init(std.testing.allocator, .{ .seed = 72101 });
         defer gs.deinit();
         try v71CampaignForTest(&gs, year);
-
-        // The same state saved directly under v72, never migrated.
-        const direct = try Store.open(":memory:");
-        defer direct.close();
-        try direct.save(&gs);
-        var direct_loaded = try direct.load(std.testing.allocator, gs.campaign_id);
-        defer direct_loaded.deinit();
-
-        const raw = try sqlite.Db.open(":memory:");
-        defer raw.close();
-        try saveAsNewForTest(try Store.fromDb(raw), &gs);
-        try downgradeToV71ForTest(raw);
-        try std.testing.expect(!try Store.hasColumnRt(raw, "personage", "key"));
-        const rows_before = try personageRowsFingerprintForTest(raw);
-
-        const store = try Store.fromDb(raw);
-        try std.testing.expectEqual(@as(i64, 72), store.getSetting("schema_version", 0));
-        try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM campaign WHERE schema_version <> 72"));
-        try std.testing.expectEqual(rows_before, try personageRowsFingerprintForTest(raw));
-        try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM personage WHERE key <> '' OR family_key <> ''"));
-        try std.testing.expectEqual(@as(i64, @intCast(gs.personages.count())), try countForTest(raw, "SELECT count(*) FROM personage"));
-        try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM pragma_foreign_key_check"));
-        try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM pragma_foreign_key_list('personage_relation') WHERE \"table\" NOT IN ('campaign', 'personage')"));
-        try std.testing.expectEqual(@as(i64, 2), try countForTest(raw, "SELECT count(DISTINCT id) FROM pragma_foreign_key_list('personage_relation') WHERE \"table\" = 'personage'"));
-        try std.testing.expectEqual(@as(i64, 1), try countForTest(raw, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'ux_personage_key'"));
-
-        var migrated = try store.load(std.testing.allocator, gs.campaign_id);
-        defer migrated.deinit();
-        var difference: [128]u8 = undefined;
-        try std.testing.expectEqualStrings("", digest.firstStateDifference(&direct_loaded, &migrated, &difference) orelse "");
-        try std.testing.expectEqual(digest.stateHash(&direct_loaded), digest.stateHash(&migrated));
-        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&migrated));
-
-        // Continued evolution: the migrated campaign and its never-migrated twin.
-        for ([_]*GameState{ &gs, &migrated }) |g| {
-            try @import("../sim/tick.zig").clearHolds(g);
-            _ = try commands.execute(g, .{ .advance_days = 14 });
-        }
-        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&migrated));
-        // It saves and loads as an ordinary v72 campaign.
-        try store.save(&migrated);
-        try expectCurrentRoundTripForTest(store, &migrated);
-
-        // Reopening a migrated store runs no second migration.
-        const settled = try databaseFingerprintForTest(raw);
-        const again = try Store.fromDb(raw);
-        try std.testing.expectEqual(@as(i64, 72), again.getSetting("schema_version", 0));
-        try std.testing.expectEqual(settled, try databaseFingerprintForTest(raw));
+        try expectMigratedFixtureForTest(&gs, 71);
     }
 }
 
-test "a v71 migration failing at any step leaves the store byte-identical, and a clean reopen migrates it" {
+test "a v72 store migrates to v73 with no conflict and the counter at 1, keeping every row, and its campaign plays on identically" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73101 });
+    defer gs.deinit();
+    try v72CampaignForTest(&gs);
+    try expectMigratedFixtureForTest(&gs, 72);
+}
+
+test "a migration failing at any step of the v71 or the v72 chain leaves the store byte-identical, and a clean reopen migrates it" {
     // The provoked failures are expected; keep their warnings out of stderr.
     const saved_log_level = std.testing.log_level;
     std.testing.log_level = .err;
     defer std.testing.log_level = saved_log_level;
-    var gs = GameState.init(std.testing.allocator, .{ .seed = 72102 });
-    defer gs.deinit();
-    try v71CampaignForTest(&gs, 3020);
-    const raw = try sqlite.Db.open(":memory:");
-    defer raw.close();
-    try saveAsNewForTest(try Store.fromDb(raw), &gs);
-    try downgradeToV71ForTest(raw);
-    const fixture = try databaseFingerprintForTest(raw);
-    for (0..Store.migration_v72_step_count) |step| {
-        errdefer std.debug.print("migration fault before step {d}\n", .{step});
-        try std.testing.expectError(error.SqliteError, Store.fromDbFaulting(raw, step));
-        try std.testing.expectEqual(fixture, try databaseFingerprintForTest(raw));
-        try std.testing.expectEqual(@as(i64, 71), try countForTest(raw, "SELECT value FROM setting WHERE key = 'schema_version'"));
+    inline for (.{ 71, 72 }) |from| {
+        errdefer std.debug.print("v{d} fixture\n", .{from});
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 72102 });
+        defer gs.deinit();
+        if (from == 71) try v71CampaignForTest(&gs, 3020) else try v72CampaignForTest(&gs);
+        const raw = try sqlite.Db.open(":memory:");
+        defer raw.close();
+        try saveAsNewForTest(try Store.fromDb(raw), &gs);
+        if (from == 71) try downgradeToV71ForTest(raw) else try downgradeToV72ForTest(raw);
+        const fixture = try databaseFingerprintForTest(raw);
+        const steps = Store.migrationStepCount(from);
+        for (0..steps) |step| {
+            errdefer std.debug.print("migration fault before step {d}\n", .{step});
+            try std.testing.expectError(error.SqliteError, Store.fromDbFaulting(raw, step));
+            try std.testing.expectEqual(fixture, try databaseFingerprintForTest(raw));
+            try std.testing.expectEqual(@as(i64, from), try countForTest(raw, "SELECT value FROM setting WHERE key = 'schema_version'"));
+        }
+        // A fault past the last step faults nothing.
+        const store = try Store.fromDbFaulting(raw, steps);
+        try std.testing.expectEqual(@as(i64, schema_version), store.getSetting("schema_version", 0));
+        var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+        defer loaded.deinit();
+        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
     }
-    // A fault past the last step faults nothing.
-    const store = try Store.fromDbFaulting(raw, Store.migration_v72_step_count);
-    try std.testing.expectEqual(@as(i64, 72), store.getSetting("schema_version", 0));
-    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
-    defer loaded.deinit();
-    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
 }
 
-test "a malformed v71 store, a mixed-version v71 store, and stores outside v71..v72 are refused unchanged" {
+test "a malformed or mixed-version v72 store, and stores outside v71..v73, are refused unchanged" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 72104 });
+    defer gs.deinit();
+    try v72CampaignForTest(&gs);
+    const Case = struct { name: []const u8, sql: [:0]const u8, expected: anyerror };
+    const cases = [_]Case{
+        .{ .name = "a v72 store missing a table", .sql = "DROP TABLE world_state", .expected = error.CorruptStore },
+        .{ .name = "a v72 store missing a column", .sql = "ALTER TABLE event_log DROP COLUMN contract", .expected = error.CorruptStore },
+        .{ .name = "a v72 store with a conflict table already present", .sql = comptime std.fmt.comptimePrint("{s}", .{conflict_v73_ddl}), .expected = error.CorruptStore },
+        .{ .name = "a v72 store with a conflict counter already present", .sql = "INSERT INTO meta (cid, key, value) SELECT id, 'next_conflict_id', 1 FROM campaign", .expected = error.CorruptStore },
+        .{ .name = "a v72 store holding a v71 campaign", .sql = "UPDATE campaign SET schema_version = 71", .expected = error.CorruptStore },
+        .{ .name = "a v72 store holding a v73 campaign", .sql = "UPDATE campaign SET schema_version = 73", .expected = error.CorruptStore },
+        .{ .name = "a v70 store", .sql = "UPDATE setting SET value = 70 WHERE key = 'schema_version'", .expected = error.StoreOlderThanGame },
+        .{ .name = "a v74 store", .sql = "UPDATE setting SET value = 74 WHERE key = 'schema_version'", .expected = error.StoreNewerThanGame },
+    };
+    for (cases) |case| {
+        errdefer std.debug.print("v72 refusal case: {s}\n", .{case.name});
+        const raw = try sqlite.Db.open(":memory:");
+        defer raw.close();
+        try saveAsNewForTest(try Store.fromDb(raw), &gs);
+        try downgradeToV72ForTest(raw);
+        try raw.exec(case.sql);
+        try expectStoreRefusedUnchanged(raw, case.expected);
+    }
+}
+
+test "the frozen schema v72 definitions are byte for byte that format's DDL, and v73 only adds to them" {
+    // SHA-256 and length of `ddl` and `index_ddl` as schema v72 defined them.
+    const Expected = struct { text: []const u8, len: usize, sha256: *const [64]u8 };
+    for ([_]Expected{
+        .{ .text = ddl_v72, .len = 45_900, .sha256 = "75c476ca4811c020e3920ce6cf102e85f90d27800c47c3b6e88bbb4e21756c78" },
+        .{ .text = index_ddl_v72, .len = 5_229, .sha256 = "5c341fa7a3d67377f81bec4bb591ea593b5d797b32ef8ed7a3309b762e3cca18" },
+    }) |want| {
+        var sum: [32]u8 = undefined;
+        std.crypto.hash.sha2.Sha256.hash(want.text, &sum, .{});
+        try std.testing.expectEqual(want.len, want.text.len);
+        try std.testing.expectEqualStrings(want.sha256, &std.fmt.bytesToHex(sum, .lower));
+    }
+    // Schema v73 keeps every v72 table and index as it was.
+    try std.testing.expect(std.mem.startsWith(u8, ddl, ddl_v72 ++ "\n"));
+    try std.testing.expectEqualStrings(conflict_v73_ddl, ddl[ddl_v72.len + 1 ..]);
+    try std.testing.expect(std.mem.startsWith(u8, index_ddl, index_ddl_v72 ++ "\n"));
+    try std.testing.expectEqualStrings(conflict_v73_index_ddl, index_ddl[index_ddl_v72.len + 1 ..]);
+    // Schema v71 differs from v72 only in `personage`.
+    try std.testing.expectEqual(std.mem.count(u8, ddl_v72, "\n"), std.mem.count(u8, ddl_v71, "\n"));
+    try std.testing.expect(std.mem.indexOf(u8, ddl_v71, personage_v71_ddl) != null);
+}
+
+test "a malformed v71 store, a mixed-version v71 store, and stores outside v71..v73 are refused unchanged" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 72103 });
     defer gs.deinit();
     try v71CampaignForTest(&gs, 3020);
@@ -12382,7 +12940,7 @@ test "a malformed v71 store, a mixed-version v71 store, and stores outside v71..
         .{ .name = "a v71 store holding a v70 campaign", .sql = "UPDATE campaign SET schema_version = 70", .expected = error.CorruptStore },
         .{ .name = "a v71 store holding a v72 campaign", .sql = "UPDATE campaign SET schema_version = 72", .expected = error.CorruptStore },
         .{ .name = "a v70 store", .sql = "UPDATE setting SET value = 70 WHERE key = 'schema_version'", .expected = error.StoreOlderThanGame },
-        .{ .name = "a v73 store", .sql = "UPDATE setting SET value = 73 WHERE key = 'schema_version'", .expected = error.StoreNewerThanGame },
+        .{ .name = "a v74 store", .sql = "UPDATE setting SET value = 74 WHERE key = 'schema_version'", .expected = error.StoreNewerThanGame },
     };
     for (cases) |case| {
         errdefer std.debug.print("v71 refusal case: {s}\n", .{case.name});

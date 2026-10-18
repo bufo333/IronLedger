@@ -16,6 +16,7 @@ const contract_market = @import("contract_market.zig");
 const faction_surplus = @import("faction_surplus.zig");
 const black_market = @import("black_market.zig");
 const merc_lifecycle = @import("merc_lifecycle.zig");
+const politics = @import("politics.zig");
 const maintenance = @import("maintenance.zig");
 const contract_events = @import("contract_events.zig");
 const battle = @import("battle.zig");
@@ -549,11 +550,13 @@ fn runSupplyConsumption(gs: *GameState) !void {
     }
 }
 
-/// markets phase: hiring halls churn daily; the contract board and
-/// site-market listings refresh on the 1st.
+/// markets phase: hiring halls churn daily; the political world moves
+/// daily and schemes on the 1st (docs/p5d-conflict-world-design.md §K);
+/// the contract board and site-market listings refresh on the 1st.
 fn runMarkets(gs: *GameState) !void {
     try artillery.syncMarkets(gs);
     try contract_market.churnCandidates(gs); // people move daily
+    try politics.advanceWorld(gs);
     if (gs.clock.date.day != 1) return;
     try contract_market.refresh(gs);
     try contract_market.refreshListings(gs);

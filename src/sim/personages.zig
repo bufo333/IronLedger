@@ -601,17 +601,18 @@ test "drawing relations after the personages leaves every personage row as drawn
 test "a create_commander whose personage reservation fails leaves the campaign unchanged and can be retried" {
     // Rules 11, 12 and 69. Each attempt is a fresh campaign whose arena and
     // operation scratch take every allocation from an allocator failing at
-    // index `i`. Attempts run until one fails with the last reservation,
-    // the relations', already made; every attempt before it failed in the
-    // relation scratch or a reservation (the arena may serve a small
-    // reservation from memory it already holds), and must leave the campaign
-    // as it was.
+    // index `i`, until an attempt gets every allocation it asks for. Which
+    // index lands in which step depends on how the arena serves and grows
+    // its blocks, so the sweep covers them all: every refused attempt, in
+    // the relation scratch, a reservation or a step after them, leaves the
+    // campaign as it was. The first attempt fails in the relation scratch,
+    // the command's first allocation.
     var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer outer.deinit();
     var fresh = GameState.init(outer.allocator(), .{ .seed = 70105 });
     const before = digest.stateHash(&fresh);
 
-    var refused: ?*GameState = null;
+    var first_refused: ?*GameState = null;
     var i: usize = 0;
     while (true) : (i += 1) {
         const gs = try outer.allocator().create(GameState);
@@ -619,13 +620,11 @@ test "a create_commander whose personage reservation fails leaves the campaign u
         const failing = try outer.allocator().create(std.testing.FailingAllocator);
         failing.* = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = i });
         gs.arena.child_allocator = failing.allocator();
-        try std.testing.expectError(error.OutOfMemory, commands.execute(gs, create_for_test));
-        if (gs.personage_relations.capacity > 0) break;
+        if (commands.execute(gs, create_for_test)) |_| break else |err| try std.testing.expectEqual(error.OutOfMemory, err);
         try std.testing.expectEqual(before, digest.stateHash(gs));
-        refused = gs;
+        if (first_refused == null) first_refused = gs;
     }
-    // At least one attempt failed inside the preparation itself.
-    const gs = refused orelse return error.TestExpectedRefusal;
+    const gs = first_refused orelse return error.TestExpectedRefusal;
 
     // The refused campaign creates cleanly once memory is available.
     gs.arena.child_allocator = outer.allocator();

@@ -18,7 +18,7 @@ pub const Stream = enum(u8) {
     actors, // P4i: persistent actor identity and relationship seeds
     rivals, // P4i: persistent rival company identity seeds
     rosters, // P3e.4: faction hull-pool seeding at campaign creation
-    politics, // personage generation at campaign creation
+    politics, // personages at campaign creation; conflicts opened and resolved
 
     pub const count = @typeInfo(Stream).@"enum".fields.len;
 
@@ -38,7 +38,7 @@ pub const Stream = enum(u8) {
             .actors => 0xC2B2AE3D27D4EB4F, // P4i actor identity generation
             .rivals => 0xA3F84D2E6B1C9057, // P4i rival company identity generation
             .rosters => 0xBF58476D1CE4E5B9, // P3e.4 faction hull-pool seeding (save-meaning)
-            .politics => 0x94D049BB133111EB, // personage generation (save-meaning)
+            .politics => 0x94D049BB133111EB, // the political world (save-meaning)
         };
     }
 };

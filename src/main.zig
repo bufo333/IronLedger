@@ -549,6 +549,7 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
             \\          artillery [<formation-id>]   (artillery list or formation detail)
             \\          mech <unit id>   (hull lifecycle: combat history, maintenance log, ownership chain)
             \\          who [<faction>|<world>|<contract id>]   (leaders; a faction's leader and governors; a world's governor; a contract's governor and leaders)
+            \\          conflicts   (the wars the powers have discovered: sides, status, strike and resolution days, and cause)
             \\          briefing <contract id>   (battle orders before contact: `confirm`, `rush`, `roe`, `role`)
             \\turn:     day [n] [force]   (the checklist gates it)
             \\commands: `help` lists every verb with its usage — the same verbs the TUI's `:` line takes
@@ -720,6 +721,23 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
             }
             for (texts.items) |raw| {
                 const text = q.stripMarks(al, raw) catch |err| {
+                    showError(err);
+                    continue;
+                };
+                std.debug.print("{s}\n", .{text});
+            }
+        } else if (std.mem.eql(u8, verb, "conflicts")) {
+            if (tokens.next() != null) {
+                std.debug.print("usage: conflicts\n", .{});
+                continue;
+            }
+            const rows = q.conflictRows(al, gs) catch |err| {
+                showError(err);
+                continue;
+            };
+            if (rows.len == 0) std.debug.print("no conflict is known.\n", .{});
+            for (rows) |r| {
+                const text = q.stripMarks(al, r.text) catch |err| {
                     showError(err);
                     continue;
                 };

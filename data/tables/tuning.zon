@@ -587,5 +587,22 @@
         .rival_chance_bp = 3_000, // TUNE: project value
         .ally_chance_bp = 2_500, // TUNE: project value
         .grudge_chance_bp = 3_500, // TUNE: project value
+        // Conflicts (§A timeline and forces, §C; decisions E4, E6). Every
+        // value is an invented project value, not a design or sourcebook
+        // figure; the playtest gate sets them.
+        .schemes_per_month = 2, // TUNE: project value
+        .max_open_conflicts = 12, // TUNE: project value
+        .scheme_reach_ly = 60, // TUNE: two standard jumps, as relation_reach_ly
+        .scheme_prep_days_min = 30, // TUNE: project value
+        .scheme_prep_days_max = 60, // TUNE: project value
+        .intel_lag_days_min = 20, // TUNE: project value
+        .intel_lag_days_max = 50, // TUNE: project value
+        .intel_chief_cut_days = 10, // TUNE: project value
+        .detection_lead_days = 7, // TUNE: project value
+        .fight_days_min = 30, // TUNE: project value
+        .fight_days_max = 90, // TUNE: project value
+        .recent_defeat_lookback_days = 365, // TUNE: project value
+        .secession_loyalty_max = 40, // TUNE: project value
+        .local_force_security_per_lance = 50, // TUNE: project value
     },
 }

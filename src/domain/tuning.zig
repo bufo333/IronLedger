@@ -940,6 +940,41 @@ pub const Tuning = struct {
         rival_chance_bp: types.Bp,
         ally_chance_bp: types.Bp,
         grudge_chance_bp: types.Bp,
+        /// Most conflicts `politics.runSchemes` opens on one 1st of the
+        /// month, in conflicts per month (§C producer).
+        schemes_per_month: u8,
+        /// Most unresolved conflicts at once, in conflicts; a month at the
+        /// cap opens none (§C producer).
+        max_open_conflicts: u16,
+        /// Farthest a world-targeting scheme reaches, in light-years from
+        /// the instigator's seat (or an ally's, for `ally_foe_world`).
+        scheme_reach_ly: u32,
+        /// Preparation between opening and the strike force's departure,
+        /// in days (§A `strike_day`).
+        scheme_prep_days_min: u32,
+        scheme_prep_days_max: u32,
+        /// The defender's intelligence lag after opening, in days (§A
+        /// discovery, D12).
+        intel_lag_days_min: u32,
+        intel_lag_days_max: u32,
+        /// Days an `intelligence_chief` of the defender's faction takes off
+        /// the intelligence lag (decision E6).
+        intel_chief_cut_days: u32,
+        /// The last-leg warning: discovery is at the latest this many days
+        /// before `strike_day` (§A detection day, D12).
+        detection_lead_days: u32,
+        /// Fighting from `strike_day` to `expires_day`, in days.
+        fight_days_min: u32,
+        fight_days_max: u32,
+        /// How far back a resolved conflict counts as a recent defeat for
+        /// `recent_victor_world`, in days.
+        recent_defeat_lookback_days: u32,
+        /// Highest loyalty, on the 1–100 relation-weight scale, at which a
+        /// ruler may revolt against its liege (`own_seat`).
+        secession_loyalty_max: u8,
+        /// World-security points per lance a conflict's local force gains
+        /// or loses (§A local forces).
+        local_force_security_per_lance: u16,
     },
 };
 

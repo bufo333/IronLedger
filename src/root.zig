@@ -78,6 +78,8 @@ pub const logo = @import("domain/logo.zig");
 pub const officer = @import("domain/officer.zig");
 pub const personage = @import("domain/personage.zig");
 pub const personage_data = @import("domain/personage_data.zig");
+pub const conflict = @import("domain/conflict.zig");
+pub const political_event = @import("domain/political_event.zig");
 
 // sim/ — state, time, randomness, battle resolution
 pub const state = @import("sim/state.zig");
@@ -99,6 +101,7 @@ pub const merc_lifecycle = @import("sim/merc_lifecycle.zig");
 pub const merc_identity = @import("sim/merc_identity.zig");
 pub const personages = @import("sim/personages.zig");
 pub const personage_relations = @import("sim/personage_relations.zig");
+pub const politics = @import("sim/politics.zig");
 
 // persist/ — SQLite save files
 pub const sqlite = @import("persist/sqlite.zig");

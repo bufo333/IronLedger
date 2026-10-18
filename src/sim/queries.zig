@@ -11699,3 +11699,120 @@ test "a personage's relation rows name its liege, a leader's fealty, both ends o
     try std.testing.expectEqual(RelationRowKind.none, none[0].kind);
     try std.testing.expect(std.mem.indexOf(u8, none[0].text, "no relations") != null);
 }
+
+// ------------------------------------------------------------------ conflicts
+
+const conflict_dom = @import("../domain/conflict.zig");
+const political_event_dom = @import("../domain/political_event.zig");
+const politics = @import("politics.zig");
+
+/// One `conflicts` row: the conflict it shows and its line.
+pub const ConflictRow = struct {
+    id: types.ConflictId,
+    text: []const u8,
+};
+
+/// Every conflict its defender has discovered, in id order (rules 29–32;
+/// docs/p5d-conflict-world-design.md §F; decision E2): threatened, open and
+/// resolved, at any distance. A `preparing` conflict is secret and shows
+/// nowhere. A row shows the id, the template's name and the world, the
+/// aggressor and defender factions, the status (and a resolved one's
+/// outcome), the strike day, the resolution day or the expected one, and
+/// the cause (`politics.causeText`). Names are escaped. `CorruptSave` when a
+/// conflict's template, world, faction or personage does not resolve;
+/// allocation errors propagate.
+pub fn conflictRows(alloc: Alloc, gs: *GameState) ![]ConflictRow {
+    const faction = @import("../domain/faction.zig");
+    const today = gs.clock.day_index;
+    var rows: std.ArrayListUnmanaged(ConflictRow) = .empty;
+    for (gs.conflicts.values()) |*c| {
+        const stage = conflict_dom.status(c, today);
+        if (stage == .preparing) continue;
+        const row = political_event_dom.find(c.template_key) orelse return error.CorruptSave;
+        const world = planet_mod.find(c.planet_key) orelse return error.CorruptSave;
+        const aggressor = faction.find(c.aggressor.faction_key) orelse return error.CorruptSave;
+        const defender = faction.find(c.defender.faction_key) orelse return error.CorruptSave;
+        const standing: []const u8 = if (c.outcome) |outcome| switch (outcome) {
+            .aggressor_won => "{c}resolved: the world fell{/}",
+            .defender_held => "{g}resolved: the world held{/}",
+        } else switch (stage) {
+            .threatened => "{a}threatened{/}",
+            .open => "{c}open{/}",
+            .preparing, .resolved => unreachable,
+        };
+        const strike = if (c.strike_day > today) try clock_mod.etaText(alloc, c.strike_day, today) else try std.fmt.allocPrint(alloc, "d{d}", .{c.strike_day});
+        const ends = if (c.outcome != null)
+            try std.fmt.allocPrint(alloc, "resolved d{d}", .{c.expires_day})
+        else
+            try std.fmt.allocPrint(alloc, "expected {s}", .{try clock_mod.etaText(alloc, c.expires_day, today)});
+        try rows.append(alloc, .{ .id = c.id, .text = try std.fmt.allocPrint(alloc, "#{d}  {s} on {s}  {s} against {s}  {s}  strike {s}  {s}  {s}", .{
+            @intFromEnum(c.id),
+            try table.plain(alloc, row.name),
+            try table.plain(alloc, world.name),
+            try table.plain(alloc, aggressor.name),
+            try table.plain(alloc, defender.name),
+            standing,
+            strike,
+            ends,
+            try table.plain(alloc, try politics.causeText(alloc, gs, c)),
+        }) });
+    }
+    return rows.toOwnedSlice(alloc);
+}
+
+/// A campaign on its first month start, with the conflicts it opened.
+fn conflictCampaignForTest(gs: *GameState) !void {
+    _ = try @import("commands.zig").execute(gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    gs.clock.advance();
+    while (gs.clock.date.day != 1) gs.clock.advance();
+    try politics.advanceWorld(gs);
+    try std.testing.expect(gs.conflicts.count() > 0);
+}
+
+test "conflicts lists a conflict from its discovery on, with its id, and never one in preparation" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73301 });
+    defer gs.deinit();
+    try conflictCampaignForTest(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    // Every conflict is still in preparation on its opening day.
+    try std.testing.expectEqual(@as(usize, 0), (try conflictRows(a, &gs)).len);
+    const first = gs.conflicts.values()[0];
+    gs.clock.day_index = first.discovery_day - 1;
+    for (try conflictRows(a, &gs)) |r| try std.testing.expect(r.id != first.id);
+    gs.clock.day_index = first.discovery_day;
+    const rows = try conflictRows(a, &gs);
+    const shown = for (rows) |r| {
+        if (r.id == first.id) break r;
+    } else return error.TestExpectedRow;
+    try std.testing.expect(std.mem.indexOf(u8, shown.text, "threatened") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shown.text, planet_mod.find(first.planet_key).?.name) != null);
+    try std.testing.expect(std.mem.indexOf(u8, shown.text, political_event_dom.find(first.template_key).?.name) != null);
+    try std.testing.expect(std.mem.indexOf(u8, shown.text, try politics.causeText(a, &gs, &first)) != null);
+    // Open from the strike, and resolved with its outcome once it has one.
+    gs.clock.day_index = first.strike_day;
+    try std.testing.expect(std.mem.indexOf(u8, (try conflictRows(a, &gs))[0].text, "open") != null);
+    gs.conflicts.values()[0].outcome = .defender_held;
+    gs.clock.day_index = first.expires_day;
+    try std.testing.expect(std.mem.indexOf(u8, (try conflictRows(a, &gs))[0].text, "the world held") != null);
+    try std.testing.expectError(error.OutOfMemory, conflictRows(std.testing.failing_allocator, &gs));
+}
+
+test "a conflict row escapes the names it shows, and a campaign without conflicts shows none" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73302 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    try std.testing.expectEqual(@as(usize, 0), (try conflictRows(a, &gs)).len);
+    gs.clock.advance();
+    while (gs.clock.date.day != 1) gs.clock.advance();
+    try politics.advanceWorld(&gs);
+    const c = gs.conflicts.values()[0];
+    gs.clock.day_index = c.discovery_day;
+    gs.personages.getPtr(c.instigator).?.last_name = "{c}Red";
+    const rows = try conflictRows(a, &gs);
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].text, "{{c}Red") != null);
+}

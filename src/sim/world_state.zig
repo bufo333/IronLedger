@@ -9,6 +9,7 @@ const tuning = @import("../domain/tuning.zig").t;
 const world_state_dom = @import("../domain/world_state.zig");
 const operation_mod = @import("../domain/operation.zig");
 const arc_mod = @import("../domain/arc.zig");
+const conflict_mod = @import("../domain/conflict.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 
@@ -76,6 +77,19 @@ pub fn finaleWorldDelta(f: *const arc_mod.Finale) WorldDelta {
     }
     // Held: employer control and security up, enemy influence and strain down.
     return .{ .employer_control = 10, .security = 8, .enemy_influence = -8, .infrastructure_strain = -5 }; // TUNE
+}
+
+/// Named outcome→world-delta owner for an NPC-only conflict resolution
+/// (docs/p5d-conflict-world-design.md §C resolution, rule 20): a world that
+/// fell loses security and its holder's control while the attacker's
+/// influence rises; one that held gains security and control. Either way
+/// the fighting strains the infrastructure. All values // TUNE: invented
+/// project values.
+pub fn conflictWorldDelta(outcome: conflict_mod.Outcome) WorldDelta {
+    return switch (outcome) {
+        .aggressor_won => .{ .security = -8, .employer_control = -10, .enemy_influence = 10, .infrastructure_strain = 6, .civilian_support = -4 }, // TUNE
+        .defender_held => .{ .security = 4, .employer_control = 5, .enemy_influence = -5, .infrastructure_strain = 3 }, // TUNE
+    };
 }
 
 /// The prepared world-state adjustment from `prepareWorldAdjust`: all
@@ -183,6 +197,15 @@ test "finaleWorldDelta: held vs collapse directions" {
     try std.testing.expect(df.infrastructure_strain > 0);
     try std.testing.expect(df.employer_control < 0);
     try std.testing.expect(df.security < 0);
+}
+
+test "conflictWorldDelta: a fallen world loses ground, a held one gains it, and both are strained" {
+    const fell = conflictWorldDelta(.aggressor_won);
+    const held = conflictWorldDelta(.defender_held);
+    try std.testing.expect(fell.security < 0 and fell.employer_control < 0 and fell.enemy_influence > 0);
+    try std.testing.expect(held.security > 0 and held.employer_control > 0 and held.enemy_influence < 0);
+    try std.testing.expect(fell.infrastructure_strain > 0 and held.infrastructure_strain > 0);
+    try std.testing.expect(fell.infrastructure_strain > held.infrastructure_strain);
 }
 
 test "prepareWorldAdjust + commitWorldAdjust: clamp to +-100 and record cause/day" {

@@ -105,6 +105,22 @@ CASES = [
     ("a personage with an empty title", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'\.title = "Duke of Summer"', '.title = ""')}, True),
     ("a personage name with markup", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'\.last_name = "Centrella"', '.last_name = "{c}Centrella"')}, True),
     ("a personage full name the name pools can draw", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'\.first_name = "Hanse"', '.first_name = "Adam"')}, True),
+    ("control: an unchanged political event table", lambda: {"tables/political_events.zon": stock("tables/political_events.zon")}, False),
+    ("two political events with one key", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r'\.key = "industrial_seizure"', '.key = "border_grab"')}, True),
+    ("a political event key that is not lowercase", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r'\.key = "supply_raid"', '.key = "Supply_Raid"')}, True),
+    ("a political event outside the opening family", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.family = \.opening", ".family = .beat")}, True),
+    ("a political event with no instigator role", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.instigator_roles = \.\{\.planetary_ruler\}", ".instigator_roles = .{}")}, True),
+    ("a political event with no motive", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.motives = \.\{\.profit\}", ".motives = .{}")}, True),
+    ("a political event with an unknown motive", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.motives = \.\{\.profit\}", ".motives = .{.greed}")}, True),
+    ("a political event with an unknown strike kind", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.strike_kind = \.recon_raid", ".strike_kind = .__bad_kind__")}, True),
+    ("a political event with min_industry on a relation rule", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"(\.target = \.grudge_seat, )\.min_industry = 0", r"\1.min_industry = 3")}, True),
+    ("a political event of zero weight", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.weight = 10,", ".weight = 0,")}, True),
+    ("a political event with an empty name", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r'\.name = "Supply raid"', '.name = ""')}, True),
+    ("a political event name with markup", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r'\.name = "Supply raid"', '.name = "{c}Supply raid"')}, True),
+    ("a political event with an empty cause", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r'\.cause = "\{instigator\} sends raiders to plunder \{world\}\."', '.cause = ""')}, True),
+    ("a political event cause with markup", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"sends raiders", "sends {/}raiders")}, True),
+    ("a political event cause with an unknown placeholder", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"plunder \{world\}", "plunder {planet}")}, True),
+    ("an own_seat political event on the aggressor side", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"(\.target = \.own_seat, \.min_industry = 0, )\.instigator_side = \.defender", r"\1.instigator_side = .aggressor")}, True),
 ]
 
 

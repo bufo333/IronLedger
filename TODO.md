@@ -117,10 +117,12 @@ A package has one primary invariant or subsystem outcome.
 - [x] Founding offer start year: a campaign founded in any start year stamps
   its founding artillery offer with that year, so its day-0 save loads and the
   offer can be bought on day 0.
-- [ ] P5d.1e conflict record: monthly schemes open conflicts from about 12
-  templates with the timeline and local and strike forces; NPC-only
-  resolution; REPL `conflicts`; log lines; the board is unchanged. Needs
-  P5d.1a and P5d.1c.
+- [x] P5d.1e conflict record: on each 1st, schemes from 12 validated
+  `political_events.zon` templates open conflicts with the §A timeline and
+  local and strike forces, which are discovered, fought and resolved
+  NPC-only, moving their worlds; REPL `conflicts` and `[politics]` log
+  lines; the board is unchanged; schema v73 with a chained v71/v72 → v73
+  migration.
 - [ ] P5d.1f board from conflicts: offers come only from conflicts, with side,
   on-station and close days and a cause line; `TooLateToArrive` and
   `OppositeSide` refusals; the opposition is the local or strike force. Needs

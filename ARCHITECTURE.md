@@ -176,7 +176,9 @@ section explains the shape, the contract states the rules.
   hall, market and hiring draw on `.market`, prisoners and salvage on `.battle`,
   event recruits on `.events`, the starter company on `.generation`, and the
   world's personages (`personage_gen`), then their relations
-  (`personage_relations.generate`, after the last personage), on `.politics`. All dice are
+  (`personage_relations.generate`, after the last personage), and the
+  conflicts `politics.runSchemes` opens and `politics.advanceWorld`
+  resolves, on `.politics`. All dice are
   2d6 unless the cited source or design rule says otherwise (`// TUNE`).
 - **Presentation markup is escaped at the source.** Screen text carries
   inline tags (`{a}` … `{/}`); `table.Tokenizer` is the one reader of it
@@ -298,7 +300,8 @@ cheap, copyable, and impossible to mix up.
   `personage.titleText`, never stored: a data row's own title, or "Governor
   of …" / "Leader, …" for a procedural row. Unlike the contract-scoped
   **Actor**, a personage exists from campaign creation whether or not any
-  contract names it, and no game rule reads one yet. Seeding and the load
+  contract names it; the political schemes read personages (**Conflict**,
+  below). Seeding and the load
   check are `sim/personages.zig` (`prepareSeeding`, `commitSeeding`,
   `validate`): `create_commander` prepares the seeding before its first
   mutation and commits it after its last fallible step, so a seeding
@@ -328,7 +331,37 @@ cheap, copyable, and impossible to mix up.
   is the load check. `queries.personageRelationRows` lists one personage's
   relations (a leader's lieges collapse into one "fealty of N governors"
   row); `who <world>`, `who <contract id>` and the F4 sheet print them under
-  each personage's row. No game rule reads a relation yet.
+  each personage's row. The political schemes read lieges, grudges, rivals
+  and allies (**Conflict**, below).
+- **Conflict** — `conflict.Conflict` in `GameState.conflicts`, keyed by
+  `ConflictId` from `next_conflict_id`, in id order, resolved ones kept
+  (docs/p5d-conflict-world-design.md §C). It holds its opening template's
+  key, the world fought over, the aggressor and defender (each a
+  `conflict.Power`: a faction key and the personage acting for it), the
+  instigator, the staging world, the §A days (`opened_day < discovery_day <
+  strike_day < expires_day`, all fixed at opening), the defender's rolled
+  `local_force` and the aggressor's `strike_force` (`opfor.Force`), and an
+  `outcome` once resolved. Its status (`preparing`, `threatened`, `open`,
+  `resolved`) is derived by one owner, `conflict.status(c, day)`, never
+  stored. The pure rules are `domain/conflict.zig`: `aggressorWinChanceBp`
+  (strike BV over both forces' BV; decision E4), `discoveryDay` (the earlier
+  of the intelligence day, `opened + lag − chief cut`, and the detection
+  day, `strike − detection_lead_days`; D12, E6) and `localForceLances`
+  (rolled lances plus one per `local_force_security_per_lance` of world
+  security, at least one). Conflicts open from the `opening` templates of
+  `data/tables/political_events.zon` (`domain/political_event.zig`, validated
+  every build): each names the instigator's roles and motives, whether it
+  is a pirate's, its `TargetRule` (`hostile_world`, `recent_victor_world`,
+  `grudge_seat`, `rival_seat`, `ally_foe_world`, `own_seat`, one owner each
+  in `sim/politics.zig`), the instigator's side, the strike force's
+  contract kind, a weight and a cause sentence. `sim/politics.zig` owns
+  opening (`runSchemes`), progression and NPC-only resolution
+  (`advanceWorld`, §6), the staging world (`stagingWorld`: the aggressor
+  faction's nearest world, never the target), the one cause formatter
+  (`causeText`) and the load check (`validate`). `queries.conflictRows`
+  lists every discovered conflict for REPL `conflicts`; a `preparing`
+  conflict shows nowhere. The contract board, offers, battles and rivals
+  read no conflict.
 - **Actor** — a contract-introduced NPC (liaison, official, enemy commander,
   etc.) that persists across contracts. Each actor carries four relationship
   dimensions (trust, debt, respect, hostility; −100…100) and typed **flags**
@@ -500,6 +533,17 @@ part of the spec:
 3. **Medical** — doctors heal the wounded (MASH/hospital modifiers).
 4. **Acquisition & markets** — ordered parts arrive; weekly/monthly market
    refreshes (contract market monthly, personnel weekly, units monthly).
+   After the hiring halls churn and before the monthly refreshes, the
+   political world moves (`politics.advanceWorld`; docs/p5d-conflict-world-design.md
+   §K steps 2–3): first today's due conflict days by (day, `ConflictId`) —
+   discovery and the strike each log a `[politics]` line, and at
+   `expires_day` one `.politics` draw against `aggressorWinChanceBp`
+   resolves the conflict, moves its world by `world_state.conflictWorldDelta`
+   and logs it; then on the 1st `runSchemes` opens up to
+   `schemes_per_month` conflicts, unlogged because an opening is secret.
+   Every fallible step is prepared before the first mutation, and a scheme
+   failure rolls the day's transitions back. Player state, presence and
+   visibility are never inputs, and the board reads no conflict.
 5. **Maintenance** *(weekly per unit)* — tech rolls vs. target number
    (modified by part quality, supply state, facility, tech workload);
    failures degrade quality/parts, MekHQ-style.
@@ -1390,9 +1434,9 @@ a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
 **Current format boundary.** New empty stores
-initialize schema 72 transactionally. Existing store and campaign versions
-must both be 72 once the store is open; a schema 71 store is migrated on
-open (below), older formats (70 included) are refused intact and newer
+initialize schema 73 transactionally. Existing store and campaign versions
+must both be 73 once the store is open; a schema 71 or 72 store is migrated
+on open (below), older formats (70 included) are refused intact and newer
 formats retain their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
 missing tables or rows. Outside a supported migration, no automatic reset,
@@ -1489,20 +1533,59 @@ duplicate key, a procedural heir, family member or official, and a
 generator version that does not match the provenance. Which data rows a
 campaign holds is not checked: the start year is not saved.
 
-**Schema 71 stores migrate to 72** on open (`Store.migrateV71ToV72`, the
-one supported migration). Before any change the store must hold every v71
-table and column (the frozen v71 `personage` definition, every other table
-as today), exactly the v71 `personage` columns, and only v71 campaigns;
-otherwise `CorruptStore`, untouched. Then one transaction with foreign keys
-off creates `personage__v72` from the current DDL, copies every row with
-`key = ''` and `family_key = ''` and every other column as stored, drops
-`personage`, renames the new table to `personage` (create–copy–drop–rename,
-so `personage_relation`'s foreign keys keep naming `personage`), recreates
-its indexes, sets every campaign and the store to 72, requires an empty
-`PRAGMA foreign_key_check` and the v72 schema, and commits. Any failure
-rolls back with the file still v71. A migrated campaign keeps every
-procedural personage, relation, id, counter and stream exactly, gains no
-data row (decision M1), and plays on as it would have.
+**Older stores migrate on open** through a chain of migrations, each from
+one version to the next (`Store.migrate`; schema 71 is the oldest
+supported format, `oldest_supported_schema_version`). A v71 store runs v71
+→ v72 and then v72 → v73; a v72 store runs only v72 → v73. The whole chain
+is one transaction with foreign keys off, ending with an empty `PRAGMA
+foreign_key_check` (else `CorruptStore`) and the current schema check
+before COMMIT; any failure rolls back with the file at its original
+version. Each migration keeps a frozen definition of its source format and
+validates it before its own statements: a malformed or mixed-version store
+is `CorruptStore`, untouched. `ddl_v72` and `index_ddl_v72` are schema
+v72's DDL byte for byte (a test pins their SHA-256); `ddl_v71` is derived
+from `ddl_v72`; the current `ddl` is v72's plus `conflict`.
+
+- **v71 → v72** (`migrateV71ToV72`). The source check: every v71 table and
+  column (the frozen v71 `personage` definition, every other table as v72
+  defines it), exactly the v71 `personage` columns, and only v71
+  campaigns. It creates `personage__v72` from the v72 DDL, copies every row
+  with `key = ''` and `family_key = ''` and every other column as stored,
+  drops `personage`, renames the new table to `personage`
+  (create–copy–drop–rename, so `personage_relation`'s foreign keys keep
+  naming `personage`), recreates its indexes and sets every campaign and the
+  store to 72. A migrated campaign keeps every procedural personage,
+  relation, id, counter and stream exactly and gains no data row (decision
+  M1).
+- **v72 → v73** (`migrateV72ToV73`). The source check: every v72 table and
+  column, no `conflict` table, no `next_conflict_id` counter, and only v72
+  campaigns. It creates `conflict` and `ix_conflict_cid`, gives every
+  campaign `next_conflict_id = 1`, and sets every campaign and the store to
+  73. A v72 campaign has no conflict, so it migrates with none; every other
+  value, id, counter and stream is unchanged.
+
+A migrated campaign loads with the digest of the same state saved directly
+at v73 and plays on as it would have.
+
+**Conflicts are saved** (schema 73): one `conflict` row each (ordinal, id,
+template key, world, aggressor and defender factions and personages,
+instigator, staging world, the four days, each force's lances, quality, lance
+BV and lance tons, and the outcome or NULL) and the meta counter
+`next_conflict_id`. SQL checks bound every integer and text column, the day
+order, lances (1–255), quality and outcome tags; `(cid, id)` and `(cid,
+ord)` are unique, and the aggressor, defender and instigator are tied to
+`personage` rows by foreign key. The loader decodes each row exactly (tags
+on their full bytes, checked integers, the ordinal equal to the row's
+position), and `politics.validate` refuses an unknown template, world or
+faction, a dangling personage, an instigator that is not the side
+personage its template names, a staging world other than `stagingWorld`'s,
+a broken day order, a strike day whose preparation (less the travel) or
+fighting days fall outside their tuned ranges, an opening after today, an
+unresolved conflict at or past its expiry or a resolved one before it, two
+unresolved conflicts on one world, more than `max_open_conflicts`
+unresolved, a force without a lance or with negative BV or tonnage, and an
+id at or above the counter. A save made under a `political_events.zon`
+without a template a conflict uses is refused.
 
 **Personage relations are saved** (schema 71): one `personage_relation` row
 each (ordinal, from and to personage ids, kind tag, weight). SQL checks bound

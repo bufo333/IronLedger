@@ -417,8 +417,8 @@ and officials, then its governors, and `who skye` that world's governor. On
 the Contracts screen (F4), `w` on an offer, an active contract or a closed
 one shows who governs its world and who leads its employer and its enemy
 (the pirates have no leader, and a world whose house does not hire has no
-governor); `who <contract id>` in the console shows the same. Nothing in
-the game acts on them yet.
+governor); `who <contract id>` in the console shows the same. They scheme
+against one another (below).
 
 They are also tied to one another. Every governor of a house with a leader
 owes that leader fealty, with a loyalty from 1 to 100. Members of one
@@ -429,7 +429,28 @@ heirs, family and officials hold only family ties, and leaders their
 governors' fealty. `who skye` and `who <contract
 id>` list each personage's ties beneath it, and so does the F4 `w` sheet; a
 leader's governors show as one "fealty of N governors" line. These ties are
-fixed when the campaign starts and nothing in the game acts on them yet.
+fixed when the campaign starts; grudges, rivalries, alliances and a weak
+loyalty all feed the schemes below.
+
+## Wars between the powers (P5d.1e)
+
+The great powers and their governors scheme against each other without you.
+On the 1st of each month a few of them move: a ruler covets a hostile
+neighbour's world, a house avenges a recent defeat, a governor strikes at a
+rival or at the target of a grudge, a disloyal governor declares its world
+free and its liege sends troops, a pirate world sends raiders to plunder.
+Each war is prepared in secret, then the threatened side discovers it —
+sooner if it keeps an intelligence chief, and always some days before the
+blow lands — then the strike force arrives from its nearest world and the
+fighting starts, and some weeks later the war is decided by the strength
+of the two forces. The result changes the world fought over: a world that
+falls loses security and its holder's grip, and one that holds is the
+stronger for it, though either way the fighting strains it. Discoveries,
+the first blows and the outcomes appear in the log under `politics`. In the
+console, `conflicts` lists every war its defender has discovered, with the
+two sides, how it stands, when it struck and when it ends, and why it
+began; a war still in preparation shows nowhere. Contracts do not come from
+these wars yet.
 
 ## Persistent actors (P4i)
 

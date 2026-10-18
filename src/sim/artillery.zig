@@ -903,7 +903,7 @@ test "fixed seed artillery acquisition attachment freight and disposal script ha
     // magazines, service checkpoint and acquisition/transport history together
     // (docs/p2-artillery-operations-design.md,
     // Acquisition, placement, sale and defaults).
-    try std.testing.expectEqual(@as(u64, 4001823673369956024), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 2107009959650156614), digest.stateHash(&gs));
 }
 
 fn validatePlacement(gs: *GameState, f: dom.Formation) error{CorruptSave}!void {

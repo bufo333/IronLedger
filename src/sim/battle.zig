@@ -1509,7 +1509,7 @@ test "non artillery engagement reference preserves every gameplay field and stre
         defer gs.deinit();
         const id = try engagementFixture(&gs, real_pool);
         try resolveEngagement(&gs, gs.contracts.getPtr(id).?);
-        try std.testing.expectEqual(if (real_pool) @as(u64, 5587220158955891290) else @as(u64, 636380459505052588), digest.nonArtilleryReferenceHash(&gs));
+        try std.testing.expectEqual(if (real_pool) @as(u64, 6997900704307054828) else @as(u64, 5364200203435939428), digest.nonArtilleryReferenceHash(&gs));
     }
 }
 

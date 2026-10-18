@@ -110,6 +110,10 @@ pub const HullInstanceId = enum(u32) { none = 0, _ };
 /// so a personage reference cannot be passed where an actor or rival index is
 /// expected (rule 56).
 pub const PersonageId = enum(u32) { none = 0, _ };
+/// One persisted world conflict (docs/p5d-conflict-world-design.md §C); typed
+/// so a conflict reference cannot be passed where a personage or contract
+/// index is expected (rule 56).
+pub const ConflictId = enum(u32) { none = 0, _ };
 pub const ArtilleryFormationId = enum(u32) { none = 0, _ };
 pub const ArtilleryOfferId = enum(u32) { none = 0, _ };
 

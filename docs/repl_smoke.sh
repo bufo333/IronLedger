@@ -33,6 +33,8 @@ printf '%s\n' \
   'who LC' \
   'who skye' \
   'who nosuchkey' \
+  'conflicts' \
+  'conflicts x' \
   'sellstock hq:1 ammo_lrm 1' \
   'stockpolicy hq:1 ammo_lrm 4 8' \
   'autoadmit off' \
@@ -286,4 +288,8 @@ awk -v steps="$who_steps" '
 if grep -n -i -w -E 'procedural|generated|generator|authored|author|canon|sarna|project character|provenance|source|fictional|invented|real' "$work/who"; then
   echo "FOUND: an origin word in a who step's output"; exit 1
 fi
+# P5d.1e: `conflicts` lists the discovered conflicts; in the first month
+# none is open, let alone discovered. A trailing token is refused.
+check 'no conflict is known'
+check 'usage: conflicts'
 echo "REPL SMOKE OK"

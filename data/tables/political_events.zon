@@ -1,0 +1,46 @@
+// Political event templates (docs/p5d-conflict-world-design.md §K "One
+// event architecture"; §C producer). Typed against
+// src/domain/political_event.zig `Table`. This table holds only the
+// `opening` family: the scheme templates conflicts open from.
+//
+// Source: every row is project-authored. The keys, names, cause sentences,
+// role and motive lists, targets, strike kinds and weights are project
+// content and game-design placeholders, not sourcebook or setting facts;
+// the playtest gate sets the weights.
+//
+//   key              stable key a save stores (conflict.template_key); never renamed
+//   name             short display label (markup-safe)
+//   family           opening (the only family the build accepts)
+//   instigator_roles the instigator holds one of these personage roles
+//   motives          and at least one of these motives
+//   pirate           true: the instigator's faction is PER; false: any other
+//   target           hostile_world | recent_victor_world | grudge_seat |
+//                    rival_seat | ally_foe_world | own_seat
+//   min_industry     the target world's least industry (hostile_world only)
+//   instigator_side  aggressor, or defender for own_seat
+//   strike_kind      the contract kind whose opfor.zon row sizes the strike force
+//   weight           relative draw weight, before the instigator's ambition
+//   cause            one sentence; {instigator} {target} {world} {aggressor}
+//                    {defender} are the only placeholders
+//
+// The build refuses a duplicate or malformed key, a family other than
+// opening, an empty role or motive list, a strike kind with no opfor.zon
+// row, min_industry on a rule other than hostile_world, a zero weight, an
+// empty or markup-bearing name or cause, an unknown placeholder, and an
+// own_seat row on the aggressor side or any other row on the defender side.
+.{
+    .events = .{
+        .{ .key = "border_grab", .name = "Border grab", .family = .opening, .instigator_roles = .{ .faction_leader, .planetary_ruler }, .motives = .{ .expansion, .ambition }, .pirate = false, .target = .hostile_world, .min_industry = 0, .instigator_side = .aggressor, .strike_kind = .planetary_assault, .weight = 10, .cause = "{instigator} covets {world} and moves to take it from {target}." },
+        .{ .key = "industrial_seizure", .name = "Industrial seizure", .family = .opening, .instigator_roles = .{.planetary_ruler}, .motives = .{.profit}, .pirate = false, .target = .hostile_world, .min_industry = 4, .instigator_side = .aggressor, .strike_kind = .planetary_assault, .weight = 6, .cause = "{instigator} wants the factories of {world} and moves to seize them from {target}." },
+        .{ .key = "supply_raid", .name = "Supply raid", .family = .opening, .instigator_roles = .{.planetary_ruler}, .motives = .{ .survival, .profit }, .pirate = false, .target = .hostile_world, .min_industry = 2, .instigator_side = .aggressor, .strike_kind = .extraction_raid, .weight = 8, .cause = "{instigator} is short of stores and plans to strip the depots of {world}, held by {target}." },
+        .{ .key = "probing_raid", .name = "Probing raid", .family = .opening, .instigator_roles = .{ .faction_leader, .heir, .intelligence_chief }, .motives = .{ .expansion, .survival }, .pirate = false, .target = .hostile_world, .min_industry = 0, .instigator_side = .aggressor, .strike_kind = .recon_raid, .weight = 8, .cause = "{instigator} orders a probe of {world} to test how well {target} holds it." },
+        .{ .key = "punitive_raid", .name = "Punitive raid", .family = .opening, .instigator_roles = .{ .faction_leader, .planetary_ruler }, .motives = .{ .revenge, .honor }, .pirate = false, .target = .recent_victor_world, .min_industry = 0, .instigator_side = .aggressor, .strike_kind = .objective_raid, .weight = 10, .cause = "{instigator} means to punish {target} for a recent defeat, starting with {world}." },
+        .{ .key = "grudge_strike", .name = "Grudge strike", .family = .opening, .instigator_roles = .{.planetary_ruler}, .motives = .{ .revenge, .honor, .ambition }, .pirate = false, .target = .grudge_seat, .min_industry = 0, .instigator_side = .aggressor, .strike_kind = .objective_raid, .weight = 10, .cause = "{instigator} bears a grudge against {target} and strikes at {world}." },
+        .{ .key = "rival_feud", .name = "Rival feud", .family = .opening, .instigator_roles = .{.planetary_ruler}, .motives = .{ .ambition, .expansion }, .pirate = false, .target = .rival_seat, .min_industry = 0, .instigator_side = .aggressor, .strike_kind = .diversionary_raid, .weight = 6, .cause = "{instigator} moves against a rival, {target}, on {world}." },
+        .{ .key = "secession_revolt", .name = "Secession revolt", .family = .opening, .instigator_roles = .{.planetary_ruler}, .motives = .{.secession}, .pirate = false, .target = .own_seat, .min_industry = 0, .instigator_side = .defender, .strike_kind = .planetary_assault, .weight = 5, .cause = "{instigator} declares {world} free of the {aggressor}, which sends troops to restore its rule." },
+        .{ .key = "sponsored_unrest", .name = "Sponsored unrest", .family = .opening, .instigator_roles = .{ .planetary_ruler, .faction_leader, .intelligence_chief }, .motives = .{ .reform, .ambition }, .pirate = false, .target = .hostile_world, .min_industry = 0, .instigator_side = .aggressor, .strike_kind = .guerrilla_warfare, .weight = 6, .cause = "{instigator} funds unrest on {world} to weaken {target}." },
+        .{ .key = "pirate_predation", .name = "Pirate predation", .family = .opening, .instigator_roles = .{.planetary_ruler}, .motives = .{.profit}, .pirate = true, .target = .hostile_world, .min_industry = 0, .instigator_side = .aggressor, .strike_kind = .objective_raid, .weight = 10, .cause = "{instigator} sends raiders to plunder {world}." },
+        .{ .key = "allied_reprisal", .name = "Allied reprisal", .family = .opening, .instigator_roles = .{.planetary_ruler}, .motives = .{ .honor, .dynastic_security }, .pirate = false, .target = .ally_foe_world, .min_industry = 0, .instigator_side = .aggressor, .strike_kind = .diversionary_raid, .weight = 5, .cause = "{instigator} strikes at {world} for an ally the {defender} threatens." },
+        .{ .key = "dynastic_claim", .name = "Dynastic claim", .family = .opening, .instigator_roles = .{ .heir, .family, .faction_leader }, .motives = .{ .dynastic_security, .ambition }, .pirate = false, .target = .hostile_world, .min_industry = 0, .instigator_side = .aggressor, .strike_kind = .planetary_assault, .weight = 4, .cause = "{instigator} presses a dynastic claim to {world} against {target}." },
+    },
+}

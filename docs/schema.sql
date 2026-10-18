@@ -1,10 +1,12 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 72, the current store and campaign format. A
--- schema 71 store is migrated to 72 on open, in one transaction
--- (Store.migrateV71ToV72; see `personage` below). Older and newer formats are
--- refused before persistent mutation under docs/engineering-contract.md
--- rule 51; only empty stores initialize schema 72.
+-- Matches schema_version 73, the current store and campaign format. Schema
+-- 71 is the oldest supported format: a v71 or v72 store reaches 73 on open
+-- through each migration in turn, all in one transaction (Store.migrate:
+-- v71 → v72 rebuilds `personage`, v72 → v73 adds `conflict`; see each
+-- below). Older and newer formats are refused before persistent mutation
+-- under docs/engineering-contract.md rule 51; only empty stores initialize
+-- schema 73.
 -- The executable DDL and dormant historical migration declarations live in
 -- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
@@ -72,7 +74,7 @@ CREATE TABLE campaign (
     commander       TEXT,
     day             INTEGER NOT NULL,                -- day_index at save
     date            TEXT    NOT NULL,                -- in-game date at save
-    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 72 (a v71 store's campaigns are migrated with it); older/newer versions are refused before load or overwrite
+    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 73 (a v71 or v72 store's campaigns are migrated with it); older/newer versions are refused before load or overwrite
     save_seq        INTEGER NOT NULL,                -- store-wide save counter, orders "most recent"
     player_id       INTEGER NOT NULL DEFAULT 0       -- -> player.id; 0 = none
 );
@@ -100,6 +102,8 @@ CREATE TABLE campaign (
 -- battle_in_progress row count, likewise completeness metadata: removed
 -- battle rows are corruption, never an engagement not yet engaged.
 -- v70 requires next_personage_id, nonzero and greater than every personage id.
+-- v73 requires next_conflict_id, nonzero and greater than every conflict id;
+-- the v72 → v73 migration sets it to 1 for every campaign.
 CREATE TABLE meta (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,
@@ -707,7 +711,8 @@ CREATE TABLE event_log (
     ord             INTEGER NOT NULL,
     day             INTEGER,
     category        TEXT,                            -- battle | decision | delivery | contract | medical |
-                                                     -- training | rotation | finance | construction | market | misc
+                                                     -- training | rotation | finance | construction | market | misc |
+                                                     -- politics (v73)
     company         INTEGER,                         -- -> force.id
     hq              INTEGER,                         -- -> hq.id
     contract        INTEGER,                         -- -> contract.id
@@ -1411,6 +1416,57 @@ CREATE TABLE personage_relation (
     FOREIGN KEY (cid, to_id) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_personage_relation_cid ON personage_relation(cid);
+
+-- conflict: world conflicts (docs/p5d-conflict-world-design.md §C, v73), in
+-- id order, resolved ones kept. Each opened from a
+-- data/tables/political_events.zon template; its §A days are fixed at
+-- opening and its status (preparing, threatened, open, resolved) is derived,
+-- never stored. The loader (politics.validate) also refuses an unknown
+-- template, world or faction, an instigator that is not the side personage
+-- its template names, a staging world other than the aggressor faction's
+-- nearest, a preparation (strike day less the travel, after opening) or a
+-- fighting span outside its tuned range, an opening after today, an
+-- unresolved conflict at or past its expiry or a resolved one before it,
+-- two unresolved conflicts on one world, more than max_open_conflicts
+-- unresolved, and an id at or above meta next_conflict_id.
+--
+-- Migration v72 → v73: v72 has no conflict table and no next_conflict_id.
+-- A v72 campaign has no conflict; the table is created empty, every campaign
+-- gets next_conflict_id = 1, and no other row changes.
+CREATE TABLE conflict (
+    cid                 INTEGER NOT NULL,
+    ord                 INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), -- id order
+    id                  INTEGER NOT NULL CHECK (typeof(id)='integer' AND id BETWEEN 1 AND 4294967295), -- ConflictId
+    template_key        TEXT    NOT NULL CHECK (typeof(template_key)='text' AND length(template_key) > 0), -- -> political_events.zon row
+    planet_key          TEXT    NOT NULL CHECK (typeof(planet_key)='text' AND length(planet_key) > 0),     -- -> planets catalog: the world fought over
+    aggressor_faction   TEXT    NOT NULL CHECK (typeof(aggressor_faction)='text' AND length(aggressor_faction) > 0), -- -> factions catalog
+    aggressor_personage INTEGER NOT NULL CHECK (typeof(aggressor_personage)='integer' AND aggressor_personage BETWEEN 1 AND 4294967295), -- PersonageId
+    defender_faction    TEXT    NOT NULL CHECK (typeof(defender_faction)='text' AND length(defender_faction) > 0),   -- -> factions catalog
+    defender_personage  INTEGER NOT NULL CHECK (typeof(defender_personage)='integer' AND defender_personage BETWEEN 1 AND 4294967295), -- PersonageId; the cause's target
+    instigator          INTEGER NOT NULL CHECK (typeof(instigator)='integer' AND instigator BETWEEN 1 AND 4294967295), -- PersonageId; the template's side personage
+    staging_planet_key  TEXT    NOT NULL CHECK (typeof(staging_planet_key)='text' AND length(staging_planet_key) > 0), -- the aggressor faction's world nearest the target
+    opened_day          INTEGER NOT NULL CHECK (typeof(opened_day)='integer' AND opened_day BETWEEN 0 AND 4294967295),
+    discovery_day       INTEGER NOT NULL CHECK (typeof(discovery_day)='integer' AND discovery_day BETWEEN 0 AND 4294967295),
+    strike_day          INTEGER NOT NULL CHECK (typeof(strike_day)='integer' AND strike_day BETWEEN 0 AND 4294967295),
+    expires_day         INTEGER NOT NULL CHECK (typeof(expires_day)='integer' AND expires_day BETWEEN 0 AND 4294967295),
+    local_lances        INTEGER NOT NULL CHECK (typeof(local_lances)='integer' AND local_lances BETWEEN 1 AND 255), -- the defender's garrison
+    local_quality       TEXT    NOT NULL CHECK (typeof(local_quality)='text' AND local_quality IN ('green','regular','veteran','elite')),
+    local_lance_bv      INTEGER NOT NULL CHECK (typeof(local_lance_bv)='integer' AND local_lance_bv >= 0),
+    local_lance_tons    INTEGER NOT NULL CHECK (typeof(local_lance_tons)='integer' AND local_lance_tons BETWEEN 0 AND 4294967295),
+    strike_lances       INTEGER NOT NULL CHECK (typeof(strike_lances)='integer' AND strike_lances BETWEEN 1 AND 255), -- the aggressor's house force
+    strike_quality      TEXT    NOT NULL CHECK (typeof(strike_quality)='text' AND strike_quality IN ('green','regular','veteran','elite')),
+    strike_lance_bv     INTEGER NOT NULL CHECK (typeof(strike_lance_bv)='integer' AND strike_lance_bv >= 0),
+    strike_lance_tons   INTEGER NOT NULL CHECK (typeof(strike_lance_tons)='integer' AND strike_lance_tons BETWEEN 0 AND 4294967295),
+    outcome             TEXT    CHECK (outcome IS NULL OR (typeof(outcome)='text' AND outcome IN ('aggressor_won','defender_held'))), -- NULL until resolved
+    CHECK (opened_day < discovery_day AND discovery_day < strike_day AND strike_day < expires_day),
+    PRIMARY KEY (cid, id),
+    UNIQUE (cid, ord),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, aggressor_personage) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, defender_personage) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, instigator) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_conflict_cid ON conflict(cid);
 
 -- Artillery formation and HQ offer fields are persisted (schema v60).
 -- Catalogue facts and attached location are derived; quotes are scratch.
