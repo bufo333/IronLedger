@@ -1,8 +1,10 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 71, the only supported store and campaign format.
--- Older and newer formats are refused before persistent mutation under
--- docs/engineering-contract.md rule 51; only empty stores initialize schema 71.
+-- Matches schema_version 72, the current store and campaign format. A
+-- schema 71 store is migrated to 72 on open, in one transaction
+-- (Store.migrateV71ToV72; see `personage` below). Older and newer formats are
+-- refused before persistent mutation under docs/engineering-contract.md
+-- rule 51; only empty stores initialize schema 72.
 -- The executable DDL and dormant historical migration declarations live in
 -- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
@@ -70,7 +72,7 @@ CREATE TABLE campaign (
     commander       TEXT,
     day             INTEGER NOT NULL,                -- day_index at save
     date            TEXT    NOT NULL,                -- in-game date at save
-    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 71; older/newer versions are refused before load or overwrite
+    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 72 (a v71 store's campaigns are migrated with it); older/newer versions are refused before load or overwrite
     save_seq        INTEGER NOT NULL,                -- store-wide save counter, orders "most recent"
     player_id       INTEGER NOT NULL DEFAULT 0       -- -> player.id; 0 = none
 );
@@ -1340,32 +1342,49 @@ CREATE TABLE merc_company_roster (
 );
 CREATE INDEX IF NOT EXISTS ix_merc_company_roster_cid ON merc_company_roster(cid);
 
--- personage: world personages (docs/p5d-conflict-world-design.md §B, v70).
--- One ruler per world whose faction hires, one leader per hiring faction
--- except PER, seated on its capital; all procedural. The loader
--- (personages.validate) refuses an unknown key or seat, a ruler on a world
--- that does not hire or of another faction than its world's, two rulers on a
--- world or two leaders for a faction, a leader off its capital or for PER, a
--- commander's campaign missing any of them, and personages without a
--- commander. meta next_personage_id exceeds every id.
+-- personage: world personages (docs/p5d-conflict-world-design.md §B, v70;
+-- key and family_key v72). One ruler per world whose faction hires, one
+-- leader per hiring faction except PER, seated on its capital; each the
+-- data/tables/personages.zon row whose era window holds the start year, else
+-- procedural; plus the start year's heirs, family and officials, all data
+-- rows. The title is not stored: it is read from the data row by key. The
+-- loader (personages.validate) refuses an unknown key or seat, a ruler on a
+-- world that does not hire or of another faction than its world's, two
+-- rulers on a world or two leaders for a faction, a leader off its capital
+-- or for PER, a commander's campaign missing any of them, personages
+-- without a commander, a key naming no data row or a keyed row differing
+-- from it, a duplicate key, a procedural heir, family member or official,
+-- and a generator version that does not match the provenance. meta
+-- next_personage_id exceeds every id.
+--
+-- Migration v71 → v72: v71 has no key or family_key column, and its role
+-- and provenance CHECKs admit only rulers, leaders and 'procedural' with
+-- generator_version = 1. Every v71 row is procedural; it is copied with every
+-- column as stored plus key = '' and family_key = '' into a new table that
+-- then replaces personage (create, copy, drop, rename — so personage_relation's
+-- foreign keys keep naming personage), and no data row is added.
 CREATE TABLE personage (
     cid              INTEGER NOT NULL,
     ord              INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), -- insertion order
     id               INTEGER NOT NULL CHECK (typeof(id)='integer' AND id BETWEEN 1 AND 4294967295), -- PersonageId
-    role             TEXT    NOT NULL CHECK (role IN ('planetary_ruler','faction_leader')),
+    role             TEXT    NOT NULL CHECK (role IN ('planetary_ruler','faction_leader','heir','family','intelligence_chief')),
     first_name       TEXT    NOT NULL CHECK (typeof(first_name)='text' AND length(first_name) > 0), -- markup-safe
     last_name        TEXT    NOT NULL CHECK (typeof(last_name)='text' AND length(last_name) > 0),   -- markup-safe
     faction_key      TEXT    NOT NULL CHECK (typeof(faction_key)='text'),     -- -> factions catalog; a ruler's equals its world's
     seat_planet_key  TEXT    NOT NULL CHECK (typeof(seat_planet_key)='text'), -- -> planets catalog; a leader's is its capital
     motives          INTEGER NOT NULL CHECK (typeof(motives)='integer' AND motives BETWEEN 1 AND 511 AND (motives & 1) + ((motives >> 1) & 1) + ((motives >> 2) & 1) + ((motives >> 3) & 1) + ((motives >> 4) & 1) + ((motives >> 5) & 1) + ((motives >> 6) & 1) + ((motives >> 7) & 1) + ((motives >> 8) & 1) BETWEEN 2 AND 3), -- bit = personage.Motive value; two or three set
     ambition         INTEGER NOT NULL CHECK (typeof(ambition)='integer' AND ambition BETWEEN 0 AND 100),
-    provenance       TEXT    NOT NULL CHECK (provenance IN ('procedural')),
-    generator_version INTEGER NOT NULL CHECK (typeof(generator_version)='integer' AND generator_version = 1), -- personage_gen.version
+    provenance       TEXT    NOT NULL CHECK (provenance IN ('procedural','canon','authored')), -- internal; never displayed
+    generator_version INTEGER NOT NULL CHECK (typeof(generator_version)='integer' AND generator_version IN (0,1)), -- personage_gen.version; 0 for a data row
+    key              TEXT    NOT NULL CHECK (typeof(key)='text'),        -- -> personages.zon row; '' for procedural
+    family_key       TEXT    NOT NULL CHECK (typeof(family_key)='text'), -- the data row's family; '' for none
+    CHECK ((provenance = 'procedural' AND key = '' AND family_key = '' AND generator_version = 1 AND role IN ('planetary_ruler','faction_leader')) OR (provenance IN ('canon','authored') AND key <> '' AND generator_version = 0)),
     PRIMARY KEY (cid, id),
     UNIQUE (cid, ord),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_personage_cid ON personage(cid);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_personage_key ON personage(cid, key) WHERE key <> '';
 
 -- personage_relation: relations between personages
 -- (docs/p5d-conflict-world-design.md §B relations, v71). kin, rival and ally

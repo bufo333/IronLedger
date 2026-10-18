@@ -1110,7 +1110,7 @@ def wizard_outfit():
 def wizard_company():
     g = shell("NEW CAMPAIGN · step 3 of 4 · Company & back office",
               "{d}[j/k] row  [-/+] adjust  [r] reroll company  [Enter] next step  [Esc] back{/}", right="player: John")
-    g.pane(0, 2, 100, 46, "GENERATED COMPANY", pad([
+    g.pane(0, 2, 100, 46, "STARTING COMPANY", pad([
         "{a}Alpha Company{/} · home: Komephoros (LC-weighted roll) · seed 0x9f3a2c · 13,052 BV · 168 people",
         "",
         "lance           hull     name           tons   pilot                 exp       tech",

@@ -241,11 +241,12 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
         for (logo.all_keys) |k| if (std.mem.eql(u8, k, c.logo_key)) break :blk k; // static catalog memory
         break :blk ""; // not a catalog key → reserve nothing (fail-closed)
     };
-    // Every world's ruler and every power's leader
-    // (docs/p5d-conflict-world-design.md §B), drawn and reserved before the
-    // first mutation so a seeding failure leaves the campaign unchanged
-    // (rules 11–12); committed after the last fallible step below.
-    const seeding = try personages.prepareSeeding(gs);
+    // Every world's ruler, every power's leader and the start year's data
+    // personages (docs/p5d-conflict-world-design.md §B), seated and
+    // reserved before the first mutation so a seeding failure leaves the
+    // campaign unchanged (rules 11–12); committed after the last fallible
+    // step below.
+    const seeding = try personages.prepareSeeding(gs, c.start_year);
     defer seeding.deinit(gs);
     _ = try createCommander(gs, c.name, c.origin, c.profession);
     gs.clock.date.year = c.start_year;

@@ -90,6 +90,21 @@ CASES = [
     ("a merc band with no line lances", lambda: {"tables/merc_bands.zon": mutate("tables/merc_bands.zon", r"\.line_lances = \d+,", ".line_lances = 0,")}, True),
     ("a merc band founded with no capital", lambda: {"tables/merc_bands.zon": mutate("tables/merc_bands.zon", r"\.capital_cbills = [\d_]+,", ".capital_cbills = 0,")}, True),
     ("merc bands that seed no company", lambda: {"tables/merc_bands.zon": mutate_all("tables/merc_bands.zon", r"\.seed_companies = \d+,", ".seed_companies = 0,")}, True),
+    ("control: an unchanged personage table", lambda: {"tables/personages.zon": stock("tables/personages.zon")}, False),
+    ("two personages with one key", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'\.key = "katrina_steiner"', '.key = "hanse_davion"')}, True),
+    ("a personage key that is a planet key", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'\.key = "melissa_steiner"', '.key = "tharkad"')}, True),
+    ("a personage of an unknown faction", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'\.faction_key = "TC"', '.faction_key = "XX"')}, True),
+    ("a personage on an unknown seat", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'\.seat_planet_key = "taurus"', '.seat_planet_key = "nowhere"')}, True),
+    ("a personage of an unknown family", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'\.family_key = "steiner"', '.family_key = "nosuchfamily"')}, True),
+    ("a ruler on another faction's world", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'(\.key = "candace_liao".*?\.seat_planet_key = )"st_ives"', r'\1"alkaid"')}, True),
+    ("a leader off its faction's capital", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'(\.key = "hanse_davion".*?\.seat_planet_key = )"new_avalon"', r'\1"kathil"')}, True),
+    ("two leaders of one faction in overlapping windows", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'(\.key = "brannoc_hale".*?)\.faction_key = "CIR", \.seat_planet_key = "circinus"', r'\1.faction_key = "FS", .seat_planet_key = "new_avalon"')}, True),
+    ("a personage window not covering 3025", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r"\.era_to_year = 3025", ".era_to_year = 3024")}, True),
+    ("a personage with one motive", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r"\.motives = \.\{ \.expansion, \.dynastic_security \}", ".motives = .{.expansion}")}, True),
+    ("a personage ambition out of range", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r"\.ambition = 85,", ".ambition = 101,")}, True),
+    ("a personage with an empty title", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'\.title = "Duke of Summer"', '.title = ""')}, True),
+    ("a personage name with markup", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'\.last_name = "Centrella"', '.last_name = "{c}Centrella"')}, True),
+    ("a personage full name the name pools can draw", lambda: {"tables/personages.zon": mutate("tables/personages.zon", r'\.first_name = "Hanse"', '.first_name = "Adam"')}, True),
 ]
 
 

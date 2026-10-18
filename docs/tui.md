@@ -15,7 +15,7 @@ that talks to the campaign registry directly (`persist/store.zig`):
 | Welcome | Players · Campaigns (emblem mark + outfit + commander + day) · Emblem of the selected campaign · Snapshot | `Enter` load · `n` new campaign · `d` delete campaign (typed-name confirm) · `p` new player · `D` delete player · `q` quit |
 | New campaign 1 · Commander | Form (name, faction of origin, profession, start year) · What this means | Values are collected for generation |
 | New campaign 2 · Outfit & emblem | Outfit name + company name fields · 5-column catalog logo thumbnail grid (scrolling) | `Enter` generates the fresh campaign and first company |
-| New campaign 3 · Company & back office | Generated company (reroll = new seed) · Back office headcount per admin role with payroll and effect | `r` regenerates; `+`/`-` execute `set_office_staff` immediately |
+| New campaign 3 · Company & back office | Starting company (reroll = new seed) · Back office headcount per admin role with payroll and effect | `r` regenerates; `+`/`-` execute `set_office_staff` immediately |
 | New campaign 4 · Review | The generated campaign, with the emblem | `Enter` saves and opens the Desk on day 0 |
 
 Inside a campaign, `q` opens **Return to welcome?** (save and return · return
@@ -815,11 +815,14 @@ and the TUI:
   (`ListingRow`) carry a typed `BoardItem`: a `.listing` (Enter sends
   `buy_listing`) or, on an HQ board only and last, that HQ's available
   `.artillery_offer` (Enter sends `buy_artillery` for the board's HQ)
-- `personageRows(filter)` and `contractWhosWho(id)` (who's-who rows, each
-  ending in its provenance label: the REPL `who` view, and the F4 `w` sheet
-  for an offer, active or closed contract — world governor, employer
-  leader, enemy leader, with a dim line for a seat no personage holds); each
-  present seat's `relations` are its holder's `personageRelationRows`
+- `personageRows(filter)` and `contractWhosWho(id)` (who's-who rows — id,
+  title, name, faction, ambition and motives, with no label for where a
+  personage comes from: the REPL `who` view, where `who <faction>` lists the
+  leader, then its heirs, family and officials, then its governors; and the
+  F4 `w` sheet for an offer, active or closed contract — world governor,
+  employer leader, enemy leader, with a dim line for a seat no personage
+  holds); each present seat's `relations` are its holder's
+  `personageRelationRows`
 - `personageRelationRows(id)` (`RelationRow`: kind, the other personage's
   `PersonageId` or null, and an indented line — liege with loyalty, a
   leader's collapsed "fealty of N governors", kin, rival, ally, grudge

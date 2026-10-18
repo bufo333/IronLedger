@@ -109,9 +109,11 @@ A package has one primary invariant or subsystem outcome.
   draw a rival, ally or grudge (R1 (relations)), drawn on `.politics` after the
   personages and persisted at schema v71 with a load that refuses a dangling
   endpoint; `who <world>`, `who <contract id>` and the F4 sheet show them (S1).
-- [ ] P5d.1d canon and authored personages: `personages.zon` with provenance,
-  validator, fixtures and a corpus report; Sarna facts re-verified against
-  their pages; Sarna credit. Needs P5d.1a and D6–D8.
+- [x] P5d.1d canon and authored personages: a 3025 start seats 20 canon and
+  24 authored figures from a validated `personages.zon` in place of their
+  seats' procedural rulers and leaders (heirs, family and officials too),
+  with no provenance shown anywhere in the game UI; schema v72 with a
+  transactional v71 → v72 migration; Sarna credited in the README.
 - [ ] P5d.1e conflict record: monthly schemes open conflicts from about 12
   templates with the timeline and local and strike forces; NPC-only
   resolution; REPL `conflicts`; log lines; the board is unchanged. Needs

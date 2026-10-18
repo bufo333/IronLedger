@@ -56,7 +56,11 @@ const artillery_battle_store = @import("artillery_battle_store.zig");
 const artillery = @import("../sim/artillery.zig");
 const artillery_catalogue = @import("../domain/artillery_catalogue.zig");
 
-pub const schema_version = 71;
+pub const schema_version = 72;
+
+/// The one older format this executable reads, by migrating it in place
+/// (`migrateV71ToV72`; rule 51, docs/p5d-conflict-world-design.md §J).
+pub const migratable_schema_version = 71;
 
 const ddl =
     \\CREATE TABLE IF NOT EXISTS player (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_seq INTEGER NOT NULL);
@@ -128,7 +132,7 @@ const ddl =
     \\CREATE TABLE IF NOT EXISTS faction_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, faction_key TEXT NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS merc_company (cid INTEGER NOT NULL, ord INTEGER NOT NULL, id INTEGER NOT NULL, archetype_key TEXT NOT NULL, commander_first TEXT NOT NULL, commander_last TEXT NOT NULL, unit_name TEXT NOT NULL, faction_key TEXT NOT NULL, side TEXT NOT NULL, doctrine TEXT NOT NULL, cbills INTEGER NOT NULL DEFAULT 0, founded_day INTEGER NOT NULL DEFAULT 0, dissolved_day INTEGER NOT NULL DEFAULT 0, logo_key TEXT NOT NULL DEFAULT '', band_key TEXT NOT NULL, understrength_since INTEGER CHECK (understrength_since IS NULL OR (typeof(understrength_since)='integer' AND understrength_since BETWEEN 0 AND 4294967295)), PRIMARY KEY (cid, id), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS merc_company_roster (cid INTEGER NOT NULL, ord INTEGER NOT NULL, merc_company_id INTEGER NOT NULL, hull_instance_id INTEGER NOT NULL, FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, merc_company_id) REFERENCES merc_company(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED);
-    \\CREATE TABLE IF NOT EXISTS personage (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), id INTEGER NOT NULL CHECK (typeof(id)='integer' AND id BETWEEN 1 AND 4294967295), role TEXT NOT NULL CHECK (role IN ('planetary_ruler','faction_leader')), first_name TEXT NOT NULL CHECK (typeof(first_name)='text' AND length(first_name) > 0), last_name TEXT NOT NULL CHECK (typeof(last_name)='text' AND length(last_name) > 0), faction_key TEXT NOT NULL CHECK (typeof(faction_key)='text'), seat_planet_key TEXT NOT NULL CHECK (typeof(seat_planet_key)='text'), motives INTEGER NOT NULL CHECK (typeof(motives)='integer' AND motives BETWEEN 1 AND 511 AND (motives & 1) + ((motives >> 1) & 1) + ((motives >> 2) & 1) + ((motives >> 3) & 1) + ((motives >> 4) & 1) + ((motives >> 5) & 1) + ((motives >> 6) & 1) + ((motives >> 7) & 1) + ((motives >> 8) & 1) BETWEEN 2 AND 3), ambition INTEGER NOT NULL CHECK (typeof(ambition)='integer' AND ambition BETWEEN 0 AND 100), provenance TEXT NOT NULL CHECK (provenance IN ('procedural')), generator_version INTEGER NOT NULL CHECK (typeof(generator_version)='integer' AND generator_version = 1), PRIMARY KEY (cid, id), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+    \\CREATE TABLE IF NOT EXISTS personage (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), id INTEGER NOT NULL CHECK (typeof(id)='integer' AND id BETWEEN 1 AND 4294967295), role TEXT NOT NULL CHECK (role IN ('planetary_ruler','faction_leader','heir','family','intelligence_chief')), first_name TEXT NOT NULL CHECK (typeof(first_name)='text' AND length(first_name) > 0), last_name TEXT NOT NULL CHECK (typeof(last_name)='text' AND length(last_name) > 0), faction_key TEXT NOT NULL CHECK (typeof(faction_key)='text'), seat_planet_key TEXT NOT NULL CHECK (typeof(seat_planet_key)='text'), motives INTEGER NOT NULL CHECK (typeof(motives)='integer' AND motives BETWEEN 1 AND 511 AND (motives & 1) + ((motives >> 1) & 1) + ((motives >> 2) & 1) + ((motives >> 3) & 1) + ((motives >> 4) & 1) + ((motives >> 5) & 1) + ((motives >> 6) & 1) + ((motives >> 7) & 1) + ((motives >> 8) & 1) BETWEEN 2 AND 3), ambition INTEGER NOT NULL CHECK (typeof(ambition)='integer' AND ambition BETWEEN 0 AND 100), provenance TEXT NOT NULL CHECK (provenance IN ('procedural','canon','authored')), generator_version INTEGER NOT NULL CHECK (typeof(generator_version)='integer' AND generator_version IN (0,1)), key TEXT NOT NULL CHECK (typeof(key)='text'), family_key TEXT NOT NULL CHECK (typeof(family_key)='text'), CHECK ((provenance = 'procedural' AND key = '' AND family_key = '' AND generator_version = 1 AND role IN ('planetary_ruler','faction_leader')) OR (provenance IN ('canon','authored') AND key <> '' AND generator_version = 0)), PRIMARY KEY (cid, id), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS personage_relation (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), from_id INTEGER NOT NULL CHECK (typeof(from_id)='integer' AND from_id BETWEEN 1 AND 4294967295), to_id INTEGER NOT NULL CHECK (typeof(to_id)='integer' AND to_id BETWEEN 1 AND 4294967295), kind TEXT NOT NULL CHECK (typeof(kind)='text' AND kind IN ('liege','kin','rival','ally','grudge')), weight INTEGER NOT NULL CHECK (typeof(weight)='integer' AND weight BETWEEN 1 AND 100), CHECK (from_id <> to_id), CHECK (kind NOT IN ('kin','rival','ally') OR from_id < to_id), PRIMARY KEY (cid, ord), UNIQUE (cid, from_id, to_id, kind), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, from_id) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid, to_id) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED);
     \\CREATE TABLE IF NOT EXISTS artillery_formation (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (ord >= 0), id INTEGER NOT NULL CHECK (id BETWEEN 1 AND 4294967295), hull INTEGER NOT NULL CHECK (hull BETWEEN 1 AND 4294967295), acquisition_day INTEGER NOT NULL CHECK (acquisition_day BETWEEN 0 AND 4294967295), paid_price INTEGER NOT NULL CHECK (paid_price > 0), placement TEXT NOT NULL CHECK (placement IN ('hq_pool','company','freight','sold','destroyed','field_freight','field_return')), pool_hq INTEGER, company INTEGER, from_hq INTEGER, to_hq INTEGER, dispatch_day INTEGER, eta_day INTEGER, paid_cost INTEGER, quality TEXT NOT NULL DEFAULT 'c' CHECK(typeof(quality)='text' AND quality IN ('a','b','c','d','e','f')), armor INTEGER NOT NULL DEFAULT 100 CHECK(typeof(armor)='integer' AND armor BETWEEN 0 AND 100), last_maintenance INTEGER CHECK(last_maintenance IS NULL OR (typeof(last_maintenance)='integer' AND last_maintenance BETWEEN 0 AND 4294967295)), tech INTEGER CHECK(tech IS NULL OR (typeof(tech)='integer' AND tech BETWEEN 1 AND 4294967295)), FOREIGN KEY(cid,tech) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED, PRIMARY KEY (cid,id), UNIQUE (cid,ord), UNIQUE (cid,hull), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,hull) REFERENCES hull_instance(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,pool_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,company) REFERENCES force(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,from_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY (cid,to_hq) REFERENCES hq(cid,id) DEFERRABLE INITIALLY DEFERRED, CHECK ((pool_hq IS NOT NULL) = (placement='hq_pool')), CHECK ((company IS NOT NULL) = (placement IN ('company','field_freight'))), CHECK ((from_hq IS NOT NULL) = (placement IN ('freight','field_freight'))), CHECK ((to_hq IS NOT NULL) = (placement IN ('freight','field_return'))), CHECK ((dispatch_day IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK ((eta_day IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK ((paid_cost IS NOT NULL) = (placement IN ('freight','field_freight','field_return'))), CHECK (pool_hq IS NULL OR pool_hq BETWEEN 1 AND 4294967295), CHECK (company IS NULL OR company BETWEEN 1 AND 4294967295), CHECK (from_hq IS NULL OR from_hq BETWEEN 1 AND 4294967295), CHECK (to_hq IS NULL OR to_hq BETWEEN 1 AND 4294967295), CHECK (placement!='freight' OR from_hq!=to_hq), CHECK (placement NOT IN ('freight','field_freight','field_return') OR (dispatch_day BETWEEN 0 AND 4294967295 AND eta_day > dispatch_day AND eta_day <= 4294967295 AND paid_cost >= 0)));
     \\CREATE TABLE IF NOT EXISTS artillery_crew (cid INTEGER NOT NULL CHECK(typeof(cid)='integer'), formation INTEGER NOT NULL CHECK(typeof(formation)='integer' AND formation BETWEEN 1 AND 4294967295), seat TEXT NOT NULL CHECK(typeof(seat)='text' AND seat IN ('commander','gunner','driver','loader')), person INTEGER CHECK(person IS NULL OR (typeof(person)='integer' AND person BETWEEN 1 AND 4294967295)), PRIMARY KEY(cid,formation,seat), UNIQUE(cid,person), FOREIGN KEY(cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,formation) REFERENCES artillery_formation(cid,id) DEFERRABLE INITIALLY DEFERRED, FOREIGN KEY(cid,person) REFERENCES person(cid,id) DEFERRABLE INITIALLY DEFERRED);
@@ -226,8 +230,63 @@ const index_ddl =
     \\CREATE INDEX IF NOT EXISTS ix_merc_company_cid ON merc_company(cid);
     \\CREATE INDEX IF NOT EXISTS ix_merc_company_roster_cid ON merc_company_roster(cid);
     \\CREATE INDEX IF NOT EXISTS ix_personage_cid ON personage(cid);
+    \\CREATE UNIQUE INDEX IF NOT EXISTS ux_personage_key ON personage(cid, key) WHERE key <> '';
     \\CREATE INDEX IF NOT EXISTS ix_personage_relation_cid ON personage_relation(cid);
 ;
+
+/// The `personage` table of schema v71, frozen: the one table v71 and v72
+/// define differently. Schema v71 has no `key` or `family_key` column, its
+/// role CHECK admits only rulers and leaders, and its provenance CHECK only
+/// `procedural` with `generator_version = 1`. `migrateV71ToV72` validates a
+/// v71 store against it and rebuilds the table into the current DDL.
+const personage_v71_ddl =
+    \\CREATE TABLE IF NOT EXISTS personage (cid INTEGER NOT NULL, ord INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), id INTEGER NOT NULL CHECK (typeof(id)='integer' AND id BETWEEN 1 AND 4294967295), role TEXT NOT NULL CHECK (role IN ('planetary_ruler','faction_leader')), first_name TEXT NOT NULL CHECK (typeof(first_name)='text' AND length(first_name) > 0), last_name TEXT NOT NULL CHECK (typeof(last_name)='text' AND length(last_name) > 0), faction_key TEXT NOT NULL CHECK (typeof(faction_key)='text'), seat_planet_key TEXT NOT NULL CHECK (typeof(seat_planet_key)='text'), motives INTEGER NOT NULL CHECK (typeof(motives)='integer' AND motives BETWEEN 1 AND 511 AND (motives & 1) + ((motives >> 1) & 1) + ((motives >> 2) & 1) + ((motives >> 3) & 1) + ((motives >> 4) & 1) + ((motives >> 5) & 1) + ((motives >> 6) & 1) + ((motives >> 7) & 1) + ((motives >> 8) & 1) BETWEEN 2 AND 3), ambition INTEGER NOT NULL CHECK (typeof(ambition)='integer' AND ambition BETWEEN 0 AND 100), provenance TEXT NOT NULL CHECK (provenance IN ('procedural')), generator_version INTEGER NOT NULL CHECK (typeof(generator_version)='integer' AND generator_version = 1), PRIMARY KEY (cid, id), UNIQUE (cid, ord), FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED);
+;
+
+/// The line of `text` (one statement per line) that defines `table`.
+fn tableLine(comptime text: []const u8, comptime table: []const u8) []const u8 {
+    @setEvalBranchQuota(1_000_000);
+    const marker = "CREATE TABLE IF NOT EXISTS " ++ table ++ " (";
+    const begin = std.mem.indexOf(u8, text, marker) orelse @compileError("no table " ++ table);
+    const end = std.mem.indexOfScalarPos(u8, text, begin, '\n') orelse text.len;
+    return text[begin..end];
+}
+
+/// Every table of schema v71: the current DDL with the frozen v71
+/// `personage` definition in place of the current one.
+const ddl_v71: []const u8 = blk: {
+    const current = tableLine(ddl, "personage");
+    const at = std.mem.indexOf(u8, ddl, current).?;
+    break :blk ddl[0..at] ++ personage_v71_ddl ++ ddl[at + current.len ..];
+};
+
+/// The columns schema v71's `personage` has, in order; the migration copies
+/// exactly these.
+const personage_v71_columns = "cid, ord, id, role, first_name, last_name, faction_key, seat_planet_key, motives, ambition, provenance, generator_version";
+
+/// The schema v71 → v72 rebuild of `personage`, one statement per entry, in
+/// order (`migrateV71ToV72`). Create–copy–drop–rename, not rename-first: a
+/// rename of `personage` would rewrite `personage_relation`'s foreign keys
+/// to the renamed table, which is then dropped. Every v71 row is procedural,
+/// so each gains `key = ''` and `family_key = ''` and every other column is
+/// copied as stored.
+const personage_v72_steps = [_][:0]const u8{
+    std.fmt.comptimePrint("CREATE TABLE personage__v72{s}", .{tableLine(ddl, "personage")["CREATE TABLE IF NOT EXISTS personage".len..]}),
+    "INSERT INTO personage__v72 (" ++ personage_v71_columns ++ ", key, family_key) SELECT " ++ personage_v71_columns ++ ", '', '' FROM personage ORDER BY cid, ord",
+    "DROP TABLE personage",
+    "ALTER TABLE personage__v72 RENAME TO personage",
+    "CREATE INDEX IF NOT EXISTS ix_personage_cid ON personage(cid)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_personage_key ON personage(cid, key) WHERE key <> ''",
+    std.fmt.comptimePrint("UPDATE campaign SET schema_version = {d}", .{schema_version}),
+    std.fmt.comptimePrint("UPDATE setting SET value = {d} WHERE key = 'schema_version'", .{schema_version}),
+};
+
+/// `personage_v72_steps` as one script, for the `migrations` registry.
+const personage_v72_script: [:0]const u8 = blk: {
+    var s: []const u8 = "";
+    for (personage_v72_steps, 0..) |step, i| s = s ++ (if (i == 0) "" else "; ") ++ step;
+    break :blk std.fmt.comptimePrint("{s}", .{s});
+};
 
 /// The stream order of the single `rng` blob that saves before schema v32
 /// hold: the generator states, one after another, in this order.
@@ -404,6 +463,12 @@ pub const Store = struct {
         .{ .from = 57, .to = 58, .table = "merc_company", .column = "founded_day", .sql = "ALTER TABLE merc_company ADD COLUMN founded_day INTEGER NOT NULL DEFAULT 0" },
         .{ .from = 57, .to = 58, .table = "merc_company", .column = "dissolved_day", .sql = "ALTER TABLE merc_company ADD COLUMN dissolved_day INTEGER NOT NULL DEFAULT 0" },
         .{ .from = 57, .to = 58, .table = "merc_company", .column = "logo_key", .sql = "ALTER TABLE merc_company ADD COLUMN logo_key TEXT NOT NULL DEFAULT ''" },
+        // v72: `personage` gains `key` and `family_key`, and its role and
+        // provenance CHECKs widen. A v71 store holds only procedural
+        // personages; each keeps every stored value and gains key = '' and
+        // family_key = '' through a table rebuild (`migrateV71ToV72`, the
+        // one migration this executable runs).
+        .{ .from = 71, .to = 72, .table = "personage", .column = "key", .sql = personage_v72_script },
     };
 
     pub fn open(path: [*:0]const u8) !Store {
@@ -435,10 +500,18 @@ pub const Store = struct {
     /// Caller owns db until success; initialization is one guarded transaction.
     /// Source: engineering-contract.md rules 50–51.
     pub fn fromDb(db: sqlite.Db) !Store {
+        return fromDbFaulting(db, null);
+    }
+
+    /// `fromDb`, with a v71 → v72 migration failing just before its step
+    /// `fault_at` (below `migration_v72_step_count`) when non-null. Only
+    /// tests pass a fault.
+    fn fromDbFaulting(db: sqlite.Db, fault_at: ?usize) !Store {
         const version = try readStoreVersion(db);
         if (version) |stored| {
-            if (stored < schema_version) return error.StoreOlderThanGame;
+            if (stored < migratable_schema_version) return error.StoreOlderThanGame;
             if (stored > schema_version) return error.StoreNewerThanGame;
+            if (stored == migratable_schema_version) try migrateV71ToV72(db, fault_at);
             try validateCurrentSchema(db);
         }
         try db.exec("PRAGMA foreign_keys = ON");
@@ -458,7 +531,66 @@ pub const Store = struct {
     /// Required table/column names come directly from the executable DDL.
     /// This probes the read boundary without creating or healing any object.
     fn validateCurrentSchema(db: sqlite.Db) !void {
-        var definitions = std.mem.splitScalar(u8, ddl, '\n');
+        return validateSchema(db, ddl);
+    }
+
+    /// Steps of the v71 → v72 migration a test fault may name: each of
+    /// `personage_v72_steps`, then the foreign-key check, the v72 schema
+    /// check and COMMIT.
+    const migration_v72_step_count = personage_v72_steps.len + 3;
+
+    /// Schema v71 → v72 (rule 51; docs/p5d-conflict-world-design.md §J). A
+    /// v71 store differs from v72 only in `personage` (`personage_v71_ddl`).
+    /// Before any change: the store holds every v71 table and column, its
+    /// `personage` holds exactly the v71 columns, and every campaign is at
+    /// v71; otherwise `CorruptStore`. Then, in one transaction with foreign
+    /// keys off: `personage_v72_steps`, an empty `PRAGMA
+    /// foreign_key_check` (else `CorruptStore`), the v72 schema check, and
+    /// COMMIT. Any failure rolls back and returns its error with the file
+    /// still v71. No gameplay value, ID, counter, relation or RNG stream
+    /// changes, and no personage is added, so a migrated campaign loads and
+    /// plays on as it would have under v71. `fault_at` (tests only) fails
+    /// the migration just before that step.
+    fn migrateV71ToV72(db: sqlite.Db, fault_at: ?usize) !void {
+        try validateSchema(db, ddl_v71);
+        {
+            const columns = try db.prepare("SELECT count(*) FROM pragma_table_info('personage')");
+            defer columns.finalize();
+            if (!try columns.next()) return error.CorruptStore;
+            const v71_count = comptime std.mem.count(u8, personage_v71_columns, ",") + 1;
+            if (columns.int(0) != v71_count) return error.CorruptStore;
+        }
+        {
+            const off = try db.prepare("SELECT count(*) FROM campaign WHERE typeof(schema_version) <> 'integer' OR schema_version <> " ++ std.fmt.comptimePrint("{d}", .{migratable_schema_version}));
+            defer off.finalize();
+            if (!try off.next() or off.int(0) != 0) return error.CorruptStore;
+        }
+        try db.exec("PRAGMA foreign_keys = OFF");
+        // best-effort: the connection's foreign keys come back on whatever failed.
+        errdefer db.exec("PRAGMA foreign_keys = ON") catch {};
+        try db.exec("BEGIN");
+        // best-effort: preserve the migration error while undoing every step.
+        errdefer db.exec("ROLLBACK") catch {};
+        for (personage_v72_steps, 0..) |step, i| {
+            if (fault_at == i) return error.SqliteError;
+            try db.exec(step);
+        }
+        if (fault_at == personage_v72_steps.len) return error.SqliteError;
+        {
+            const dangling = try db.prepare("PRAGMA foreign_key_check");
+            defer dangling.finalize();
+            if (try dangling.next()) return error.CorruptStore;
+        }
+        if (fault_at == personage_v72_steps.len + 1) return error.SqliteError;
+        try validateCurrentSchema(db);
+        if (fault_at == personage_v72_steps.len + 2) return error.SqliteError;
+        try db.exec("COMMIT");
+    }
+
+    /// Every table and column that `definitions` (one CREATE TABLE per
+    /// line) names exists; `CorruptStore` otherwise.
+    fn validateSchema(db: sqlite.Db, definitions_text: []const u8) !void {
+        var definitions = std.mem.splitScalar(u8, definitions_text, '\n');
         const marker = "CREATE TABLE IF NOT EXISTS ";
         while (definitions.next()) |line| {
             if (!std.mem.startsWith(u8, line, marker)) return error.CorruptStore;
@@ -1771,7 +1903,7 @@ pub const Store = struct {
 
     // World personages (docs/p5d-conflict-world-design.md §B, §J).
     fn savePersonages(self: Store, gs: *GameState, cid: i64) !void {
-        const st = try self.db.prepare("INSERT INTO personage VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)");
+        const st = try self.db.prepare("INSERT INTO personage VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)");
         defer st.finalize();
         for (gs.personages.values(), 0..) |p, ord| {
             try st.bindAll(.{
@@ -1787,6 +1919,8 @@ pub const Store = struct {
                 @as(i64, p.ambition),
                 @tagName(p.provenance),
                 @as(i64, p.generator_version),
+                p.key,
+                p.family_key,
             });
             try st.run();
         }
@@ -1796,10 +1930,12 @@ pub const Store = struct {
     /// bytes, so a valid tag before an embedded NUL is unknown), a non-integer or
     /// out-of-range value, a duplicate id, or an ordinal other than the
     /// row's position (`savePersonages` writes 0, 1, 2, …) is `CorruptSave`
-    /// (rule 47). `personages.validate` then checks keys, seats and coverage.
+    /// (rule 47). `personages.validate` then checks keys, data rows, seats
+    /// and coverage. A title is not stored: it is read from the data row by
+    /// key.
     fn loadPersonages(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT id, role, first_name, last_name, faction_key, seat_planet_key, motives, ambition, provenance, generator_version, typeof(ord)='integer' AND typeof(id)='integer' AND typeof(motives)='integer' AND typeof(ambition)='integer' AND typeof(generator_version)='integer' AND typeof(role)='text' AND typeof(first_name)='text' AND typeof(last_name)='text' AND typeof(faction_key)='text' AND typeof(seat_planet_key)='text' AND typeof(provenance)='text', ord FROM personage WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT id, role, first_name, last_name, faction_key, seat_planet_key, motives, ambition, provenance, generator_version, typeof(ord)='integer' AND typeof(id)='integer' AND typeof(motives)='integer' AND typeof(ambition)='integer' AND typeof(generator_version)='integer' AND typeof(role)='text' AND typeof(first_name)='text' AND typeof(last_name)='text' AND typeof(faction_key)='text' AND typeof(seat_planet_key)='text' AND typeof(provenance)='text' AND typeof(key)='text' AND typeof(family_key)='text', ord, key, family_key FROM personage WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -1816,6 +1952,8 @@ pub const Store = struct {
                 .ambition = try st.intAs(u8, 7),
                 .provenance = std.meta.stringToEnum(personage_mod.Provenance, try st.text(8, alloc)) orelse return error.CorruptSave,
                 .generator_version = try st.intAs(u16, 9),
+                .key = try st.text(12, alloc),
+                .family_key = try st.text(13, alloc),
             };
             const gop = try gs.personages.getOrPut(alloc, p.id);
             if (gop.found_existing) return error.CorruptSave;
@@ -5779,8 +5917,8 @@ test "a played current campaign round trips and its downgraded store is refused 
     try expectCurrentRoundTripForTest(s1, &gs);
     try raw.exec("UPDATE setting SET value = 36 WHERE key = 'schema_version'");
     defer raw.close();
-    try std.testing.expectEqual(@as(u64, 8256077945726463002), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 12293060296378331270), hash_before);
+    try std.testing.expectEqual(@as(u64, 3307560644039167125), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 3945222852926955671), hash_before);
     try expectStoreRefusedUnchanged(raw, error.StoreOlderThanGame);
 }
 
@@ -6205,8 +6343,8 @@ test "golden master: a played year hashes to its pinned value, and a save of it 
     // service requires available, physically local technicians and local pool
     // teams (docs/p2-artillery-operations-design.md,
     // Condition, maintenance, repairs and shared hours).
-    try std.testing.expectEqual(@as(u64, 8256077945726463002), digest.nonArtilleryReferenceHash(&gs));
-    try std.testing.expectEqual(@as(u64, 12293060296378331270), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 3307560644039167125), digest.nonArtilleryReferenceHash(&gs));
+    try std.testing.expectEqual(@as(u64, 3945222852926955671), digest.stateHash(&gs));
 
     const store = try Store.open(":memory:");
     defer store.close();
@@ -10358,7 +10496,7 @@ test "operational save continues through shared service injury repair reload and
     defer continued.deinit();
     try std.testing.expectEqual(digest.stateHash(&loaded), digest.stateHash(&continued));
     // Pin the complete operational command script, including service and injury streams.
-    try std.testing.expectEqual(@as(u64, 15509639992824121628), digest.stateHash(&continued));
+    try std.testing.expectEqual(@as(u64, 12566426983587953022), digest.stateHash(&continued));
 }
 
 test "artillery bay targets round trip and malformed mutually exclusive targets reject loading" {
@@ -11569,7 +11707,7 @@ test "a store or a campaign at format 69 is refused before any change, personage
     var gs = GameState.init(std.testing.allocator, .{ .seed = 6905 });
     defer gs.deinit();
     _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
-    try std.testing.expectEqual(personage_rules.seed_count, gs.personages.count());
+    try std.testing.expect(gs.personages.count() >= personage_rules.seed_count);
     const raw = try sqlite.Db.open(":memory:");
     defer raw.close();
     var store = try Store.fromDb(raw);
@@ -11592,7 +11730,7 @@ test "a store or a campaign at format 70 is refused before any change, relations
     defer gs.deinit();
     _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
     try std.testing.expect(gs.personage_relations.items.len > 0);
-    try std.testing.expectEqual(@as(i64, 71), schema_version);
+    try std.testing.expectEqual(@as(i64, 72), schema_version);
     const raw = try sqlite.Db.open(":memory:");
     defer raw.close();
     var store = try Store.fromDb(raw);
@@ -11615,8 +11753,11 @@ test "a created campaign's personages and their counter survive save and load, a
     const commands = @import("../sim/commands.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 70001 });
     defer gs.deinit();
-    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
-    try std.testing.expectEqual(personage_rules.seed_count, gs.personages.count());
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer, .start_year = personage_data_for_test.reference_year } });
+    try std.testing.expectEqual(personage_rules.seatedCount(personage_data_for_test.reference_year), gs.personages.count());
+    var provenances = std.EnumSet(personage_mod.Provenance).initEmpty();
+    for (gs.personages.values()) |p| provenances.insert(p.provenance);
+    try std.testing.expect(provenances.eql(.initFull()));
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
@@ -11637,6 +11778,8 @@ test "a created campaign's personages and their counter survive save and load, a
         try std.testing.expectEqual(p.ambition, q.ambition);
         try std.testing.expectEqual(p.provenance, q.provenance);
         try std.testing.expectEqual(p.generator_version, q.generator_version);
+        try std.testing.expectEqualStrings(p.key, q.key);
+        try std.testing.expectEqualStrings(p.family_key, q.family_key);
     }
     // The relations come back in order, field for field.
     try std.testing.expect(gs.personage_relations.items.len > 0);
@@ -11646,6 +11789,18 @@ test "a created campaign's personages and their counter survive save and load, a
     gs.personages.values()[0].ambition ^= 1;
     try std.testing.expect(digest.stateHash(&gs) != hash);
     gs.personages.values()[0].ambition ^= 1;
+    for (gs.personages.values()) |*p| {
+        if (p.key.len == 0 or p.family_key.len == 0) continue;
+        const key = p.key;
+        p.key = "other_key";
+        try std.testing.expect(digest.stateHash(&gs) != hash);
+        p.key = key;
+        const family = p.family_key;
+        p.family_key = "";
+        try std.testing.expect(digest.stateHash(&gs) != hash);
+        p.family_key = family;
+        break;
+    } else return error.TestFixtureLacksFamily;
     const rel = &gs.personage_relations.items[0];
     rel.weight ^= 1;
     try std.testing.expect(digest.stateHash(&gs) != hash);
@@ -11670,13 +11825,17 @@ test "a created campaign's personages and their counter survive save and load, a
     try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
 }
 
+const personage_data_for_test = @import("../domain/personage_data.zig");
+
 /// After rows leave `personage_relation`, its ordinals renumbered 0, 1, 2, …
 /// in their former order, so a later refusal is not the ordinal check's.
 const relation_ords_renumbered = "UPDATE personage_relation SET ord = -1 - ord; UPDATE personage_relation SET ord = (SELECT COUNT(*) FROM personage_relation AS q WHERE q.cid = personage_relation.cid AND q.ord > personage_relation.ord); ";
 
 /// `template` with `$R` (a ruler's id), `$L` (a leader's id), `$S` (a free
-/// id), `$N` (the counter past it) and `$C` (the last id) filled in.
-fn personageTamperSqlForTest(buf: *[1024:0]u8, template: []const u8, ids: [3]u32) ![:0]const u8 {
+/// id), `$N` (the counter past it), `$C` (the last id), `$D` (a data
+/// ruler's id) and `$K` (a data heir's, family member's or official's id)
+/// filled in.
+fn personageTamperSqlForTest(buf: *[1024:0]u8, template: []const u8, ids: [5]u32) ![:0]const u8 {
     var w = std.Io.Writer.fixed(buf[0..1023]);
     var i: usize = 0;
     while (i < template.len) : (i += 1) {
@@ -11687,6 +11846,8 @@ fn personageTamperSqlForTest(buf: *[1024:0]u8, template: []const u8, ids: [3]u32
                 'S' => ids[2],
                 'N' => ids[2] + 1,
                 'C' => ids[2] - 1,
+                'D' => ids[3],
+                'K' => ids[4],
                 else => null,
             };
             if (value) |v| {
@@ -11704,9 +11865,15 @@ fn personageTamperSqlForTest(buf: *[1024:0]u8, template: []const u8, ids: [3]u32
 
 test "a tampered personage row, seat, counter or politics stream refuses to load" {
     // Rules 47, 48, 50, 70; docs/p5d-conflict-world-design.md §J "dangling refs".
+    // A start year no data row's window holds: every personage is
+    // procedural. `a tampered data personage refuses to load` covers keyed rows.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 70002 });
     defer gs.deinit();
-    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer, .start_year = 3020 } });
+    for (gs.personages.values()) |p| try std.testing.expectEqual(personage_mod.Provenance.procedural, p.provenance);
+    // A day's play first: a day-0 campaign of a non-3025 start holds an
+    // artillery offer dated 3025, which `artillery.validate` refuses on load.
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .advance_days = 1 });
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
@@ -11720,18 +11887,23 @@ test "a tampered personage row, seat, counter or politics stream refuses to load
     // A case that adds or deletes a row keeps the ordinals 0, 1, 2, …, so its
     // refusal is the named defect's, not the ordinal check's.
     const cases = [_]Case{
-        .{ "unknown role", "UPDATE personage SET role = 'heir' WHERE id = $R" },
+        .{ "unknown role", "UPDATE personage SET role = 'regent' WHERE id = $R" },
+        .{ "a procedural heir", "UPDATE personage SET role = 'heir' WHERE id = $R" },
         .{ "unknown faction", "UPDATE personage SET faction_key = 'XX' WHERE id = $L" },
         .{ "unknown planet", "UPDATE personage SET seat_planet_key = 'nowhere' WHERE id = $R" },
-        .{ "unknown provenance", "UPDATE personage SET provenance = 'canon' WHERE id = $R" },
+        .{ "unknown provenance", "UPDATE personage SET provenance = 'forged' WHERE id = $R" },
+        .{ "a canon provenance without a key", "UPDATE personage SET provenance = 'canon' WHERE id = $R" },
         .{ "unknown generator version", "UPDATE personage SET generator_version = 2 WHERE id = $R" },
-        .{ "ruler on a world that does not hire", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', 'CS', 'terra', motives, ambition, provenance, generator_version FROM personage WHERE id = $R; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+        .{ "a procedural row with a data row's generator version", "UPDATE personage SET generator_version = 0 WHERE id = $R" },
+        .{ "a procedural row with a family", "UPDATE personage SET family_key = 'davion' WHERE id = $R" },
+        .{ "a key naming no data row", "UPDATE personage SET key = 'nosuchkey', provenance = 'authored', generator_version = 0 WHERE id = $R" },
+        .{ "ruler on a world that does not hire", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', 'CS', 'terra', motives, ambition, provenance, generator_version, key, family_key FROM personage WHERE id = $R; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
         .{ "ruler of another faction than its world's", "UPDATE personage SET faction_key = CASE WHEN faction_key = 'DC' THEN 'LC' ELSE 'DC' END WHERE id = $R" },
-        .{ "two rulers on one world", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', faction_key, seat_planet_key, motives, ambition, provenance, generator_version FROM personage WHERE id = $R; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+        .{ "two rulers on one world", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', faction_key, seat_planet_key, motives, ambition, provenance, generator_version, key, family_key FROM personage WHERE id = $R; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
         .{ "a hiring world without a ruler", "DELETE FROM personage_relation WHERE from_id = $R OR to_id = $R; " ++ relation_ords_renumbered ++ "DELETE FROM personage WHERE id = $R; UPDATE personage SET ord = -1 - ord; UPDATE personage SET ord = (SELECT COUNT(*) FROM personage AS q WHERE q.cid = personage.cid AND q.id < personage.id)" },
         .{ "a leader off its capital", "UPDATE personage SET seat_planet_key = 'skye' WHERE id = $L" },
-        .{ "two leaders for one faction", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', faction_key, seat_planet_key, motives, ambition, provenance, generator_version FROM personage WHERE id = $L; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
-        .{ "a leader for the catch-all faction", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', 'PER', 'galatea', motives, ambition, provenance, generator_version FROM personage WHERE id = $L; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+        .{ "two leaders for one faction", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', faction_key, seat_planet_key, motives, ambition, provenance, generator_version, key, family_key FROM personage WHERE id = $L; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+        .{ "a leader for the catch-all faction", "INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, 'Extra', 'PER', 'galatea', motives, ambition, provenance, generator_version, key, family_key FROM personage WHERE id = $L; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
         .{ "a leader-bearing faction without a leader", "DELETE FROM personage_relation WHERE from_id = $L OR to_id = $L; " ++ relation_ords_renumbered ++ "DELETE FROM personage WHERE id = $L; UPDATE personage SET ord = -1 - ord; UPDATE personage SET ord = (SELECT COUNT(*) FROM personage AS q WHERE q.cid = personage.cid AND q.id < personage.id)" },
         .{ "personages without a commander", "DELETE FROM commander" },
         .{ "one motive", "UPDATE personage SET motives = 1 WHERE id = $R" },
@@ -11754,7 +11926,7 @@ test "a tampered personage row, seat, counter or politics stream refuses to load
         errdefer std.debug.print("personage tamper case: {s}\n", .{case[0]});
         try store.save(&gs);
         try store.db.exec("PRAGMA ignore_check_constraints=ON");
-        try store.db.exec(try personageTamperSqlForTest(&buf, case[1], .{ ruler, leader, spare }));
+        try store.db.exec(try personageTamperSqlForTest(&buf, case[1], .{ ruler, leader, spare, 0, 0 }));
         try store.db.exec("PRAGMA ignore_check_constraints=OFF");
         try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
     }
@@ -11765,6 +11937,63 @@ test "a tampered personage row, seat, counter or politics stream refuses to load
     var commanderless = try store.load(std.testing.allocator, gs.campaign_id);
     commanderless.deinit();
     try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+}
+
+test "a tampered data personage refuses to load" {
+    // Rules 47, 50, 70: a keyed row is its personages.zon row exactly
+    // (`personages.validate`).
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 70006 });
+    defer gs.deinit();
+    _ = try @import("../sim/commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer, .start_year = personage_data_for_test.reference_year } });
+    const store = try Store.open(":memory:");
+    defer store.close();
+    try store.save(&gs);
+    try expectCurrentRoundTripForTest(store, &gs);
+
+    // A data ruler with a family, and a data heir with a family.
+    var data_ruler: u32 = 0;
+    var court: u32 = 0;
+    for (gs.personages.values()) |p| {
+        if (p.family_key.len == 0) continue;
+        if (data_ruler == 0 and p.role == .planetary_ruler) data_ruler = @intFromEnum(p.id);
+        if (court == 0 and p.role == .heir) court = @intFromEnum(p.id);
+    }
+    try std.testing.expect(data_ruler != 0 and court != 0);
+    const spare = gs.next_personage_id;
+    var buf: [1024:0]u8 = undefined;
+    const Case = struct { []const u8, []const u8 };
+    const cases = [_]Case{
+        .{ "a key naming no data row", "UPDATE personage SET key = 'nosuchkey' WHERE id = $D" },
+        .{ "a key with a NUL and more", "UPDATE personage SET key = key || char(0) || 'x' WHERE id = $D" },
+        .{ "another data row's key", "DROP INDEX ux_personage_key; UPDATE personage SET key = (SELECT key FROM personage WHERE id = $K) WHERE id = $D" },
+        .{ "a role other than its data row's", "UPDATE personage SET role = 'family' WHERE id = $K" },
+        .{ "a first name other than its data row's", "UPDATE personage SET first_name = 'Other' WHERE id = $D" },
+        .{ "a last name other than its data row's", "UPDATE personage SET last_name = 'Other' WHERE id = $K" },
+        .{ "a faction other than its data row's", "UPDATE personage SET faction_key = 'DC' WHERE id = $K" },
+        .{ "a seat other than its data row's", "UPDATE personage SET seat_planet_key = 'skye' WHERE id = $K" },
+        .{ "a family other than its data row's", "UPDATE personage SET family_key = CASE WHEN family_key = 'kurita' THEN 'marik' ELSE 'kurita' END WHERE id = $K" },
+        .{ "no family where its data row has one", "UPDATE personage SET family_key = '' WHERE id = $D" },
+        .{ "motives other than its data row's", "UPDATE personage SET motives = CASE WHEN motives = 3 THEN 5 ELSE 3 END WHERE id = $D" },
+        .{ "an ambition other than its data row's", "UPDATE personage SET ambition = CASE WHEN ambition = 0 THEN 1 ELSE ambition - 1 END WHERE id = $K" },
+        .{ "a provenance other than its data row's", "UPDATE personage SET provenance = CASE WHEN provenance = 'canon' THEN 'authored' ELSE 'canon' END WHERE id = $D" },
+        .{ "a keyed procedural row", "UPDATE personage SET provenance = 'procedural' WHERE id = $D" },
+        .{ "a data row with the generator's version", "UPDATE personage SET generator_version = 1 WHERE id = $D" },
+        .{ "a procedural heir", "UPDATE personage SET provenance = 'procedural', generator_version = 1, key = '', family_key = '' WHERE id = $K" },
+        .{ "a duplicate key", "DROP INDEX ux_personage_key; INSERT INTO personage SELECT cid, (SELECT MAX(ord) + 1 FROM personage), $S, role, first_name, last_name, faction_key, seat_planet_key, motives, ambition, provenance, generator_version, key, family_key FROM personage WHERE id = $K; UPDATE meta SET value = $N WHERE key = 'next_personage_id'" },
+    };
+    for (cases) |case| {
+        errdefer std.debug.print("data personage tamper case: {s}\n", .{case[0]});
+        try store.save(&gs);
+        try store.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_personage_key ON personage(cid, key) WHERE key <> ''");
+        try store.db.exec("PRAGMA ignore_check_constraints=ON");
+        try store.db.exec(try personageTamperSqlForTest(&buf, case[1], .{ 0, 0, spare, data_ruler, court }));
+        try store.db.exec("PRAGMA ignore_check_constraints=OFF");
+        try std.testing.expectError(error.CorruptSave, store.load(std.testing.allocator, gs.campaign_id));
+    }
+    // Control: the untampered save loads, with the schema's index restored.
+    try store.save(&gs);
+    try store.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_personage_key ON personage(cid, key) WHERE key <> ''");
     try expectCurrentRoundTripForTest(store, &gs);
 }
 
@@ -11816,21 +12045,38 @@ test "the personage schema refuses out-of-range rows without the loader" {
     const store = try Store.open(":memory:");
     defer store.close();
     try store.save(&gs);
+    // `P`: a procedural row; `D`: a data row.
+    const P = "(SELECT MIN(id) FROM personage WHERE key = '')";
+    const D = "(SELECT MIN(id) FROM personage WHERE key <> '')";
     for ([_][:0]const u8{
-        "UPDATE personage SET role = 'heir' WHERE id = 1",
-        "UPDATE personage SET motives = 1 WHERE id = 1",
-        "UPDATE personage SET motives = 15 WHERE id = 1",
-        "UPDATE personage SET motives = 512 WHERE id = 1",
-        "UPDATE personage SET ambition = 101 WHERE id = 1",
-        "UPDATE personage SET ambition = -1 WHERE id = 1",
-        "UPDATE personage SET provenance = 'canon' WHERE id = 1",
-        "UPDATE personage SET generator_version = 2 WHERE id = 1",
-        "UPDATE personage SET first_name = '' WHERE id = 1",
-        "UPDATE personage SET id = 0 WHERE id = 1",
+        "UPDATE personage SET role = 'regent' WHERE id = " ++ D,
+        "UPDATE personage SET role = 'heir' WHERE id = " ++ P,
+        "UPDATE personage SET motives = 1 WHERE id = " ++ P,
+        "UPDATE personage SET motives = 15 WHERE id = " ++ P,
+        "UPDATE personage SET motives = 512 WHERE id = " ++ P,
+        "UPDATE personage SET ambition = 101 WHERE id = " ++ P,
+        "UPDATE personage SET ambition = -1 WHERE id = " ++ P,
+        "UPDATE personage SET provenance = 'forged' WHERE id = " ++ D,
+        "UPDATE personage SET provenance = 'canon' WHERE id = " ++ P,
+        "UPDATE personage SET provenance = 'procedural' WHERE id = " ++ D,
+        "UPDATE personage SET generator_version = 2 WHERE id = " ++ P,
+        "UPDATE personage SET generator_version = 0 WHERE id = " ++ P,
+        "UPDATE personage SET generator_version = 1 WHERE id = " ++ D,
+        "UPDATE personage SET key = 'x' WHERE id = " ++ P,
+        "UPDATE personage SET key = '' WHERE id = " ++ D,
+        "UPDATE personage SET key = x'61' WHERE id = " ++ D,
+        "UPDATE personage SET family_key = 'davion' WHERE id = " ++ P,
+        "UPDATE personage SET family_key = NULL WHERE id = " ++ D,
+        "UPDATE personage SET key = (SELECT key FROM personage WHERE key <> '' AND id <> " ++ D ++ " LIMIT 1) WHERE id = " ++ D,
+        "UPDATE personage SET first_name = '' WHERE id = " ++ P,
+        "UPDATE personage SET id = 0 WHERE id = " ++ P,
         "UPDATE personage SET id = 2 WHERE id = 1",
-        "UPDATE personage SET ord = -1 WHERE id = 1",
-        "UPDATE personage SET ord = 0.5 WHERE id = 1",
-    }) |tamper| try std.testing.expectError(error.ConstraintViolation, store.db.exec(tamper));
+        "UPDATE personage SET ord = -1 WHERE id = " ++ P,
+        "UPDATE personage SET ord = 0.5 WHERE id = " ++ P,
+    }) |tamper| {
+        errdefer std.debug.print("personage schema case: {s}\n", .{tamper});
+        try std.testing.expectError(error.ConstraintViolation, store.db.exec(tamper));
+    }
     try expectCurrentRoundTripForTest(store, &gs);
 }
 
@@ -11961,4 +12207,190 @@ test "the personage relation schema refuses malformed rows without the loader" {
         try std.testing.expectError(error.ConstraintViolation, store.db.exec(tamper));
     }
     try expectCurrentRoundTripForTest(store, &gs);
+}
+
+// ---- schema v71 → v72 migration (rule 51; docs/p5d-conflict-world-design.md §J) ----
+
+/// A campaign as schema v71 held one: every personage procedural, its clock
+/// at `year`. A 3025 start seats data rows today, so that campaign's
+/// personages are the procedural set a year no window holds would seat.
+fn v71CampaignForTest(gs: *GameState, year: u16) !void {
+    const commands = @import("../sim/commands.zig");
+    if (year == personage_data_for_test.reference_year) {
+        _ = try founding.createCommander(gs, "T", .LC, .line_officer);
+        gs.clock.date.year = year;
+        const s = try personage_rules.prepareSeeding(gs, 3020);
+        defer s.deinit(gs);
+        personage_rules.commitSeeding(gs, &s);
+    } else {
+        _ = try commands.execute(gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer, .start_year = year } });
+    }
+    for (gs.personages.values()) |p| {
+        try std.testing.expectEqual(personage_mod.Provenance.procedural, p.provenance);
+        try std.testing.expectEqualStrings("", p.key);
+    }
+    try std.testing.expectEqual(year, gs.clock.date.year);
+    _ = try commands.execute(gs, .{ .advance_days = 3 });
+}
+
+/// Rewrite a current store holding v71-shaped campaigns into the genuine v71
+/// format: the frozen v71 `personage` table, every other table as the
+/// current DDL defines it, and version 71 on the store and every campaign.
+fn downgradeToV71ForTest(db: sqlite.Db) !void {
+    try db.exec("PRAGMA foreign_keys = OFF");
+    defer db.exec("PRAGMA foreign_keys = ON") catch {}; // best-effort: test fixture cleanup.
+    try db.exec("BEGIN");
+    try db.exec(comptime std.fmt.comptimePrint("CREATE TABLE personage__v71{s}", .{personage_v71_ddl["CREATE TABLE IF NOT EXISTS personage".len..]}));
+    try db.exec("INSERT INTO personage__v71 SELECT " ++ personage_v71_columns ++ " FROM personage ORDER BY cid, ord; DROP TABLE personage; ALTER TABLE personage__v71 RENAME TO personage; CREATE INDEX IF NOT EXISTS ix_personage_cid ON personage(cid)");
+    try db.exec("UPDATE campaign SET schema_version = 71; UPDATE setting SET value = 71 WHERE key = 'schema_version'; COMMIT");
+}
+
+/// A fingerprint of every v71 column of every personage row, and of every
+/// relation row, in stored order.
+fn personageRowsFingerprintForTest(db: sqlite.Db) !u64 {
+    var hash = std.hash.Wyhash.init(0);
+    var scratch = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer scratch.deinit();
+    const Query = struct { sql: [:0]const u8, columns: c_int };
+    for ([_]Query{
+        .{ .sql = "SELECT " ++ personage_v71_columns ++ " FROM personage ORDER BY cid, ord", .columns = comptime std.mem.count(u8, personage_v71_columns, ",") + 1 },
+        .{ .sql = "SELECT cid, ord, from_id, to_id, kind, weight FROM personage_relation ORDER BY cid, ord", .columns = 6 },
+    }) |query| {
+        const st = try db.prepare(query.sql);
+        defer st.finalize();
+        while (try st.next()) {
+            var column: c_int = 0;
+            while (column < query.columns) : (column += 1) {
+                _ = scratch.reset(.retain_capacity);
+                const value = try st.text(column, scratch.allocator());
+                hash.update(std.mem.asBytes(&value.len));
+                hash.update(value);
+            }
+        }
+    }
+    return hash.final();
+}
+
+/// Save `gs` into `store` as a new campaign: the store's row id is session
+/// state, so the campaign may be filed in several stores.
+fn saveAsNewForTest(store: Store, gs: *GameState) !void {
+    gs.campaign_id = 0;
+    try store.save(gs);
+}
+
+fn countForTest(db: sqlite.Db, sql: [:0]const u8) !i64 {
+    const st = try db.prepare(sql);
+    defer st.finalize();
+    if (!try st.next()) return error.TestUnexpectedResult;
+    return st.int(0);
+}
+
+test "a v71 store migrates to v72 keeping every personage and relation, and its campaign plays on identically" {
+    const commands = @import("../sim/commands.zig");
+    for ([_]u16{ 3020, personage_data_for_test.reference_year }) |year| {
+        errdefer std.debug.print("v71 fixture from a {d} start\n", .{year});
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 72101 });
+        defer gs.deinit();
+        try v71CampaignForTest(&gs, year);
+
+        // The same state saved directly under v72, never migrated.
+        const direct = try Store.open(":memory:");
+        defer direct.close();
+        try direct.save(&gs);
+        var direct_loaded = try direct.load(std.testing.allocator, gs.campaign_id);
+        defer direct_loaded.deinit();
+
+        const raw = try sqlite.Db.open(":memory:");
+        defer raw.close();
+        try saveAsNewForTest(try Store.fromDb(raw), &gs);
+        try downgradeToV71ForTest(raw);
+        try std.testing.expect(!try Store.hasColumnRt(raw, "personage", "key"));
+        const rows_before = try personageRowsFingerprintForTest(raw);
+
+        const store = try Store.fromDb(raw);
+        try std.testing.expectEqual(@as(i64, 72), store.getSetting("schema_version", 0));
+        try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM campaign WHERE schema_version <> 72"));
+        try std.testing.expectEqual(rows_before, try personageRowsFingerprintForTest(raw));
+        try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM personage WHERE key <> '' OR family_key <> ''"));
+        try std.testing.expectEqual(@as(i64, @intCast(gs.personages.count())), try countForTest(raw, "SELECT count(*) FROM personage"));
+        try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM pragma_foreign_key_check"));
+        try std.testing.expectEqual(@as(i64, 0), try countForTest(raw, "SELECT count(*) FROM pragma_foreign_key_list('personage_relation') WHERE \"table\" NOT IN ('campaign', 'personage')"));
+        try std.testing.expectEqual(@as(i64, 2), try countForTest(raw, "SELECT count(DISTINCT id) FROM pragma_foreign_key_list('personage_relation') WHERE \"table\" = 'personage'"));
+        try std.testing.expectEqual(@as(i64, 1), try countForTest(raw, "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'ux_personage_key'"));
+
+        var migrated = try store.load(std.testing.allocator, gs.campaign_id);
+        defer migrated.deinit();
+        var difference: [128]u8 = undefined;
+        try std.testing.expectEqualStrings("", digest.firstStateDifference(&direct_loaded, &migrated, &difference) orelse "");
+        try std.testing.expectEqual(digest.stateHash(&direct_loaded), digest.stateHash(&migrated));
+        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&migrated));
+
+        // Continued evolution: the migrated campaign and its never-migrated twin.
+        for ([_]*GameState{ &gs, &migrated }) |g| {
+            try @import("../sim/tick.zig").clearHolds(g);
+            _ = try commands.execute(g, .{ .advance_days = 14 });
+        }
+        try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&migrated));
+        // It saves and loads as an ordinary v72 campaign.
+        try store.save(&migrated);
+        try expectCurrentRoundTripForTest(store, &migrated);
+
+        // Reopening a migrated store runs no second migration.
+        const settled = try databaseFingerprintForTest(raw);
+        const again = try Store.fromDb(raw);
+        try std.testing.expectEqual(@as(i64, 72), again.getSetting("schema_version", 0));
+        try std.testing.expectEqual(settled, try databaseFingerprintForTest(raw));
+    }
+}
+
+test "a v71 migration failing at any step leaves the store byte-identical, and a clean reopen migrates it" {
+    // The provoked failures are expected; keep their warnings out of stderr.
+    const saved_log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_log_level;
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 72102 });
+    defer gs.deinit();
+    try v71CampaignForTest(&gs, 3020);
+    const raw = try sqlite.Db.open(":memory:");
+    defer raw.close();
+    try saveAsNewForTest(try Store.fromDb(raw), &gs);
+    try downgradeToV71ForTest(raw);
+    const fixture = try databaseFingerprintForTest(raw);
+    for (0..Store.migration_v72_step_count) |step| {
+        errdefer std.debug.print("migration fault before step {d}\n", .{step});
+        try std.testing.expectError(error.SqliteError, Store.fromDbFaulting(raw, step));
+        try std.testing.expectEqual(fixture, try databaseFingerprintForTest(raw));
+        try std.testing.expectEqual(@as(i64, 71), try countForTest(raw, "SELECT value FROM setting WHERE key = 'schema_version'"));
+    }
+    // A fault past the last step faults nothing.
+    const store = try Store.fromDbFaulting(raw, Store.migration_v72_step_count);
+    try std.testing.expectEqual(@as(i64, 72), store.getSetting("schema_version", 0));
+    var loaded = try store.load(std.testing.allocator, gs.campaign_id);
+    defer loaded.deinit();
+    try std.testing.expectEqual(digest.stateHash(&gs), digest.stateHash(&loaded));
+}
+
+test "a malformed v71 store, a mixed-version v71 store, and stores outside v71..v72 are refused unchanged" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 72103 });
+    defer gs.deinit();
+    try v71CampaignForTest(&gs, 3020);
+    const Case = struct { name: []const u8, sql: [:0]const u8, expected: anyerror };
+    const cases = [_]Case{
+        .{ .name = "a v71 personage table missing a column", .sql = "PRAGMA foreign_keys = OFF; CREATE TABLE p2 AS SELECT cid, ord, id, role, first_name, last_name, faction_key, seat_planet_key, motives, ambition, provenance FROM personage; DROP TABLE personage; ALTER TABLE p2 RENAME TO personage; PRAGMA foreign_keys = ON", .expected = error.CorruptStore },
+        .{ .name = "a v71 personage table with a v72 column", .sql = "ALTER TABLE personage ADD COLUMN key TEXT NOT NULL DEFAULT ''", .expected = error.CorruptStore },
+        .{ .name = "a v71 store missing another table", .sql = "DROP TABLE world_state", .expected = error.CorruptStore },
+        .{ .name = "a v71 store holding a v70 campaign", .sql = "UPDATE campaign SET schema_version = 70", .expected = error.CorruptStore },
+        .{ .name = "a v71 store holding a v72 campaign", .sql = "UPDATE campaign SET schema_version = 72", .expected = error.CorruptStore },
+        .{ .name = "a v70 store", .sql = "UPDATE setting SET value = 70 WHERE key = 'schema_version'", .expected = error.StoreOlderThanGame },
+        .{ .name = "a v73 store", .sql = "UPDATE setting SET value = 73 WHERE key = 'schema_version'", .expected = error.StoreNewerThanGame },
+    };
+    for (cases) |case| {
+        errdefer std.debug.print("v71 refusal case: {s}\n", .{case.name});
+        const raw = try sqlite.Db.open(":memory:");
+        defer raw.close();
+        try saveAsNewForTest(try Store.fromDb(raw), &gs);
+        try downgradeToV71ForTest(raw);
+        try raw.exec(case.sql);
+        try expectStoreRefusedUnchanged(raw, case.expected);
+    }
 }

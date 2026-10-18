@@ -1035,7 +1035,7 @@ pub const App = struct {
             const lw: u16 = if (wide) layout.major.of(b.w) else b.w;
             const oh: u16 = @min(b.h, 12);
             const toe_h: u16 = if (wide) b.h else b.h -| oh;
-            self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = toe_h }, "GENERATED COMPANY", texts.items, 0, self.w_field == 0, true);
+            self.listPane(.{ .x = 0, .y = b.y, .w = lw, .h = toe_h }, "STARTING COMPANY", texts.items, 0, self.w_field == 0, true);
             {
                 const hq_id = q.firstHq(g);
                 var office: std.ArrayListUnmanaged([]const u8) = .empty;
@@ -3412,7 +3412,7 @@ pub const App = struct {
                     .head = &.{"hull      name                  owned   price (staple line at home)   what it does"},
                     .rows = rows.items,
                     .n = train.lines.len,
-                    .foot = try al.dupe([]const u8, &.{ "", try std.fmt.allocPrint(al, "field capacity {d}t  ·  a generated company carries 4 of each", .{train.capacity_tons}) }),
+                    .foot = try al.dupe([]const u8, &.{ "", try std.fmt.allocPrint(al, "field capacity {d}t  ·  a starting company carries 4 of each", .{train.capacity_tons}) }),
                     .w = layout.modal.raise_support_w,
                     .max_h = full_h,
                 };
@@ -3467,7 +3467,7 @@ pub const App = struct {
                 var open_total: u32 = 0;
                 for (mq) |m| open_total += m.open;
                 try rows.append(al, "");
-                try rows.append(al, try std.fmt.allocPrint(al, "{d} open · the counts match a generated starter company of this shape", .{open_total}));
+                try rows.append(al, try std.fmt.allocPrint(al, "{d} open · the counts match a starting company of this shape", .{open_total}));
                 try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}} now: a pilot per crewless hull and a tech where none has hours (signing bonuses from the outfit)", .{try keyHint(RaiseCrewsAction, al, &raise_crews_bindings, .crew, "hire from the halls")}));
                 try rows.append(al, "  {d}or hire by hand later from an HQ's hiring hall or the People screen · this table is also :manning co:N{/}");
                 try rows.append(al, try std.fmt.allocPrint(al, "  {{a}}{s}{{/}}", .{try keyHint(SheetAction, al, &sheet_bindings, .close, "finish")}));
@@ -6248,14 +6248,15 @@ test "the who's who sheet reads its contract each frame and says when the contra
     const c = try clientForTest(std.testing.allocator);
     defer deinitForTest(c, std.testing.allocator);
     const gs = c.app.state();
-    // An active contract on a world with a governor.
+    // An active contract on a world with a governor, against a power whose
+    // leader is a data row: a generic title and a data title on one sheet.
     const cid: types.ContractId = @enumFromInt(99);
     try gs.contracts.put(gs.allocator(), cid, .{
         .id = cid,
         .kind = .garrison_duty,
         .employer_key = "LC",
         .enemy_key = "DC",
-        .planet_key = "skye",
+        .planet_key = "alkaid",
         .terms = .{ .length_months = 6, .base_pay_month = 100_000 },
         .status = .active,
     });
@@ -6267,10 +6268,18 @@ test "the who's who sheet reads its contract each frame and says when the contra
         const view = try c.app.listView(al);
         try std.testing.expect(std.mem.indexOf(u8, view.title, "WHO'S WHO · CONTRACT [") != null);
         const text = try std.mem.join(al, "\n", view.rows);
-        try std.testing.expect(std.mem.indexOf(u8, text, "Governor of Skye") != null);
-        try std.testing.expect(std.mem.indexOf(u8, text, "Leader, Draconis Combine") != null);
-        // The provenance label survives the wrap at either width.
-        try std.testing.expect(std.mem.indexOf(u8, text, "[procedural]") != null);
+        try std.testing.expect(std.mem.indexOf(u8, text, "Governor of Alkaid") != null);
+        try std.testing.expect(std.mem.indexOf(u8, text, "Coordinator of the Draconis Combine") != null);
+        // Direction 4 (docs/p5d-conflict-world-design.md §F): neither the
+        // sheet's rows, its title nor its rendered screen says where anyone
+        // comes from, at either width.
+        for ([_][]const u8{ text, view.title }) |shown| {
+            try std.testing.expectEqual(@as(?[]const u8, null), try q.originWordForTest(al, shown, &q.origin_words_for_test));
+        }
+        var row: u16 = 0;
+        while (row < size[1]) : (row += 1) {
+            try std.testing.expectEqual(@as(?[]const u8, null), try q.originWordForTest(al, try screenRowForTest(c, al, 0, row, size[0]), &q.origin_words_for_test));
+        }
     }
     // The contract leaves the record while the sheet is open: one dim line, no error.
     try std.testing.expect(gs.contracts.swapRemove(cid));
@@ -6278,4 +6287,67 @@ test "the who's who sheet reads its contract each frame and says when the contra
     const gone = try c.app.listView(c.app.a());
     try std.testing.expectEqual(@as(usize, 1), gone.rows.len);
     try std.testing.expect(std.mem.indexOf(u8, gone.rows[0], "no longer on record") != null);
+}
+
+/// Words that would name a company's origin; no company screen shows one
+/// (docs/p5d-conflict-world-design.md §F).
+const company_origin_words_for_test = [_][]const u8{ "generated", "generator", "procedural" };
+
+test "the founding wizard's company step is the starting company, at either size" {
+    const gpa = std.testing.allocator;
+    const c = try gpa.create(ClientForTest);
+    defer gpa.destroy(c);
+    c.sink = std.Io.Writer.Discarding.init(&.{});
+    c.term = Term.forTest(&c.sink.writer);
+    const store = try game.lobby.Lobby.open(":memory:");
+    defer store.close();
+    c.app = try App.init(gpa, std.testing.io, &c.term, store);
+    defer c.app.deinit();
+    c.app.w_name.set("Erik Kalmar");
+    c.app.w_outfit.set("The Unforgiven");
+    c.app.w_company.set("Alpha Company");
+    try c.app.generateCampaign();
+    c.app.mode = .wizard;
+    c.app.step = .company;
+    for ([_][2]u16{ .{ 200, 50 }, .{ 80, 24 } }) |size| {
+        errdefer std.debug.print("wizard at {d}x{d}\n", .{ size[0], size[1] });
+        try c.app.screen.resize(size[0], size[1]);
+        _ = c.app.frame.reset(.retain_capacity);
+        try c.app.draw();
+        const al = c.app.a();
+        var titled = false;
+        var row: u16 = 0;
+        while (row < size[1]) : (row += 1) {
+            const text = try screenRowForTest(c, al, 0, row, size[0]);
+            if (std.mem.indexOf(u8, text, "STARTING COMPANY") != null) titled = true;
+            try std.testing.expectEqual(@as(?[]const u8, null), try q.originWordForTest(al, text, &company_origin_words_for_test));
+        }
+        try std.testing.expect(titled);
+    }
+}
+
+test "the raise support and crews sheets measure against a starting company" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    // The company comes from its TO&E row's identity (rule 32).
+    c.app.raise.company = for (try q.toe(c.app.a(), c.app.state())) |row| {
+        if (row.is_company) break row.force;
+    } else return error.TestFixtureLacksCompany;
+    for ([_]Modal{ .raise_support, .raise_crews }) |modal| {
+        errdefer std.debug.print("modal {s}\n", .{@tagName(modal)});
+        c.app.openModal(modal);
+        _ = c.app.frame.reset(.retain_capacity);
+        try c.app.draw();
+        const al = c.app.a();
+        const view = try c.app.listView(al);
+        var parts: std.ArrayListUnmanaged([]const u8) = .empty;
+        try parts.append(al, view.title);
+        try parts.appendSlice(al, view.head);
+        try parts.appendSlice(al, view.rows);
+        try parts.appendSlice(al, view.foot);
+        const text = try std.mem.join(al, "\n", parts.items);
+        try std.testing.expect(std.mem.indexOf(u8, text, "a starting company") != null);
+        try std.testing.expectEqual(@as(?[]const u8, null), try q.originWordForTest(al, text, &company_origin_words_for_test));
+        c.app.modal = .none;
+    }
 }

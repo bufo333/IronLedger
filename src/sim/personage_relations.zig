@@ -1,8 +1,9 @@
 //! Relations between world personages at campaign creation
 //! (docs/p5d-conflict-world-design.md §B relations, P5d.1c): every ruler's
-//! fealty to its faction's leader, kin by shared surname within a faction,
-//! and rivals, allies and grudges between rulers in reach; and the load-time
-//! check every campaign's relations keep.
+//! fealty to its faction's leader, kin (`personage.kinAtCreation`), and
+//! rivals, allies and grudges between rulers in reach; heirs, family and
+//! officials hold kin only. And the load-time check every campaign's
+//! relations keep.
 //! No MekHQ counterpart: MekHQ has no persistent political figures
 //! (docs/mekhq-map.md).
 
@@ -133,9 +134,9 @@ pub fn validate(gs: *const GameState) error{CorruptSave}!void {
         if (relations.len > 0) return error.CorruptSave;
         return;
     }
-    // `personages.validate` holds a campaign to the seeded set.
-    if (people.len > personages.seed_count) return error.CorruptSave;
-    var has_liege = [_]bool{false} ** personages.seed_count;
+    // `personages.validate` holds a campaign to a seated set.
+    if (people.len > personages.max_count) return error.CorruptSave;
+    var has_liege = [_]bool{false} ** personages.max_count;
     for (relations, 0..) |rel, i| {
         if (rel.from == rel.to) return error.CorruptSave;
         const from = gs.personages.getIndex(rel.from) orelse return error.CorruptSave;
@@ -236,17 +237,45 @@ test "creation relates exactly the pairs the relation rules name" {
         try std.testing.expectEqual(expected, held);
     }
 
-    // Kin: exactly the same-faction, same-last-name pairs, lower ID first.
+    // Kin: exactly the pairs K1 and K2 name, lower ID first. Two procedural
+    // rows of one faction and surname; two data rows of one family; never a
+    // data row and a procedural row.
     var kin_pairs: usize = 0;
+    var data_kin_pairs: usize = 0;
     for (people, 0..) |*a, i| for (people[i + 1 ..]) |*b| {
-        if (!(std.mem.eql(u8, a.faction_key, b.faction_key) and std.mem.eql(u8, a.last_name, b.last_name))) continue;
-        kin_pairs += 1;
+        const a_data = a.key.len > 0;
+        const b_data = b.key.len > 0;
+        const expected = if (a_data and b_data)
+            a.family_key.len > 0 and std.mem.eql(u8, a.family_key, b.family_key)
+        else if (!a_data and !b_data)
+            std.mem.eql(u8, a.faction_key, b.faction_key) and std.mem.eql(u8, a.last_name, b.last_name)
+        else
+            false;
         var found: usize = 0;
         for (relations) |rel| found += @intFromBool(rel.kind == .kin and rel.from == a.id and rel.to == b.id);
-        try std.testing.expectEqual(@as(usize, 1), found);
+        try std.testing.expectEqual(@as(usize, @intFromBool(expected)), found);
+        kin_pairs += @intFromBool(expected);
+        data_kin_pairs += @intFromBool(expected and a_data);
     };
-    try std.testing.expect(kin_pairs > 0);
+    try std.testing.expect(kin_pairs > data_kin_pairs and data_kin_pairs > 0);
     try std.testing.expectEqual(kin_pairs, kindCount(relations, .kin));
+    for (relations) |rel| if (rel.kind == .kin) {
+        try std.testing.expectEqual(gs.personages.get(rel.from).?.key.len > 0, gs.personages.get(rel.to).?.key.len > 0);
+    };
+
+    // A data ruler's liege is its faction's leader, a data leader where the
+    // faction has one. Heirs, family and officials hold kin and nothing else.
+    for (people) |*p| {
+        const court = p.role == .heir or p.role == .family or p.role == .intelligence_chief;
+        for (relations) |rel| {
+            if (court and (rel.from == p.id or rel.to == p.id)) try std.testing.expectEqual(RelationKind.kin, rel.kind);
+            if (rel.kind == .liege and rel.from == p.id and p.key.len > 0) {
+                const liege = gs.personages.get(rel.to).?;
+                try std.testing.expectEqualStrings(p.faction_key, liege.faction_key);
+                try std.testing.expect(liege.key.len > 0);
+            }
+        }
+    }
 
     // Rival, ally and grudge join two rulers in reach under their faction rule.
     for (relations, 0..) |rel, i| {

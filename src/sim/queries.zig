@@ -11136,15 +11136,28 @@ fn leadsFaction(p: *const personage_dom.Personage, faction_key: []const u8) bool
 }
 
 /// One `who` row: the personage it shows, and its line — title, name,
-/// faction, ambition, motives and provenance label. Names are escaped.
+/// faction, ambition and motives. Names are escaped. No row says where a
+/// personage comes from (docs/p5d-conflict-world-design.md §F).
 pub const PersonageRow = struct {
     id: types.PersonageId,
     text: []const u8,
 };
 
+/// Whether a personage is one of a faction's heirs, family or officials:
+/// the rows `who <faction>` lists between its leader and its rulers.
+fn courtOf(p: *const personage_dom.Personage, faction_key: []const u8) bool {
+    const court = switch (p.role) {
+        .heir, .family, .intelligence_chief => true,
+        .planetary_ruler, .faction_leader => false,
+    };
+    return court and std.mem.eql(u8, p.faction_key, faction_key);
+}
+
 /// The personages a filter selects, as display rows (rules 29–32): leaders
-/// in `factions.zon` order; a faction's leader before its rulers; a world's
-/// one ruler. Rulers follow personage id order.
+/// in `factions.zon` order; a faction's leader, then its heirs, family and
+/// officials, then its rulers; a world's one ruler. Within a group rows
+/// follow personage id order, which for the heirs, family and officials is
+/// `personages.zon` order.
 pub fn personageRows(alloc: Alloc, gs: *GameState, filter: WhoFilter) ![]PersonageRow {
     var rows: std.ArrayListUnmanaged(PersonageRow) = .empty;
     switch (filter) {
@@ -11154,11 +11167,15 @@ pub fn personageRows(alloc: Alloc, gs: *GameState, filter: WhoFilter) ![]Persona
             };
         },
         .faction => |key| {
-            for ([_]personage_dom.Role{ .faction_leader, .planetary_ruler }) |role| {
-                for (gs.personages.values()) |*p| if (p.role == role and std.mem.eql(u8, p.faction_key, key)) {
-                    try rows.append(alloc, try personageRow(alloc, p));
-                };
-            }
+            for (gs.personages.values()) |*p| if (leadsFaction(p, key)) {
+                try rows.append(alloc, try personageRow(alloc, p));
+            };
+            for (gs.personages.values()) |*p| if (courtOf(p, key)) {
+                try rows.append(alloc, try personageRow(alloc, p));
+            };
+            for (gs.personages.values()) |*p| if (p.role == .planetary_ruler and std.mem.eql(u8, p.faction_key, key)) {
+                try rows.append(alloc, try personageRow(alloc, p));
+            };
         },
         .planet => |key| for (gs.personages.values()) |*p| if (rulesWorld(p, key)) {
             try rows.append(alloc, try personageRow(alloc, p));
@@ -11241,7 +11258,7 @@ fn personageRow(alloc: Alloc, p: *const personage_dom.Personage) !PersonageRow {
         if (motives.items.len > 0) try motives.appendSlice(alloc, ", ");
         try motives.appendSlice(alloc, @tagName(m));
     }
-    const text = try std.fmt.allocPrint(alloc, "#{d}  {s}  {s} {s}  {s}  ambition {d}  motives {s}  {{d}}[{s}]{{/}}", .{
+    const text = try std.fmt.allocPrint(alloc, "#{d}  {s}  {s} {s}  {s}  ambition {d}  motives {s}", .{
         @intFromEnum(p.id),
         try table.plain(alloc, try personage_dom.titleText(alloc, p)),
         try table.plain(alloc, p.first_name),
@@ -11249,7 +11266,6 @@ fn personageRow(alloc: Alloc, p: *const personage_dom.Personage) !PersonageRow {
         p.faction_key,
         p.ambition,
         motives.items,
-        p.provenance.label(),
     });
     return .{ .id = p.id, .text = text };
 }
@@ -11346,10 +11362,70 @@ fn relationRow(alloc: Alloc, gs: *GameState, kind: RelationRowKind, other: types
     }) };
 }
 
-test "who lists the leaders in faction order, a faction's leader then its rulers, and a world's ruler" {
+/// Words that would tell the player where a character or company comes
+/// from; no display row holds one (docs/p5d-conflict-world-design.md §F).
+pub const origin_words_for_test = [_][]const u8{ "procedural", "generated", "generator", "authored", "author", "canon", "sarna", "project character", "provenance", "source", "fictional", "invented", "real" };
+
+/// The first of `words` that `text` holds as a whole word, ignoring case,
+/// or null. A `planets.zon` world's or `factions.zon` power's name is a
+/// place, not an origin word, and is skipped (the catalogue has a world
+/// named Sarna), unless a dot and a letter or digit follow it, as in a site
+/// address. Tests only.
+pub fn originWordForTest(alloc: Alloc, text: []const u8, words: []const []const u8) !?[]const u8 {
+    std.debug.assert(@import("builtin").is_test);
+    const lower = try std.ascii.allocLowerString(alloc, text);
+    const Blank = struct {
+        fn wordAt(s: []const u8, at: usize, len: usize) bool {
+            const before = at == 0 or !std.ascii.isAlphanumeric(s[at - 1]);
+            const after = at + len == s.len or !std.ascii.isAlphanumeric(s[at + len]);
+            return before and after;
+        }
+        fn address(s: []const u8, end: usize) bool {
+            return end + 1 < s.len and s[end] == '.' and std.ascii.isAlphanumeric(s[end + 1]);
+        }
+        fn out(s: []u8, name: []const u8, scratch: Alloc) !void {
+            const needle = try std.ascii.allocLowerString(scratch, name);
+            var from: usize = 0;
+            while (std.mem.indexOfPos(u8, s, from, needle)) |at| : (from = at + 1) {
+                if (wordAt(s, at, needle.len) and !address(s, at + needle.len)) @memset(s[at..][0..needle.len], ' ');
+            }
+        }
+    };
+    for (planet_mod.catalog) |w| try Blank.out(lower, w.name, alloc);
+    for (@import("../domain/faction.zig").table) |f| try Blank.out(lower, f.name, alloc);
+    for (words) |word| {
+        var from: usize = 0;
+        while (std.mem.indexOfPos(u8, lower, from, word)) |at| : (from = at + 1) {
+            if (Blank.wordAt(lower, at, word.len)) return word;
+        }
+    }
+    return null;
+}
+
+/// A 3025 campaign holding canon, authored and procedural personages.
+fn whoCampaignForTest(gs: *GameState) !void {
+    _ = try @import("commands.zig").execute(gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer, .start_year = @import("../domain/personage_data.zig").reference_year } });
+    var held = std.EnumSet(personage_dom.Provenance).initEmpty();
+    for (gs.personages.values()) |p| held.insert(p.provenance);
+    try std.testing.expect(held.eql(.initFull()));
+}
+
+test "the origin-word check finds a whole word in any case and skips catalogue names" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const words = &origin_words_for_test;
+    try std.testing.expectEqualStrings("procedural", (try originWordForTest(a, "#4  x  {d}[Procedural]{/}", words)).?);
+    try std.testing.expectEqualStrings("project character", (try originWordForTest(a, "a PROJECT CHARACTER row", words)).?);
+    try std.testing.expectEqualStrings("real", (try originWordForTest(a, "a real one", words)).?);
+    try std.testing.expectEqual(@as(?[]const u8, null), try originWordForTest(a, "Prefect of Sarna  realm  authority  canonical  sources", words));
+    try std.testing.expectEqualStrings("sarna", (try originWordForTest(a, "see sarna.net", words)).?);
+}
+
+test "who lists the leaders in faction order, a faction's leader, court and rulers, and a world's ruler" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 70201 });
     defer gs.deinit();
-    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    try whoCampaignForTest(&gs);
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -11367,40 +11443,117 @@ test "who lists the leaders in faction order, a faction's leader then its rulers
     }
     try std.testing.expectEqual(expected, leaders.len);
 
-    // A faction: its leader first, then exactly its rulers.
+    // A faction: its leader first, then its heirs, family and officials in
+    // id order, then exactly its rulers in id order.
+    for (faction.table) |*f| {
+        errdefer std.debug.print("who {s}\n", .{f.key});
+        const rows = try personageRows(a, &gs, (try parseWho(f.key, null)).personages);
+        var want: std.ArrayListUnmanaged(types.PersonageId) = .empty;
+        for (gs.personages.values()) |p| if (p.role == .faction_leader and std.mem.eql(u8, p.faction_key, f.key)) try want.append(a, p.id);
+        for (gs.personages.values()) |p| if ((p.role == .heir or p.role == .family or p.role == .intelligence_chief) and std.mem.eql(u8, p.faction_key, f.key)) try want.append(a, p.id);
+        for (gs.personages.values()) |p| if (p.role == .planetary_ruler and std.mem.eql(u8, p.faction_key, f.key)) try want.append(a, p.id);
+        try std.testing.expectEqual(want.items.len, rows.len);
+        for (want.items, rows) |id, row| try std.testing.expectEqual(id, row.id);
+    }
     const lc = try personageRows(a, &gs, (try parseWho("LC", null)).personages);
     try std.testing.expectEqual(personage_dom.Role.faction_leader, gs.personages.get(lc[0].id).?.role);
+    try std.testing.expectEqual(personage_dom.Role.heir, gs.personages.get(lc[1].id).?.role);
     var lc_worlds: usize = 0;
     for (planet_mod.catalog) |w| if (std.mem.eql(u8, w.faction, "LC")) {
         lc_worlds += 1;
     };
-    try std.testing.expectEqual(lc_worlds + 1, lc.len);
-    for (lc[1..]) |row| {
+    var lc_court: usize = 0;
+    for (@import("../domain/personage_data.zig").table.rows) |row| {
+        if (std.mem.eql(u8, row.faction_key, "LC") and (row.role == .heir or row.role == .family or row.role == .intelligence_chief)) lc_court += 1;
+    }
+    try std.testing.expect(lc_court > 0);
+    try std.testing.expectEqual(1 + lc_court + lc_worlds, lc.len);
+    for (lc[1 + lc_court ..]) |row| {
         const p = gs.personages.get(row.id).?;
         try std.testing.expectEqual(personage_dom.Role.planetary_ruler, p.role);
         try std.testing.expectEqualStrings("LC", p.faction_key);
     }
 
-    // A world: its one ruler, whose line names the world.
-    const skye = try personageRows(a, &gs, (try parseWho("skye", null)).personages);
-    try std.testing.expectEqual(@as(usize, 1), skye.len);
-    try std.testing.expectEqualStrings("skye", gs.personages.get(skye[0].id).?.seat_planet_key);
-    try std.testing.expect(std.mem.indexOf(u8, skye[0].text, "Governor of Skye") != null);
+    // A world: its one ruler, whose line carries its title — a data row's
+    // own, or the generic one.
+    const summer = try personageRows(a, &gs, (try parseWho("summer", null)).personages);
+    try std.testing.expectEqual(@as(usize, 1), summer.len);
+    try std.testing.expect(std.mem.indexOf(u8, summer[0].text, "Duke of Summer") != null);
+    const alkaid = try personageRows(a, &gs, (try parseWho("alkaid", null)).personages);
+    try std.testing.expectEqual(@as(usize, 1), alkaid.len);
+    try std.testing.expectEqualStrings("alkaid", gs.personages.get(alkaid[0].id).?.seat_planet_key);
+    try std.testing.expect(std.mem.indexOf(u8, alkaid[0].text, "Governor of Alkaid") != null);
     // A world that does not hire and a faction with no leader list nobody.
     try std.testing.expectEqual(@as(usize, 0), (try personageRows(a, &gs, (try parseWho("terra", null)).personages)).len);
     try std.testing.expectEqual(@as(usize, 0), (try personageRows(a, &gs, (try parseWho("CS", null)).personages)).len);
 
-    // Every row shows its provenance label and its personage's name.
-    for ([_][]const PersonageRow{ leaders, lc, skye }) |rows| for (rows) |row| {
+    // Every row shows its personage's name and no word about its origin.
+    for ([_][]const PersonageRow{ leaders, lc, summer, alkaid }) |rows| for (rows) |row| {
         const p = gs.personages.get(row.id).?;
-        try std.testing.expect(std.mem.indexOf(u8, row.text, "[procedural]") != null);
         try std.testing.expect(std.mem.indexOf(u8, row.text, p.last_name) != null);
+        try std.testing.expectEqual(@as(?[]const u8, null), try originWordForTest(a, row.text, &origin_words_for_test));
     };
 
     // Unknown keys and trailing tokens are refused.
     try std.testing.expectError(error.BadArguments, parseWho("nosuchkey", null));
     try std.testing.expectError(error.BadArguments, parseWho("LC", "skye"));
     try std.testing.expectError(error.OutOfMemory, personageRows(std.testing.failing_allocator, &gs, .leaders));
+}
+
+test "no who's who row says where a personage comes from, and data and procedural rows share one shape" {
+    // Direction 4 of docs/p5d-conflict-world-design.md §F: every string the
+    // who views show, over canon, authored and procedural personages.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 70204 });
+    defer gs.deinit();
+    try whoCampaignForTest(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const words = &origin_words_for_test;
+    const Check = struct {
+        fn none(al: Alloc, text: []const u8, w: []const []const u8) !void {
+            errdefer std.debug.print("origin word in: {s}\n", .{text});
+            try std.testing.expectEqual(@as(?[]const u8, null), try originWordForTest(al, text, w));
+        }
+    };
+    var filters: std.ArrayListUnmanaged(WhoFilter) = .empty;
+    try filters.append(a, .leaders);
+    for (@import("../domain/faction.zig").table) |f| try filters.append(a, .{ .faction = f.key });
+    for (planet_mod.catalog) |w| try filters.append(a, .{ .planet = w.key });
+    var rows_seen: usize = 0;
+    for (filters.items) |filter| for (try personageRows(a, &gs, filter)) |row| {
+        try Check.none(a, row.text, words);
+        rows_seen += 1;
+    };
+    try std.testing.expect(rows_seen > gs.personages.count());
+    for (gs.personages.keys()) |id| for (try personageRelationRows(a, &gs, id)) |row| try Check.none(a, row.text, words);
+    try std.testing.expect(gs.contract_offers.items.len > 0);
+    for (gs.contract_offers.items) |c| for (try contractWhosWho(a, &gs, c.id)) |row| {
+        try Check.none(a, row.text, words);
+        for (row.relations) |rel| try Check.none(a, rel.text, words);
+    };
+
+    // A canon ruler's row and a procedural ruler's row are the same fields
+    // in the same places.
+    const Shape = struct {
+        fn expected(al: Alloc, p: *const personage_dom.Personage) ![]const u8 {
+            var motives: std.ArrayListUnmanaged(u8) = .empty;
+            var it = p.motives.iterator();
+            while (it.next()) |m| {
+                if (motives.items.len > 0) try motives.appendSlice(al, ", ");
+                try motives.appendSlice(al, @tagName(m));
+            }
+            return std.fmt.allocPrint(al, "#{d}  {s}  {s} {s}  {s}  ambition {d}  motives {s}", .{ @intFromEnum(p.id), try personage_dom.titleText(al, p), p.first_name, p.last_name, p.faction_key, p.ambition, motives.items });
+        }
+    };
+    var shapes: usize = 0;
+    for (gs.personages.values()) |*p| {
+        if (p.role != .planetary_ruler or !(p.provenance == .canon or p.provenance == .procedural)) continue;
+        const row = try personageRows(a, &gs, .{ .planet = p.seat_planet_key });
+        try std.testing.expectEqualStrings(try Shape.expected(a, p), row[0].text);
+        shapes |= @as(usize, 1) << @intFromEnum(p.provenance);
+    }
+    try std.testing.expectEqual(@as(usize, 1 << @intFromEnum(personage_dom.Provenance.procedural) | 1 << @intFromEnum(personage_dom.Provenance.canon)), shapes);
 }
 
 test "who names a contract by its id, and nothing else by a number" {
@@ -11431,7 +11584,7 @@ test "a contract's who's who is its world's governor, its employer's leader and 
     };
 
     // Every board offer: world, employer, enemy, each the seat's holder in
-    // the personage map; a present row is the `who` line, label included.
+    // the personage map; a present row is the part's label, then the `who` line.
     try std.testing.expect(gs.contract_offers.items.len > 0);
     for (gs.contract_offers.items) |c| {
         const rows = try contractWhosWho(a, &gs, c.id);
@@ -11440,7 +11593,8 @@ test "a contract's who's who is its world's governor, its employer's leader and 
             try std.testing.expectEqual(part, row.part);
             try std.testing.expectEqual(Expect.holder(&gs, part, key), row.id);
             if (row.id) |pid| {
-                try std.testing.expect(std.mem.indexOf(u8, row.text, "[procedural]") != null);
+                const line = try personageRow(a, gs.personages.getPtr(pid).?);
+                try std.testing.expect(std.mem.endsWith(u8, row.text, line.text));
                 try std.testing.expect(std.mem.indexOf(u8, row.text, gs.personages.get(pid).?.last_name) != null);
                 // A present seat carries its holder's relation rows.
                 const expected = try personageRelationRows(a, &gs, pid);

@@ -77,6 +77,7 @@ pub const merc_band = @import("domain/merc_band.zig");
 pub const logo = @import("domain/logo.zig");
 pub const officer = @import("domain/officer.zig");
 pub const personage = @import("domain/personage.zig");
+pub const personage_data = @import("domain/personage_data.zig");
 
 // sim/ — state, time, randomness, battle resolution
 pub const state = @import("sim/state.zig");

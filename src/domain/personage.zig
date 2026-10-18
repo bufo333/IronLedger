@@ -1,9 +1,10 @@
 //! Personages: the persisted figures of the political world, a world's
-//! ruler and a power's leader (docs/p5d-conflict-world-design.md §B, P5d.1a).
+//! ruler, a power's leader, and the heirs, family and officials of the
+//! data table (docs/p5d-conflict-world-design.md §B, P5d.1a, P5d.1d).
 //! Distinct from the contract-scoped `Actor`. This record holds §B's
 //! identity, motive, ambition and provenance, and §B's relations between
-//! personages (P5d.1c), whose liege weight is loyalty; family, backstory,
-//! status, standing and flags belong to later increments.
+//! personages (P5d.1c), whose liege weight is loyalty; backstory, status,
+//! standing and flags belong to later increments.
 //! No MekHQ counterpart: MekHQ has no persistent political figures
 //! (docs/mekhq-map.md).
 
@@ -12,11 +13,16 @@ const types = @import("types.zig");
 const tuning = @import("tuning.zig").t;
 const planet = @import("planet.zig");
 const faction = @import("faction.zig");
+const personage_data = @import("personage_data.zig");
 
-/// The role a personage holds (§B). Persisted by tag name.
+/// The role a personage holds (§B). Persisted by tag name. Only data rows
+/// hold `heir`, `family` and `intelligence_chief`.
 pub const Role = enum {
     planetary_ruler,
     faction_leader,
+    heir,
+    family,
+    intelligence_chief,
 };
 
 /// §B's closed motive set. Each value is the motive's bit in the persisted
@@ -35,17 +41,16 @@ pub const Motive = enum(u4) {
 
 pub const Motives = std.EnumSet(Motive);
 
-/// Where a personage's row comes from (§B). Persisted by tag name.
+/// Where a personage's row comes from (§B). Persisted by tag name. Internal
+/// metadata for tests and save validation; no display shows it
+/// (docs/p5d-conflict-world-design.md §F).
 pub const Provenance = enum {
     /// Generated at campaign creation; `generator_version` names the generator.
     procedural,
-
-    /// The label every display row shows beside the name.
-    pub fn label(self: Provenance) []const u8 {
-        return switch (self) {
-            .procedural => "procedural",
-        };
-    }
+    /// A `personages.zon` row restating setting facts.
+    canon,
+    /// A `personages.zon` row of project fiction.
+    authored,
 };
 
 pub const Personage = struct {
@@ -61,7 +66,12 @@ pub const Personage = struct {
     /// 0..`tuning.politics.ambition_max`.
     ambition: u8,
     provenance: Provenance,
+    /// `personage_gen.version` for a procedural row, 0 for a data row.
     generator_version: u16,
+    /// The `personages.zon` row this personage is, or "" for a procedural one.
+    key: []const u8,
+    /// The data row's family, or "" for none and for every procedural row.
+    family_key: []const u8,
 };
 
 /// The faction key that is a catch-all bucket rather than a polity: it has
@@ -177,11 +187,17 @@ pub fn drawnRelationFactionsAllowed(kind: RelationKind, faction_a: []const u8, f
     };
 }
 
-/// Whether two distinct personages are kin at campaign creation: the same
-/// faction and the same last name (§B, decision K1). Kin never crosses
-/// factions.
+/// Whether two distinct personages are kin at campaign creation (§B,
+/// decisions K1 and K2): two data rows when they share a non-empty
+/// `family_key`; two procedural rows when they share a faction and a last
+/// name; a data row and a procedural row never.
 pub fn kinAtCreation(a: *const Personage, b: *const Personage) bool {
-    return a.id != b.id and std.mem.eql(u8, a.faction_key, b.faction_key) and std.mem.eql(u8, a.last_name, b.last_name);
+    if (a.id == b.id) return false;
+    const a_data = a.key.len > 0;
+    const b_data = b.key.len > 0;
+    if (a_data != b_data) return false;
+    if (a_data) return a.family_key.len > 0 and std.mem.eql(u8, a.family_key, b.family_key);
+    return std.mem.eql(u8, a.faction_key, b.faction_key) and std.mem.eql(u8, a.last_name, b.last_name);
 }
 
 /// Whether a relation weight is on the tuned scale.
@@ -189,15 +205,20 @@ pub fn relationWeightValid(weight: u8) bool {
     return weight >= tuning.politics.relation_weight_min and weight <= tuning.politics.relation_weight_max;
 }
 
-pub const TitleError = error{UnknownSeat} || std.mem.Allocator.Error;
+pub const TitleError = error{ UnknownSeat, UnknownKey } || std.mem.Allocator.Error;
 
-/// A personage's title (rule 28: the one formatter): "Governor of <world>"
-/// for a ruler, "Leader, <faction>" for a leader. Project-authored generic
-/// labels, not canon titles. `UnknownSeat` when the key names no row.
+/// A personage's title (rule 28: the one formatter; decision T1): a data
+/// row's own `personages.zon` title; for a procedural row, "Governor of
+/// <world>" for a ruler and "Leader, <faction>" for a leader, generic
+/// project labels. `UnknownKey` when a key names no data row,
+/// `UnknownSeat` when a procedural row's seat or faction names no row or
+/// its role is one only data rows hold. The returned text is `alloc`'s.
 pub fn titleText(alloc: std.mem.Allocator, p: *const Personage) TitleError![]const u8 {
+    if (p.key.len > 0) return alloc.dupe(u8, (personage_data.find(p.key) orelse return error.UnknownKey).title);
     return switch (p.role) {
         .planetary_ruler => std.fmt.allocPrint(alloc, "Governor of {s}", .{(planet.find(p.seat_planet_key) orelse return error.UnknownSeat).name}),
         .faction_leader => std.fmt.allocPrint(alloc, "Leader, {s}", .{(faction.find(p.faction_key) orelse return error.UnknownSeat).name}),
+        .heir, .family, .intelligence_chief => error.UnknownSeat,
     };
 }
 
@@ -274,10 +295,62 @@ test "a title names the world ruled or the faction led" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    var p: Personage = .{ .id = @enumFromInt(1), .role = .planetary_ruler, .first_name = "A", .last_name = "B", .faction_key = "LC", .seat_planet_key = "skye", .motives = .initEmpty(), .ambition = 0, .provenance = .procedural, .generator_version = 1 };
+    var p: Personage = .{ .id = @enumFromInt(1), .role = .planetary_ruler, .first_name = "A", .last_name = "B", .faction_key = "LC", .seat_planet_key = "skye", .motives = .initEmpty(), .ambition = 0, .provenance = .procedural, .generator_version = 1, .key = "", .family_key = "" };
     try std.testing.expectEqualStrings("Governor of Skye", try titleText(a, &p));
     p.role = .faction_leader;
     try std.testing.expectEqualStrings("Leader, Lyran Commonwealth", try titleText(a, &p));
     p.faction_key = "nobody";
     try std.testing.expectError(error.UnknownSeat, titleText(a, &p));
+    p.role = .heir;
+    try std.testing.expectError(error.UnknownSeat, titleText(a, &p));
+}
+
+test "a keyed personage's title is its data row's, whatever its role and seat" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    for (personage_data.table.rows) |*row| {
+        var p: Personage = .{ .id = @enumFromInt(1), .role = .planetary_ruler, .first_name = row.first_name, .last_name = row.last_name, .faction_key = row.faction_key, .seat_planet_key = "skye", .motives = .initEmpty(), .ambition = 0, .provenance = row.provenance, .generator_version = 0, .key = row.key, .family_key = row.family_key };
+        try std.testing.expectEqualStrings(row.title, try titleText(a, &p));
+        p.role = row.role;
+        try std.testing.expectEqualStrings(row.title, try titleText(a, &p));
+    }
+    var stray: Personage = .{ .id = @enumFromInt(1), .role = .heir, .first_name = "A", .last_name = "B", .faction_key = "LC", .seat_planet_key = "tharkad", .motives = .initEmpty(), .ambition = 0, .provenance = .authored, .generator_version = 0, .key = "nosuchkey", .family_key = "" };
+    try std.testing.expectError(error.UnknownKey, titleText(a, &stray));
+    stray.key = personage_data.table.rows[0].key;
+    try std.testing.expectError(error.OutOfMemory, titleText(std.testing.failing_allocator, &stray));
+}
+
+test "data rows are kin by a shared family, procedural rows by faction and surname, and never each other" {
+    const base: Personage = .{ .id = @enumFromInt(1), .role = .planetary_ruler, .first_name = "A", .last_name = "Davion", .faction_key = "FS", .seat_planet_key = "kathil", .motives = .initEmpty(), .ambition = 0, .provenance = .procedural, .generator_version = 1, .key = "", .family_key = "" };
+    var other = base;
+    other.id = @enumFromInt(2);
+    // K1: procedural pairs.
+    try std.testing.expect(kinAtCreation(&base, &other));
+    try std.testing.expect(!kinAtCreation(&base, &base));
+    other.faction_key = "LC";
+    try std.testing.expect(!kinAtCreation(&base, &other));
+    // A data row is never kin to a procedural row, even with its surname,
+    // faction and a family key.
+    var data_a = base;
+    data_a.id = @enumFromInt(3);
+    data_a.key = "a_row";
+    data_a.family_key = "davion";
+    data_a.provenance = .canon;
+    data_a.generator_version = 0;
+    try std.testing.expect(!kinAtCreation(&base, &data_a) and !kinAtCreation(&data_a, &base));
+    // K2: data pairs share a non-empty family, whatever their names and factions.
+    var data_b = data_a;
+    data_b.id = @enumFromInt(4);
+    data_b.key = "b_row";
+    data_b.last_name = "Hasek-Davion";
+    data_b.faction_key = "LC";
+    try std.testing.expect(kinAtCreation(&data_a, &data_b));
+    data_b.family_key = "steiner";
+    try std.testing.expect(!kinAtCreation(&data_a, &data_b));
+    data_a.family_key = "";
+    data_b.family_key = "";
+    data_b.last_name = data_a.last_name;
+    data_b.faction_key = data_a.faction_key;
+    try std.testing.expect(!kinAtCreation(&data_a, &data_b));
 }

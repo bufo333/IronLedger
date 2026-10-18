@@ -276,23 +276,33 @@ cheap, copyable, and impossible to mix up.
   officer arcs map, world-state map, personages map.
 - **Personage** — a persisted figure of the political world
   (`domain/personage.zig`, docs/p5d-conflict-world-design.md §B), keyed by
-  `PersonageId`. Two roles: a `planetary_ruler` for every world whose faction
-  hires (`personage.worldHasRuler`), and a `faction_leader` seated on the
-  capital of every hiring faction except the `PER` catch-all bucket
-  (`personage.factionHasLeader`). Each carries a name, two or three motives
-  from §B's closed set, an ambition (0–100) and a provenance; every row is
-  `procedural`, generated at `create_commander` by `personage_gen` and naming
-  its generator version. The title ("Governor of …", "Leader, …") is derived
-  by `personage.titleText`, never stored. Unlike the contract-scoped
+  `PersonageId`. Every campaign seats a `planetary_ruler` for every world
+  whose faction hires (`personage.worldHasRuler`) and a `faction_leader` on
+  the capital of every hiring faction except the `PER` catch-all bucket
+  (`personage.factionHasLeader`); data rows add `heir`, `family` and
+  `intelligence_chief` figures. Each carries a name, two or three motives
+  from §B's closed set, an ambition (0–100), a provenance, a `key` and a
+  `family_key`. A seat goes to the `data/tables/personages.zon` row
+  (`domain/personage_data.zig`) whose era window holds the start year, else
+  to a `procedural` row drawn by `personage_gen` (`key` and `family_key`
+  empty, `generator_version` naming the generator); every other in-window
+  data row is seated after the seats (`personages.prepareSeeding(gs,
+  start_year)`). Data rows are `canon` (setting facts restated) or
+  `authored` (project fiction), with `generator_version` 0. Provenance is
+  internal metadata for tests and save validation; no display shows it,
+  and no row says where a personage comes from. The title is derived by
+  `personage.titleText`, never stored: a data row's own title, or "Governor
+  of …" / "Leader, …" for a procedural row. Unlike the contract-scoped
   **Actor**, a personage exists from campaign creation whether or not any
   contract names it, and no game rule reads one yet. Seeding and the load
   check are `sim/personages.zig` (`prepareSeeding`, `commitSeeding`,
   `validate`): `create_commander` prepares the seeding before its first
   mutation and commits it after its last fallible step, so a seeding
   failure leaves the campaign unchanged. `who` lists them through
-  `queries.personageRows`; `who <contract id>` and the F4 `w` who's-who
-  sheet read `queries.contractWhosWho` (the contract's world governor,
-  employer leader and enemy leader, a dim line for an empty seat).
+  `queries.personageRows` (`who <faction>`: the leader, then its heirs,
+  family and officials, then its rulers); `who <contract id>` and the F4
+  `w` who's-who sheet read `queries.contractWhosWho` (the contract's world
+  governor, employer leader and enemy leader, a dim line for an empty seat).
 - **Personage relation** — `personage.Relation { from, to, kind, weight }`
   in `GameState.personage_relations`, in generation order; `(from, to, kind)`
   is its identity. Kinds (§B): `liege` (vassal → liege), `kin`, `rival`,
@@ -301,13 +311,16 @@ cheap, copyable, and impossible to mix up.
   1–100 (`tuning.politics`); a liege's weight is the vassal's loyalty, so
   loyalty exists exactly where a liege does. `sim/personage_relations.zig`
   draws them inside `prepareSeeding`, after every personage: each ruler of a
-  leader-bearing faction owes its leader fealty; personages of one faction
-  sharing a last name are kin (`personage.kinAtCreation`, decision K1); and
+  leader-bearing faction owes its leader fealty; two data rows sharing a
+  non-empty `family_key` are kin (decision K2), two procedural rows of one
+  faction sharing a last name are kin (decision K1), and a data row and a
+  procedural row never are (`personage.kinAtCreation`); and
   each ruler may draw one rival (same faction), ally (neither faction lists
   the other as a foe) and grudge (one does) toward a ruler within
   `relation_reach_ly` (`personage.inRelationReach`,
   `drawnRelationFactionsAllowed`, `factionsHostile`; decision R1 (relations)).
-  Leaders hold only kin and receive lieges. `personage_relations.validate`
+  Leaders hold only kin and receive lieges; heirs, family and officials hold
+  only kin. `personage_relations.validate`
   is the load check. `queries.personageRelationRows` lists one personage's
   relations (a leader's lieges collapse into one "fealty of N governors"
   row); `who <world>`, `who <contract id>` and the F4 sheet print them under
@@ -1373,9 +1386,10 @@ a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
 **Current format boundary.** New empty stores
-initialize schema 71 transactionally. Existing store and campaign versions
-must both be 71; older formats (70 included) are refused intact and newer formats retain
-their distinct refusal before persistent mutation. A nonempty unversioned
+initialize schema 72 transactionally. Existing store and campaign versions
+must both be 72 once the store is open; a schema 71 store is migrated on
+open (below), older formats (70 included) are refused intact and newer
+formats retain their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
 missing tables or rows. No automatic reset, deletion, rewrite, backfill or
 reseeding is allowed. Store adoption, campaign loading and overwriting enforce
@@ -1447,17 +1461,43 @@ loader refuses a company member on a pool or travelling seat, field freight to
 a non-company force, inbound plus attached carriers over the company's cap,
 and a return leg to a missing HQ.
 
-**Personages are saved** (schema 70 and later): one `personage` row each (role, names,
+**Personages are saved** (schema 70 and later; `key` and `family_key` from
+schema 72): one `personage` row each (role, names,
 faction and seat keys, the motive set as a bitmask with bit = the motive's
-declared value, ambition, provenance and generator version) and the meta
-counter `next_personage_id`. SQL checks bound the ordinal, role, motive
-count (two or three), ambition (0–100), provenance and generator version;
-the loader refuses an ordinal that is not an integer equal to the row's
-position (0, 1, 2, … as saved), and `personages.validate` refuses an
+declared value, ambition, provenance, generator version, data key and
+family key) and the meta counter `next_personage_id`. The title is not
+saved: it is read from the data row by key. SQL checks bound the ordinal,
+role, motive count (two or three), ambition (0–100), provenance and
+generator version, and tie them together: a `procedural` row has an empty
+key and family, generator version 1 and a ruler or leader role; a `canon`
+or `authored` row has a key and generator version 0. A partial unique
+index keeps each non-empty key once per campaign. The loader refuses an
+ordinal that is not an integer equal to the row's position (0, 1, 2, … as
+saved), and `personages.validate` refuses an
 unknown key, seat, enum or motive bit, a ruler on a world that does not hire or of another faction than its world's,
 two rulers on one world, a leader for a faction that gets none, off its
 capital or doubled, a campaign with a commander missing any ruler or leader,
-personages in a campaign without one, and an id at or above the counter.
+personages in a campaign without one, and an id at or above the counter; a
+key naming no `personages.zon` row, a keyed row whose role, names, faction,
+seat, family, motives, ambition or provenance differ from its data row, a
+duplicate key, a procedural heir, family member or official, and a
+generator version that does not match the provenance. Which data rows a
+campaign holds is not checked: the start year is not saved.
+
+**Schema 71 stores migrate to 72** on open (`Store.migrateV71ToV72`, the
+one supported migration). Before any change the store must hold every v71
+table and column (the frozen v71 `personage` definition, every other table
+as today), exactly the v71 `personage` columns, and only v71 campaigns;
+otherwise `CorruptStore`, untouched. Then one transaction with foreign keys
+off creates `personage__v72` from the current DDL, copies every row with
+`key = ''` and `family_key = ''` and every other column as stored, drops
+`personage`, renames the new table to `personage` (create–copy–drop–rename,
+so `personage_relation`'s foreign keys keep naming `personage`), recreates
+its indexes, sets every campaign and the store to 72, requires an empty
+`PRAGMA foreign_key_check` and the v72 schema, and commits. Any failure
+rolls back with the file still v71. A migrated campaign keeps every
+procedural personage, relation, id, counter and stream exactly, gains no
+data row (decision M1), and plays on as it would have.
 
 **Personage relations are saved** (schema 71): one `personage_relation` row
 each (ordinal, from and to personage ids, kind tag, weight). SQL checks bound
@@ -1488,6 +1528,9 @@ legacy-blob or fresh-stream fallbacks.
 their own terms; BattleTech IP belongs to Topps/CGL, with Microsoft rights over
 video game usage. We re-implement rules and keep our own data format. Don't
 bulk-copy MegaMek data files into the repo without deciding on licensing.
+The `canon` rows of `data/tables/personages.zon` restate BattleTech setting
+facts (names, offices, seats, family ties) as summarized by Sarna
+(BattleTechWiki) in project words; no text is copied.
 
 ## 13. Zig specifics
 

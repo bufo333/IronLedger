@@ -1,0 +1,93 @@
+// Data personages: the figures a campaign seats in place of procedural
+// rulers and leaders when its start year is in a row's era window
+// (docs/p5d-conflict-world-design.md §B, §H). Typed against
+// src/domain/personage_data.zig `Table`.
+//
+// Source: `canon` rows restate BattleTech setting facts for 3025 (names,
+// offices, seats, family ties) in project words, as summarized by
+// BattleTechWiki (sarna.net); no text is copied. `authored` rows are
+// project fiction. Motives and ambition are project characterization on
+// every row. `provenance` is internal metadata and is never displayed.
+//
+//   key              stable key a save stores (personage.key); never renamed
+//   role             planetary_ruler | faction_leader | heir | family | intelligence_chief
+//   first_name, last_name, title   display text (markup-safe)
+//   faction_key      a factions.zon key
+//   seat_planet_key  a planets.zon key: the world ruled, the leader's
+//                    capital, or where the figure is placed
+//   family_key       a `families` key, or "" for none; rows sharing one are kin
+//   motives          two or three distinct motives (§B)
+//   ambition         0..politics.ambition_max
+//   era_from_year, era_to_year     inclusive start years that seat the row
+//   provenance       canon | authored
+//
+// The build refuses a duplicate or malformed key, an unknown faction, seat
+// or family, a ruler off a hiring world of its faction, a leader off its
+// faction's capital, two rows on one seat in overlapping windows, an
+// out-of-range motive set or ambition, a window not covering 3025, an
+// empty or markup-bearing name or title, and a full name the names.zon
+// pools could draw.
+.{
+    .families = .{
+        .{ .key = "davion", .name = "House Davion" },
+        .{ .key = "steiner", .name = "House Steiner" },
+        .{ .key = "kurita", .name = "House Kurita" },
+        .{ .key = "liao", .name = "House Liao" },
+        .{ .key = "marik", .name = "House Marik" },
+    },
+    .rows = .{
+        // ---- canon: faction leaders, on their capitals ----
+        .{ .key = "hanse_davion", .role = .faction_leader, .first_name = "Hanse", .last_name = "Davion", .title = "First Prince of the Federated Suns", .faction_key = "FS", .seat_planet_key = "new_avalon", .family_key = "davion", .motives = .{ .expansion, .dynastic_security }, .ambition = 85, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "katrina_steiner", .role = .faction_leader, .first_name = "Katrina", .last_name = "Steiner", .title = "Archon of the Lyran Commonwealth", .faction_key = "LC", .seat_planet_key = "tharkad", .family_key = "steiner", .motives = .{ .dynastic_security, .reform }, .ambition = 70, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "takashi_kurita", .role = .faction_leader, .first_name = "Takashi", .last_name = "Kurita", .title = "Coordinator of the Draconis Combine", .faction_key = "DC", .seat_planet_key = "luthien", .family_key = "kurita", .motives = .{ .expansion, .honor, .revenge }, .ambition = 80, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "maximilian_liao", .role = .faction_leader, .first_name = "Maximilian", .last_name = "Liao", .title = "Chancellor of the Capellan Confederation", .faction_key = "CC", .seat_planet_key = "sian", .family_key = "liao", .motives = .{ .survival, .revenge, .ambition }, .ambition = 75, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "janos_marik", .role = .faction_leader, .first_name = "Janos", .last_name = "Marik", .title = "Captain-General of the Free Worlds League", .faction_key = "FWL", .seat_planet_key = "atreus", .family_key = "marik", .motives = .{ .dynastic_security, .survival }, .ambition = 55, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "thomas_calderon", .role = .faction_leader, .first_name = "Thomas", .last_name = "Calderon", .title = "Protector of the Taurian Concordat", .faction_key = "TC", .seat_planet_key = "taurus", .family_key = "", .motives = .{ .survival, .revenge }, .ambition = 50, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "kyalla_centrella", .role = .faction_leader, .first_name = "Kyalla", .last_name = "Centrella", .title = "Magestrix of Canopus", .faction_key = "MOC", .seat_planet_key = "canopus4", .family_key = "", .motives = .{ .profit, .dynastic_security }, .ambition = 45, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "neil_avellar_ii", .role = .faction_leader, .first_name = "Neil", .last_name = "Avellar II", .title = "President of the Outworlds Alliance", .faction_key = "OA", .seat_planet_key = "alpheratz", .family_key = "", .motives = .{ .survival, .reform }, .ambition = 35, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+
+        // ---- canon: planetary rulers ----
+        .{ .key = "michael_hasek_davion", .role = .planetary_ruler, .first_name = "Michael", .last_name = "Hasek-Davion", .title = "Duke of New Syrtis", .faction_key = "FS", .seat_planet_key = "new_syrtis", .family_key = "davion", .motives = .{ .ambition, .secession }, .ambition = 80, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "candace_liao", .role = .planetary_ruler, .first_name = "Candace", .last_name = "Liao", .title = "Duchess of St. Ives", .faction_key = "CC", .seat_planet_key = "st_ives", .family_key = "liao", .motives = .{ .dynastic_security, .secession }, .ambition = 60, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "aldo_lestrade", .role = .planetary_ruler, .first_name = "Aldo", .last_name = "Lestrade IV", .title = "Duke of Summer", .faction_key = "LC", .seat_planet_key = "summer", .family_key = "", .motives = .{ .secession, .ambition, .profit }, .ambition = 85, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+
+        // ---- canon: heirs, family and officials ----
+        .{ .key = "melissa_steiner", .role = .heir, .first_name = "Melissa", .last_name = "Steiner", .title = "Archon-Designate", .faction_key = "LC", .seat_planet_key = "tharkad", .family_key = "steiner", .motives = .{ .dynastic_security, .honor }, .ambition = 40, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "theodore_kurita", .role = .heir, .first_name = "Theodore", .last_name = "Kurita", .title = "Prince of Luthien", .faction_key = "DC", .seat_planet_key = "luthien", .family_key = "kurita", .motives = .{ .honor, .reform }, .ambition = 60, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "thomas_marik", .role = .heir, .first_name = "Thomas", .last_name = "Marik", .title = "Heir to the Captain-Generalcy", .faction_key = "FWL", .seat_planet_key = "atreus", .family_key = "marik", .motives = .{ .reform, .honor }, .ambition = 45, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "marie_davion", .role = .family, .first_name = "Marie", .last_name = "Davion-St. Claire", .title = "Duchess of New Syrtis", .faction_key = "FS", .seat_planet_key = "new_syrtis", .family_key = "davion", .motives = .{ .dynastic_security, .ambition }, .ambition = 55, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "romano_liao", .role = .family, .first_name = "Romano", .last_name = "Liao", .title = "Daughter of the Chancellor", .faction_key = "CC", .seat_planet_key = "sian", .family_key = "liao", .motives = .{ .ambition, .revenge }, .ambition = 90, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "tormano_liao", .role = .family, .first_name = "Tormano", .last_name = "Liao", .title = "Son of the Chancellor", .faction_key = "CC", .seat_planet_key = "sian", .family_key = "liao", .motives = .{ .ambition, .survival }, .ambition = 65, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "duggan_marik", .role = .family, .first_name = "Duggan", .last_name = "Marik", .title = "Son of the Captain-General", .faction_key = "FWL", .seat_planet_key = "atreus", .family_key = "marik", .motives = .{ .dynastic_security, .expansion }, .ambition = 50, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "duncan_marik", .role = .family, .first_name = "Duncan", .last_name = "Marik", .title = "Nephew of the Captain-General", .faction_key = "FWL", .seat_planet_key = "atreus", .family_key = "marik", .motives = .{ .ambition, .expansion }, .ambition = 70, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+        .{ .key = "quintus_allard", .role = .intelligence_chief, .first_name = "Quintus", .last_name = "Allard", .title = "Acting Minister of Intelligence", .faction_key = "FS", .seat_planet_key = "new_avalon", .family_key = "", .motives = .{ .honor, .dynastic_security }, .ambition = 30, .era_from_year = 3025, .era_to_year = 3025, .provenance = .canon },
+
+        // ---- authored: leaders of the minor Periphery powers ----
+        .{ .key = "aurelius_drevan", .role = .faction_leader, .first_name = "Aurelius", .last_name = "Drevan", .title = "Consul of the Marian Hegemony", .faction_key = "MH", .seat_planet_key = "alphard_mh", .family_key = "", .motives = .{ .expansion, .ambition }, .ambition = 75, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "brannoc_hale", .role = .faction_leader, .first_name = "Brannoc", .last_name = "Hale", .title = "Chairman of the Circinus Federation", .faction_key = "CIR", .seat_planet_key = "circinus", .family_key = "", .motives = .{ .profit, .survival }, .ambition = 55, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "ingmar_torvaldsen", .role = .faction_leader, .first_name = "Ingmar", .last_name = "Torvaldsen", .title = "Regent of the Oberon Confederation", .faction_key = "OBR", .seat_planet_key = "oberon6", .family_key = "", .motives = .{ .profit, .revenge, .survival }, .ambition = 60, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+
+        // ---- authored: governors of the industrial worlds ----
+        .{ .key = "konrad_ebersbach", .role = .planetary_ruler, .first_name = "Konrad", .last_name = "Ebersbach", .title = "Landgrave of New Earth", .faction_key = "LC", .seat_planet_key = "new_earth", .family_key = "", .motives = .{ .profit, .dynastic_security }, .ambition = 45, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "mathilde_rausch", .role = .planetary_ruler, .first_name = "Mathilde", .last_name = "Rausch", .title = "Magistrate of Solaris VII", .faction_key = "LC", .seat_planet_key = "solaris7", .family_key = "", .motives = .{ .profit, .ambition }, .ambition = 70, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "henrike_asmussen", .role = .planetary_ruler, .first_name = "Henrike", .last_name = "Asmussen", .title = "Steward of Skye", .faction_key = "LC", .seat_planet_key = "skye", .family_key = "", .motives = .{ .secession, .survival }, .ambition = 50, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "ottokar_lindqvist", .role = .planetary_ruler, .first_name = "Ottokar", .last_name = "Lindqvist", .title = "Burgrave of Tharkad", .faction_key = "LC", .seat_planet_key = "tharkad", .family_key = "", .motives = .{ .honor, .dynastic_security }, .ambition = 30, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "siobhan_brennagh", .role = .planetary_ruler, .first_name = "Siobhan", .last_name = "Brennagh", .title = "Landgravine of Donegal", .faction_key = "LC", .seat_planet_key = "donegal", .family_key = "", .motives = .{ .reform, .profit }, .ambition = 55, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "ambrose_wexley", .role = .planetary_ruler, .first_name = "Ambrose", .last_name = "Wexley", .title = "Lord Lieutenant of Coventry", .faction_key = "LC", .seat_planet_key = "coventry", .family_key = "", .motives = .{ .profit, .honor }, .ambition = 40, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "jorunn_halvdan", .role = .planetary_ruler, .first_name = "Jorunn", .last_name = "Halvdan", .title = "Margravine of Hesperus II", .faction_key = "LC", .seat_planet_key = "hesperus_ii", .family_key = "", .motives = .{ .survival, .profit, .honor }, .ambition = 35, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "masaru_tokugane", .role = .planetary_ruler, .first_name = "Masaru", .last_name = "Tokugane", .title = "Planetary Magistrate of Luthien", .faction_key = "DC", .seat_planet_key = "luthien", .family_key = "", .motives = .{ .honor, .dynastic_security }, .ambition = 40, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "ayame_kurosaki", .role = .planetary_ruler, .first_name = "Ayame", .last_name = "Kurosaki", .title = "Warden of Benjamin", .faction_key = "DC", .seat_planet_key = "benjamin", .family_key = "", .motives = .{ .expansion, .honor }, .ambition = 65, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "shigeo_nanbara", .role = .planetary_ruler, .first_name = "Shigeo", .last_name = "Nanbara", .title = "Magistrate of Dieron", .faction_key = "DC", .seat_planet_key = "dieron", .family_key = "", .motives = .{ .revenge, .expansion }, .ambition = 60, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "percival_ashcombe", .role = .planetary_ruler, .first_name = "Percival", .last_name = "Ashcombe", .title = "Viscount of New Avalon", .faction_key = "FS", .seat_planet_key = "new_avalon", .family_key = "", .motives = .{ .dynastic_security, .honor }, .ambition = 35, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "genevieve_larouche", .role = .planetary_ruler, .first_name = "Genevieve", .last_name = "Larouche", .title = "Countess of Robinson", .faction_key = "FS", .seat_planet_key = "robinson", .family_key = "", .motives = .{ .expansion, .revenge }, .ambition = 65, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "desmond_whitlow", .role = .planetary_ruler, .first_name = "Desmond", .last_name = "Whitlow", .title = "Baron of Kathil", .faction_key = "FS", .seat_planet_key = "kathil", .family_key = "", .motives = .{ .profit, .survival }, .ambition = 45, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "anatoly_vorontsev", .role = .planetary_ruler, .first_name = "Anatoly", .last_name = "Vorontsev", .title = "Margrave of Tikonov", .faction_key = "FS", .seat_planet_key = "tikonov", .family_key = "", .motives = .{ .survival, .reform }, .ambition = 50, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "liang_shuren", .role = .planetary_ruler, .first_name = "Liang", .last_name = "Shuren", .title = "Prefect of Sian", .faction_key = "CC", .seat_planet_key = "sian", .family_key = "", .motives = .{ .dynastic_security, .survival }, .ambition = 35, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "yevgenia_orlova", .role = .planetary_ruler, .first_name = "Yevgenia", .last_name = "Orlova", .title = "Magistrate of Capella", .faction_key = "CC", .seat_planet_key = "capella", .family_key = "", .motives = .{ .ambition, .profit }, .ambition = 70, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "feng_jiahui", .role = .planetary_ruler, .first_name = "Feng", .last_name = "Jiahui", .title = "Prefect of Sarna", .faction_key = "CC", .seat_planet_key = "sarna", .family_key = "", .motives = .{ .survival, .revenge }, .ambition = 55, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "ottavio_brancaleone", .role = .planetary_ruler, .first_name = "Ottavio", .last_name = "Brancaleone", .title = "Count of Atreus", .faction_key = "FWL", .seat_planet_key = "atreus", .family_key = "", .motives = .{ .dynastic_security, .profit }, .ambition = 40, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "ludmila_ostrova", .role = .planetary_ruler, .first_name = "Ludmila", .last_name = "Ostrova", .title = "Countess of Marik", .faction_key = "FWL", .seat_planet_key = "marik", .family_key = "", .motives = .{ .reform, .ambition }, .ambition = 60, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "cassius_vantorre", .role = .planetary_ruler, .first_name = "Cassius", .last_name = "Vantorre", .title = "Director of Irian", .faction_key = "FWL", .seat_planet_key = "irian", .family_key = "", .motives = .{ .profit, .expansion }, .ambition = 75, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+        .{ .key = "bianca_ferrante", .role = .planetary_ruler, .first_name = "Bianca", .last_name = "Ferrante", .title = "Viscountess of Oriente", .faction_key = "FWL", .seat_planet_key = "oriente", .family_key = "", .motives = .{ .secession, .dynastic_security }, .ambition = 50, .era_from_year = 3025, .era_to_year = 3025, .provenance = .authored },
+    },
+}

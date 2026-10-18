@@ -401,27 +401,32 @@ Nobody piloted a mek. That's the game.
 
 ---
 
-## Who rules the Inner Sphere (P5d.1a, P5d.1b, P5d.1c)
+## Who rules the Inner Sphere (P5d.1a–P5d.1d)
 
 Every world whose house hires mercenaries has a governor, and every great
 power that hires has a leader seated on its capital; the Periphery's pirate
 bucket has worlds and governors but no leader. Each carries two or three
-motives (expansion, honor, revenge, …) and an ambition. In the console `who`
-lists the leaders, `who LC` a power's leader and then its governors, and
-`who skye` that world's governor. On the Contracts screen (F4), `w` on an
-offer, an active contract or a closed one shows who governs its world and who
-leads its employer and its enemy (the pirates have no leader, and a world
-whose house does not hire has no governor); `who <contract id>` in the
-console shows the same. For now every one of them is generated when the
-campaign starts and labelled `procedural`: they are not the canon rulers of
-3025, and nothing in the game acts on them yet.
+motives (expansion, honor, revenge, …) and an ambition. In a 3025 start the
+great houses' leaders, their heirs and family, and the notable rulers of the
+realm are the setting's own figures under their own titles — the Archon on
+Tharkad, the First Prince on New Avalon, the Duke of New Syrtis — and the
+lesser Periphery powers and the great industrial worlds have their own
+named rulers; every other world has a Governor of the realm. In the console
+`who` lists the leaders, `who LC` a power's leader, then its heirs, family
+and officials, then its governors, and `who skye` that world's governor. On
+the Contracts screen (F4), `w` on an offer, an active contract or a closed
+one shows who governs its world and who leads its employer and its enemy
+(the pirates have no leader, and a world whose house does not hire has no
+governor); `who <contract id>` in the console shows the same. Nothing in
+the game acts on them yet.
 
 They are also tied to one another. Every governor of a house with a leader
-owes that leader fealty, with a loyalty from 1 to 100. Personages of one
-house who share a surname are family (kin). Governors whose worlds lie within
+owes that leader fealty, with a loyalty from 1 to 100. Members of one
+family are kin. Governors whose worlds lie within
 two jumps (60 light-years) may be rivals (same house), allies (houses that do
-not count each other as foes) or hold a grudge (houses that do). Leaders hold
-only family ties and their governors' fealty. `who skye` and `who <contract
+not count each other as foes) or hold a grudge (houses that do). Leaders,
+heirs, family and officials hold only family ties, and leaders their
+governors' fealty. `who skye` and `who <contract
 id>` list each personage's ties beneath it, and so does the F4 `w` sheet; a
 leader's governors show as one "fealty of N governors" line. These ties are
 fixed when the campaign starts and nothing in the game acts on them yet.

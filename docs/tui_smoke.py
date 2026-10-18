@@ -153,8 +153,13 @@ assert wait_for("Ashfall Lancers"), plain()[-3000:]   # auto-fill from first cat
 send("\t\t", 0.3)              # Tab×2: field 0 → 1 → 2 (grid navigation mode)
 send("l", 1.5)                 # right: w_logo 0 → 1 (Balance Point Mercenaries)
 assert wait_for("Balance Point Mercenaries"), plain()[-3000:]  # auto-fill from second logo
+company_from = len(out)
 send("\r", 3.0)                # outfit → company (generates)
-assert "GENERATED COMPANY" in plain()
+assert wait_for("STARTING COMPANY"), plain()[-3000:]
+# The company step never calls the player's company generated
+# (docs/p5d-conflict-world-design.md §F).
+company_step = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[company_from:]).decode("utf-8", "replace")
+assert "generated" not in company_step.lower(), company_step[-3000:]
 assert "BACK OFFICE" in plain(), plain()[-3000:]   # sizing pane, wide or narrow
 send("\t", 0.4); send("+", 0.8)  # one more command admin …
 assert "hired one admin_command" in plain()[-1200:], plain()[-1500:]
@@ -177,11 +182,16 @@ assert "CONTRACT BOARD" in plain() and "HISTORY" in plain(), plain()[-3000:]
 send("b", 0.8)                 # bargain: negotiation term picker on the offer under the cursor
 assert "NEGOTIATE" in plain()[-30000:] and "salvage" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)
+sheet_from = len(out)
 send("w", 0.8)                 # who's who for the offer under the cursor
 p = plain()[-30000:]
-assert "WHO'S WHO" in p and "Governor of" in p and "[procedural]" in p, plain()[-3000:]
+assert "WHO'S WHO" in p and "Governor of" in p, plain()[-3000:]
 # Every present seat lists its relations, or says it has none.
-assert re.search(r"liege  Leader, |fealty of \d+ governor|no relations|(kin|rival|ally|grudge against|grudge borne by)  Governor of ", p), plain()[-3000:]
+assert re.search(r"liege  [A-Z]|fealty of \d+ governor|no relations|(kin|rival|ally|grudge against|grudge borne by)  [A-Z]", p), plain()[-3000:]
+# The sheet says nothing of where anyone comes from (docs/p5d-conflict-world-design.md §F).
+sheet = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[sheet_from:]).decode("utf-8", "replace")
+origin = re.search(r"\b(procedural|generated|generator|authored|author|canon|sarna|project character|provenance|source|fictional|invented|real)\b", sheet, re.I)
+assert origin is None, f"origin word {origin.group(0) if origin else ''!r} on the who's who sheet: " + sheet[-3000:]
 send("\x1b", 0.6)
 send("\t"); send("\t", 0.6)    # focus the history pane; read-only
 send("j"); send("c", 0.6)
@@ -673,7 +683,7 @@ def artillery_phase():
         send("\r")
         assert wait_for("CATALOG"), plain()[-3000:]
         send("\r", 3.0)
-        assert wait_for("GENERATED COMPANY"), plain()[-3000:]
+        assert wait_for("STARTING COMPANY"), plain()[-3000:]
         send("\r")
         assert wait_for("REVIEW"), plain()[-3000:]
         send("\r", 2.0)

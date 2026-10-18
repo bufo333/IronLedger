@@ -253,23 +253,37 @@ check '\[1\] situation Alpha'
 check '(Black Market Contact) offers crates of munitions'
 check '3: Send them away   \[morale -2\]   nothing changes hands (default)'
 check '\[situation\] .* (Black Market Contact): chose "Send them away" — morale -2 · nothing changes hands'
-# P5d.1a: `who` lists the leaders, a faction's leader then its governors, and
-# a world's governor, each labelled with its provenance; an unknown key is
-# refused with the usage.
-check 'Leader, Draconis Combine'
-check 'Leader, Lyran Commonwealth .* LC '
-check 'Governor of Tharkad'
-check 'Governor of Skye'
-check '\[procedural\]'
+# P5d.1a, P5d.1d: `who` lists the leaders, a faction's leader, then its
+# heirs, family and officials, then its governors, and a world's governor;
+# a 3025 start seats the setting's figures under their own titles beside
+# generic governors. An unknown key is refused with the usage.
+check 'Coordinator of the Draconis Combine'
+check 'Archon of the Lyran Commonwealth  Katrina Steiner  LC '
+check 'Archon-Designate  Melissa Steiner  LC '
+check 'Governor of '
+check 'Steward of Skye'
 check 'those arguments do not fit the verb — usage: who'
 # `who <contract id>` names the governor of the offer's world and its
 # employer's and enemy's leaders; an id no contract has is refused.
-check 'world  *#[0-9]*  Governor of'
-check 'employer  #[0-9]*  Leader, '
+check 'world  *#[0-9]*  [A-Z]'
+check 'employer  #[0-9]*  [A-Z]'
 check 'could not show that: no contract has that id'
 # `who <world>` and `who <contract id>` print each personage's relations
 # under its row: Skye's governor owes fealty to the Lyran leader, and a
 # contract's leader seat counts its governors' fealty.
-check '^      liege  Leader, Lyran Commonwealth  .*  loyalty [0-9]'
+check '^      liege  Archon of the Lyran Commonwealth  .*  loyalty [0-9]'
 check '^      fealty of [0-9]* governor'
+# No `who` step says where anyone comes from (docs/p5d-conflict-world-design.md
+# §F): the output of each, between its prompt and the next, holds none of
+# these words. Input line N is the Nth command, whose output follows the
+# Nth prompt.
+who_steps=$(grep -n '^who' "$work/input" | cut -d: -f1 | tr '\n' ' ')
+awk -v steps="$who_steps" '
+  BEGIN { n = split(steps, s, " "); for (i = 1; i <= n; i++) want[s[i]] = 1; c = 0 }
+  { line = $0; while (substr(line, 1, 2) == "> ") { c++; line = substr(line, 3) } if (c in want) print line }
+' "$work/output" > "$work/who"
+[ -s "$work/who" ] || { echo "MISSING: who step output"; exit 1; }
+if grep -n -i -w -E 'procedural|generated|generator|authored|author|canon|sarna|project character|provenance|source|fictional|invented|real' "$work/who"; then
+  echo "FOUND: an origin word in a who step's output"; exit 1
+fi
 echo "REPL SMOKE OK"

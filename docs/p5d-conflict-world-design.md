@@ -8,10 +8,11 @@ digest, P5c situations and inbox — all on `main`.
 acceptance, presence from the hire day). None of its content is carried
 forward.
 **Adaptation note:** BattleTech canon (people, titles, dates) enters only as
-facts restated from cited Sarna pages, never as copied prose (D8);
+facts restated in project words from Sarna, never as copied prose (D8);
 ARCHITECTURE.md "Licensing note" applies. Everything else here — scheme
 templates, project characters, the NPC operating model and every number — is
-project-authored and labelled so. Every new number is `// TUNE` with its unit
+project-authored. The game UI never says which is which (direction 4 of the
+P5d.1d decisions below). Every new number is `// TUNE` with its unit
 in its name (contract rules 24, 81).
 
 The existing P5d.2, P5d.3 and P5d.5–P5d.7 entries keep their scope. This
@@ -64,9 +65,12 @@ acceptance evidence.
    durable passive decay.
 10. Intended eventual scale: at least a governor or local leader per planet,
     faction leaders, families and generals, several hundred named people and
-    roughly a few thousand scenarios. External canon is cited accurately with
-    provenance; original material is labelled project-authored. Canon research
-    re-verifies exact Sarna facts and citations before use.
+    roughly a few thousand scenarios. Canon is restated in project words from
+    read-only research done during planning; the game needs no external-source
+    validation or citation, and no step depends on web access (John's
+    directions for P5d.1d). No player-facing label, word, marker, filter,
+    count or lookup says whether a character or company is generated,
+    authored, canon or Sarna-derived.
 
 ## What exists today
 
@@ -308,9 +312,10 @@ for every kind.
     `// TUNE` scale, and a backstory as a short authored or composed text.
   - Relations: `personage_relation(a, b, kind ∈ {kin, liege, rival, ally,
     grudge}, weight)`.
-  - Provenance (required on every row): `canon` (Sarna page URL plus retrieval
-    date, facts re-encoded), `authored` (project-created, with a named author
-    note), or `procedural` (generated, with the generator version).
+  - Provenance (internal metadata on every row, for tests and save
+    validation; never displayed): `canon` (setting facts restated in project
+    words), `authored` (project-created), or `procedural` (generated, with the
+    generator version). No per-row URL, retrieval date or citation field.
   - State: `status` (`active`, `deposed`, `dead`, `exiled`),
     `standing_with_player`, and typed flags (as `ActorFlags`).
 - **Coverage target (directions 5, 10).** Every `hires` world has exactly one
@@ -353,6 +358,22 @@ for every kind.
   one pair. Which pairs creation draws is not a load check, because later
   increments relate others (§C resolution grudges, §K pacts and broken
   alliances).
+- **Landed in P5d.1d.** `data/tables/personages.zon` (`domain/personage_data.zig`,
+  validated every build) holds `families` and `rows` with `key`, `role`
+  (adding `heir`, `family` and `intelligence_chief`), names, `title`,
+  faction, seat, `family_key`, motives, ambition, an inclusive start-year era
+  window and an internal `canon` or `authored` provenance. A campaign seats,
+  in each ruler and leader seat, the row whose window holds its start year,
+  else a procedural draw, and then every other in-window row (Y1); stock rows
+  are 3025–3025, so other start years seat exactly the procedural world.
+  Two data rows sharing a `family_key` are kin (K2), procedural pairs stay K1,
+  and a data row and a procedural row are never kin; heirs, family and
+  officials hold kin only. A data row shows its own title; a procedural row
+  keeps "Governor of …" / "Leader, …" (T1). `personage` gains `key` and
+  `family_key` at schema v72, with a transactional v71 → v72 migration that
+  keeps every existing personage procedural and adds no data row (M1).
+  `general`, `noble`, `corporate`, `pirate_lord` and `merc_commander`,
+  backstory, `status`, standing and flags remain later work.
 
 ## §C World conflicts: the cause of every contract (D2)
 
@@ -474,16 +495,16 @@ for every kind.
 - **Who's who.** A personage detail (REPL `who <id|key>`, and a modal from the
   Contracts detail and the conflict view in the TUI) shows:
   - title, seat, liege, kin, motives and backstory;
-  - provenance label (`canon — sarna.net/wiki/…` / `project character` /
-    `procedural`, the label P5d.1a landed for generated rows);
+  - no provenance label: nothing says where the personage comes from
+    (P5d.1d removed the `procedural` label P5d.1a had shown);
   - standing with you;
   - conflicts instigated or targeted;
   - for a merc commander, the company's location and commitment.
 
   P5d.1b landed the Contracts entry point: `w` on any F4 offer, active or
   closed contract opens a read-only sheet of the contract's world governor,
-  employer leader and enemy leader, each the `who` row with its provenance
-  label, and REPL `who <contract id>` prints the same rows. P5d.1c added
+  employer leader and enemy leader, each the `who` row (since P5d.1d without
+  any provenance label), and REPL `who <contract id>` prints the same rows. P5d.1c added
   liege and kin, with rivals, allies and grudges, as relation lines under each
   seat on that sheet and under each personage in `who <world>` and
   `who <contract id>`. The conflict-view entry comes with the conflict view;
@@ -516,11 +537,12 @@ for every kind.
 
 ## §H Corpus: size, provenance and composition (D6, D8)
 
-- **Composition (three layers, every row labelled):**
-  1. **Canon** — re-encoded facts from Sarna, cited per row, 3025 state only.
+- **Composition (three layers, each row's layer internal metadata, never
+  shown to the player):**
+  1. **Canon** — facts restated in project words from Sarna, 3025 state
+     only; no per-row citation.
   2. **Authored** — project characters filling named gaps (rulers of notable
-     worlds, pirate lords, merc commanders), written for this project and never
-     presented as canon.
+     worlds, pirate lords, merc commanders), written for this project.
   3. **Procedural** — rulers for remaining worlds and minor family, generated
      from names tables plus motive/trait tables. One can be promoted to
      authored by adding a data row with the same seat.
@@ -538,21 +560,39 @@ for every kind.
   - about 12 scheme templates.
 
   Growth after that is data-only ("P5d content expansion").
-- **A corpus report** built from the data (a test-backed query or a
-  `docs/data-fixtures.py`-style count) prints counts by layer, role and
-  faction, so size and provenance are auditable.
-- This document adds no data row. Canon enters only in P5d.1d, re-verified
-  against its page then.
+- **The corpus as built (P5d.1d):** 20 canon rows (the eight great and
+  Periphery leaders, the rulers of New Syrtis, St. Ives and Summer, and nine
+  heirs, family and officials), 24 authored rows (leaders of the Marian
+  Hegemony, Circinus Federation and Oberon Confederation, and the rulers of
+  the 21 hiring worlds of industry 4 or more with no canon ruler), and a
+  procedural ruler for every other hiring world. The counts are asserted by
+  tests over the table; no player-visible corpus report or count exists.
+- Canon enters through `personages.zon` from the planning research in §I;
+  the implementer encodes it from that record and needs no web access.
 
-## §I Sarna research record (scoped, retrieved 2026-10-15, unverified for use)
+## §I Sarna research record (planning input, retrieved 2026-10-15 and 2026-10-17)
 
-The facts below were extracted during planning with a page-summarizing fetch
-tool and were not re-fetched for this document. They are a research record
-with provenance (URL, retrieval date 2026-10-15) and are **unverified for
-use**: the P5d.1d implementer re-verifies each against the exact cited page,
-with that day's retrieval date, before it enters any data or player-visible
-text. This document restates facts only and copies no Sarna prose. Anything
-not listed is unverified and is not canon until sourced.
+The facts below were read read-only during planning and are restated in
+project words; no Sarna prose is copied. They are planning input only: the
+game carries no citation, re-verification step or player-facing source
+disclosure, and the implementer encodes the P5d.1d plan's restated list
+without web access. The URLs below record where planning read; they enter no
+data row and no screen.
+
+- **P5d.1d research (2026-10-17).** The P5d.1d plan restates the 3025 figures
+  it encodes: the eight faction leaders on their capitals; Michael
+  Hasek-Davion (New Syrtis), Candace Liao (St. Ives) and Aldo Lestrade IV
+  (Summer) as rulers; and Melissa Steiner, Theodore Kurita and Thomas Marik
+  as heirs, Marie Davion-St. Claire, Romano, Tormano, Duggan and Duncan as
+  family, and Quintus Allard as acting intelligence head. Thomas, Romano,
+  Tormano, Duggan, Duncan and Quintus are placed on their faction's capital
+  because the pages give no 3025 seat; placement is a model choice. Dropped
+  because the pages read do not confirm a 3025 role, or only a
+  disambiguation page was read: Morgan Hasek-Davion, Frederick Steiner, Ryan
+  Steiner and Ardan Sortek. No `general` or `noble` row exists. The Concord
+  of Kapteyn date (3022 or 3024) and the start of Liao's dealings with
+  Michael (3020 or about 3027) remain recorded disagreements; neither is
+  encoded.
 
 - **Licence.** Sarna states its content is under the GNU FDL 1.2 unless
   otherwise noted, and that this licensing does not cover the original works or
@@ -990,7 +1030,7 @@ John before approval.
 | **P5d.1a** personage record | Every hiring world has a procedural `planetary_ruler` and every hiring faction a leader, persisted; `.politics` stream; REPL `who` | this design, D6, D7 | same seed → same rulers; adding `.politics` leaves other streams' values unchanged; load refuses a dangling seat |
 | **P5d.1b** who's-who surface | TUI who's-who modal and query rows with the provenance label | 1a | query test; TUI smoke step |
 | **P5d.1c** personage relations | `kin/liege/rival/ally/grudge` relations generated and shown | 1a | fixed-seed relation set; dangling endpoint refused |
-| **P5d.1d** canon and authored rows | `personages.zon` with provenance, rule-58 validator and fixtures, corpus report; §I canon re-verified; Sarna credit (D8) | 1a, D6–D8 | data-fixtures fail on each broken row; corpus report counts |
+| **P5d.1d** canon and authored rows | `personages.zon` with internal provenance, rule-58 validator and fixtures; §I canon restated from planning research; no player-facing provenance; schema v72 with its v71 migration; Sarna credit (D8) | 1a, D6–D8 | data-fixtures fail on each broken row; test-asserted counts by layer |
 | **P5d.1e** conflict record | Monthly `runSchemes` opens conflicts from about 12 templates with the §A timeline, local and strike forces; NPC-only resolution; REPL `conflicts`; log lines. **Board unchanged.** | 1a, 1c | same seed → same conflicts and days; strike/discovery invariants; resolution writes world state |
 | **P5d.1f** board from conflicts | Offers come only from conflicts under the §A posting rules; `conflict_id`, `side`, `on_station_by`, `close_day`; cause line; `TooLateToArrive`, `OppositeSide`; opposition = local/strike force | 1e | no offer without a conflict; no defender offer before `discovery_day`; close-day boundary; both refusals |
 | **P5d.1g** news reach and Newswire | `newsReach` (absorbs the company-position rule), `NewsItem`, Newswire pane and `news`, for conflict open/discover/resolve | 1e | 99/100/101 ly; position-independence test; out-of-reach conflict still resolves |
@@ -1112,7 +1152,32 @@ whose design depends on a different choice is re-planned.
   canon applies to another start year is left to 1d.
 - **D8 — Sarna text.** *Recommended:* restate facts, cite the URL per row, copy
   no prose, credit Sarna in 1d. *Alternative:* adapt GFDL text after a
-  licensing decision.
+  licensing decision. **John's choice (P5d.1d plan):** restate facts in
+  project words and copy no prose, with no per-row URL, retrieval date or
+  citation field and no validator check on sources; `README.md`
+  "Attribution" and the ARCHITECTURE.md "Licensing note" credit Sarna
+  (BattleTechWiki) as the source of the restated setting facts.
+- **P5d.1d decisions. John's choices (P5d.1d plan):**
+  - *Directions.* The game needs no external-source validation or citation;
+    Sarna research is read-only planning input restated in project words;
+    no player-facing provenance anywhere in the game UI (the founding
+    wizard's company pane is the "Starting company"); every schema change
+    includes a migration (applied to 1d; recording it as a standing rule is
+    separate governance work).
+  - *Y1 — start years.* Every data row has an era window; stock rows are
+    3025–3025. A campaign seats a row only in a start year its window holds;
+    other start years are seeded exactly as before.
+  - *K2 — kin.* Two data rows sharing a non-empty `family_key` are kin;
+    procedural pairs stay K1; a data row and a procedural row never are.
+  - *A1 — authored layer.* Authored leaders for MH, CIR and OBR, and an
+    authored ruler for each of the 21 hiring worlds of industry 4 or more
+    with no canon ruler.
+  - *T1 — titles.* A data row shows its own title, a procedural row the
+    generic one; no label marks either, and authored rows use styled titles
+    too, so a styled title does not mean canon.
+  - *M1 — migrated campaigns.* The v71 → v72 migration keeps every existing
+    personage procedural with empty `key` and `family_key` and adds no data
+    row; a new 3025 campaign gets the canon figures.
 - **D9 — playtest gate.** The gate entry is unchecked on `main`, and no verdict
   from John is recorded on `main`. *Recommended:* check it, worded as John's
   verdict, once John confirms it. *Alternative:* leave it for separate
@@ -1288,9 +1353,10 @@ Each increment plan may refine these under the contract:
   local and house forces only, and the old counter-hire still runs. 1k deletes
   it. The 1f plan states this, and no increment re-adds it.
 - **Canon drift.** Canon personages can meet non-canon fates after 3025 (D7).
-  The label says "canon as of 3025".
+  No label marks them as canon.
 - **Licensing.** GFDL text is not copied into the GPLv3 tree (D8). The
-  summarizing tool's extraction could be wrong, hence re-verification in 1d.
+  summarizing tool's extraction could be wrong; the game makes no claim of
+  source accuracy and carries no citation.
 - **News volume.** 100 ly around several HQs covers a large region. Severity
   and a per-day digest cap (`// TUNE`) keep it readable.
 - **Stale reach.** Reach is fixed on the public day and never back-filled. This

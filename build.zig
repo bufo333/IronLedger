@@ -55,6 +55,7 @@ pub fn build(b: *std.Build) void {
         .{ .import_name = "situations_zon", .rel = "tables/situations.zon" },
         .{ .import_name = "rival_archetypes_zon", .rel = "tables/rival_archetypes.zon" },
         .{ .import_name = "merc_bands_zon", .rel = "tables/merc_bands.zon" },
+        .{ .import_name = "personages_zon", .rel = "tables/personages.zon" },
     };
     // A mod directory that is missing, or that overlays nothing, is a
     // mistake, not a request for stock data: it fails here. A .zon file in

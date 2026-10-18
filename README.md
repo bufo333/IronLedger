@@ -698,7 +698,13 @@ IRON LEDGER is inspired by [MekHQ](https://megamek.org/) and the wider
 [MegaMek](https://github.com/MegaMek) project, whose campaign systems shaped
 what this game absorbs and what it leaves out. The rules it follows come from
 the BattleTech *Campaign Operations* and *TechManual* sourcebooks. It shares no
-code with MegaMek.
+code with MegaMek. The setting's figures of 3025 — its rulers, heirs and
+officials, their offices, seats and families — are restated in the game's own
+words from [Sarna](https://www.sarna.net/) (BattleTechWiki); no text is
+copied.
+
+Saves from the previous format (schema 71) upgrade automatically, in place,
+the first time this version opens them.
 
 BattleTech and 'Mech are trademarks of The Topps Company, Inc. This is a fan
 project, unaffiliated with Topps, Catalyst Game Labs, or MegaMek.
