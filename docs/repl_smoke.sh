@@ -262,7 +262,7 @@ check 'Governor of Tharkad'
 check 'Governor of Skye'
 check '\[procedural\]'
 check 'those arguments do not fit the verb — usage: who'
-# P5d.1b: `who <contract id>` names the governor of the offer's world and its
+# `who <contract id>` names the governor of the offer's world and its
 # employer's and enemy's leaders; an id no contract has is refused.
 check 'world  *#[0-9]*  Governor of'
 check 'employer  #[0-9]*  Leader, '

@@ -164,7 +164,7 @@ const Modal = union(enum) {
     /// Detail sheet for one NPC merc company, entered from the leaderboard.
     leaderboard_detail: types.MercCompanyId,
     /// Read-only who's who for one contract or offer (F4 `w`): its world's
-    /// governor, its employer's and its enemy's leaders (P5d.1b).
+    /// governor, its employer's and its enemy's leaders.
     whos_who: types.ContractId,
     /// Artillery formation detail (narrow terminals: no side pane).
     arty_detail: types.ArtilleryFormationId,
@@ -6241,7 +6241,7 @@ test "a decision taller than its modal scrolls under a fixed hint, and its keys 
 }
 
 test "the who's who sheet reads its contract each frame and says when the contract is gone" {
-    // Rule 40: the modal holds only the contract id. P5d.1b.
+    // Rule 40: the modal holds only the contract id.
     const c = try clientForTest(std.testing.allocator);
     defer deinitForTest(c, std.testing.allocator);
     const gs = c.app.state();
