@@ -247,7 +247,8 @@ cheap, copyable, and impossible to mix up.
   through typed pickers (crew, mechanic, clear, send) or says why it does not.
   [Artillery acquisition policy](docs/p2-artillery-acquisition-design.md) defines
   the monthly local offers, field delivery and declared transport/accounting
-  abstractions.
+  abstractions. The founding board is stamped with the campaign's start date,
+  so a day-0 save loads and its offer can be bought on day 0.
 - **Part** — static part definition (catalog) plus fungible quantities in site
   inventories; mounted unit slots carry condition, hulls carry maintenance
   quality A–F, and catalogue availability A–F controls sourcing. Acquisition

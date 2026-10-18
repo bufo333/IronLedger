@@ -7,6 +7,7 @@ const dom = @import("../domain/artillery_formation.zig");
 const catalogue = @import("../domain/artillery_catalogue.zig");
 const hull_dom = @import("../domain/hull_instance.zig");
 const hq_dom = @import("../domain/hq.zig");
+const clock = @import("../domain/clock.zig");
 const planet = @import("../domain/planet.zig");
 const unit = @import("../domain/unit.zig");
 const market = @import("../econ/market.zig");
@@ -32,17 +33,25 @@ pub fn purchasePrice() types.CBills {
     return (catalogue.calculated(carrier()) catch unreachable).cost;
 }
 
-/// Regional/brigade monthly supply exists only after the carrier's introduction year.
-pub fn marketEligible(gs: *const GameState, hq: *const hq_dom.Hq) bool {
-    return hq.tier != .field and gs.clock.date.year >= carrier().intro_year;
+/// Regional/brigade monthly supply exists in `year` only from the carrier's
+/// introduction year on. The one owner of artillery market eligibility. Pure.
+pub fn marketEligibleIn(hq: *const hq_dom.Hq, year: u16) bool {
+    return hq.tier != .field and year >= carrier().intro_year;
 }
 
-/// Prepare the initial founding board, without changing IDs or stock.
-pub fn prepareInitialOffer(gs: *GameState, hq: *const hq_dom.Hq, id: types.HqId) !?dom.Offer {
-    if (!marketEligible(gs, hq)) return null;
+/// `marketEligibleIn` at the campaign clock's year.
+pub fn marketEligible(gs: *const GameState, hq: *const hq_dom.Hq) bool {
+    return marketEligibleIn(hq, gs.clock.date.year);
+}
+
+/// Prepare the founding board for `date`, the campaign's start date: the offer
+/// is judged and stamped with that year and month. Reserves capacity only;
+/// changes no ID, stock or RNG.
+pub fn prepareInitialOffer(gs: *GameState, hq: *const hq_dom.Hq, id: types.HqId, date: clock.Date) !?dom.Offer {
+    if (!marketEligibleIn(hq, date.year)) return null;
     if (gs.next_artillery_offer_id == 0 or gs.next_artillery_offer_id == std.math.maxInt(u32)) return error.ArtilleryIdExhausted;
     try gs.artillery_offers.ensureUnusedCapacity(gs.allocator(), 1);
-    return .{ .id = @enumFromInt(gs.next_artillery_offer_id), .hq = id, .year = gs.clock.date.year, .month = gs.clock.date.month };
+    return .{ .id = @enumFromInt(gs.next_artillery_offer_id), .hq = id, .year = date.year, .month = date.month };
 }
 
 /// Install a prepared founding board without allocation or random draws.

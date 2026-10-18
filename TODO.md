@@ -114,6 +114,9 @@ A package has one primary invariant or subsystem outcome.
   seats' procedural rulers and leaders (heirs, family and officials too),
   with no provenance shown anywhere in the game UI; schema v72 with a
   transactional v71 → v72 migration; Sarna credited in the README.
+- [x] Founding offer start year: a campaign founded in any start year stamps
+  its founding artillery offer with that year, so its day-0 save loads and the
+  offer can be bought on day 0.
 - [ ] P5d.1e conflict record: monthly schemes open conflicts from about 12
   templates with the timeline and local and strike forces; NPC-only
   resolution; REPL `conflicts`; log lines; the board is unchanged. Needs

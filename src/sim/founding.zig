@@ -29,19 +29,32 @@ pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld, UnknownSit
 /// assertion below rather than silently overrunning a stack array.
 const max_founding_staff = 32;
 
-/// Character creation: the commander's origin picks the starter world
-/// (weighted-random in their faction's space) and stands up the starter
-/// regional HQ there with modest level-1 facilities.
-///
-/// Failure-atomic (rules 11-13): every RNG draw and allocation happens in
-/// a prepare phase that never touches `gs`; nothing commits until every
-/// destination has reserved capacity, so an OOM anywhere in preparation
-/// leaves `gs` — including `gs.rng` — exactly as it was.
+/// `createCommanderAt` in the campaign clock's current year.
 pub fn createCommander(
     gs: *GameState,
     name: []const u8,
     origin: commander_mod.Faction,
     profession: commander_mod.Profession,
+) CreateCommanderError!types.HqId {
+    return createCommanderAt(gs, name, origin, profession, gs.clock.date.year);
+}
+
+/// Character creation: the commander's origin picks the starter world
+/// (weighted-random in their faction's space) and stands up the starter
+/// regional HQ there with modest level-1 facilities. On success the clock's
+/// year is `start_year`, and the founding artillery offer carries that start
+/// date, so a day-0 save validates.
+///
+/// Failure-atomic (rules 11-13): every RNG draw and allocation happens in
+/// a prepare phase that never touches `gs`; nothing commits until every
+/// destination has reserved capacity, so an OOM anywhere in preparation
+/// leaves `gs` — including `gs.rng` and the clock — exactly as it was.
+pub fn createCommanderAt(
+    gs: *GameState,
+    name: []const u8,
+    origin: commander_mod.Faction,
+    profession: commander_mod.Profession,
+    start_year: u16,
 ) CreateCommanderError!types.HqId {
     // ---- validate ----
     if (gs.commander != null) return error.CommanderExists;
@@ -140,7 +153,9 @@ pub fn createCommander(
     const can_fund = gs.funds >= founding_funds;
     if (can_fund) try gs.reserveLedger(2); // debit + credit
 
-    const artillery_offer = try artillery.prepareInitialOffer(gs, &hq, @enumFromInt(gs.next_hq_id));
+    var start_date = gs.clock.date;
+    start_date.year = start_year;
+    const artillery_offer = try artillery.prepareInitialOffer(gs, &hq, @enumFromInt(gs.next_hq_id), start_date);
 
     // ---- commit: no fallible operation past this point ----
     gs.commander = .{
@@ -150,6 +165,7 @@ pub fn createCommander(
     };
 
     const id = gs.commitHq(hq);
+    gs.clock.date.year = start_year;
     artillery.commitInitialOffer(gs, artillery_offer);
 
     for (built[0..staff_count]) |person| {
@@ -248,8 +264,7 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
     // step below.
     const seeding = try personages.prepareSeeding(gs, c.start_year);
     defer seeding.deinit(gs);
-    _ = try createCommander(gs, c.name, c.origin, c.profession);
-    gs.clock.date.year = c.start_year;
+    _ = try createCommanderAt(gs, c.name, c.origin, c.profession, c.start_year);
     // Until renamed, the outfit carries the commander's name — it
     // reads far better in the campaign registry.
     if (std.mem.eql(u8, gs.outfit_name, "Provisional Mercenary Command")) {
@@ -296,9 +311,8 @@ test "foundHq produces an HQ with exactly the facilities from prepareHq" {
 }
 
 test "createCommander yields the same commander, HQ, staff and stock regardless of clock year" {
-    // execCreateCommander sets the start year after createCommander succeeds;
-    // this test verifies that the founding output is independent of the
-    // clock's year value so the two paths always agree.
+    // Only the founding artillery offer depends on the start year; the
+    // commander, HQ, staff and stock are the same whatever the clock's year.
     var gs1 = GameState.init(std.testing.allocator, .{ .seed = 8102 });
     defer gs1.deinit();
     var gs2 = GameState.init(std.testing.allocator, .{ .seed = 8102 });
@@ -387,6 +401,25 @@ test "the start year sets the calendar and gates the catalogue" {
     for (gs.market_listings.items) |l| if (l.kind == .unit) {
         try std.testing.expect(chassis_mod.find(l.item_key).?.intro_year <= 3010);
     };
+}
+
+test "the founding artillery offer carries the start date and can be bought on day 0" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 1217 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster, .start_year = 3020 } });
+    const home = gs.seat();
+    try std.testing.expectEqual(@as(u16, 3020), gs.clock.date.year);
+    try std.testing.expectEqual(@as(usize, 1), gs.artillery_offers.items.len);
+    const offer = gs.artillery_offers.items[0];
+    try std.testing.expectEqual(home, offer.hq);
+    try std.testing.expectEqual(gs.clock.date.year, offer.year);
+    try std.testing.expectEqual(gs.clock.date.month, offer.month);
+    try artillery.validate(&gs);
+    // The founding treasury is below the carrier price; fund the HQ in place
+    // because a courier transfer does not arrive on day 0.
+    gs.hqs.getPtr(home).?.funds = artillery.purchasePrice();
+    const bought = try commands.execute(&gs, .{ .buy_artillery = .{ .hq = home, .offer = offer.id } });
+    try std.testing.expect(bought.artillery_formation != .none);
 }
 
 test "HQ creation rejects exhausted invalid and retired counters without mutation" {

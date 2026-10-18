@@ -278,3 +278,27 @@ test "freshCampaign builds a saveable session with commander, outfit, company an
     try std.testing.expect(gs.campaign_id != 0);
     _ = commander_mod.Profession.paymaster; // ensures import is used
 }
+
+test "a campaign founded in any wizard start year loads its day-0 save with the same digest" {
+    const sqlite = @import("sqlite.zig");
+    const digest = @import("../sim/digest.zig");
+    // The wizard's start years plus a late-era year, as test data.
+    for ([_]u16{ 3015, 3020, 3025, 3028, 3030, 3050 }) |year| {
+        var lobby = Lobby.wrap(try store_mod.Store.fromDb(try sqlite.Db.open(":memory:")));
+        defer lobby.close();
+        const pid = try lobby.createPlayer("Ada");
+        var session = try Session.freshCampaign(std.testing.allocator, 7, .{
+            .commander_name = "Kalmar",
+            .origin = .FS,
+            .profession = .paymaster,
+            .start_year = year,
+            .outfit_name = "Iron Wolves",
+            .company_name = "Alpha Company",
+        });
+        defer session.close();
+        try lobby.save(&session, pid);
+        var loaded = try Session.load(lobby, std.testing.allocator, session.state().campaign_id);
+        defer loaded.close();
+        try std.testing.expectEqual(digest.stateHash(session.state()), digest.stateHash(loaded.state()));
+    }
+}
