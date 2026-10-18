@@ -1162,8 +1162,8 @@ whose design depends on a different choice is re-planned.
     Sarna research is read-only planning input restated in project words;
     no player-facing provenance anywhere in the game UI (the founding
     wizard's company pane is the "Starting company"); every schema change
-    includes a migration (applied to 1d; recording it as a standing rule is
-    separate governance work).
+    includes a migration (applied to 1d; standing policy in
+    [contract rule 51](engineering-contract.md#51-save-format-support-is-explicit)).
   - *Y1 — start years.* Every data row has an era window; stock rows are
     3025–3025. A campaign seats a row only in a start year its window holds;
     other start years are seeded exactly as before.

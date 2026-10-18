@@ -553,25 +553,60 @@ delete, and overwrite cannot omit a table.
 
 ### 51. Save-format support is explicit
 
-While IRON LEDGER is unreleased, new work has no obligation to migrate or
-preserve compatibility with older save formats. The executable declares its
-supported store and campaign format. A nonempty store or campaign outside
-that supported format is refused before persistent mutation; no automatic
-reset, deletion, rewrite, backfill, reseeding, or replacement is permitted.
-An empty database may initialize the current schema transactionally.
+The executable declares its current store and campaign format
+(`schema_version`) and every older format it migrates. A nonempty store or
+campaign outside those formats is refused before persistent mutation; no
+automatic reset, deletion, rewrite, backfill, reseeding, or replacement is
+permitted. An empty database may initialize the current schema
+transactionally.
 
 Supported current-format saves preserve all gameplay state, named RNG streams,
 identities and counters exactly, fail closed on corruption, and continue
 deterministically after save/load and executable restart. Format versions
 remain explicit rejection boundaries. Future formats are refused before
-mutation. Changing format support requires an approved plan; this policy
-does not authorize a repository-wide deletion of historical migration code.
+mutation.
 
-If a later approved release policy requires migrations, each migration must
-name source and target versions, run transactionally, define deterministic
-reconstruction, and carry fixture and failure/retry tests. That future policy
-is not selected here. Existing-view consumer integrity and platform or ABI
-compatibility are separate obligations and remain governed by their owners.
+**Every schema change includes a supported migration**, whether or not
+IRON LEDGER is released. A schema change is any change to the persisted
+format: the executable DDL (a table, column, type, default, constraint, or
+index), or the rows, keys, encodings, enum tags, or RNG streams a
+current-format store or campaign holds. It increments `schema_version` by
+one, and the deliverable that makes it carries, on the same branch, the
+migration from the previous version. Schema 71 is the oldest supported
+format: every format from it to the current one opens and reaches the current
+format through successive migrations, and older formats receive
+`StoreOlderThanGame` or `SaveOlderThanGame`.
+
+Each migration:
+
+- names its source and target versions and keeps a frozen definition of the
+  source format it validates against;
+- validates the source format completely before any change, refusing a
+  malformed or mixed-version store with `CorruptStore`, unchanged;
+- runs as one transaction that also sets the store and every campaign to the
+  target version, checks foreign keys, and validates the target schema, so
+  any failure rolls back and leaves the file at its source version;
+- defines a deterministic reconstruction of every new or changed value from
+  stored state, the retained seed, or a documented compatibility value, and
+  changes no other gameplay value, identity, counter, or RNG stream (rules 2,
+  48, 52);
+- carries a fixture test that builds a genuine source-version store, opens
+  it, and proves every source value survives, every new value equals its
+  defined reconstruction, and the campaign saves, loads, and evolves
+  deterministically as an ordinary current-format campaign; a failure test at
+  each step proving the file unchanged and that a clean reopen migrates; and
+  refusal tests for a malformed source store and the unsupported versions on
+  either side.
+
+Each supported source version's fixture test keeps passing at every later
+version, and its migration code and frozen definitions are kept. If no
+deterministic reconstruction preserves rules 1 and 2, planning stops and the
+conflict goes to John; a schema change never ships without its migration.
+Removing a supported source version or moving the oldest supported format
+requires an approved governance plan that amends this rule. This policy does
+not authorize a repository-wide deletion of historical migration code.
+Existing-view consumer integrity and platform or ABI compatibility are
+separate obligations and remain governed by their owners.
 
 ### 52. RNG serialization is stable and named
 
@@ -605,6 +640,10 @@ continued evolution preserve it.
 - Is an old save rejected under rule 51's support policy, or initialized
   deterministically only through an explicitly supported migration, with existing
   stream state unchanged in either applicable path?
+- Does the change alter the persisted format? Then does it increment
+  `schema_version` by one and carry the migration from the previous version
+  with rule 51's fixture, failure, and refusal tests, and do the older
+  supported versions' fixture tests still pass?
 
 ---
 
@@ -804,7 +843,8 @@ Persistence tests cover:
 - every next-ID counter;
 - current RNG stream completeness and format corruption;
 - unsupported-format refusal without persistent mutation;
-- RNG upgrades and new-stream initialization fixtures only when upgrades are supported;
+- new-stream initialization fixtures for every migration that adds an RNG
+  stream;
 - save, load, and continued deterministic evolution.
 
 Prefer tables and shared fixtures when they make these cases clearer and
@@ -1080,10 +1120,11 @@ fast-forwarded into local `main` and the local branch is deleted.
 ### 86. Deliverables are cohesive
 
 A deliverable has one primary invariant or subsystem outcome. Package fixes,
-schema migrations, frontend tests, and major module decompositions do not
-share a branch merely because they came from the same audit. Structural moves
-land after behavior fixes that rely on existing line ownership, unless the
-move is required to make the behavior fix safe.
+standalone schema migrations, frontend tests, and major module decompositions
+do not share a branch merely because they came from the same audit.
+Structural moves land after behavior fixes that rely on existing line
+ownership, unless the move is required to make the behavior fix safe. A
+schema change and its migration (rule 51) are one deliverable.
 
 ### 87. Exceptions are explicit debt
 
@@ -1113,8 +1154,9 @@ Every branch answers before integration:
    failure atomicity guaranteed after it?
 3. Which allocations and container capacities are prepared before commit?
 4. Does any new or changed state field have a persistence classification,
-   digest coverage, format support/rejection behavior and migration behavior
-   when supported, and next-ID impact?
+   digest coverage, format support/rejection behavior, and the migration from
+   the previous schema version when the persisted format changes (rule 51),
+   and next-ID impact?
 5. Is every site-sensitive rule passed an explicit site, and which asymmetric
    test proves locality?
 6. Is every capability predicate complete for status, location, crew, and

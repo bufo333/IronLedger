@@ -1395,9 +1395,10 @@ must both be 72 once the store is open; a schema 71 store is migrated on
 open (below), older formats (70 included) are refused intact and newer
 formats retain their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
-missing tables or rows. No automatic reset, deletion, rewrite, backfill or
-reseeding is allowed. Store adoption, campaign loading and overwriting enforce
-the format boundary before decoding or replacing gameplay rows.
+missing tables or rows. Outside a supported migration, no automatic reset,
+deletion, rewrite, backfill or reseeding is allowed. Store adoption, campaign
+loading and overwriting enforce the format boundary before decoding or
+replacing gameplay rows.
 
 **Loading fails closed.** The schema declares enforceable foreign keys
 (containment references); the historical v37 table-rebuild declaration does not
