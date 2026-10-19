@@ -703,8 +703,8 @@ officials, their offices, seats and families — are restated in the game's own
 words from [Sarna](https://www.sarna.net/) (BattleTechWiki); no text is
 copied.
 
-Saves from the previous formats (schema 71 and 72) upgrade automatically, in
-place, the first time this version opens them.
+Saves from the previous formats (schema 71, 72 and 73) upgrade automatically,
+in place, the first time this version opens them.
 
 BattleTech and 'Mech are trademarks of The Topps Company, Inc. This is a fan
 project, unaffiliated with Topps, Catalyst Game Labs, or MegaMek.

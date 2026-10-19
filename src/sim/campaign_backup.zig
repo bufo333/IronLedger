@@ -136,6 +136,7 @@ fn richCampaignForTest(gs: *GameState) !void {
     const phase = @import("../domain/battle_phase.zig");
     _ = try founding.createCommander(gs, "T", .LC, .paymaster);
     const co = try @import("starter_company.zig").generateInto(gs, "Alpha");
+    _ = try contract_market.worldForTest(gs);
     // Month by month until a contract is taken and a monthly pass has
     // installed the roster maps' lifecycle arena.
     var accepted = false;

@@ -415,6 +415,17 @@ fn printOffers(gs: *game.state.GameState, al: std.mem.Allocator) !void {
     const c = try q.contracts(al, gs, .none);
     std.debug.print("Contract board ({d} offers):\n", .{c.board.len});
     printTable(al, q.board_cols, c.board, "  ") catch |err| showError(err);
+    for (c.board) |row| {
+        const brief = (q.offerBrief(al, gs, row.id) catch |err| {
+            showError(err);
+            continue;
+        }) orelse continue;
+        const text = q.stripMarks(al, brief) catch |err| {
+            showError(err);
+            continue;
+        };
+        std.debug.print("  #{d} {s}\n", .{ @intFromEnum(row.id), text });
+    }
     std.debug.print("  (* = beachhead: premium pay, hardship costs, slow resupply · `candidates <offer#>` ranks the companies that could go)\n", .{});
     const arty_rows = q.artilleryOfferRows(al, gs) catch |err| {
         showError(err);

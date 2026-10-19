@@ -19,6 +19,7 @@ const commands = @import("commands.zig");
 const artillery = @import("artillery.zig");
 const roster_seed = @import("roster_seed.zig");
 const personages = @import("personages.zig");
+const politics = @import("politics.zig");
 const campaign_backup = @import("campaign_backup.zig");
 
 pub const CreateCommanderError = error{ CommanderExists, NoHomeWorld, UnknownSite, ArtilleryIdExhausted, HqIdExhausted, CorruptSave } || std.mem.Allocator.Error;
@@ -288,6 +289,12 @@ fn foundCampaign(gs: *GameState, c: @FieldType(Command, "create_commander"), res
     }
     // Reserve the player's catalog logo before seeding NPC merc companies.
     gs.player_logo_key = reserved_logo;
+    // Every world's ruler holds a standing garrison or training need from
+    // the first day, so the board opens with positions to post
+    // (docs/p5d-conflict-world-design.md §E).
+    personages.commitSeeding(gs, seeding);
+    const standing = try politics.maintainStanding(gs);
+    standing.deinit(gs);
     // The boards open the day the shingle goes up.
     try contract_market.refresh(gs);
     try contract_market.refreshListings(gs);
@@ -298,7 +305,6 @@ fn foundCampaign(gs: *GameState, c: @FieldType(Command, "create_commander"), res
     try roster_seed.seedMercCompanies(gs);
     // Seed the Periphery/pirates (PER) salvage pool (P3e.5b-1, §8.C).
     try roster_seed.seedPirateRoster(gs);
-    personages.commitSeeding(gs, seeding);
 }
 
 test "foundHq produces an HQ with exactly the facilities from prepareHq" {
@@ -402,9 +408,9 @@ test "a failed createCommander leaves state and RNG unchanged" {
 
 test "create_commander that fails at any allocation leaves the campaign unchanged" {
     // Every allocation fails in turn, including those after the commander
-    // and HQ are on the books: the outfit name, the board refreshes and the
-    // roster seeding. The full digest covers the year, RNG, ID counters,
-    // funds, boards and personages.
+    // and HQ are on the books: the outfit name, the standing needs, the
+    // board postings and the roster seeding. The full digest covers the
+    // year, RNG, ID counters, funds, boards, personages and conflicts.
     const digest = @import("digest.zig");
     var gs = GameState.init(std.testing.allocator, .{ .seed = 8105 });
     defer gs.deinit();

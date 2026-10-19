@@ -988,10 +988,53 @@ pub const board_cols: []const table.Col = &.{
     .{ .name = "id", .justify = .right },               .{ .name = "kind" },                  .{ .name = "world" },                   .{ .name = "emp" },
     .{ .name = "LY", .justify = .right, .drop = 3 },    .{ .name = "band" },                  .{ .name = "mo", .justify = .right },   .{ .name = "pay/mo", .justify = .right },
     .{ .name = "total", .justify = .right, .drop = 3 }, .{ .name = "enemy" },                 .{ .name = "salv", .justify = .right }, .{ .name = "rights" },
-    .{ .name = "transit", .justify = .right },          .{ .name = "difficulty" },            .{ .name = "rating" },                  .{ .name = "readiest co." },
-    .{ .name = "tons", .justify = .right, .drop = 1 },  .{ .name = "weight mix", .drop = 2 }, .{ .name = "enemy tons", .drop = 2 },   .{ .name = "opposition" },
-    .{ .name = "" },
+    .{ .name = "transit", .justify = .right },          .{ .name = "closes" },                .{ .name = "on station", .drop = 2 },   .{ .name = "side", .drop = 2 },
+    .{ .name = "difficulty" },                          .{ .name = "rating" },                .{ .name = "readiest co." },            .{ .name = "tons", .justify = .right, .drop = 1 },
+    .{ .name = "weight mix", .drop = 2 },               .{ .name = "enemy tons", .drop = 2 }, .{ .name = "opposition" },              .{ .name = "" },
 };
+
+/// When an offer leaves the board (`contract_market.offerRetires`): its
+/// close day, or the next month start.
+fn closesText(alloc: Alloc, c: *const contract_mod.Contract, day: u32) ![]const u8 {
+    const close = c.close_day orelse return "the 1st";
+    return clock_mod.etaText(alloc, close, day);
+}
+
+/// The day an offer wants the company on its world, or "—" for a
+/// position with none (a standing need's, or one with no backer).
+fn onStationText(alloc: Alloc, c: *const contract_mod.Contract, day: u32) ![]const u8 {
+    const by = c.on_station_by orelse return "—";
+    return clock_mod.etaText(alloc, by, day);
+}
+
+/// The side an offer or contract serves, or "—" with no backer.
+fn sideText(c: *const contract_mod.Contract) []const u8 {
+    return if (c.conflict_id == .none) "—" else c.side.label();
+}
+
+/// Why an offer or contract exists (docs/p5d-conflict-world-design.md §F
+/// "Cause sentence"): its backing conflict's cause (`politics.causeText`),
+/// escaped; a fixed line when it has no backer. `CorruptSave` when the
+/// backer does not resolve; allocation errors propagate.
+pub fn causeLine(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract) ![]const u8 {
+    if (c.conflict_id == .none) return "{d}no backing conflict on record{/}";
+    const backer = gs.conflicts.getPtr(c.conflict_id) orelse return error.CorruptSave;
+    return table.plain(alloc, try politics.causeText(alloc, gs, backer));
+}
+
+/// The board's brief for one offer (docs/p5d-conflict-world-design.md §F
+/// "Timing"): its cause, the side it serves, the day it wants the company
+/// on the world and the day it closes. Null past the board.
+pub fn offerBrief(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) !?[]const u8 {
+    const c = findOfferPtr(gs, offer_id) orelse return null;
+    const day = gs.clock.day_index;
+    return try std.fmt.allocPrint(alloc, "{{a}}why{{/}} {s}  ·  {s} side  ·  on station {s}  ·  closes {s}", .{
+        try causeLine(alloc, gs, c),
+        sideText(c),
+        try onStationText(alloc, c, day),
+        try closesText(alloc, c, day),
+    });
+}
 
 pub const ActiveRow = struct {
     id: types.ContractId,
@@ -1136,6 +1179,8 @@ pub fn factionLegend(alloc: Alloc) ![]const u8 {
 /// The board's rating cells: skulls · rating · company · own
 /// tons · weight mix · enemy tons, for the readiest company in range.
 fn boardRatingCells(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) ![6][]const u8 {
+    // A position with no named threat (a standing need's) has nothing to rate.
+    if (findOfferPtr(gs, offer_id)) |o| if (!o.hasOpfor()) return .{ "{d}—{/}", "{d}—{/}", "{d}no named threat{/}", "", "", "" };
     const r = (try bestRating(alloc, gs, offer_id)) orelse return .{ "{d}—{/}", "{d}—{/}", "{d}no company in range{/}", "", "", "" };
     const mk = skullMarkup(r.half_hi);
     var a: [8]u8 = undefined;
@@ -1193,6 +1238,9 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             try std.fmt.allocPrint(alloc, "{d}%{s}", .{ c.terms.salvage_pct, if (c.terms.salvage_exchange) " cash" else "" }),
             @tagName(c.terms.command_rights),
             try std.fmt.allocPrint(alloc, "{d}d", .{offerTransitDays(gs, &c)}),
+            try closesText(alloc, &c, day),
+            try onStationText(alloc, &c, day),
+            sideText(&c),
             rt[0],
             rt[1],
             rt[2],
@@ -1226,6 +1274,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             const done: i64 = @as(i64, day) - @as(i64, start);
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    duration    {{d}}{s}{{/}}  day {d} of {d} · {d} days left", .{ table.bar(&bar_buf, done, total), @max(0, done), @max(0, total), @max(0, total - done) }));
         }
+        try lines.append(alloc, try std.fmt.allocPrint(alloc, "    why         {s}  ·  {s} side", .{ try causeLine(alloc, gs, c), sideText(c) }));
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "    rights      {s}", .{c.terms.command_rights.describe()}));
         {
             // Rules of engagement: the company's order, or the employer's.
@@ -1333,7 +1382,7 @@ pub fn contracts(alloc: Alloc, gs: *GameState, board_hq: types.HqId) !Contracts 
             var b5: [16]u8 = undefined;
             break :blk try std.fmt.allocPrint(
                 alloc,
-                "{s}  ·  {{d}}beachhead: {s} pay · +{d}% hardship · local supplies {s} · resupply via link only  ·  rights: integrated = more fights, salvage {s}, defeats −{d}, no training lances, pay +{d}% · house = {s}, +{d}% · liaison = {s} · independent = fewer fights, full salvage, −{d}% · salv cash = salvage exchange (paid in cash, no wrecks)  ·  board refreshes on the 1st{{/}}",
+                "{s}  ·  {{d}}beachhead: {s} pay · +{d}% hardship · local supplies {s} · resupply via link only  ·  rights: integrated = more fights, salvage {s}, defeats −{d}, no training lances, pay +{d}% · house = {s}, +{d}% · liaison = {s} · independent = fewer fights, full salvage, −{d}% · salv cash = salvage exchange (paid in cash, no wrecks)  ·  positions post as their wars and standing needs call for them; standing work posts afresh on the 1st{{/}}",
                 .{
                     (try rating(alloc, gs)).line,
                     types.bpText(&b1, bpay),
@@ -6673,21 +6722,30 @@ test "skulls on the board, the candidates, the active pane — and an outmatched
     defer gs.deinit();
     _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
     const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    _ = try @import("contract_market.zig").worldForTest(&gs);
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     const view = try contracts(a, &gs, gs.seat());
     try std.testing.expect(view.board.len > 0);
+    const difficulty = for (board_cols, 0..) |col, i| {
+        if (std.mem.eql(u8, col.name, "difficulty")) break i;
+    } else unreachable;
+    // A position with an opposition is rated in skulls; a standing need's,
+    // with no named threat, is not.
+    var rated: ?types.ContractId = null;
     for (view.board) |row| {
         try std.testing.expectEqual(board_cols.len, row.cells.len);
-        try std.testing.expect(std.mem.indexOf(u8, row.cells[13], "●") != null);
+        const threat = findOfferPtr(&gs, row.id).?.hasOpfor();
+        try std.testing.expectEqual(threat, std.mem.indexOf(u8, row.cells[difficulty], "●") != null);
+        if (threat) rated = rated orelse row.id else try std.testing.expect(std.mem.indexOf(u8, row.cells[difficulty + 2], "no named threat") != null);
     }
     // The board renders at natural width with every column under its name.
     const lines = try (try view.boardTable(a)).render(a);
     try std.testing.expectEqual(view.board.len + 1, lines.len);
     try std.testing.expect(std.mem.startsWith(u8, lines[0], "id"));
     var saw = false;
-    for (try offerCandidates(a, &gs, view.board[0].id)) |c| if (c.company == co and std.mem.indexOf(u8, c.text, "skull") != null) {
+    for (try offerCandidates(a, &gs, rated.?)) |c| if (c.company == co and std.mem.indexOf(u8, c.text, "skull") != null) {
         saw = true;
     };
     try std.testing.expect(saw);
@@ -6712,6 +6770,54 @@ test "skulls on the board, the candidates, the active pane — and an outmatched
         pane_ok = true;
     };
     try std.testing.expect(pane_ok);
+}
+
+test "an offer's brief and board row carry its cause, side, station day and close day, escaped, under its id" {
+    // docs/p5d-conflict-world-design.md §F "Cause sentence" and "Timing";
+    // rules 31–33.
+    const commands = @import("commands.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 74021 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    _ = try commands.execute(&gs, .{ .new_company = "Alpha" });
+    const raid = try @import("contract_market.zig").worldForTest(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const offer = for (gs.contract_offers.items) |o| {
+        if (o.conflict_id == raid) break o;
+    } else unreachable;
+    const standing = for (gs.contract_offers.items) |o| {
+        if (o.close_day == null) break o;
+    } else unreachable;
+    const brief = (try offerBrief(a, &gs, offer.id)).?;
+    try std.testing.expect(std.mem.indexOf(u8, brief, try politics.causeText(a, &gs, &gs.conflicts.get(raid).?)) != null);
+    try std.testing.expect(std.mem.indexOf(u8, brief, "aggressor side") != null);
+    try std.testing.expect(std.mem.indexOf(u8, brief, try std.fmt.allocPrint(a, "on station d{d}", .{offer.on_station_by.?})) != null);
+    try std.testing.expect(std.mem.indexOf(u8, brief, try std.fmt.allocPrint(a, "closes d{d}", .{offer.close_day.?})) != null);
+    // A standing need's position wants no station day and closes at the
+    // month start.
+    const standing_brief = (try offerBrief(a, &gs, standing.id)).?;
+    try std.testing.expect(std.mem.indexOf(u8, standing_brief, "defender side  ·  on station —  ·  closes the 1st") != null);
+    // A name holding markup is escaped.
+    gs.personages.getPtr(gs.conflicts.get(raid).?.instigator).?.last_name = "{c}Red";
+    try std.testing.expect(std.mem.indexOf(u8, (try offerBrief(a, &gs, offer.id)).?, "{{c}Red") != null);
+    // The board row under the offer's id carries the same days and side.
+    const view = try contracts(a, &gs, gs.seat());
+    const row = for (view.board) |r| {
+        if (r.id == offer.id) break r;
+    } else unreachable;
+    const col = struct {
+        fn of(name: []const u8) usize {
+            for (board_cols, 0..) |c, i| if (std.mem.eql(u8, c.name, name)) return i;
+            unreachable;
+        }
+    }.of;
+    try std.testing.expect(std.mem.indexOf(u8, row.cells[col("closes")], try std.fmt.allocPrint(a, "d{d}", .{offer.close_day.?})) != null);
+    try std.testing.expect(std.mem.indexOf(u8, row.cells[col("on station")], try std.fmt.allocPrint(a, "d{d}", .{offer.on_station_by.?})) != null);
+    try std.testing.expectEqualStrings("aggressor", row.cells[col("side")]);
+    try std.testing.expectEqual(@as(?[]const u8, null), try offerBrief(a, &gs, @enumFromInt(999_999)));
+    try std.testing.expectError(error.OutOfMemory, offerBrief(std.testing.failing_allocator, &gs, offer.id));
 }
 
 // ----------------------------------------------------------- leaderboard
@@ -11712,13 +11818,16 @@ pub const ConflictRow = struct {
     text: []const u8,
 };
 
-/// Every conflict its defender has discovered, in id order (rules 29–32;
-/// docs/p5d-conflict-world-design.md §F; decision E2): threatened, open and
-/// resolved, at any distance. A `preparing` conflict is secret and shows
-/// nowhere. A row shows the id, the template's name and the world, the
-/// aggressor and defender factions, the status (and a resolved one's
-/// outcome), the strike day, the resolution day or the expected one, and
-/// the cause (`politics.causeText`). Names are escaped. `CorruptSave` when a
+/// Every offensive conflict its defender has discovered, and every standing
+/// need with a position on a board or backing one of the outfit's
+/// contracts, in id order (rules 29–32; docs/p5d-conflict-world-design.md
+/// §F; decision E2): threatened, open and resolved, at any distance. A
+/// `preparing` conflict is secret and shows nowhere. A row shows the id,
+/// the template's name and the world, the aggressor and defender factions
+/// (a standing need only its defender), the status (and a resolved one's
+/// outcome), the strike day, the resolution day or the expected one, the
+/// positions on the boards, the side the outfit holds if any, and the
+/// cause (`politics.causeText`). Names are escaped. `CorruptSave` when a
 /// conflict's template, world, faction or personage does not resolve;
 /// allocation errors propagate.
 pub fn conflictRows(alloc: Alloc, gs: *GameState) ![]ConflictRow {
@@ -11728,36 +11837,57 @@ pub fn conflictRows(alloc: Alloc, gs: *GameState) ![]ConflictRow {
     for (gs.conflicts.values()) |*c| {
         const stage = conflict_dom.status(c, today);
         if (stage == .preparing) continue;
+        var posted: usize = 0;
+        for (gs.contract_offers.items) |*o| posted += @intFromBool(o.conflict_id == c.id);
+        const held = heldSide(gs, c.id);
+        if (c.family == .standing and posted == 0 and held == null) continue;
         const row = political_event_dom.find(c.template_key) orelse return error.CorruptSave;
         const world = planet_mod.find(c.planet_key) orelse return error.CorruptSave;
-        const aggressor = faction.find(c.aggressor.faction_key) orelse return error.CorruptSave;
         const defender = faction.find(c.defender.faction_key) orelse return error.CorruptSave;
-        const standing: []const u8 = if (c.outcome) |outcome| switch (outcome) {
+        const sides = if (c.aggressor) |a|
+            try std.fmt.allocPrint(alloc, "{s} against {s}", .{ try table.plain(alloc, (faction.find(a.faction_key) orelse return error.CorruptSave).name), try table.plain(alloc, defender.name) })
+        else
+            try std.fmt.allocPrint(alloc, "{s} standing", .{try table.plain(alloc, defender.name)});
+        const status_text: []const u8 = if (c.outcome) |outcome| switch (outcome) {
             .aggressor_won => "{c}resolved: the world fell{/}",
             .defender_held => "{g}resolved: the world held{/}",
+            .stood_down => "{d}stood down{/}",
         } else switch (stage) {
             .threatened => "{a}threatened{/}",
             .open => "{c}open{/}",
+            .standing => "{d}a standing need{/}",
             .preparing, .resolved => unreachable,
         };
-        const strike = if (c.strike_day > today) try clock_mod.etaText(alloc, c.strike_day, today) else try std.fmt.allocPrint(alloc, "d{d}", .{c.strike_day});
-        const ends = if (c.outcome != null)
-            try std.fmt.allocPrint(alloc, "resolved d{d}", .{c.expires_day})
-        else
-            try std.fmt.allocPrint(alloc, "expected {s}", .{try clock_mod.etaText(alloc, c.expires_day, today)});
-        try rows.append(alloc, .{ .id = c.id, .text = try std.fmt.allocPrint(alloc, "#{d}  {s} on {s}  {s} against {s}  {s}  strike {s}  {s}  {s}", .{
+        const timeline: []const u8 = if (conflict_dom.offense(c)) |o| blk: {
+            const strike = if (o.strike_day > today) try clock_mod.etaText(alloc, o.strike_day, today) else try std.fmt.allocPrint(alloc, "d{d}", .{o.strike_day});
+            const ends = if (c.outcome != null)
+                try std.fmt.allocPrint(alloc, "resolved d{d}", .{o.expires_day})
+            else
+                try std.fmt.allocPrint(alloc, "expected {s}", .{try clock_mod.etaText(alloc, o.expires_day, today)});
+            break :blk try std.fmt.allocPrint(alloc, "  strike {s}  {s}", .{ strike, ends });
+        } else if (c.family == .offensive) return error.CorruptSave else "";
+        const you: []const u8 = if (held) |side| try std.fmt.allocPrint(alloc, "  {{g}}you: {s}{{/}}", .{side.label()}) else "";
+        try rows.append(alloc, .{ .id = c.id, .text = try std.fmt.allocPrint(alloc, "#{d}  {s} on {s}  {s}  {s}{s}  {d} posted{s}  {s}", .{
             @intFromEnum(c.id),
             try table.plain(alloc, row.name),
             try table.plain(alloc, world.name),
-            try table.plain(alloc, aggressor.name),
-            try table.plain(alloc, defender.name),
-            standing,
-            strike,
-            ends,
+            sides,
+            status_text,
+            timeline,
+            posted,
+            you,
             try table.plain(alloc, try politics.causeText(alloc, gs, c)),
         }) });
     }
     return rows.toOwnedSlice(alloc);
+}
+
+/// The side of conflict `id` the outfit holds (`Contract.holdsPosition`).
+fn heldSide(gs: *GameState, id: types.ConflictId) ?contract_mod.ConflictSide {
+    for (gs.contracts.values()) |*c| {
+        if (c.conflict_id == id and c.holdsPosition()) return c.side;
+    }
+    return null;
 }
 
 /// A campaign on its first month start, with the conflicts it opened.
@@ -11766,7 +11896,9 @@ fn conflictCampaignForTest(gs: *GameState) !void {
     gs.clock.advance();
     while (gs.clock.date.day != 1) gs.clock.advance();
     try politics.advanceWorld(gs);
-    try std.testing.expect(gs.conflicts.count() > 0);
+    var offensive = false;
+    for (gs.conflicts.values()) |c| offensive = offensive or c.family == .offensive;
+    try std.testing.expect(offensive);
 }
 
 test "conflicts lists a conflict from its discovery on, with its id, and never one in preparation" {
@@ -11776,43 +11908,83 @@ test "conflicts lists a conflict from its discovery on, with its id, and never o
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    // Every conflict is still in preparation on its opening day.
-    try std.testing.expectEqual(@as(usize, 0), (try conflictRows(a, &gs)).len);
-    const first = gs.conflicts.values()[0];
+    // Every offensive conflict is still in preparation on its opening day.
+    for (try conflictRows(a, &gs)) |r| try std.testing.expectEqual(conflict_dom.Family.standing, gs.conflicts.get(r.id).?.family);
+    const first = for (gs.conflicts.values()) |c| {
+        if (c.family == .offensive) break c;
+    } else unreachable;
     gs.clock.day_index = first.discovery_day - 1;
     for (try conflictRows(a, &gs)) |r| try std.testing.expect(r.id != first.id);
     gs.clock.day_index = first.discovery_day;
-    const rows = try conflictRows(a, &gs);
-    const shown = for (rows) |r| {
-        if (r.id == first.id) break r;
-    } else return error.TestExpectedRow;
-    try std.testing.expect(std.mem.indexOf(u8, shown.text, "threatened") != null);
-    try std.testing.expect(std.mem.indexOf(u8, shown.text, planet_mod.find(first.planet_key).?.name) != null);
-    try std.testing.expect(std.mem.indexOf(u8, shown.text, political_event_dom.find(first.template_key).?.name) != null);
-    try std.testing.expect(std.mem.indexOf(u8, shown.text, try politics.causeText(a, &gs, &first)) != null);
+    const shown = (try conflictRowForTest(a, &gs, first.id)).?;
+    try std.testing.expect(std.mem.indexOf(u8, shown, "threatened") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shown, planet_mod.find(first.planet_key).?.name) != null);
+    try std.testing.expect(std.mem.indexOf(u8, shown, political_event_dom.find(first.template_key).?.name) != null);
+    try std.testing.expect(std.mem.indexOf(u8, shown, try politics.causeText(a, &gs, &first)) != null);
     // Open from the strike, and resolved with its outcome once it has one.
-    gs.clock.day_index = first.strike_day;
-    try std.testing.expect(std.mem.indexOf(u8, (try conflictRows(a, &gs))[0].text, "open") != null);
-    gs.conflicts.values()[0].outcome = .defender_held;
-    gs.clock.day_index = first.expires_day;
-    try std.testing.expect(std.mem.indexOf(u8, (try conflictRows(a, &gs))[0].text, "the world held") != null);
+    gs.clock.day_index = first.strike_day.?;
+    try std.testing.expect(std.mem.indexOf(u8, (try conflictRowForTest(a, &gs, first.id)).?, "open") != null);
+    gs.conflicts.getPtr(first.id).?.outcome = .defender_held;
+    gs.clock.day_index = first.expires_day.?;
+    try std.testing.expect(std.mem.indexOf(u8, (try conflictRowForTest(a, &gs, first.id)).?, "the world held") != null);
     try std.testing.expectError(error.OutOfMemory, conflictRows(std.testing.failing_allocator, &gs));
 }
 
-test "a conflict row escapes the names it shows, and a campaign without conflicts shows none" {
+fn conflictRowForTest(alloc: Alloc, gs: *GameState, id: types.ConflictId) !?[]const u8 {
+    for (try conflictRows(alloc, gs)) |r| if (r.id == id) return r.text;
+    return null;
+}
+
+test "conflicts lists a standing need while it posts or backs the outfit's contract, with its positions and the side held" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73303 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    const offer = gs.contract_offers.items[0];
+    const need = gs.conflicts.get(offer.conflict_id).?;
+    try std.testing.expectEqual(conflict_dom.Family.standing, need.family);
+    var posted: usize = 0;
+    for (gs.contract_offers.items) |o| posted += @intFromBool(o.conflict_id == need.id);
+    const shown = (try conflictRowForTest(a, &gs, need.id)).?;
+    try std.testing.expect(std.mem.indexOf(u8, shown, "a standing need") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shown, try std.fmt.allocPrint(a, "{d} posted", .{posted})) != null);
+    try std.testing.expect(std.mem.indexOf(u8, shown, "you:") == null);
+    // A need with nothing posted and no contract is not listed.
+    var quiet: ?types.ConflictId = null;
+    for (gs.conflicts.values()) |c| {
+        const has_offer = for (gs.contract_offers.items) |o| {
+            if (o.conflict_id == c.id) break true;
+        } else false;
+        if (!has_offer) quiet = c.id;
+    }
+    try std.testing.expectEqual(@as(?[]const u8, null), try conflictRowForTest(a, &gs, quiet.?));
+    // Once the outfit holds its position the row says so, posted or not.
+    var held = offer;
+    held.status = .transit;
+    try gs.contracts.put(gs.allocator(), held.id, held);
+    gs.contract_offers.clearRetainingCapacity();
+    try std.testing.expect(std.mem.indexOf(u8, (try conflictRowForTest(a, &gs, need.id)).?, "you: defender") != null);
+}
+
+test "a conflict row escapes the names it shows, and a campaign with nothing posted or discovered shows none" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 73302 });
     defer gs.deinit();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    // With nothing posted and no offensive conflict yet, nothing shows.
+    gs.contract_offers.clearRetainingCapacity();
     try std.testing.expectEqual(@as(usize, 0), (try conflictRows(a, &gs)).len);
     gs.clock.advance();
     while (gs.clock.date.day != 1) gs.clock.advance();
     try politics.advanceWorld(&gs);
-    const c = gs.conflicts.values()[0];
+    const c = for (gs.conflicts.values()) |c| {
+        if (c.family == .offensive) break c;
+    } else unreachable;
     gs.clock.day_index = c.discovery_day;
     gs.personages.getPtr(c.instigator).?.last_name = "{c}Red";
-    const rows = try conflictRows(a, &gs);
-    try std.testing.expect(std.mem.indexOf(u8, rows[0].text, "{{c}Red") != null);
+    try std.testing.expect(std.mem.indexOf(u8, (try conflictRowForTest(a, &gs, c.id)).?, "{{c}Red") != null);
 }

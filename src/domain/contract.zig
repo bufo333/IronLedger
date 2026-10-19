@@ -84,6 +84,26 @@ pub const ContractKind = enum {
     }
 };
 
+/// Which side of its backing conflict a position serves
+/// (docs/p5d-conflict-world-design.md §A "Player offers per side", §C).
+/// A standing conflict's employer is its defender. Persisted by tag name.
+pub const ConflictSide = enum {
+    aggressor,
+    defender,
+
+    /// "aggressor" — the side as the screens print it.
+    pub fn label(self: ConflictSide) []const u8 {
+        return @tagName(self);
+    }
+
+    pub fn other(self: ConflictSide) ConflictSide {
+        return switch (self) {
+            .aggressor => .defender,
+            .defender => .aggressor,
+        };
+    }
+};
+
 /// Who runs the show (AtB/CamOps command rights). Integrated: the
 /// employer's officers command — more fights, half the salvage, harder
 /// grading, no training lances, scouts pulled into the line, +10% pay.
@@ -295,10 +315,32 @@ pub const Contract = struct {
     /// Every situation this contract raised, in the order raised; each
     /// comes up at most once per contract.
     situations: std.ArrayListUnmanaged(situation_mod.SituationRecord) = .empty,
+    /// The conflict that posted this position (docs/p5d-conflict-world-design.md
+    /// §C "No contract without a backer"): its `side` faction is
+    /// `employer_key`. `.none` only on an offer or contract a schema v73
+    /// store held, which has no backer.
+    conflict_id: types.ConflictId = .none,
+    /// The side of `conflict_id` the position serves; `.defender` when there
+    /// is no backer.
+    side: ConflictSide = .defender,
+    /// The day the backer wants the company on the world (§A): the
+    /// conflict's strike day; null for a standing conflict's position and
+    /// when there is no backer.
+    on_station_by: ?u32 = null,
+    /// The last day the position may be accepted (§A posting cadence;
+    /// `contract_market.closeDay`); null when it closes at the next month
+    /// start instead.
+    close_day: ?u32 = null,
 
     /// The company is out on it: in transit to the world or on station.
     pub fn isRunning(self: *const Contract) bool {
         return self.status == .transit or self.status == .active;
+    }
+
+    /// Holds its backing conflict's position (docs/p5d-conflict-world-design.md
+    /// §A "Both sides"): accepted, in transit or on station.
+    pub fn holdsPosition(self: *const Contract) bool {
+        return self.status == .accepted or self.isRunning();
     }
 
     /// Over, one way or another: completed, breached or failed.

@@ -725,5 +725,5 @@ test "fixed seed field dispatch, diversion and arrival script has a pinned diges
     try artillery.validate(&gs);
     try std.testing.expect(first.artillery_freight_cost > 0);
     try std.testing.expectEqual(dom.Placement{ .company = fx.company }, gs.artillery_formations.get(fx.formation).?.placement);
-    try std.testing.expectEqual(@as(u64, 5906786924745764917), digest.stateHash(&gs));
+    try std.testing.expectEqual(@as(u64, 14569179233801937118), digest.stateHash(&gs));
 }

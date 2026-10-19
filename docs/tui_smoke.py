@@ -419,10 +419,29 @@ stopped_on = int(stop.group(1))
 send("\r", 1.0)
 send(":"); send("day 3\r", 2.0)
 assert f"day {stopped_on + 3}" in plain()[-30000:], plain()[-2000:]
+# A position that fights: an arc contract whose backer names an opposition
+# (docs/p5d-conflict-world-design.md §A; a standing need's garrison names
+# none). The board is read week by week until one is posted on the seat's
+# board; its id is the row's first cell.
+ARC_COMBAT = r"(relief duty|diversionary raid|objective raid|guerrilla warfare)"
+fought = None
+for _ in range(20):
+    mark_board = len(out)
+    send("4", 1.0)
+    frame = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark_board:]).decode("utf-8", "replace")
+    for row in re.finditer(r"│\s*(\d+)\s+" + ARC_COMBAT + r"\s[^│]*●", frame):
+        fought = row.group(1)
+        break
+    if fought:
+        break
+    send(":"); send("day 7\r", 2.0)
+    send("\x1b", 0.5)
+assert fought, "no fought arc position reached the seat's board: " + plain()[-3000:]
+assert "why " in plain()[-30000:], plain()[-3000:]   # the selected offer's cause line
 # Battle orders: the advance stops short of contact and opens the box;
 # → changes the ROE, confirm clears the warning, and the next advance
 # runs on to the fight instead of stopping again.
-send(":"); send("accept 9 1\r", 1.5)
+send(":"); send(f"accept {fought} 1\r", 1.5)
 # Operations board and tempo picker: P4f.
 # has_ops tracks whether the ops board was shown so the P4g block can skip
 # safely when the garrison arc is not available.
@@ -477,7 +496,8 @@ def fight_battle(refuse_first, levers=False):
         assert wait_for("call emergency recon for the decisive phase", tail=4000), plain()[-3000:]
         send("i", 0.3); send("i", 0.3); send("i", 0.5)   # recon → reinforce → air cover
         send("\r", 1.5)
-        assert wait_for("the intervention gate is not met", tail=4000), plain()[-3000:]
+        # Refused for want of a fighter, or for weather that grounds one.
+        assert wait_for("the intervention gate is not met", tail=4000) or "the weather has grounded the fighters" in plain()[-4000:], plain()[-3000:]
         assert wait_for("the reserve is committed", tail=30000), plain()[-3000:]
         print("battle levers OK")
     send("p", 1.5)
@@ -519,18 +539,18 @@ def fight_battle(refuse_first, levers=False):
 assert fight_battle(True) > 0, "the first battle raised no decision modal: " + plain()[-3000:]
 send("\x1b", 0.5); send("\x1b", 0.5)
 # P4g: exercise the intervention picker on a committed combat op.  The
-# garrison auto-probe battle above has been resolved; the contract is still
-# active; repel_probe (op 2) is still in the .available state.  Commit it
-# now — the contract is well past its transit window (the battle loop
-# advanced ≥ 60 days) — then open the ops board and verify the picker.
-# After the check, advance through the committed battle and read the
-# after-action so the second client starts with no unresolved turn holds.
+# contract's scheduled battle above has been resolved; the contract is still
+# active; its arc's first operation, a combat one, is still in the
+# .available state.  Commit it now — the contract is well past its transit
+# window (the battle loop advanced ≥ 60 days) — then open the ops board and
+# verify the picker. After the check, advance through the committed battle
+# and read the after-action so the second client starts with no unresolved
+# turn holds.
 if has_ops:
-    send(":"); send("commit 9 2 secure_objective\r", 1.0)
-    send(":"); send("task 9 2 3 reserve\r", 1.0)   # the 2nd Lance stands as the reserve
+    send(":"); send(f"commit {fought} 1 secure_objective\r", 1.0)
+    send(":"); send(f"task {fought} 1 3 reserve\r", 1.0)   # the 2nd Lance stands as the reserve
     send("4", 0.6); send("\t", 0.6)   # contracts tab, active-contracts pane
-    send("g", 0.8)                    # open operations board
-    send("j", 0.3)                    # navigate to the second op (repel_probe, committed)
+    send("g", 0.8)                    # open operations board, cursor on the committed first op
     send("i", 0.8)                    # open intervention picker on the committed op
     assert "INTERVENTION" in plain()[-30000:], plain()[-3000:]
     send("\x1b", 0.5)                 # close intervention picker

@@ -2,7 +2,10 @@
 //! instance of (docs/p5d-conflict-world-design.md §K "One event
 //! architecture"). The `opening` family is the §C scheme templates: each
 //! names who may instigate it, what it targets, which side the instigator
-//! takes, the strike force's kind and one cause sentence. Data in
+//! takes, the strike force's kind, the kinds of position the aggressor
+//! posts and one cause sentence. The `standing` family is §E's `stability`
+//! templates: a ruler's standing garrison or training need on its own
+//! seat, posting only garrison and cadre positions. Data in
 //! data/tables/political_events.zon; `sim/politics.zig` opens conflicts
 //! from it.
 //! No MekHQ counterpart: MekHQ has no political events (docs/mekhq-map.md).
@@ -12,9 +15,9 @@ const personage = @import("personage.zig");
 const contract = @import("contract.zig");
 const opfor = @import("opfor.zig");
 
-/// §K's template families. The table holds only `opening` rows: the other
-/// families have no producer, and the build refuses them.
-pub const Family = enum { opening, beat, resolution, intrigue };
+/// §K's template families. The table holds `opening` and `standing` rows:
+/// the other families have no producer, and the build refuses them.
+pub const Family = enum { opening, standing, beat, resolution, intrigue };
 
 /// What a scheme targets (§C producer). `sim/politics.zig` owns each rule's
 /// test.
@@ -29,8 +32,9 @@ pub const TargetRule = enum {
     rival_seat,
     /// A world hostile to an ally's faction, in reach of the ally's seat.
     ally_foe_world,
-    /// The instigator's own seat, in revolt against a liege it is not loyal
-    /// to.
+    /// The instigator's own seat: for an `opening` row, in revolt against a
+    /// liege it is not loyal to; for a `standing` row, the ruler's own
+    /// world, with no loyalty bound.
     own_seat,
 
     /// Whether `min_industry` applies: only `hostile_world` reads it.
@@ -40,7 +44,16 @@ pub const TargetRule = enum {
 };
 
 /// Which side of the conflict the instigator takes.
-pub const Side = enum { aggressor, defender };
+pub const Side = contract.ConflictSide;
+
+/// The kinds every offensive conflict's defender posts (decision D3:
+/// relief, security and riot duty), whatever its template.
+pub const defender_kinds = [_]contract.ContractKind{ .relief_duty, .security_duty, .riot_duty };
+
+/// The kinds a standing row may post: §E's garrison and cadre.
+pub fn standingKind(kind: contract.ContractKind) bool {
+    return kind == .garrison_duty or kind == .cadre_duty;
+}
 
 /// The placeholders a cause sentence may hold: the instigator's and the
 /// target personage's title and name, the world's name, and the two sides'
@@ -65,8 +78,13 @@ pub const Row = struct {
     /// `hostile_world`.
     min_industry: u8,
     instigator_side: Side,
-    /// The kind whose `opfor.zon` row sizes the strike force.
-    strike_kind: contract.ContractKind,
+    /// The kind whose `opfor.zon` row sizes the strike force; null for a
+    /// `standing` row, which has none.
+    strike_kind: ?contract.ContractKind,
+    /// The kinds of position the row's poster offers (decision F3): an
+    /// `opening` row's aggressor, a `standing` row's defender. An
+    /// `opening` row's defender posts `defender_kinds`.
+    position_kinds: []const contract.ContractKind,
     /// Relative draw weight, before the instigator's ambition.
     weight: u32,
     /// One sentence; `{…}` holds a `Placeholder` name.
@@ -145,11 +163,29 @@ comptime {
         for (table.events[0..i]) |earlier| {
             if (std.mem.eql(u8, k, earlier.key)) @compileError(file ++ "duplicate key: " ++ k);
         }
-        if (row.family != .opening) @compileError(file ++ "only the opening family is accepted: " ++ k);
         if (row.instigator_roles.len == 0) @compileError(file ++ "no instigator role: " ++ k);
         if (row.motives.len == 0) @compileError(file ++ "no motive: " ++ k);
         if (row.min_industry != 0 and !row.target.industryGated()) @compileError(file ++ "min_industry is set on a rule other than hostile_world: " ++ k);
-        if (!hasOpforRow(row.strike_kind)) @compileError(file ++ "strike_kind has no opfor.zon row: " ++ k);
+        if (row.position_kinds.len == 0) @compileError(file ++ "no position kind: " ++ k);
+        switch (row.family) {
+            .opening => {
+                const strike = row.strike_kind orelse @compileError(file ++ "an opening row names no strike_kind: " ++ k);
+                if (!hasOpforRow(strike)) @compileError(file ++ "strike_kind has no opfor.zon row: " ++ k);
+            },
+            .standing => {
+                if (row.strike_kind != null) @compileError(file ++ "a standing row names a strike_kind: " ++ k);
+                for (row.position_kinds) |kind| {
+                    if (!standingKind(kind)) @compileError(file ++ "a standing row posts a kind other than garrison_duty or cadre_duty: " ++ k);
+                }
+                if (row.target != .own_seat) @compileError(file ++ "a standing row targets a world other than own_seat: " ++ k);
+                var cause_parts = CauseParts.init(row.cause);
+                while (cause_parts.next() catch @compileError(file ++ "a cause holds an unknown placeholder: " ++ k)) |part| switch (part) {
+                    .placeholder => |ph| if (ph == .aggressor) @compileError(file ++ "a standing row's cause names {aggressor}: " ++ k),
+                    .text => {},
+                };
+            },
+            .beat, .resolution, .intrigue => @compileError(file ++ "only the opening and standing families are accepted: " ++ k),
+        }
         if (row.weight == 0) @compileError(file ++ "weight must be positive: " ++ k);
         total += row.weight;
         if (row.name.len == 0) @compileError(file ++ "empty name: " ++ k);
@@ -161,6 +197,28 @@ comptime {
             @compileError(file ++ "own_seat rows take the defender side and every other row the aggressor side: " ++ k);
     }
     if (total == 0) @compileError(file ++ "the total weight is zero");
+}
+
+test "the stock table holds both families, and every ruler's motives meet a standing row of its pirate kind" {
+    var opening: usize = 0;
+    var standing: usize = 0;
+    for (table.events) |row| switch (row.family) {
+        .opening => opening += 1,
+        .standing => standing += 1,
+        else => unreachable,
+    };
+    try std.testing.expect(opening > 0 and standing > 0);
+    // Every motive a ruler may hold is named by a non-pirate standing row
+    // and by a pirate one, so no hiring world is left without a standing
+    // need (`sim/politics.zig` reads this).
+    for (std.enums.values(personage.Motive)) |m| for ([_]bool{ false, true }) |pirate| {
+        const met = for (table.events) |row| {
+            if (row.family != .standing or row.pirate != pirate) continue;
+            const has_role = std.mem.indexOfScalar(personage.Role, row.instigator_roles, .planetary_ruler) != null;
+            if (has_role and std.mem.indexOfScalar(personage.Motive, row.motives, m) != null) break true;
+        } else false;
+        try std.testing.expect(met);
+    };
 }
 
 test "every stock row is found by its key, and its cause splits into known parts" {

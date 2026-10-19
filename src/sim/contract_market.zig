@@ -1,11 +1,17 @@
-//! Contract market: monthly offer generation filtered by influence rings
-//! (ARCH §9.2). MekHQ counterpart: `market/ContractMarket`, with CamOps
-//! payment terms; adds per-place visibility and beachhead flagging (docs/mekhq-map.md).
+//! Contract market: positions posted daily from the political world's
+//! conflicts, filtered by influence rings (ARCH §9.2;
+//! docs/p5d-conflict-world-design.md §A, §C). MekHQ counterpart:
+//! `market/ContractMarket`, with CamOps payment terms; adds per-place
+//! visibility and beachhead flagging (docs/mekhq-map.md).
 
 const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const contract = @import("../domain/contract.zig");
+const conflict_mod = @import("../domain/conflict.zig");
+const political_event = @import("../domain/political_event.zig");
+const faction_mod = @import("../domain/faction.zig");
+const rng_mod = @import("rng.zig");
 const planet = @import("../domain/planet.zig");
 const market = @import("../econ/market.zig");
 const logistics = @import("../econ/logistics.zig");
@@ -52,35 +58,6 @@ pub fn isGreatHouse(faction_key: []const u8) bool {
 /// on top (CamOps' negotiation environment, abstracted).
 pub const market_margin_bp: types.Bp = tuning.market.market_margin_bp; // ×1.8
 
-/// AtB-flavored contract-type roll, widened: garrison work is the most
-/// common single kind, but every kind in the book turns up, and `refresh`
-/// caps any one kind at a third of the board.
-fn rollKind(gs: *GameState) contract.ContractKind {
-    const roll = gs.rng.roll2d6(.market);
-    const coin = gs.rng.random(.market).boolean(); // TUNE: design split of cadre vs security, riot vs relief within the AtB 2d6 kind table
-    return switch (roll) {
-        2 => .guerrilla_warfare,
-        3 => .recon_raid,
-        4 => .pirate_hunting,
-        5 => .objective_raid,
-        6, 7 => .garrison_duty,
-        8 => if (coin) .cadre_duty else .security_duty,
-        9 => if (coin) .riot_duty else .relief_duty,
-        10 => .extraction_raid,
-        11 => .diversionary_raid,
-        else => .planetary_assault,
-    };
-}
-
-fn pickEnemy(gs: *GameState, employer: []const u8, kind: contract.ContractKind) []const u8 {
-    // Garrison-class work is as often about pirates as neighbors.
-    if (kind.isGarrisonClass() and gs.rng.random(.market).boolean()) return "PER"; // TUNE: pirates vs neighbour
-    // The faction table's foes: a house fights its neighbours.
-    const foes = @import("../domain/faction.zig").get(employer).foes;
-    if (foes.len == 0) return "PER";
-    return foes[gs.rng.random(.market).uintLessThan(usize, foes.len)]; // uniform pick from faction's foe list
-}
-
 /// Pay multiplier for an offer's opposition: its combat power
 /// against the kind's norm (midpoint lances of `reference_lance_bv` at
 /// regular skill). A veteran five-lance force pays more than a green four.
@@ -99,128 +76,364 @@ pub fn threatPayBp(kind: contract.ContractKind, lances: u8, quality: types.Exper
     return @intCast(10_000 + delta);
 }
 
-/// Regenerate the offer board (monthly, and once at campaign start).
-/// Reputation reaches only as far as your rings: hidden worlds offer nothing.
+/// Days a company based at the posting HQ takes to reach `world`: the
+/// shared travel rule from the HQ's world (`logistics.daysBetween`). The
+/// ETA `closeDay` reckons with (docs/p5d-conflict-world-design.md §A
+/// posting cadence).
+pub fn postingTransitDays(hq_world: *const planet.Planet, world: *const planet.Planet) u32 {
+    return logistics.daysBetween(hq_world, world);
+}
+
+/// The last day a position wanting a company on its world by
+/// `on_station_by` may be accepted from a board `transit_days` away (§A
+/// posting cadence; decision F2): `on_station_by − transit_days −
+/// position_close_grace_days`. Null when that day would fall before day 0,
+/// so the position is out of reach from that board. Pure.
+pub fn closeDay(on_station_by: u32, transit_days: u32) ?u32 {
+    const lead = @as(u64, transit_days) + tuning.market.position_close_grace_days;
+    if (lead > on_station_by) return null;
+    return on_station_by - @as(u32, @intCast(lead));
+}
+
+/// Whether an offer leaves the board on `day` (§A posting cadence): once
+/// past its `close_day`; one with no `close_day` (a standing need's, or
+/// one a schema v73 store held) at the month start. The one retirement
+/// rule.
+pub fn offerRetires(offer: *const contract.Contract, day: u32, month_start: bool) bool {
+    if (offer.close_day) |close| return day > close;
+    return month_start;
+}
+
+/// Whether HQ `hq` has already posted for `side` of conflict `id`: an
+/// offer on its board, or a contract (in any status) taken from it.
+fn sidePosted(gs: *const GameState, offers: []const contract.Contract, hq: types.HqId, id: types.ConflictId, side: contract.ConflictSide) bool {
+    for (offers) |*o| if (o.offer_hq == hq and o.conflict_id == id and o.side == side) return true;
+    for (gs.contracts.values()) |*c| if (c.offer_hq == hq and c.conflict_id == id and c.side == side) return true;
+    return false;
+}
+
+/// The kinds of position a side of conflict `c` posts (decisions D3, F3):
+/// a standing conflict's and an offensive aggressor's from its template's
+/// `position_kinds`, an offensive defender's `political_event.defender_kinds`.
+fn sideKinds(c: *const conflict_mod.Conflict, side: contract.ConflictSide) error{CorruptSave}![]const contract.ContractKind {
+    const row = political_event.find(c.template_key) orelse return error.CorruptSave;
+    if (c.family == .offensive and side == .defender) return &political_event.defender_kinds;
+    return row.position_kinds;
+}
+
+/// Today's board change, prepared: the offers that leave (indices into
+/// `gs.contract_offers`, ascending) and the ones that post, in posting
+/// order, with the `.market` stream after their draws.
+const Posting = struct {
+    retired: []usize,
+    posted: []contract.Contract,
+    market: std.Random.DefaultPrng,
+
+    fn deinit(self: *const Posting, gs: *GameState) void {
+        gs.scratch().free(self.retired);
+        gs.scratch().free(self.posted);
+    }
+};
+
+/// Post today's positions and retire the closed ones, on every HQ's board
+/// (docs/p5d-conflict-world-design.md §A "Player offers per side", §C
+/// "Offers come from conflicts"; decisions F2–F4). Runs daily and when the
+/// campaign opens. Every offer traces to a backing conflict; none is
+/// invented. In order:
+/// 1. every offer for which `offerRetires` holds today leaves its board;
+/// 2. for each HQ in id order, each unresolved conflict in id order, and
+///    its aggressor then defender side: a side posts when its posting day
+///    (`conflict.postsFrom`) has come, its faction hires and is not a Great
+///    House to an outfit rated below `house_min_index`, the target world is
+///    in the HQ's ring or beachhead band (`market.visibilityFor`), the HQ
+///    has not already posted for it (`sidePosted`), and a position wanting
+///    a company by the conflict's `on_station_by` can still be reached
+///    (`closeDay` of `postingTransitDays`). It posts up to
+///    `positions_per_side` positions while the board holds fewer than its
+///    HQ's offer count (`market.contractOfferCount`, halved at a field
+///    HQ). Each position's kind is drawn on `.market` among the side's
+///    kinds (`sideKinds`) that keep the board under its kind cap (a third
+///    of the count, at least two) and garrison-class cap (half, at least
+///    two), and that are not a planetary assault for an outfit rated below
+///    `assault_min_index`; then the terms, in their existing order: length,
+///    pay (beachhead premium, cooling employer, standing, command rights),
+///    the opposition's price (`threatPayBp`) and the remaining terms. A
+///    cooling or shunning employer skips a position on a coin. The
+///    opposition is the conflict's force facing the side
+///    (`conflict.opposition`; none for a standing need), and the enemy the
+///    other side's faction (`PER` for a standing need).
+/// Validates and prepares everything on a copy of `.market` before the
+/// first mutation (rules 12, 16): on error the campaign is unchanged.
+/// Each posted offer takes the next `ContractId`.
 pub fn refresh(gs: *GameState) !void {
-    gs.contract_offers.clearRetainingCapacity();
-    if (gs.hqs.count() == 0) return;
+    var posting = try preparePosting(gs);
+    defer posting.deinit(gs);
+    try gs.contract_offers.ensureUnusedCapacity(gs.allocator(), posting.posted.len);
+    if (gs.next_contract_id > std.math.maxInt(u32) - posting.posted.len) return error.CorruptSave;
+    var i = posting.retired.len;
+    while (i > 0) {
+        i -= 1;
+        _ = gs.contract_offers.orderedRemove(posting.retired[i]);
+    }
+    gs.contract_offers.appendSliceAssumeCapacity(posting.posted);
+    gs.next_contract_id += @intCast(posting.posted.len);
+    gs.rng.prngs[@intFromEnum(rng_mod.Stream.market)] = posting.market;
+}
 
-    // Employers price off what fielding ONE company costs per month —
-    // payroll, hulls and expected maintenance consumables, spread over the
-    // combat companies on the books. A contract hires one company; pricing
-    // it off the whole outfit would pay every company for all of them at once.
-    const base = types.applyBp(@max(perCompanyOpsCost(gs), tuning.market.min_ops_cost), types.applyBp(market_margin_bp, gs.diff().contract_pay_bp)); // difficulty
+fn preparePosting(gs: *GameState) !Posting {
+    const scratch = gs.scratch();
+    const today = gs.clock.day_index;
+    var retired: std.ArrayListUnmanaged(usize) = .empty;
+    errdefer retired.deinit(scratch);
+    var kept: std.ArrayListUnmanaged(contract.Contract) = .empty;
+    defer kept.deinit(scratch);
+    for (gs.contract_offers.items, 0..) |*o, index| {
+        if (offerRetires(o, today, gs.clock.date.day == 1)) try retired.append(scratch, index) else try kept.append(scratch, o.*);
+    }
+    var posted: std.ArrayListUnmanaged(contract.Contract) = .empty;
+    errdefer posted.deinit(scratch);
+    var rng = gs.rng;
+    if (gs.hqs.count() > 0) {
+        // Employers price off what fielding ONE company costs per month —
+        // payroll, hulls and expected maintenance consumables, spread over
+        // the combat companies on the books. A contract hires one company;
+        // pricing it off the whole outfit would pay every company for all
+        // of them at once.
+        const base = types.applyBp(@max(perCompanyOpsCost(gs), tuning.market.min_ops_cost), types.applyBp(market_margin_bp, gs.diff().contract_pay_bp)); // difficulty
+        // The Dragoons rating sets how many come calling, who, and at what pay.
+        const rating_idx = try rating.currentIndex(gs);
+        for (gs.hqs.keys()) |hq_id| {
+            try postBoard(gs, &rng, hq_id, base, rating_idx, kept.items, &posted);
+        }
+    }
+    return .{
+        .retired = try retired.toOwnedSlice(scratch),
+        .posted = try posted.toOwnedSlice(scratch),
+        .market = rng.prngs[@intFromEnum(rng_mod.Stream.market)],
+    };
+}
 
-    // The Dragoons rating sets how many come calling, who, and at what pay.
+/// One HQ's postings for `preparePosting` (its step 2), appended to
+/// `posted`; `kept` is every offer staying on any board.
+fn postBoard(gs: *GameState, rng: *rng_mod.Rng, hq_id: types.HqId, base: types.CBills, rating_idx: u8, kept: []const contract.Contract, posted: *std.ArrayListUnmanaged(contract.Contract)) !void {
+    const scratch = gs.scratch();
+    const today = gs.clock.day_index;
+    const hq = gs.hqs.getPtr(hq_id).?;
+    const hq_world = planet.find(hq.planet_key) orelse return;
+    // One board per HQ: each posts work inside its own ring and beachhead
+    // band, for the companies based there; its comms set how many come
+    // calling, and a field HQ hears half as much.
+    var offer_count = market.contractOfferCount(rating_idx, hq.effectiveFacilityLevel(.comms));
+    if (hq.tier == .field) offer_count = @max(1, offer_count / 2);
+    // A mix, not a wall of garrison duty: no kind takes more than a third
+    // of the board, and the garrison class — garrison, cadre, security,
+    // riot: long, quiet, event-driven — no more than half.
+    const kind_cap: usize = @max(2, @as(usize, offer_count) / 3);
+    const class_cap: usize = @max(2, @as(usize, offer_count) / 2);
+    var by_kind = std.enums.EnumArray(contract.ContractKind, usize).initFill(0);
+    var on_board: usize = 0;
+    var garrison_class: usize = 0;
+    for (kept) |*o| if (o.offer_hq == hq_id) {
+        by_kind.getPtr(o.kind).* += 1;
+        on_board += 1;
+        garrison_class += @intFromBool(o.kind.isGarrisonClass());
+    };
+    const board_start = posted.items.len;
     const rt = tuning.rating;
-    const rating_idx = try rating.currentIndex(gs);
-    // One board per HQ: each posts work inside its own ring and
-    // beachhead band, for the companies based there; its comms set how many
-    // come calling, and a field HQ hears half as much.
-    for (gs.hqs.keys()) |hq_id| {
-        const hq = gs.hqs.getPtr(hq_id).?;
-        const hq_world = planet.find(hq.planet_key) orelse continue;
-        const board_start = gs.contract_offers.items.len;
-        var offer_count = market.contractOfferCount(rating_idx, hq.effectiveFacilityLevel(.comms));
-        if (hq.tier == .field) offer_count = @max(1, offer_count / 2);
-        var attempts: u32 = 0;
-        while (gs.contract_offers.items.len - board_start < offer_count and attempts < 1000) : (attempts += 1) {
-            const world = &planet.catalog[gs.rng.random(.market).uintLessThan(usize, planet.catalog.len)]; // uniform pick from world catalog
-            if (!@import("../domain/faction.zig").get(world.faction).hires) continue; // ComStar posts nothing
+    for (gs.conflicts.values()) |*c| {
+        if (c.outcome != null) continue;
+        for ([_]contract.ConflictSide{ .aggressor, .defender }) |side| {
+            if (on_board >= offer_count) return;
+            const from = conflict_mod.postsFrom(c, side) orelse continue;
+            if (today < from) continue;
+            const employer = conflict_mod.sideFaction(c, side) orelse continue;
+            if (!(faction_mod.find(employer) orelse return error.CorruptSave).hires) continue;
+            // Great Houses do not hire an F-rated outfit.
+            if (rating_idx < rt.house_min_index and isGreatHouse(employer)) continue;
+            if (sidePosted(gs, kept, hq_id, c.id, side) or sidePosted(gs, posted.items[board_start..], hq_id, c.id, side)) continue;
+            const world = planet.find(c.planet_key) orelse return error.CorruptSave;
             const dist = planet.distanceLy(hq_world, world);
             const seen = market.visibilityFor(dist, hq.influenceLy());
             if (seen == .hidden) continue;
-            const vis: struct { market.OfferVisibility, u32 } = .{ seen, dist };
-
-            // Great Houses do not hire an F-rated outfit, and nobody hands
-            // one a planetary assault.
-            if (rating_idx < rt.house_min_index and isGreatHouse(world.faction)) continue;
-            var kind = rollKind(gs);
-            if (kind == .planetary_assault and rating_idx < rt.assault_min_index) kind = .garrison_duty;
-            // A mix, not a wall of garrison duty: no kind takes
-            // more than a third of the board, and the garrison class — garrison,
-            // cadre, security, riot: long, quiet, event-driven — no more than half,
-            // so raids and assaults are always on offer.
-            const kind_cap: usize = @max(2, @as(usize, offer_count) / 3);
-            const class_cap: usize = @max(2, @as(usize, offer_count) / 2);
-            var same: usize = 0;
-            var same_class: usize = 0;
-            for (gs.contract_offers.items[board_start..]) |o| {
-                if (o.kind == kind) same += 1;
-                if (o.kind.isGarrisonClass()) same_class += 1;
+            const on_station_by = conflict_mod.onStationBy(c);
+            var close_day: ?u32 = null;
+            if (on_station_by) |by| {
+                close_day = closeDay(by, postingTransitDays(hq_world, world)) orelse continue;
+                if (close_day.? < today) continue;
             }
-            if (same >= kind_cap) continue;
-            if (kind.isGarrisonClass() and same_class >= class_cap) continue;
-            const length_variance: i32 = @as(i32, gs.rng.roll2d6(.market)) - 7;
-            const length: u8 = @intCast(std.math.clamp(
-                @as(i32, kind.baseLengthMonths()) + length_variance,
-                2,
-                30,
-            ));
-
-            // Beachhead employers pay a premium — nobody else will go.
-            var pay = contract.monthlyPayment(base, kind, employerMultBp(world.faction), rating.payBp(rating_idx));
-            if (vis[0] == .beachhead) pay = types.applyBp(pay, tuning.market.beachhead_pay_bp);
-            // A cooling employer (after a breach): half the offers, 70% pay.
-            if (gs.factionCooling(world.faction)) {
-                if (gs.rng.random(.market).boolean()) continue; // TUNE: project-chosen "half the offers" odds
-                pay = types.applyBp(pay, tuning.market.cooling_pay_bp);
+            const all_kinds = try sideKinds(c, side);
+            const opposition = conflict_mod.opposition(c, side);
+            const enemy_key = conflict_mod.sideFaction(c, side.other()) orelse catch_all_enemy_key;
+            var kinds: std.ArrayListUnmanaged(contract.ContractKind) = .empty;
+            defer kinds.deinit(scratch);
+            for (0..tuning.market.positions_per_side) |_| {
+                if (on_board >= offer_count) return;
+                kinds.clearRetainingCapacity();
+                for (all_kinds) |kind| {
+                    if (kind == .planetary_assault and rating_idx < rt.assault_min_index) continue;
+                    if (by_kind.get(kind) >= kind_cap) continue;
+                    if (kind.isGarrisonClass() and garrison_class >= class_cap) continue;
+                    try kinds.append(scratch, kind);
+                }
+                if (kinds.items.len == 0) break;
+                const kind = kinds.items[rng.random(.market).uintLessThan(usize, kinds.items.len)]; // uniform pick among the side's open kinds
+                const offer = positionTerms(gs, rng, .{
+                    .kind = kind,
+                    .employer_key = employer,
+                    .enemy_key = enemy_key,
+                    .world = world,
+                    .seen = seen,
+                    .dist_ly = dist,
+                    .hq = hq_id,
+                    .base = base,
+                    .rating_idx = rating_idx,
+                    .opposition = opposition,
+                    .conflict_id = c.id,
+                    .side = side,
+                    .on_station_by = on_station_by,
+                    .close_day = close_day,
+                    .id = @enumFromInt(gs.next_contract_id +| @as(u32, @intCast(posted.items.len))),
+                }) orelse continue;
+                try posted.append(scratch, offer);
+                by_kind.getPtr(kind).* += 1;
+                on_board += 1;
+                garrison_class += @intFromBool(kind.isGarrisonClass());
             }
-            // Standing: a house that thinks well of you pays more and
-            // one that doesn't shuns you like a cooling employer.
-            const standing = gs.standing(world.faction);
-            if (standing <= -tuning.contract.standing_shun_depth and gs.rng.random(.market).boolean()) continue; // TUNE: project-chosen "half the offers" odds
-            pay = types.applyBp(pay, standingPayBp(standing));
-            // Command rights: the employer pays for the reins.
-            const rights: contract.CommandRights = switch (gs.rng.roll2d6(.market)) {
-                2, 3, 4 => .integrated,
-                5, 6, 7 => .house,
-                8, 9, 10 => .liaison,
-                else => .independent,
-            };
-            pay = types.applyBp(pay, rights.payBp());
-
-            // The opposition is a force of its own, rolled now so the
-            // board can say what the job is up against.
-            const enemy_key = pickEnemy(gs, world.faction, kind);
-            const opfor = @import("../domain/opfor.zig").roll(&gs.rng, .market, kind, enemy_key, gs.clock.date.year);
-            // Harder work pays more: the employer prices the opposition.
-            pay = types.applyBp(pay, threatPayBp(kind, opfor.lances, opfor.quality, opfor.lance_bv));
-            try gs.contract_offers.append(gs.allocator(), .{
-                .id = @enumFromInt(gs.next_contract_id),
-                .kind = kind,
-                .employer_key = world.faction,
-                .enemy_key = enemy_key,
-                .enemy_lances = opfor.lances,
-                .enemy_quality = opfor.quality,
-                .enemy_lance_bv = opfor.lance_bv,
-                .enemy_lance_tons = opfor.lance_tons,
-                .offer_hq = hq_id,
-                .planet_key = world.key,
-                .dist_ly = vis[1],
-                .beachhead = vis[0] == .beachhead,
-                .terms = .{
-                    .length_months = length,
-                    .base_pay_month = pay,
-                    .advance_pct = tuning.contract.advance_pct,
-                    .signing_bonus = if (gs.rng.roll2d6(.market) >= tuning.contract.signing_bonus_target) @divTrunc(pay, tuning.contract.signing_bonus_divisor) else 0,
-                    .transport_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * tuning.contract.transport_pct_per_pip),
-                    // Straight support: the employer ships you supplies monthly
-                    // (goods, not cash).
-                    .overhead_pct = blk: {
-                        const r = gs.rng.roll2d6(.market);
-                        break :blk if (r >= tuning.contract.overhead_full_at) @as(u8, 100) else if (r >= tuning.contract.overhead_half_at) 50 else if (r >= tuning.contract.overhead_quarter_at) 25 else 0;
-                    },
-                    .battle_loss_pct = if (gs.rng.roll2d6(.market) >= tuning.contract.battle_loss_target) tuning.contract.battle_loss_pct else 0,
-                    .salvage_pct = @intCast(@as(u32, gs.rng.roll2d6(.market) -| 2) * tuning.contract.salvage_pct_per_pip),
-                    // Salvage exchange: the employer keeps the wrecks and pays cash.
-                    .salvage_exchange = gs.rng.random(.market).uintLessThan(u32, tuning.contract.salvage_exchange_in) == 0, // TUNE: salvage_exchange_in constant named in tuning
-                    .command_rights = rights,
-                },
-            });
-            gs.next_contract_id += 1;
         }
     }
+}
+
+/// A founded campaign's political world for board tests: its personages
+/// seated and its standing needs kept when it holds none, an offensive
+/// conflict opened today (`politics.openConflictForTest`, a
+/// `probing_raid`, whose recon raids any rating may take) on the nearest
+/// hiring world the seat HQ's board sees (its ring or beachhead band) that
+/// has a ruler, no unresolved offensive conflict and a hostile leader to
+/// attack it, and today's postings. Returns that conflict. Tests only.
+pub fn worldForTest(gs: *GameState) !types.ConflictId {
+    std.debug.assert(@import("builtin").is_test);
+    const politics = @import("politics.zig");
+    if (gs.personages.count() == 0) try @import("personages.zig").seedForTest(gs);
+    if (gs.conflicts.count() == 0) {
+        const standing = try politics.maintainStanding(gs);
+        standing.deinit(gs);
+    }
+    const hq = gs.hqs.getPtr(gs.seat()).?;
+    const hq_world = planet.find(hq.planet_key).?;
+    var tried = std.StaticBitSet(planet.catalog.len).initEmpty();
+    while (true) {
+        var best: ?usize = null;
+        for (planet.catalog, 0..) |*w, wi| {
+            if (tried.isSet(wi)) continue;
+            const dist = planet.distanceLy(hq_world, w);
+            if (market.visibilityFor(dist, hq.influenceLy()) == .hidden) continue;
+            if (!faction_mod.get(w.faction).hires or !@import("../domain/personage.zig").worldHasRuler(w)) continue;
+            var contested = false;
+            for (gs.conflicts.values()) |*c| contested = contested or (c.family == .offensive and c.outcome == null and std.mem.eql(u8, c.planet_key, w.key));
+            if (contested) continue;
+            if (best == null or dist < planet.distanceLy(hq_world, &planet.catalog[best.?])) best = wi;
+        }
+        const wi = best orelse return error.TestNoWorldInRing;
+        tried.set(wi);
+        const id = politics.openConflictForTest(gs, planet.catalog[wi].key, "probing_raid") catch |err| switch (err) {
+            error.TestNoAggressor => continue,
+            else => return err,
+        };
+        try refresh(gs);
+        return id;
+    }
+}
+
+/// The enemy a standing need's positions name: no threat yet, so the
+/// catch-all pirate bucket (docs/p5d-conflict-world-design.md §E).
+const catch_all_enemy_key = "PER";
+
+const PositionSpec = struct {
+    kind: contract.ContractKind,
+    employer_key: []const u8,
+    enemy_key: []const u8,
+    world: *const planet.Planet,
+    seen: market.OfferVisibility,
+    dist_ly: u32,
+    hq: types.HqId,
+    base: types.CBills,
+    rating_idx: u8,
+    opposition: ?conflict_mod.Force,
+    conflict_id: types.ConflictId,
+    side: contract.ConflictSide,
+    on_station_by: ?u32,
+    close_day: ?u32,
+    id: types.ContractId,
+};
+
+/// One position's terms, drawn on `rng`'s `.market` in their existing
+/// order (length, cooling, standing, command rights, then the remaining
+/// terms); null when a cooling or shunning employer passes on it. Its
+/// strings are static table memory.
+fn positionTerms(gs: *GameState, rng: *rng_mod.Rng, spec: PositionSpec) ?contract.Contract {
+    const kind = spec.kind;
+    const length_variance: i32 = @as(i32, rng.roll2d6(.market)) - 7;
+    const length: u8 = @intCast(std.math.clamp(@as(i32, kind.baseLengthMonths()) + length_variance, 2, 30));
+    // Beachhead employers pay a premium — nobody else will go.
+    var pay = contract.monthlyPayment(spec.base, kind, employerMultBp(spec.employer_key), rating.payBp(spec.rating_idx));
+    if (spec.seen == .beachhead) pay = types.applyBp(pay, tuning.market.beachhead_pay_bp);
+    // A cooling employer (after a breach): half the offers, 70% pay.
+    if (gs.factionCooling(spec.employer_key)) {
+        if (rng.random(.market).boolean()) return null; // TUNE: project-chosen "half the offers" odds
+        pay = types.applyBp(pay, tuning.market.cooling_pay_bp);
+    }
+    // Standing: a house that thinks well of you pays more and one that
+    // doesn't shuns you like a cooling employer.
+    const standing = gs.standing(spec.employer_key);
+    if (standing <= -tuning.contract.standing_shun_depth and rng.random(.market).boolean()) return null; // TUNE: project-chosen "half the offers" odds
+    pay = types.applyBp(pay, standingPayBp(standing));
+    // Command rights: the employer pays for the reins.
+    const rights: contract.CommandRights = switch (rng.roll2d6(.market)) {
+        2, 3, 4 => .integrated,
+        5, 6, 7 => .house,
+        8, 9, 10 => .liaison,
+        else => .independent,
+    };
+    pay = types.applyBp(pay, rights.payBp());
+    // Harder work pays more: the employer prices the opposition.
+    const opposition: conflict_mod.Force = spec.opposition orelse .{ .lances = 0, .quality = .regular, .lance_bv = 0, .lance_tons = 0 };
+    if (spec.opposition != null) pay = types.applyBp(pay, threatPayBp(kind, opposition.lances, opposition.quality, opposition.lance_bv));
+    return .{
+        .id = spec.id,
+        .kind = kind,
+        .employer_key = spec.employer_key,
+        .enemy_key = spec.enemy_key,
+        .enemy_lances = opposition.lances,
+        .enemy_quality = opposition.quality,
+        .enemy_lance_bv = opposition.lance_bv,
+        .enemy_lance_tons = opposition.lance_tons,
+        .offer_hq = spec.hq,
+        .planet_key = spec.world.key,
+        .dist_ly = spec.dist_ly,
+        .beachhead = spec.seen == .beachhead,
+        .conflict_id = spec.conflict_id,
+        .side = spec.side,
+        .on_station_by = spec.on_station_by,
+        .close_day = spec.close_day,
+        .terms = .{
+            .length_months = length,
+            .base_pay_month = pay,
+            .advance_pct = tuning.contract.advance_pct,
+            .signing_bonus = if (rng.roll2d6(.market) >= tuning.contract.signing_bonus_target) @divTrunc(pay, tuning.contract.signing_bonus_divisor) else 0,
+            .transport_pct = @intCast(@as(u32, rng.roll2d6(.market) -| 2) * tuning.contract.transport_pct_per_pip),
+            // Straight support: the employer ships you supplies monthly
+            // (goods, not cash).
+            .overhead_pct = blk: {
+                const r = rng.roll2d6(.market);
+                break :blk if (r >= tuning.contract.overhead_full_at) @as(u8, 100) else if (r >= tuning.contract.overhead_half_at) 50 else if (r >= tuning.contract.overhead_quarter_at) 25 else 0;
+            },
+            .battle_loss_pct = if (rng.roll2d6(.market) >= tuning.contract.battle_loss_target) tuning.contract.battle_loss_pct else 0,
+            .salvage_pct = @intCast(@as(u32, rng.roll2d6(.market) -| 2) * tuning.contract.salvage_pct_per_pip),
+            // Salvage exchange: the employer keeps the wrecks and pays cash.
+            .salvage_exchange = rng.random(.market).uintLessThan(u32, tuning.contract.salvage_exchange_in) == 0, // TUNE: salvage_exchange_in constant named in tuning
+            .command_rights = rights,
+        },
+    };
 }
 
 /// Monthly board refresh at the HQ (ARCH §9.8): hull listings
@@ -743,7 +956,7 @@ test "refresh only offers work inside rings or the beachhead band" {
     _ = try founding.createCommander(&gs, "Erik Kalmar", .CC, .quartermaster);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha Company");
 
-    try refresh(&gs);
+    _ = try worldForTest(&gs);
     try std.testing.expect(gs.contract_offers.items.len >= 1);
 
     const hq = gs.hqs.values()[0];
@@ -857,11 +1070,17 @@ test "an F-rated outfit hears only from the periphery and never gets a planetary
         try e.value_ptr.skills.put(gs.allocator(), e.value_ptr.role.primarySkill(), 7); // … and green as grass: firmly F
     };
     try std.testing.expectEqual(@as(u8, 0), try rating.currentIndex(&gs));
+    // A conflict whose aggressor posts only planetary assaults, on a world
+    // the board sees.
+    const raid = try worldForTest(&gs);
+    gs.conflicts.getPtr(raid).?.template_key = "border_grab";
     gs.contract_offers.clearRetainingCapacity();
     try refresh(&gs);
     for (gs.contract_offers.items) |o| {
         try std.testing.expect(!isGreatHouse(o.employer_key));
         try std.testing.expect(o.kind != .planetary_assault);
+        // The assault's aggressor posts nothing to an F-rated outfit.
+        try std.testing.expect(o.conflict_id != raid or o.side != .aggressor);
     }
     try std.testing.expectEqual(@as(types.Bp, 8_000), rating.payBp(0));
     try std.testing.expectEqual(@as(types.Bp, 13_000), rating.payBp(5));
@@ -968,15 +1187,17 @@ test "the hiring hall always has a few of every role" {
     try std.testing.expect(mw >= 2);
 }
 
-test "the board is a mix: at least offers_min offers, no kind over a third of them" {
+test "the board is a mix under its HQ's caps: no more offers than its count, no kind over a third of them, the garrison class at most half" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 610 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "Erik Kalmar", .LC, .quartermaster);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha Company");
-    try refresh(&gs);
+    _ = try worldForTest(&gs);
+    const hq = gs.hqs.getPtr(gs.seat()).?;
+    const count: usize = market.contractOfferCount(try rating.currentIndex(&gs), hq.effectiveFacilityLevel(.comms));
     const n = gs.contract_offers.items.len;
-    try std.testing.expect(n >= tuning.market.offers_min and n <= tuning.market.offers_max);
-    const cap = @max(2, n / 3);
+    try std.testing.expect(n > 0 and n <= count);
+    const cap = @max(2, count / 3);
     inline for (@typeInfo(contract.ContractKind).@"enum".fields) |f| {
         const kind: contract.ContractKind = @enumFromInt(f.value);
         var same: usize = 0;
@@ -985,12 +1206,239 @@ test "the board is a mix: at least offers_min offers, no kind over a third of th
         };
         try std.testing.expect(same <= cap);
     }
-    // … and the garrison class fills at most half of it.
+    // … and the garrison class fills at most half of it, leaving room for
+    // the raid that posts.
     var garrison_class: usize = 0;
-    for (gs.contract_offers.items) |o| if (o.kind.isGarrisonClass()) {
-        garrison_class += 1;
+    var raids: usize = 0;
+    for (gs.contract_offers.items) |o| {
+        garrison_class += @intFromBool(o.kind.isGarrisonClass());
+        raids += @intFromBool(o.kind == .recon_raid);
+    }
+    try std.testing.expect(garrison_class <= @max(2, count / 2));
+    try std.testing.expect(raids > 0);
+}
+
+fn postedForTest(gs: *const GameState, id: types.ConflictId, side: contract.ConflictSide) usize {
+    var n: usize = 0;
+    for (gs.contract_offers.items) |o| n += @intFromBool(o.conflict_id == id and o.side == side);
+    return n;
+}
+
+/// Step to `day` (not a 1st of the month) and post.
+fn postOnForTest(gs: *GameState, day: u32) !void {
+    gs.clock.day_index = day;
+    gs.clock.date = .{ .year = 3025, .month = 1, .day = 2 + @as(u8, @intCast(day % 20)) };
+    try refresh(gs);
+}
+
+/// A founded campaign whose standing needs have stood down and whose board
+/// is empty, with two offensive conflicts on worlds its seat HQ sees: `x`
+/// opened today and discovered tomorrow, `y` opening in three days and
+/// discovered in six, neither yet posted.
+fn twoConflictsForTest(gs: *GameState) !struct { x: types.ConflictId, y: types.ConflictId } {
+    _ = try founding.createCommander(gs, "T", .LC, .quartermaster);
+    _ = try @import("starter_company.zig").generateInto(gs, "Alpha");
+    const x = try worldForTest(gs);
+    const y = try worldForTest(gs);
+    for (gs.conflicts.values()) |*c| if (c.family == .standing) {
+        c.outcome = .stood_down;
     };
-    try std.testing.expect(garrison_class <= @max(2, n / 2));
+    gs.contract_offers.clearRetainingCapacity();
+    const today = gs.clock.day_index;
+    const yc = gs.conflicts.getPtr(y).?;
+    yc.opened_day = today + 3;
+    yc.discovery_day = today + 6;
+    return .{ .x = x, .y = y };
+}
+
+test "a side posts from its own day: the aggressor's from opening, the defender's from discovery, each world on its own conflict's days" {
+    // docs/p5d-conflict-world-design.md §A "Player offers per side"; rule
+    // 71: two worlds, only one of whose conflicts is discovered.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 74001 });
+    defer gs.deinit();
+    const w = try twoConflictsForTest(&gs);
+    const today = gs.clock.day_index;
+    try postOnForTest(&gs, today);
+    try std.testing.expect(postedForTest(&gs, w.x, .aggressor) > 0);
+    try std.testing.expectEqual(@as(usize, 0), postedForTest(&gs, w.x, .defender));
+    try std.testing.expectEqual(@as(usize, 0), postedForTest(&gs, w.y, .aggressor));
+    // `x` is discovered; `y`, a world away, is not.
+    try postOnForTest(&gs, today + 1);
+    try std.testing.expect(postedForTest(&gs, w.x, .defender) > 0);
+    try std.testing.expectEqual(@as(usize, 0), postedForTest(&gs, w.y, .defender));
+    try std.testing.expectEqual(@as(usize, 0), postedForTest(&gs, w.y, .aggressor));
+    try postOnForTest(&gs, today + 2);
+    try std.testing.expectEqual(@as(usize, 0), postedForTest(&gs, w.y, .aggressor));
+    try postOnForTest(&gs, today + 3);
+    try std.testing.expect(postedForTest(&gs, w.y, .aggressor) > 0);
+    try postOnForTest(&gs, today + 5);
+    try std.testing.expectEqual(@as(usize, 0), postedForTest(&gs, w.y, .defender));
+    try postOnForTest(&gs, today + 6);
+    try std.testing.expect(postedForTest(&gs, w.y, .defender) > 0);
+    // Every position names its side's faction as employer, the other side's
+    // as enemy, and faces the force that side meets (decision F4).
+    for (gs.contract_offers.items) |o| {
+        const c = gs.conflicts.get(o.conflict_id).?;
+        try std.testing.expectEqualStrings(conflict_mod.sideFaction(&c, o.side).?, o.employer_key);
+        try std.testing.expectEqualStrings(conflict_mod.sideFaction(&c, o.side.other()).?, o.enemy_key);
+        const force = conflict_mod.opposition(&c, o.side).?;
+        try std.testing.expectEqual(force.lances, o.enemy_lances);
+        try std.testing.expectEqual(force.lance_bv, o.enemy_lance_bv);
+        try std.testing.expectEqual(c.strike_day, o.on_station_by);
+        // The aggressor's kinds are its template's, the defender's D3's.
+        const kinds: []const contract.ContractKind = if (o.side == .aggressor) political_event.find(c.template_key).?.position_kinds else &political_event.defender_kinds;
+        try std.testing.expect(std.mem.indexOfScalar(contract.ContractKind, kinds, o.kind) != null);
+    }
+    // A side posts once per board: a later day posts no second batch.
+    const before = gs.contract_offers.items.len;
+    try postOnForTest(&gs, today + 7);
+    try std.testing.expectEqual(before, gs.contract_offers.items.len);
+}
+
+test "a position closes on the last day its board can still reach the world, and leaves the board the day after" {
+    // docs/p5d-conflict-world-design.md §A posting cadence; decision F2.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 74002 });
+    defer gs.deinit();
+    const w = try twoConflictsForTest(&gs);
+    const today = gs.clock.day_index;
+    try postOnForTest(&gs, today);
+    const hq_world = planet.find(gs.hqs.getPtr(gs.seat()).?.planet_key).?;
+    const c = gs.conflicts.get(w.x).?;
+    const close = closeDay(c.strike_day.?, postingTransitDays(hq_world, planet.find(c.planet_key).?)).?;
+    var posted: usize = 0;
+    for (gs.contract_offers.items) |o| if (o.conflict_id == w.x) {
+        try std.testing.expectEqual(@as(?u32, close), o.close_day);
+        try std.testing.expect(o.close_day.? <= o.on_station_by.?);
+        posted += 1;
+    };
+    try std.testing.expect(posted > 0);
+    try postOnForTest(&gs, close);
+    try std.testing.expectEqual(posted, postedForTest(&gs, w.x, .aggressor));
+    try postOnForTest(&gs, close + 1);
+    try std.testing.expectEqual(@as(usize, 0), postedForTest(&gs, w.x, .aggressor));
+    // A side whose close day has passed posts nothing later.
+    try std.testing.expectEqual(@as(usize, 0), postedForTest(&gs, w.x, .defender));
+}
+
+test "closeDay is the station day less the board's transit and the grace, and out of reach before day 0" {
+    const grace = tuning.market.position_close_grace_days;
+    try std.testing.expectEqual(@as(?u32, 100 - 20 - grace), closeDay(100, 20));
+    try std.testing.expectEqual(@as(?u32, 0), closeDay(20 + grace, 20));
+    try std.testing.expectEqual(@as(?u32, null), closeDay(20 + grace - 1, 20));
+    var offer: contract.Contract = .{ .id = @enumFromInt(1), .kind = .recon_raid, .employer_key = "LC", .enemy_key = "DC", .planet_key = "skye", .terms = .{ .length_months = 3, .base_pay_month = 1 }, .close_day = 40 };
+    try std.testing.expect(!offerRetires(&offer, 40, true));
+    try std.testing.expect(offerRetires(&offer, 41, false));
+    // An offer with no close day leaves at the month start.
+    offer.close_day = null;
+    try std.testing.expect(!offerRetires(&offer, 1_000, false));
+    try std.testing.expect(offerRetires(&offer, 1_000, true));
+}
+
+test "the board is not cleared monthly: a raid stays across a month start, and a standing need's garrison leaves and posts again" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 74003 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
+    _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const raid = try worldForTest(&gs);
+    var standing_ids: std.ArrayListUnmanaged(types.ContractId) = .empty;
+    defer standing_ids.deinit(std.testing.allocator);
+    for (gs.contract_offers.items) |o| if (o.close_day == null) try standing_ids.append(std.testing.allocator, o.id);
+    try std.testing.expect(standing_ids.items.len > 0 and postedForTest(&gs, raid, .aggressor) > 0);
+    const raids = postedForTest(&gs, raid, .aggressor);
+    // A month start on the raids' close day.
+    for (gs.contract_offers.items) |o| if (o.conflict_id == raid) {
+        gs.clock.day_index = o.close_day.?;
+    };
+    gs.clock.date = .{ .year = 3025, .month = 2, .day = 1 };
+    try refresh(&gs);
+    try std.testing.expectEqual(raids, postedForTest(&gs, raid, .aggressor));
+    for (gs.contract_offers.items) |o| {
+        try std.testing.expect(std.mem.indexOfScalar(types.ContractId, standing_ids.items, o.id) == null);
+    }
+    var reposted: usize = 0;
+    for (gs.contract_offers.items) |o| reposted += @intFromBool(o.close_day == null);
+    try std.testing.expect(reposted > 0);
+}
+
+test "after a month of play every offer traces to a backer whose side hires it, and two campaigns on one seed post the same boards whatever an unrelated command does" {
+    // Criteria 1 and 6 (docs/p5d-conflict-world-design.md §C "No contract
+    // without a backer"; rule 2).
+    const commands_ = @import("commands.zig");
+    const digest = @import("digest.zig");
+    var a = GameState.init(std.testing.allocator, .{ .seed = 20_260_924 });
+    defer a.deinit();
+    var b = GameState.init(std.testing.allocator, .{ .seed = 20_260_924 });
+    defer b.deinit();
+    for ([_]*GameState{ &a, &b }) |g| _ = try commands_.execute(g, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    // A command the board does not price or post from.
+    _ = try commands_.execute(&b, .{ .rename_outfit = "Carlyle's Commandos" });
+    var saw_offensive = false;
+    for (0..45) |_| {
+        for ([_]*GameState{ &a, &b }) |g| {
+            try @import("tick.zig").clearHolds(g);
+            _ = try commands_.execute(g, .{ .advance_days = 1 });
+        }
+        var ha = std.hash.Wyhash.init(0);
+        var hb = std.hash.Wyhash.init(0);
+        digest.update(&ha, a.contract_offers);
+        digest.update(&hb, b.contract_offers);
+        try std.testing.expectEqual(ha.final(), hb.final());
+        for (a.contract_offers.items) |o| {
+            const c = a.conflicts.get(o.conflict_id).?;
+            try std.testing.expectEqualStrings(conflict_mod.sideFaction(&c, o.side).?, o.employer_key);
+            try std.testing.expect(c.outcome == null);
+            saw_offensive = saw_offensive or c.family == .offensive;
+            if (c.family == .standing) try std.testing.expectEqual(@as(u8, 0), o.enemy_lances);
+        }
+    }
+    try std.testing.expect(saw_offensive);
+}
+
+test "posting draws only on the market stream" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 74004 });
+    defer gs.deinit();
+    _ = try twoConflictsForTest(&gs);
+    const before = gs.rng;
+    try postOnForTest(&gs, gs.clock.day_index);
+    try std.testing.expect(gs.contract_offers.items.len > 0);
+    for (std.enums.values(rng_mod.Stream)) |stream| {
+        const moved = !std.mem.eql(u8, &before.encode(stream), &gs.rng.encode(stream));
+        try std.testing.expectEqual(stream == .market, moved);
+    }
+}
+
+test "a day that posts several positions and retires others changes nothing when any allocation fails" {
+    // Rules 12, 69: `refresh` prepares every offer before the first mutation.
+    const digest = @import("digest.zig");
+    const campaign_backup = @import("campaign_backup.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 74005 });
+    defer gs.deinit();
+    const w = try twoConflictsForTest(&gs);
+    try postOnForTest(&gs, gs.clock.day_index);
+    // Tomorrow `x`'s defender posts and a closed offer retires.
+    gs.contract_offers.items[0].close_day = gs.clock.day_index;
+    gs.clock.day_index += 1;
+    gs.clock.date.day += 1;
+    const before = digest.stateHash(&gs);
+    var failures: usize = 0;
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        var copy = try campaign_backup.take(&gs);
+        defer campaign_backup.discard(&copy);
+        var failing = std.testing.FailingAllocator.init(copy.arena.child_allocator, .{ .fail_index = i });
+        const backing = copy.arena.child_allocator;
+        copy.arena.child_allocator = failing.allocator();
+        defer copy.arena.child_allocator = backing;
+        if (refresh(&copy)) |_| {
+            try std.testing.expect(postedForTest(&copy, w.x, .defender) > 0);
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&copy));
+            failures += 1;
+        }
+    }
+    try std.testing.expect(failures > 0);
 }
 
 test "offers are priced per company — a second company does not double every contract's pay" {

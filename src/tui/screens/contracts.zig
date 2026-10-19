@@ -23,21 +23,23 @@ pub fn draw(self: *App) anyerror!void {
     const c = self.cur(0);
     if (view.board.len > 0 and c.* >= view.board.len) c.* = view.board.len - 1;
     const cands = if (view.board.len > 0) try q.offerCandidates(al, g, view.board[c.*].id) else &[_]q.Candidate{};
-    const board_need: u16 = @intCast(@min(1 + view.board.len + 3 + 1 + cands.len + 2, 200));
+    const board_need: u16 = @intCast(@min(1 + view.board.len + 4 + 1 + cands.len + 2, 200));
     const board_h: u16 = @max(6, @min(board_need, layout.major.of(b.h)));
     const board_hq: types.HqId = @enumFromInt(try self.hqSelId(g));
     const inner = self.screen.pane(.{ .x = b.x, .y = b.y, .w = b.w, .h = board_h }, .{ .title = try std.fmt.allocPrint(al, "CONTRACT BOARD · {{a}}{s}{{/}} · for the companies based there", .{try q.hqName(self.a(), g, board_hq)}), .focused = self.paneFocused(0), .right_title = try app.keys.paneTitle(al, &legend, 0) });
     if (view.board.len == 0) {
-        self.screen.lines(inner, &.{"{d}no offers — the board refreshes on the 1st{/}"}, 0, null);
+        self.screen.lines(inner, &.{"{d}no offers — positions post as the conflicts in reach call for them{/}"}, 0, null);
     } else {
-        // The offers on top; under them, who could take the one under the
-        // cursor, readiest first.
+        // The offers on top; under them, why the one under the cursor
+        // exists and when it closes, then who could take it, readiest
+        // first.
         const board_rows: u16 = @intCast(@min(view.board.len + 1, inner.h));
         try self.tablePane(.{ .x = inner.x, .y = inner.y, .w = inner.w, .h = board_rows }, try view.boardTable(al), 0, self.focus == 0);
-        if (inner.h > board_rows + 2) {
+        if (inner.h > board_rows + 3) {
             const y = inner.y + board_rows;
-            self.screen.textPad(inner.x, y + 1, inner.w, "{a}companies for the selected offer{/}", .normal);
-            _ = try self.screen.table(al, .{ .x = inner.x, .y = y + 2, .w = inner.w, .h = inner.h - board_rows - 2 }, try q.tableOf(al, q.candidates_cols, cands), 0, null, self.colScroll(3));
+            if (try q.offerBrief(al, g, view.board[c.*].id)) |brief| self.screen.textPad(inner.x, y + 1, inner.w, brief, .normal);
+            self.screen.textPad(inner.x, y + 2, inner.w, "{a}companies for the selected offer{/}", .normal);
+            _ = try self.screen.table(al, .{ .x = inner.x, .y = y + 3, .w = inner.w, .h = inner.h - board_rows - 3 }, try q.tableOf(al, q.candidates_cols, cands), 0, null, self.colScroll(3));
         }
     }
 

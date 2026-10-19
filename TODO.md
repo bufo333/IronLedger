@@ -123,10 +123,12 @@ A package has one primary invariant or subsystem outcome.
   NPC-only, moving their worlds; REPL `conflicts` and `[politics]` log
   lines; the board is unchanged; schema v73 with a chained v71/v72 → v73
   migration.
-- [ ] P5d.1f board from conflicts: offers come only from conflicts, with side,
-  on-station and close days and a cause line; `TooLateToArrive` and
-  `OppositeSide` refusals; the opposition is the local or strike force. Needs
-  P5d.1e.
+- [x] P5d.1f board from conflicts: every offer is posted daily by an
+  offensive conflict or a ruler's standing garrison or training need, with
+  side, on-station and close days and a cause line; the monthly clear is gone
+  and a between-contracts stop marks new positions; `TooLateToArrive` and
+  `OppositeSide` refusals; the opposition is the local or strike force, none
+  for a standing need; schema v74 with a chained v71/v72/v73 → v74 migration.
 - [ ] P5d.1g news reach and Newswire: one reach owner (absorbing the
   company-position rule), news items, the Newswire pane and REPL `news` for
   conflict open, discovery and resolution. Needs P5d.1e.

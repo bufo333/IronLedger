@@ -552,13 +552,15 @@ fn runSupplyConsumption(gs: *GameState) !void {
 
 /// markets phase: hiring halls churn daily; the political world moves
 /// daily and schemes on the 1st (docs/p5d-conflict-world-design.md §K);
-/// the contract board and site-market listings refresh on the 1st.
+/// the contract board posts and retires its positions daily, after the
+/// political world moves (§A posting cadence); site-market listings
+/// refresh on the 1st.
 fn runMarkets(gs: *GameState) !void {
     try artillery.syncMarkets(gs);
     try contract_market.churnCandidates(gs); // people move daily
     try politics.advanceWorld(gs);
-    if (gs.clock.date.day != 1) return;
     try contract_market.refresh(gs);
+    if (gs.clock.date.day != 1) return;
     try contract_market.refreshListings(gs);
     try faction_surplus.runMonthly(gs);
     // Order is part of the spec: new faction listings first, then NPC consumption, then pirate trickle.
@@ -2042,6 +2044,7 @@ test "stop cadence regression: a home month is one or two stops; each garrison m
     defer gs.deinit();
     _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .paymaster);
     const co = (try @import("commands.zig").execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    _ = try @import("contract_market.zig").worldForTest(&gs);
 
     // One calendar month of `next`, counting stops other than the cap; holds
     // and decisions are answered with their defaults so time keeps moving.

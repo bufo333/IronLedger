@@ -108,7 +108,7 @@ CASES = [
     ("control: an unchanged political event table", lambda: {"tables/political_events.zon": stock("tables/political_events.zon")}, False),
     ("two political events with one key", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r'\.key = "industrial_seizure"', '.key = "border_grab"')}, True),
     ("a political event key that is not lowercase", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r'\.key = "supply_raid"', '.key = "Supply_Raid"')}, True),
-    ("a political event outside the opening family", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.family = \.opening", ".family = .beat")}, True),
+    ("a political event outside the opening and standing families", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.family = \.opening", ".family = .beat")}, True),
     ("a political event with no instigator role", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.instigator_roles = \.\{\.planetary_ruler\}", ".instigator_roles = .{}")}, True),
     ("a political event with no motive", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.motives = \.\{\.profit\}", ".motives = .{}")}, True),
     ("a political event with an unknown motive", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.motives = \.\{\.profit\}", ".motives = .{.greed}")}, True),
@@ -121,6 +121,13 @@ CASES = [
     ("a political event cause with markup", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"sends raiders", "sends {/}raiders")}, True),
     ("a political event cause with an unknown placeholder", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"plunder \{world\}", "plunder {planet}")}, True),
     ("an own_seat political event on the aggressor side", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"(\.target = \.own_seat, \.min_industry = 0, )\.instigator_side = \.defender", r"\1.instigator_side = .aggressor")}, True),
+    ("an opening political event with no strike kind", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.strike_kind = \.recon_raid", ".strike_kind = null")}, True),
+    ("an opening political event with no position kind", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.position_kinds = \.\{\.recon_raid\}", ".position_kinds = .{}")}, True),
+    ("a political event with an unknown position kind", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.position_kinds = \.\{\.recon_raid\}", ".position_kinds = .{.__bad_kind__}")}, True),
+    ("a standing political event with a strike kind", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r'(\.key = "border_watch".*?)\.strike_kind = null', r"\1.strike_kind = .garrison_duty")}, True),
+    ("a standing political event posting a kind other than garrison or cadre duty", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"\.position_kinds = \.\{\.cadre_duty\}", ".position_kinds = .{.security_duty}")}, True),
+    ("a standing political event targeting another world", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r'(\.key = "border_watch".*?)\.target = \.own_seat, \.min_industry = 0, \.instigator_side = \.defender', r"\1.target = .hostile_world, .min_industry = 0, .instigator_side = .aggressor")}, True),
+    ("a standing political event whose cause names an aggressor", lambda: {"tables/political_events.zon": mutate("tables/political_events.zon", r"against the \{defender\}\.", "against the {aggressor}.")}, True),
 ]
 
 

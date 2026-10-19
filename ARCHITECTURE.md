@@ -176,9 +176,11 @@ section explains the shape, the contract states the rules.
   hall, market and hiring draw on `.market`, prisoners and salvage on `.battle`,
   event recruits on `.events`, the starter company on `.generation`, and the
   world's personages (`personage_gen`), then their relations
-  (`personage_relations.generate`, after the last personage), and the
-  conflicts `politics.runSchemes` opens and `politics.advanceWorld`
-  resolves, on `.politics`. All dice are
+  (`personage_relations.generate`, after the last personage), the standing
+  needs `politics.maintainStanding` keeps, and the conflicts
+  `politics.runSchemes` opens and `politics.advanceWorld` resolves, on
+  `.politics`; the board's position kinds and terms (`contract_market.refresh`)
+  on `.market`. All dice are
   2d6 unless the cited source or design rule says otherwise (`// TUNE`).
 - **Presentation markup is escaped at the source.** Screen text carries
   inline tags (`{a}` … `{/}`); `table.Tokenizer` is the one reader of it
@@ -266,7 +268,14 @@ cheap, copyable, and impossible to mix up.
   Deployed companies also hold **local operating funds** (§9.8).
 - **Contract** — type (one of the 12 AtB types below), employer, enemy,
   planet, dates, financial terms, assigned company, required force size,
-  score/success state, generated scenario & event schedule.
+  score/success state, generated scenario & event schedule. Every offer and
+  contract has a backer (docs/p5d-conflict-world-design.md §C "No contract
+  without a backer"): the **Conflict** that posted it (`conflict_id`), the
+  `side` it serves (`ConflictSide`: aggressor or defender, a standing need's
+  employer being its defender), the day the backer wants the company on the
+  world (`on_station_by`, the strike day; none for a standing need) and the
+  last day it may be accepted (`close_day`; none when it closes at the month
+  start). Only a row a schema v73 store held has no backer.
 - **Hq** — tier, planet, facility levels (each with an upgrade path),
   influence radius (derived), capacity slots (derived), staffing requirement
   (derived, grows with facility levels), assigned staff, inventory, project
@@ -304,8 +313,9 @@ cheap, copyable, and impossible to mix up.
   below). Seeding and the load
   check are `sim/personages.zig` (`prepareSeeding`, `commitSeeding`,
   `validate`): `create_commander` prepares the seeding before its first
-  mutation and commits it after its last fallible step, so a seeding
-  failure leaves the campaign unchanged. `who` lists them through
+  mutation and commits it once the commander exists, before the standing
+  needs and the boards are drawn; any later failure restores the campaign
+  from the command's backup, so a seeding failure leaves it unchanged. `who` lists them through
   `queries.personageRows` (`who <faction>`: the leader, then its heirs,
   family and officials, then its rulers); `who <contract id>` and the F4
   `w` who's-who sheet read `queries.contractWhosWho` (the contract's world
@@ -335,15 +345,25 @@ cheap, copyable, and impossible to mix up.
   and allies (**Conflict**, below).
 - **Conflict** — `conflict.Conflict` in `GameState.conflicts`, keyed by
   `ConflictId` from `next_conflict_id`, in id order, resolved ones kept
-  (docs/p5d-conflict-world-design.md §C). It holds its opening template's
+  (docs/p5d-conflict-world-design.md §C, §E). Its `family` is `offensive`
+  (a war) or `standing` (a ruler's standing garrison or training need, §E
+  "stability"). It holds its opening template's
   key, the world fought over, the aggressor and defender (each a
   `conflict.Power`: a faction key and the personage acting for it), the
   instigator, the staging world, the §A days (`opened_day < discovery_day <
   strike_day < expires_day`, all fixed at opening), the defender's rolled
   `local_force` and the aggressor's `strike_force` (`opfor.Force`), and an
-  `outcome` once resolved. Its status (`preparing`, `threatened`, `open`,
+  `outcome` once resolved. A standing need has no aggressor, staging world,
+  strike or end day or strike force (`conflict.offense` reads them
+  together); it is known from its opening (`discovery_day = opened_day`),
+  its ruler is its defender and instigator, and it ends only `stood_down`.
+  Its status (`preparing`, `threatened`, `open`, `standing`,
   `resolved`) is derived by one owner, `conflict.status(c, day)`, never
-  stored. The pure rules are `domain/conflict.zig`: `aggressorWinChanceBp`
+  stored. The posting rules are `conflict.postsFrom` (the aggressor's
+  positions from `opened_day`, the defender's from `discovery_day`; D15),
+  `onStationBy` (the strike day), `sideFaction` and `opposition` (an
+  aggressor's position faces the `local_force`, a defender's the
+  `strike_force`, a standing need's no named threat; decision F4). The pure rules are `domain/conflict.zig`: `aggressorWinChanceBp`
   (strike BV over both forces' BV; decision E4), `discoveryDay` (the earlier
   of the intelligence day, `opened + lag − chief cut`, and the detection
   day, `strike − detection_lead_days`; D12, E6) and `localForceLances`
@@ -354,14 +374,23 @@ cheap, copyable, and impossible to mix up.
   is a pirate's, its `TargetRule` (`hostile_world`, `recent_victor_world`,
   `grudge_seat`, `rival_seat`, `ally_foe_world`, `own_seat`, one owner each
   in `sim/politics.zig`), the instigator's side, the strike force's
-  contract kind, a weight and a cause sentence. `sim/politics.zig` owns
+  contract kind, the kinds of position its aggressor posts
+  (`position_kinds`; its defender posts `political_event.defender_kinds`,
+  decision D3), a weight and a cause sentence; the `standing` templates post
+  garrison and cadre duty on the ruler's own seat. `sim/politics.zig` owns
   opening (`runSchemes`), progression and NPC-only resolution
-  (`advanceWorld`, §6), the staging world (`stagingWorld`: the aggressor
-  faction's nearest world, never the target), the one cause formatter
-  (`causeText`) and the load check (`validate`). `queries.conflictRows`
-  lists every discovered conflict for REPL `conflicts`; a `preparing`
-  conflict shows nowhere. The contract board, offers, battles and rivals
-  read no conflict.
+  (`advanceWorld`, §6), the standing needs (`maintainStanding`: one on every
+  hiring world with a ruler, drawn at campaign creation and kept on each
+  1st; one stands down once `standing_lifetime_days` have passed and no
+  contract it backs holds its position, `standDownDue`), the staging world
+  (`stagingWorld`: the aggressor faction's nearest world, never the
+  target), the one cause formatter (`causeText`) and the load check
+  (`validate`, which also checks every offer's and contract's backer).
+  `queries.conflictRows` lists, for REPL `conflicts`, every discovered
+  offensive conflict and every standing need with a position posted or
+  holding the outfit's contract, with its positions and the side the outfit
+  holds; a `preparing` conflict shows nowhere. Every contract position is
+  posted from a conflict (§9.2); battles and rivals read no conflict yet.
 - **Actor** — a contract-introduced NPC (liaison, official, enemy commander,
   etc.) that persists across contracts. Each actor carries four relationship
   dimensions (trust, debt, respect, hostility; −100…100) and typed **flags**
@@ -531,19 +560,22 @@ part of the spec:
    medical supplies, and repair or refit consumes parts in its own phase;
    fabrication adds completed structural components to stock.
 3. **Medical** — doctors heal the wounded (MASH/hospital modifiers).
-4. **Acquisition & markets** — ordered parts arrive; weekly/monthly market
-   refreshes (contract market monthly, personnel weekly, units monthly).
-   After the hiring halls churn and before the monthly refreshes, the
+4. **Acquisition & markets** — ordered parts arrive; market refreshes
+   (contract positions daily, personnel weekly, units monthly).
+   After the hiring halls churn and before the contract board posts, the
    political world moves (`politics.advanceWorld`; docs/p5d-conflict-world-design.md
    §K steps 2–3): first today's due conflict days by (day, `ConflictId`) —
    discovery and the strike each log a `[politics]` line, and at
    `expires_day` one `.politics` draw against `aggressorWinChanceBp`
    resolves the conflict, moves its world by `world_state.conflictWorldDelta`
-   and logs it; then on the 1st `runSchemes` opens up to
+   and logs it; then on the 1st `maintainStanding` stands down the lapsed
+   standing needs and draws new ones, and `runSchemes` opens up to
    `schemes_per_month` conflicts, unlogged because an opening is secret.
-   Every fallible step is prepared before the first mutation, and a scheme
-   failure rolls the day's transitions back. Player state, presence and
-   visibility are never inputs, and the board reads no conflict.
+   Every fallible step is prepared before the first mutation, and a later
+   step's failure rolls the earlier ones back. Player state, presence and
+   visibility are never inputs, but a standing need stands on while a
+   contract it backs holds its position. Then the contract board posts the
+   day's positions from the conflicts and retires the closed ones (§9.2).
 5. **Maintenance** *(weekly per unit)* — tech rolls vs. target number
    (modified by part quality, supply state, facility, tech workload);
    failures degrade quality/parts, MekHQ-style.
@@ -890,6 +922,32 @@ by HPG and word of mouth, and yours only reaches so far. Offers in the
 preview. Beyond that: invisible. Completing a beachhead contract earns the
 right to found a **field HQ** on-site — the expansion toehold that upgrades,
 over time and money, into a regional HQ with a ring of its own.
+
+**Every position comes from a conflict** (docs/p5d-conflict-world-design.md
+§A "Player offers per side", §C "Offers come from conflicts"; decisions
+F2–F4). `contract_market.refresh` runs daily: it retires every offer past
+its `close_day`, and on the 1st every offer without one
+(`offerRetires`); then each HQ's board, in HQ id order, takes each
+unresolved conflict in id order and each side whose posting day has come
+(`conflict.postsFrom`), whose faction hires (a Great House only an outfit
+rated `house_min_index` or above), whose world the HQ sees, which it has not
+posted for already (an offer on its board or a contract taken from it), and
+whose `on_station_by` it can still reach: `closeDay` is `on_station_by −
+postingTransitDays(HQ world, world) − position_close_grace_days`. It posts
+up to `positions_per_side` positions while the board holds fewer than its
+offer count, each kind drawn on `.market` among the side's kinds that keep
+the board under its kind cap (a third) and garrison-class cap (half), never
+a planetary assault for an outfit below `assault_min_index`; the terms keep
+their owners and order (pay by kind, employer, rating, beachhead premium,
+cooling and standing, command rights, the opposition's price). The
+opposition is the backer's force facing the side (`conflict.opposition`):
+none for a standing need, whose garrison faces no named threat and fights
+no engagement until a threat emerges. Everything is prepared before the
+first mutation. Accepting refuses a position past its `close_day`
+(`TooLateToArrive`) or on the other side of a conflict the outfit holds a
+position in (`OppositeSide`; `contract_control.requireOpenPosition`), both
+before any change. Between contracts a day that posts new positions stops
+an advance (`positions_posted`).
 
 ### 9.3 Capacity slots
 
@@ -1434,9 +1492,9 @@ a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
 **Current format boundary.** New empty stores
-initialize schema 73 transactionally. Existing store and campaign versions
-must both be 73 once the store is open; a schema 71 or 72 store is migrated
-on open (below), older formats (70 included) are refused intact and newer
+initialize schema 74 transactionally. Existing store and campaign versions
+must both be 74 once the store is open; a schema 71, 72 or 73 store is
+migrated on open (below), older formats (70 included) are refused intact and newer
 formats retain their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
 missing tables or rows. Outside a supported migration, no automatic reset,
@@ -1536,15 +1594,18 @@ campaign holds is not checked: the start year is not saved.
 **Older stores migrate on open** through a chain of migrations, each from
 one version to the next (`Store.migrate`; schema 71 is the oldest
 supported format, `oldest_supported_schema_version`). A v71 store runs v71
-→ v72 and then v72 → v73; a v72 store runs only v72 → v73. The whole chain
+→ v72, v72 → v73 and v73 → v74; a v72 store the last two; a v73 store only
+v73 → v74. The whole chain
 is one transaction with foreign keys off, ending with an empty `PRAGMA
 foreign_key_check` (else `CorruptStore`) and the current schema check
 before COMMIT; any failure rolls back with the file at its original
 version. Each migration keeps a frozen definition of its source format and
 validates it before its own statements: a malformed or mixed-version store
 is `CorruptStore`, untouched. `ddl_v72` and `index_ddl_v72` are schema
-v72's DDL byte for byte (a test pins their SHA-256); `ddl_v71` is derived
-from `ddl_v72`; the current `ddl` is v72's plus `conflict`.
+v72's DDL byte for byte, and `conflict_v73_ddl` is the `conflict` table
+v73 added (a test pins their SHA-256); `ddl_v71` is derived from `ddl_v72`,
+`ddl_v73` is v72's plus `conflict_v73_ddl`, and the current `ddl` is v73's
+with `contract` and `conflict` in their v74 definitions.
 
 - **v71 → v72** (`migrateV71ToV72`). The source check: every v71 table and
   column (the frozen v71 `personage` definition, every other table as v72
@@ -1563,31 +1624,62 @@ from `ddl_v72`; the current `ddl` is v72's plus `conflict`.
   campaign `next_conflict_id = 1`, and sets every campaign and the store to
   73. A v72 campaign has no conflict, so it migrates with none; every other
   value, id, counter and stream is unchanged.
+- **v73 → v74** (`migrateV73ToV74`). The source check: every v73 table and
+  column (`ddl_v73`), exactly the v73 `conflict` columns, no `family` or
+  backer column, and only v73 campaigns. It rebuilds `conflict` and then
+  `contract` from the v74 DDL (create–copy–drop–rename, rows in stored
+  order, indexes recreated): every v73 conflict is offensive, so each gains
+  `family = 'offensive'`; every v73 contract and offer has no backer, so
+  each gains `conflict_id` NULL, `side = 'defender'` and no `on_station_by`
+  or `close_day`. It sets every campaign and the store to 74; every other
+  value, id, counter and stream is unchanged. An offer without a backer
+  loads (only offers posted at v74 come from conflicts) and leaves the board
+  at the next month start.
 
 A migrated campaign loads with the digest of the same state saved directly
-at v73 and plays on as it would have.
+at v74 and plays on as it would have.
 
-**Conflicts are saved** (schema 73): one `conflict` row each (ordinal, id,
+**Conflicts are saved** (schema 74): one `conflict` row each (ordinal, id,
 template key, world, aggressor and defender factions and personages,
 instigator, staging world, the four days, each force's lances, quality, lance
-BV and lance tons, and the outcome or NULL) and the meta counter
-`next_conflict_id`. SQL checks bound every integer and text column, the day
-order, lances (1–255), quality and outcome tags; `(cid, id)` and `(cid,
-ord)` are unique, and the aggressor, defender and instigator are tied to
-`personage` rows by foreign key. The loader decodes each row exactly (tags
-on their full bytes, checked integers, the ordinal equal to the row's
-position), and `politics.validate` refuses an unknown template, world or
-faction, a dangling personage, an instigator that is not the side
-personage its template names, a staging world other than `stagingWorld`'s,
-a broken day order, a strike day whose preparation (less the travel) or
-fighting days fall outside their tuned ranges, an opening after today, an
-unresolved conflict at or past its expiry or a resolved one before it, two
-unresolved conflicts on one world, more than `max_open_conflicts`
-unresolved, a force without a lance or with negative BV or tonnage, an id
-not above the previous row's (ordinal order must be id order), and an id at
-or above the counter. Any lance BV the schema admits resolves exactly: the
-win chance is computed in i128. A save made under a `political_events.zon`
-without a template a conflict uses is refused.
+BV and lance tons, the outcome or NULL, and the family) and the meta counter
+`next_conflict_id`. SQL checks bound every integer and text column, lances
+(1–255), quality, outcome and family tags, and each family's shape: an
+offensive row holds every aggressor-side column, the day order and no
+`stood_down`; a standing row holds none of them, `discovery_day =
+opened_day`, its defender as instigator and only `stood_down`. `(cid, id)`
+and `(cid, ord)` are unique, and the aggressor, defender and instigator are
+tied to `personage` rows by foreign key. The loader decodes each row
+exactly (tags on their full bytes, checked integers, each aggressor-side
+part whole or absent, the ordinal equal to the row's position), and
+`politics.validate` refuses an unknown template, world or faction, a
+template of the other family, a dangling personage, an instigator that is
+not the side personage its template names, a staging world other than
+`stagingWorld`'s, a broken day order, a strike day whose preparation (less
+the travel) or fighting days fall outside their tuned ranges, an opening
+after today, an unresolved conflict at or past its expiry or a resolved one
+before it, two unresolved offensive conflicts on one world, more than
+`max_open_conflicts` unresolved, a force without a lance or with negative
+BV or tonnage, an id not above the previous row's (ordinal order must be id
+order), and an id at or above the counter; a standing need with any
+aggressor-side part, a discovery other than its opening, an instigator
+other than its defender, a defender faction other than its world's, an
+outcome other than `stood_down`, or a second unresolved need on its world;
+and an offensive conflict missing an aggressor-side part or stood down. Any
+lance BV the schema admits resolves exactly: the win chance is computed in
+i128. A save made under a `political_events.zon` without a template a
+conflict uses is refused.
+
+**Each position's backer is saved** (schema 74) on its `contract` row:
+`conflict_id` (NULL without a backer), `side`, `on_station_by` and
+`close_day`. SQL checks bound them, keep a row without a backer at the
+default side with neither day, keep both days set or both NULL with the
+close no later than the station day, and tie `conflict_id` to a `conflict`
+row by foreign key. `politics.validate` refuses a backer the campaign does
+not hold, an employer other than the backer's faction on that side (a
+standing need has no aggressor side), an `on_station_by` other than the
+backer's (`conflict.onStationBy`), a close day without a station day or
+after it, and a row without a backer holding a side or a day.
 
 **Personage relations are saved** (schema 71): one `personage_relation` row
 each (ordinal, from and to personage ids, kind tag, weight). SQL checks bound

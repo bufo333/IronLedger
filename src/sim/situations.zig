@@ -224,6 +224,7 @@ pub fn acceptedGarrisonForTest(gs: *GameState) !types.ContractId {
     defer arena.deinit();
     _ = try founding.createCommander(gs, "T", .LC, .line_officer);
     const co = try starter_company.generateInto(gs, "Alpha");
+    _ = try contract_market.worldForTest(gs);
     const offer: types.ContractId = hunt: for (0..24) |_| {
         for (gs.contract_offers.items) |*o| {
             const arc = operations.selectArcKeyFor(o.kind) orelse continue;

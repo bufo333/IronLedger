@@ -450,6 +450,42 @@ for every kind.
   Deferred: `stability` conflicts and every offer to 1f, `parent_conflict`
   to 1m, personage consequences (deposition, grudges, standing) to 1n; the
   faction weight in resolution and discovery is dropped (E4, E6).
+- **Landed in P5d.1f.** Every offer comes from a conflict, at schema v74
+  (with a transactional v73 → v74 migration: every v73 conflict becomes
+  offensive and every v73 offer and contract has no backer, such an offer
+  leaving the board at the next month start). A conflict's `family` is
+  `offensive` or `standing` (F1): a standing conflict is §E's `stability`
+  need, drawn from four `standing` templates in `political_events.zon` for
+  every hiring world with a ruler at campaign creation and kept on each 1st
+  (`politics.maintainStanding`), with no aggressor, staging world, strike,
+  end day or strike force; its ruler is defender and instigator; it stands
+  down once `standing_lifetime_days` have passed and no contract it backs
+  holds its position. `Contract` gains `conflict_id`, `side`,
+  `on_station_by` (the strike day) and `close_day`. `contract_market.refresh`
+  runs daily (F2): it retires a position past its `close_day` and, on the
+  1st, every position without one (a standing need's), then posts each
+  unresolved conflict's sides in id order on each board that sees the world
+  — the aggressor's from `opened_day`, the defender's from `discovery_day`
+  (D15) — up to `positions_per_side` positions each (F3), kinds drawn on
+  `.market` from the aggressor's template `position_kinds` or the
+  defender's relief, security and riot (D3), under the existing per-HQ
+  offer count, kind and garrison-class caps. `close_day` is `on_station_by`
+  less the travel from the posting HQ's world (`postingTransitDays`) less
+  `position_close_grace_days`; a side whose close day has passed posts
+  nothing. An offer's opposition is the backer's force facing its side
+  (F4): the defender's `local_force` for the aggressor's positions, the
+  `strike_force` for the defender's, none for a standing need's, whose
+  garrison fights no engagement until §E's threats emerge (1m); the
+  per-offer opposition roll, kind roll and enemy pick are gone. Accepting a
+  position past its close day is refused `TooLateToArrive`, and the other
+  side of a conflict the outfit holds a position in `OppositeSide`, both
+  before any change. The board, the offer's brief and the active contract
+  show the cause, side, on-station day and close day; `conflicts` lists the
+  standing needs with positions posted and the side the outfit holds.
+  Between contracts a day that posts new positions stops an advance
+  (`positions_posted`); payday no longer names a board refresh. The
+  opposition gap between 1f and 1k stands: forces present and opposition
+  routing are 1k's, and the old counter-hire still runs until 1k deletes it.
 
 ## §D Commitments: hired companies with travel (D4, D13, D14)
 
@@ -508,6 +544,12 @@ for every kind.
   `discovery_day`. The notice names who, why and the expected arrival. The
   opposition joins on its `arrive_day`. Until then, probe battles keep today's
   garrison behaviour (`battle.zig` 129, `hasOpfor` false path).
+- **Landed in P5d.1f.** Every hiring world with a ruler holds one standing
+  need from the campaign's first day (`border_watch`, `militia_training`,
+  `household_guard`, and `den_guard` for a pirate world), posting garrison
+  and/or cadre duty for its world's faction with no named threat (enemy
+  `PER`, no opposition lances); threat emergence and `parent_conflict` are
+  1m's.
 
 ## §F Narrative surfaces
 
@@ -1233,6 +1275,22 @@ whose design depends on a different choice is re-planned.
   - *E6 — defender intelligence.* One flat lag range, shortened by a fixed
     `intel_chief_cut_days` when the defender faction has an
     `intelligence_chief` personage.
+- **P5d.1f decisions. John's choices (P5d.1f plan):**
+  - *F1 — the `stability` backer.* One `Conflict` record with a defender-only
+    `standing` family (optional aggressor side, a `family` column, a
+    `standing` status), not a separate entity, so every contract keeps one
+    `conflict_id`.
+  - *F2 — board cadence.* Positions post on the day their rule allows and
+    close on their own `close_day`; the monthly clear ends; payday no longer
+    names a board refresh, and a between-contracts `positions_posted` stop
+    restates it as "new positions posted".
+  - *F3 — board density.* Each side posts up to `positions_per_side`
+    (`// TUNE`) positions per board from its kinds, under the existing
+    per-HQ, per-kind and garrison-class caps.
+  - *F4 — the opposition before `forcesPresent`.* An offer's opposition is
+    the backer's stored force at posting (the `local_force` for an
+    aggressor's position, the `strike_force` for a defender's, none for a
+    standing need's); offers no longer roll their own.
 - **D9 — playtest gate.** The gate entry is unchecked on `main`, and no verdict
   from John is recorded on `main`. *Recommended:* check it, worded as John's
   verdict, once John confirms it. *Alternative:* leave it for separate

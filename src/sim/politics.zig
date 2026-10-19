@@ -1,11 +1,14 @@
 //! The political world's progression (docs/p5d-conflict-world-design.md §C,
-//! §K "Progression is independent of the player", P5d.1e). `advanceWorld`,
-//! the markets-phase owner, moves due conflicts through discovery, the
-//! strike and NPC-only resolution, and on the 1st `runSchemes` opens new
-//! ones from the `political_events.zon` opening templates. Also the one
-//! cause formatter and the load-time check every campaign's conflicts keep.
-//! Player state, presence and visibility are never inputs, and the
-//! contract board never reads a conflict.
+//! §E, §K "Progression is independent of the player"; P5d.1e, P5d.1f).
+//! `advanceWorld`, the markets-phase owner, moves due conflicts through
+//! discovery, the strike and NPC-only resolution, and on the 1st keeps
+//! every hiring world's standing garrison or training need
+//! (`maintainStanding`) and has `runSchemes` open new offensive conflicts
+//! from the `political_events.zon` opening templates. Also the one cause
+//! formatter and the load-time check every campaign's conflicts keep. A
+//! standing need stands down only once no contract it backs runs; no other
+//! player state, presence or visibility is an input. The contract board
+//! posts its positions from these conflicts (`contract_market.refresh`).
 //! No MekHQ counterpart: MekHQ has no persistent political conflicts
 //! (docs/mekhq-map.md).
 
@@ -17,6 +20,7 @@ const faction = @import("../domain/faction.zig");
 const personage = @import("../domain/personage.zig");
 const political_event = @import("../domain/political_event.zig");
 const conflict = @import("../domain/conflict.zig");
+const contract_mod = @import("../domain/contract.zig");
 const opfor = @import("../domain/opfor.zig");
 const world_state_dom = @import("../domain/world_state.zig");
 const logistics = @import("../econ/logistics.zig");
@@ -71,9 +75,11 @@ const Context = struct {
     /// Per world: its ruler and its faction.
     ruler: [world_count]?u32,
     world_faction: [world_count]?u8,
-    /// Worlds with an unresolved conflict, and personages who instigated one.
+    /// Worlds with an unresolved offensive conflict, and personages who
+    /// instigated one; standing conflicts bar no scheme.
     contested: [world_count]bool,
     busy: [max_people]bool,
+    /// Unresolved offensive conflicts.
     unresolved: usize,
     /// `personage.factionsHostile` between every pair.
     hostile: [faction_count][faction_count]bool,
@@ -116,13 +122,16 @@ const Context = struct {
             };
         }
         for (gs.conflicts.values()) |*c| {
+            if (c.family == .standing) continue;
+            const o = conflict.offense(c) orelse return error.CorruptSave;
             if (c.outcome) |outcome| {
-                if (ctx.today -| c.expires_day > tuning.politics.recent_defeat_lookback_days) continue;
-                const a = factionIndex(c.aggressor.faction_key) orelse return error.CorruptSave;
+                if (ctx.today -| o.expires_day > tuning.politics.recent_defeat_lookback_days) continue;
+                const a = factionIndex(o.aggressor.faction_key) orelse return error.CorruptSave;
                 const d = factionIndex(c.defender.faction_key) orelse return error.CorruptSave;
                 switch (outcome) {
                     .aggressor_won => ctx.beat[d][a] = true,
                     .defender_held => ctx.beat[a][d] = true,
+                    .stood_down => return error.CorruptSave,
                 }
                 continue;
             }
@@ -296,18 +305,19 @@ const Candidate = struct {
     weight: u64,
 };
 
-/// Every candidate scheme, in personage order, then template-file order,
-/// then catalogue order (§K step 3). A candidate's instigator meets
-/// `instigatorEligible` and instigated no unresolved conflict; its target
-/// world has no unresolved conflict, passes the template's rule, and the
-/// aggressor's faction has a world to stage from. `alloc` owns the result.
+/// Every candidate scheme, in personage order, then `opening` template-file
+/// order, then catalogue order (§K step 3). A candidate's instigator meets
+/// `instigatorEligible` and instigated no unresolved offensive conflict;
+/// its target world has no unresolved offensive conflict, passes the
+/// template's rule, and the aggressor's faction has a world to stage from.
+/// `alloc` owns the result.
 fn candidates(alloc: std.mem.Allocator, ctx: *const Context) error{OutOfMemory}![]Candidate {
     var out: std.ArrayListUnmanaged(Candidate) = .empty;
     errdefer out.deinit(alloc);
     for (ctx.people, 0..) |*p, pi| {
         if (ctx.busy[pi]) continue;
         for (political_event.table.events, 0..) |*row, ti| {
-            if (!instigatorEligible(p, row)) continue;
+            if (row.family != .opening or !instigatorEligible(p, row)) continue;
             const related: []u32 = switch (row.target) {
                 .grudge_seat => try relatedTo(alloc, ctx, p.id, .grudge),
                 .rival_seat => try relatedTo(alloc, ctx, p.id, .rival),
@@ -433,9 +443,9 @@ pub fn runSchemes(gs: *GameState) error{ OutOfMemory, CorruptSave }!Opened {
     for (planned[0..n]) |*c| {
         c.template_key = try alloc.dupe(u8, c.template_key);
         c.planet_key = try alloc.dupe(u8, c.planet_key);
-        c.aggressor.faction_key = try alloc.dupe(u8, c.aggressor.faction_key);
+        c.aggressor.?.faction_key = try alloc.dupe(u8, c.aggressor.?.faction_key);
         c.defender.faction_key = try alloc.dupe(u8, c.defender.faction_key);
-        c.staging_planet_key = try alloc.dupe(u8, c.staging_planet_key);
+        c.staging_planet_key = try alloc.dupe(u8, c.staging_planet_key.?);
     }
 
     var opened: Opened = .{};
@@ -471,7 +481,7 @@ fn plan(ctx: *const Context, rng: *rng_mod.Rng, cand: Candidate, id: types.Confl
     var local = opfor.roll(rng, .politics, .garrison_duty, sides.defender.faction_key, year);
     const security: i16 = if (ctx.gs.world_states.get(target.key)) |ws| ws.security else 0;
     local.lances = conflict.localForceLances(local.lances, security);
-    const strike_force = opfor.roll(rng, .politics, row.strike_kind, sides.aggressor.faction_key, year);
+    const strike_force = opfor.roll(rng, .politics, row.strike_kind orelse return error.CorruptSave, sides.aggressor.faction_key, year);
     return .{
         .id = id,
         .template_key = row.key,
@@ -532,9 +542,10 @@ fn prepareDue(gs: *GameState) error{ OutOfMemory, CorruptSave }!PreparedDue {
     var count: usize = 0;
     var resolutions: usize = 0;
     for (gs.conflicts.values()) |*c| {
-        if (c.outcome != null) continue;
-        if (c.discovery_day == today or c.strike_day == today or c.expires_day == today) count += 1;
-        if (c.expires_day == today) resolutions += 1;
+        if (c.outcome != null or c.family == .standing) continue;
+        const o = conflict.offense(c) orelse return error.CorruptSave;
+        if (c.discovery_day == today or o.strike_day == today or o.expires_day == today) count += 1;
+        if (o.expires_day == today) resolutions += 1;
     }
     const steps = try gs.scratch().alloc(DueStep, count);
     errdefer gs.scratch().free(steps);
@@ -548,29 +559,30 @@ fn prepareDue(gs: *GameState) error{ OutOfMemory, CorruptSave }!PreparedDue {
     const r = rng.random(.politics);
     var at: usize = 0;
     for (gs.conflicts.values(), 0..) |*c, index| {
-        if (c.outcome != null) continue;
+        if (c.outcome != null or c.family == .standing) continue;
+        const o = conflict.offense(c) orelse return error.CorruptSave;
         const world = (planet.find(c.planet_key) orelse return error.CorruptSave).name;
-        const aggressor = (faction.find(c.aggressor.faction_key) orelse return error.CorruptSave).name;
+        const aggressor = (faction.find(o.aggressor.faction_key) orelse return error.CorruptSave).name;
         const defender = (faction.find(c.defender.faction_key) orelse return error.CorruptSave).name;
         if (c.discovery_day == today) {
             steps[at] = .{ .index = index, .kind = .discovery, .log = try gs.prepareLog(.politics, .{}, "[politics] {s} learns of a threat to {s}: {s}", .{ defender, world, try causeText(ta, gs, c) }) };
             at += 1;
-        } else if (c.strike_day == today) {
+        } else if (o.strike_day == today) {
             steps[at] = .{ .index = index, .kind = .strike, .log = try gs.prepareLog(.politics, .{}, "[politics] fighting begins on {s}: {s} against {s}", .{ world, aggressor, defender }) };
             at += 1;
-        } else if (c.expires_day == today) {
+        } else if (o.expires_day == today) {
             const row = political_event.find(c.template_key) orelse return error.CorruptSave;
-            const won = r.uintLessThan(u32, @intCast(types.full_bp)) < conflict.aggressorWinChanceBp(c.strike_force, c.local_force);
+            const won = r.uintLessThan(u32, @intCast(types.full_bp)) < conflict.aggressorWinChanceBp(o.strike_force, c.local_force);
             const outcome: conflict.Outcome = if (won) .aggressor_won else .defender_held;
             steps[at] = .{
                 .index = index,
                 .kind = .resolution,
                 .outcome = outcome,
                 .world = try world_state.prepareWorldAdjust(gs, c.planet_key, world_state.conflictWorldDelta(outcome), row.name),
-                .log = switch (outcome) {
-                    .aggressor_won => try gs.prepareLog(.politics, .{}, "[politics] {s} takes {s} from {s}", .{ aggressor, world, defender }),
-                    .defender_held => try gs.prepareLog(.politics, .{}, "[politics] {s} holds {s} against {s}", .{ defender, world, aggressor }),
-                },
+                .log = if (won)
+                    try gs.prepareLog(.politics, .{}, "[politics] {s} takes {s} from {s}", .{ aggressor, world, defender })
+                else
+                    try gs.prepareLog(.politics, .{}, "[politics] {s} holds {s} against {s}", .{ defender, world, aggressor }),
             };
             at += 1;
         }
@@ -625,18 +637,181 @@ fn rollbackDue(gs: *GameState, due: *const PreparedDue) void {
 
 /// The markets-phase political step (§K "Progression is independent of the
 /// player"): today's due transitions (`prepareDue`), then on the 1st of
-/// the month `runSchemes`. NPC movements and beats are later increments'.
-/// Reads no player state, presence or visibility. Failure-atomic: an error
-/// leaves the campaign as it was (rules 12, 17).
+/// the month the standing needs (`maintainStanding`) and `runSchemes`. NPC
+/// movements and beats are later increments'. Reads no player state,
+/// presence or visibility but the contracts a standing need backs.
+/// Failure-atomic: an error leaves the campaign as it was (rules 12, 17).
 pub fn advanceWorld(gs: *GameState) error{ OutOfMemory, CorruptSave }!void {
     var due = try prepareDue(gs);
     defer due.deinit(gs);
     commitDue(gs, &due);
     if (gs.clock.date.day != 1) return;
-    _ = runSchemes(gs) catch |err| {
+    var standing = maintainStanding(gs) catch |err| {
         rollbackDue(gs, &due);
         return err;
     };
+    defer standing.deinit(gs);
+    _ = runSchemes(gs) catch |err| {
+        rollbackStanding(gs, &standing);
+        rollbackDue(gs, &due);
+        return err;
+    };
+}
+
+// ---------------------------------------------------------------- standing needs
+
+/// Whether a contract holding its position (`Contract.holdsPosition`) is
+/// backed by conflict `id`.
+fn backsRunningContract(gs: *const GameState, id: types.ConflictId) bool {
+    for (gs.contracts.values()) |*c| {
+        if (c.conflict_id == id and c.holdsPosition()) return true;
+    }
+    return false;
+}
+
+/// Whether an unresolved standing conflict stands down on `day` (§E;
+/// decision F1): `standing_lifetime_days` have passed since it opened and
+/// no running contract it backs remains. The one stand-down rule.
+pub fn standDownDue(gs: *const GameState, c: *const Conflict, day: u32) bool {
+    if (c.family != .standing or c.outcome != null) return false;
+    if (@as(u64, day) < @as(u64, c.opened_day) + tuning.politics.standing_lifetime_days) return false;
+    return !backsRunningContract(gs, c.id);
+}
+
+/// What `maintainStanding` committed, for `rollbackStanding`.
+pub const StandingChange = struct {
+    /// Indices into `gs.conflicts` of the conflicts that stood down.
+    stood_down: []usize,
+    /// How many standing conflicts were opened, at the end of `gs.conflicts`.
+    opened: usize,
+    prior_next_id: u32,
+    prior_politics: std.Random.DefaultPrng,
+
+    pub fn deinit(self: *const StandingChange, gs: *GameState) void {
+        gs.scratch().free(self.stood_down);
+    }
+};
+
+/// Keep one standing garrison or training need on every hiring world
+/// (§E "stability"; decision F1), on the 1st and when the campaign opens.
+/// In order:
+/// 1. every unresolved standing conflict for which `standDownDue` holds
+///    today stands down (`outcome = .stood_down`), in id order;
+/// 2. the worlds that then hold none and whose faction hires
+///    (`faction.hires`) and that have a planetary ruler are shuffled on
+///    `.politics`; for each in that order a `standing` template the ruler
+///    is `instigatorEligible` for is drawn by `schemeWeight` and its
+///    garrison rolled as an offensive conflict's (`opfor.roll` for
+///    `garrison_duty` on `.politics`, scaled by `conflict.localForceLances`
+///    with the world's security). The new conflict's ruler is its defender
+///    and instigator, it opens and is known today, and it takes the next
+///    `ConflictId`.
+/// Nothing is logged. Validates and prepares everything before the first
+/// mutation (rules 12, 16): on `OutOfMemory` or `CorruptSave` (a broken
+/// reference, or an id counter that cannot hold the new ids) the campaign
+/// is unchanged. `rollbackStanding` undoes a success.
+pub fn maintainStanding(gs: *GameState) error{ OutOfMemory, CorruptSave }!StandingChange {
+    const scratch = gs.scratch();
+    const today = gs.clock.day_index;
+    const people = gs.personages.values();
+    var ruler = [_]?u32{null} ** world_count;
+    for (people, 0..) |*p, pi| if (p.role == .planetary_ruler) {
+        if (worldIndex(p.seat_planet_key)) |wi| ruler[wi] = @intCast(pi);
+    };
+
+    var down: std.ArrayListUnmanaged(usize) = .empty;
+    errdefer down.deinit(scratch);
+    var held = [_]bool{false} ** world_count;
+    for (gs.conflicts.values(), 0..) |*c, index| {
+        if (c.family != .standing or c.outcome != null) continue;
+        if (standDownDue(gs, c, today)) {
+            try down.append(scratch, index);
+            continue;
+        }
+        held[worldIndex(c.planet_key) orelse return error.CorruptSave] = true;
+    }
+    var worlds: std.ArrayListUnmanaged(u16) = .empty;
+    defer worlds.deinit(scratch);
+    for (planet.catalog, 0..) |*w, wi| {
+        if (held[wi] or ruler[wi] == null) continue;
+        const f = faction.find(w.faction) orelse return error.CorruptSave;
+        if (!f.hires) continue;
+        try worlds.append(scratch, @intCast(wi));
+    }
+
+    var rng = gs.rng;
+    const r = rng.random(.politics);
+    r.shuffle(u16, worlds.items);
+    if (gs.next_conflict_id == 0 or gs.next_conflict_id > std.math.maxInt(u32) - worlds.items.len) return error.CorruptSave;
+    var planned: std.ArrayListUnmanaged(Conflict) = .empty;
+    defer planned.deinit(scratch);
+    try planned.ensureTotalCapacity(scratch, worlds.items.len);
+    const year = gs.clock.date.year;
+    for (worlds.items) |wi| {
+        const p = &people[ruler[wi].?];
+        var total: u64 = 0;
+        for (political_event.table.events) |*row| {
+            if (row.family == .standing and instigatorEligible(p, row)) total += schemeWeight(row, p);
+        }
+        if (total == 0) continue;
+        var pick = r.uintLessThan(u64, total);
+        const row = for (political_event.table.events) |*row| {
+            if (row.family != .standing or !instigatorEligible(p, row)) continue;
+            const weight = schemeWeight(row, p);
+            if (pick < weight) break row;
+            pick -= weight;
+        } else unreachable;
+        const world = &planet.catalog[wi];
+        var local = opfor.roll(&rng, .politics, .garrison_duty, world.faction, year);
+        const security: i16 = if (gs.world_states.get(world.key)) |ws| ws.security else 0;
+        local.lances = conflict.localForceLances(local.lances, security);
+        planned.appendAssumeCapacity(.{
+            .id = @enumFromInt(gs.next_conflict_id + @as(u32, @intCast(planned.items.len))),
+            .family = .standing,
+            .template_key = row.key,
+            .planet_key = world.key,
+            .aggressor = null,
+            .defender = .{ .faction_key = world.faction, .personage = p.id },
+            .instigator = p.id,
+            .staging_planet_key = null,
+            .opened_day = today,
+            .discovery_day = today,
+            .strike_day = null,
+            .expires_day = null,
+            .local_force = local,
+            .strike_force = null,
+        });
+    }
+
+    const alloc = gs.allocator();
+    try gs.conflicts.ensureUnusedCapacity(alloc, planned.items.len);
+    for (planned.items) |*c| {
+        c.template_key = try alloc.dupe(u8, c.template_key);
+        c.planet_key = try alloc.dupe(u8, c.planet_key);
+        c.defender.faction_key = try alloc.dupe(u8, c.defender.faction_key);
+    }
+    const stood_down = try down.toOwnedSlice(scratch);
+
+    const change: StandingChange = .{
+        .stood_down = stood_down,
+        .opened = planned.items.len,
+        .prior_next_id = gs.next_conflict_id,
+        .prior_politics = gs.rng.prngs[@intFromEnum(rng_mod.Stream.politics)],
+    };
+    for (stood_down) |index| gs.conflicts.values()[index].outcome = .stood_down;
+    for (planned.items) |c| gs.conflicts.putAssumeCapacity(c.id, c);
+    gs.next_conflict_id += @intCast(planned.items.len);
+    gs.rng.prngs[@intFromEnum(rng_mod.Stream.politics)] = rng.prngs[@intFromEnum(rng_mod.Stream.politics)];
+    return change;
+}
+
+/// Undo a `maintainStanding` (rule 12's rollback guard): the conflicts it
+/// opened (last first), the stand-downs, the id counter and `.politics`.
+fn rollbackStanding(gs: *GameState, change: *const StandingChange) void {
+    for (0..change.opened) |_| _ = gs.conflicts.pop().?;
+    for (change.stood_down) |index| gs.conflicts.values()[index].outcome = null;
+    gs.next_conflict_id = change.prior_next_id;
+    gs.rng.prngs[@intFromEnum(rng_mod.Stream.politics)] = change.prior_politics;
 }
 
 // ---------------------------------------------------------------- text
@@ -648,9 +823,10 @@ pub const CauseError = error{ CorruptSave, OutOfMemory };
 /// personage's name and title ("Katrina Steiner (Archon of the Lyran
 /// Commonwealth)"), `{world}` as the world's name and `{aggressor}` and
 /// `{defender}` as the sides' faction names. The target is the defender's
-/// personage. Plain text, not escaped and not stored; `alloc` owns it.
-/// `CorruptSave` when the template, a personage, its title, the world or a
-/// faction does not resolve.
+/// personage; on a standing conflict that is the ruler who instigated it.
+/// Plain text, not escaped and not stored; `alloc` owns it. `CorruptSave`
+/// when the template, a personage, its title, the world or a faction does
+/// not resolve, or `{aggressor}` names a standing conflict's missing side.
 pub fn causeText(alloc: std.mem.Allocator, gs: *const GameState, c: *const Conflict) CauseError![]const u8 {
     const row = political_event.find(c.template_key) orelse return error.CorruptSave;
     var out: std.ArrayListUnmanaged(u8) = .empty;
@@ -662,7 +838,10 @@ pub fn causeText(alloc: std.mem.Allocator, gs: *const GameState, c: *const Confl
             .instigator => try appendPersonage(alloc, &out, gs, c.instigator),
             .target => try appendPersonage(alloc, &out, gs, c.defender.personage),
             .world => try out.appendSlice(alloc, (planet.find(c.planet_key) orelse return error.CorruptSave).name),
-            .aggressor => try out.appendSlice(alloc, (faction.find(c.aggressor.faction_key) orelse return error.CorruptSave).name),
+            .aggressor => {
+                const aggressor = c.aggressor orelse return error.CorruptSave;
+                try out.appendSlice(alloc, (faction.find(aggressor.faction_key) orelse return error.CorruptSave).name);
+            },
             .defender => try out.appendSlice(alloc, (faction.find(c.defender.faction_key) orelse return error.CorruptSave).name),
         },
     };
@@ -693,48 +872,150 @@ fn appendPersonage(alloc: std.mem.Allocator, out: *std.ArrayListUnmanaged(u8), g
 /// `strike_day` less the travel not `opened_day` plus a preparation in
 /// range, or fighting days out of range; `opened_day` after today; an
 /// unresolved conflict at or past its `expires_day`, or a resolved one
-/// before it; two unresolved conflicts on one world, or more than
+/// before it; two unresolved offensive conflicts on one world, or more than
 /// `max_open_conflicts`; a force without a lance or with a negative BV or
-/// tonnage.
+/// tonnage. A standing conflict is also refused for: a template other than
+/// a `standing` row; an aggressor, staging world, strike day, end day or
+/// strike force; a `discovery_day` other than `opened_day`; an instigator
+/// other than its defender's personage, or a defender faction other than
+/// the world's; an outcome other than `stood_down`; or a second unresolved
+/// standing conflict on its world. An offensive conflict is refused for a
+/// template other than an `opening` row, a missing aggressor-side part
+/// (`conflict.offense`), or a `stood_down` outcome. Then every offer's and
+/// contract's backer (`validateBacker`).
 pub fn validate(gs: *const GameState) error{CorruptSave}!void {
     const pol = tuning.politics;
     const today = gs.clock.day_index;
     var unresolved: usize = 0;
-    for (gs.conflicts.values()) |*c| unresolved += @intFromBool(c.outcome == null);
+    for (gs.conflicts.values()) |*c| unresolved += @intFromBool(c.outcome == null and c.family == .offensive);
     if (unresolved > pol.max_open_conflicts) return error.CorruptSave;
     var contested = [_]bool{false} ** world_count;
+    var standing_held = [_]bool{false} ** world_count;
     var previous: u32 = @intFromEnum(types.ConflictId.none);
     for (gs.conflicts.keys(), gs.conflicts.values()) |id, *c| {
         if (c.id != id or @intFromEnum(id) <= previous or @intFromEnum(id) >= gs.next_conflict_id) return error.CorruptSave;
         previous = @intFromEnum(id);
         const row = political_event.find(c.template_key) orelse return error.CorruptSave;
         const wi = worldIndex(c.planet_key) orelse return error.CorruptSave;
-        const target = &planet.catalog[wi];
-        if (factionIndex(c.aggressor.faction_key) == null or factionIndex(c.defender.faction_key) == null) return error.CorruptSave;
-        for ([_]types.PersonageId{ c.aggressor.personage, c.defender.personage, c.instigator }) |pid| {
+        if (factionIndex(c.defender.faction_key) == null) return error.CorruptSave;
+        for ([_]types.PersonageId{ c.defender.personage, c.instigator }) |pid| {
             if (!gs.personages.contains(pid)) return error.CorruptSave;
         }
-        const side_personage = switch (row.instigator_side) {
-            .aggressor => c.aggressor.personage,
-            .defender => c.defender.personage,
-        };
-        if (c.instigator != side_personage) return error.CorruptSave;
-        const staging = stagingWorld(c.aggressor.faction_key, target) orelse return error.CorruptSave;
-        if (!std.mem.eql(u8, staging.key, c.staging_planet_key)) return error.CorruptSave;
-        if (!(c.opened_day < c.discovery_day and c.discovery_day < c.strike_day and c.strike_day < c.expires_day)) return error.CorruptSave;
-        const departs = @as(u64, c.strike_day) -| travelDays(staging, target);
-        if (departs < @as(u64, c.opened_day) + pol.scheme_prep_days_min or departs > @as(u64, c.opened_day) + pol.scheme_prep_days_max) return error.CorruptSave;
-        const fight = c.expires_day - c.strike_day;
-        if (fight < pol.fight_days_min or fight > pol.fight_days_max) return error.CorruptSave;
         if (c.opened_day > today) return error.CorruptSave;
-        if (c.outcome == null) {
-            if (c.expires_day <= today or contested[wi]) return error.CorruptSave;
-            contested[wi] = true;
-        } else if (c.expires_day > today) return error.CorruptSave;
-        for ([_]conflict.Force{ c.local_force, c.strike_force }) |f| {
-            if (f.lances == 0 or f.lance_bv < 0) return error.CorruptSave;
+        if (c.local_force.lances == 0 or c.local_force.lance_bv < 0) return error.CorruptSave;
+        switch (c.family) {
+            .standing => try validateStanding(c, row, wi, &standing_held),
+            .offensive => try validateOffensive(gs, c, row, wi, &contested),
         }
     }
+    for ([_][]const contract_mod.Contract{ gs.contracts.values(), gs.contract_offers.items }) |list| {
+        for (list) |*c| try validateBacker(gs, c);
+    }
+}
+
+/// An offer's or contract's backer (§C "No contract without a backer";
+/// rule 47): with no `conflict_id` (a row a schema v73 store held) it has
+/// the default side and neither day; otherwise the conflict is loaded, its
+/// `side` faction is the employer (a standing conflict has no aggressor
+/// side), `on_station_by` is the conflict's (`conflict.onStationBy`), and
+/// `close_day` is set exactly when `on_station_by` is and is no later.
+fn validateBacker(gs: *const GameState, c: *const contract_mod.Contract) error{CorruptSave}!void {
+    if (c.conflict_id == .none) {
+        if (c.side != .defender or c.on_station_by != null or c.close_day != null) return error.CorruptSave;
+        return;
+    }
+    const backer = gs.conflicts.getPtr(c.conflict_id) orelse return error.CorruptSave;
+    const employer = conflict.sideFaction(backer, c.side) orelse return error.CorruptSave;
+    if (!std.mem.eql(u8, employer, c.employer_key)) return error.CorruptSave;
+    if (c.on_station_by != conflict.onStationBy(backer)) return error.CorruptSave;
+    if ((c.close_day == null) != (c.on_station_by == null)) return error.CorruptSave;
+    if (c.close_day) |close| if (close > c.on_station_by.?) return error.CorruptSave;
+}
+
+fn validateStanding(c: *const Conflict, row: *const Row, wi: usize, held: *[world_count]bool) error{CorruptSave}!void {
+    if (row.family != .standing) return error.CorruptSave;
+    if (c.aggressor != null or c.staging_planet_key != null or c.strike_day != null or c.expires_day != null or c.strike_force != null) return error.CorruptSave;
+    if (c.discovery_day != c.opened_day) return error.CorruptSave;
+    if (c.instigator != c.defender.personage) return error.CorruptSave;
+    if (!std.mem.eql(u8, c.defender.faction_key, planet.catalog[wi].faction)) return error.CorruptSave;
+    const outcome = c.outcome orelse {
+        if (held[wi]) return error.CorruptSave;
+        held[wi] = true;
+        return;
+    };
+    if (outcome != .stood_down) return error.CorruptSave;
+}
+
+fn validateOffensive(gs: *const GameState, c: *const Conflict, row: *const Row, wi: usize, contested: *[world_count]bool) error{CorruptSave}!void {
+    const pol = tuning.politics;
+    const today = gs.clock.day_index;
+    if (row.family != .opening) return error.CorruptSave;
+    const o = conflict.offense(c) orelse return error.CorruptSave;
+    const target = &planet.catalog[wi];
+    if (factionIndex(o.aggressor.faction_key) == null) return error.CorruptSave;
+    if (!gs.personages.contains(o.aggressor.personage)) return error.CorruptSave;
+    const side_personage = switch (row.instigator_side) {
+        .aggressor => o.aggressor.personage,
+        .defender => c.defender.personage,
+    };
+    if (c.instigator != side_personage) return error.CorruptSave;
+    const staging = stagingWorld(o.aggressor.faction_key, target) orelse return error.CorruptSave;
+    if (!std.mem.eql(u8, staging.key, o.staging_planet_key)) return error.CorruptSave;
+    if (!(c.opened_day < c.discovery_day and c.discovery_day < o.strike_day and o.strike_day < o.expires_day)) return error.CorruptSave;
+    const departs = @as(u64, o.strike_day) -| travelDays(staging, target);
+    if (departs < @as(u64, c.opened_day) + pol.scheme_prep_days_min or departs > @as(u64, c.opened_day) + pol.scheme_prep_days_max) return error.CorruptSave;
+    const fight = o.expires_day - o.strike_day;
+    if (fight < pol.fight_days_min or fight > pol.fight_days_max) return error.CorruptSave;
+    if (c.outcome) |outcome| {
+        if (outcome == .stood_down or o.expires_day > today) return error.CorruptSave;
+    } else {
+        if (o.expires_day <= today or contested[wi]) return error.CorruptSave;
+        contested[wi] = true;
+    }
+    if (o.strike_force.lances == 0 or o.strike_force.lance_bv < 0) return error.CorruptSave;
+}
+
+/// Open an offensive conflict on `world_key` from the aggressor-side
+/// `template_key` today, as `validate` admits it: the aggressor is the
+/// first leader, in campaign order, of a faction hostile to the world's
+/// that can stage against it; the defender is the world's ruler; the
+/// preparation and fighting are their shortest; the defender learns of it
+/// tomorrow. Its forces are a regular two-lance garrison and a veteran
+/// three-lance strike. Tests only.
+pub fn openConflictForTest(gs: *GameState, world_key: []const u8, template_key: []const u8) !types.ConflictId {
+    std.debug.assert(@import("builtin").is_test);
+    const row = political_event.find(template_key).?;
+    std.debug.assert(row.family == .opening and row.instigator_side == .aggressor);
+    const target = planet.find(world_key).?;
+    var ruler: ?types.PersonageId = null;
+    var leader: ?*const personage.Personage = null;
+    for (gs.personages.values()) |*p| {
+        if (p.role == .planetary_ruler and std.mem.eql(u8, p.seat_planet_key, target.key)) ruler = p.id;
+        if (leader == null and p.role == .faction_leader and personage.factionsHostile(p.faction_key, target.faction) and
+            !std.mem.eql(u8, p.faction_key, target.faction) and stagingWorld(p.faction_key, target) != null) leader = p;
+    }
+    const aggressor = leader orelse return error.TestNoAggressor;
+    const staging = stagingWorld(aggressor.faction_key, target).?;
+    const today = gs.clock.day_index;
+    const strike = today + tuning.politics.scheme_prep_days_min + travelDays(staging, target);
+    const id: types.ConflictId = @enumFromInt(gs.next_conflict_id);
+    try gs.conflicts.put(gs.allocator(), id, .{
+        .id = id,
+        .template_key = row.key,
+        .planet_key = target.key,
+        .aggressor = .{ .faction_key = aggressor.faction_key, .personage = aggressor.id },
+        .defender = .{ .faction_key = target.faction, .personage = ruler orelse return error.TestNoRuler },
+        .instigator = aggressor.id,
+        .staging_planet_key = staging.key,
+        .opened_day = today,
+        .discovery_day = today + 1,
+        .strike_day = strike,
+        .expires_day = strike + tuning.politics.fight_days_min,
+        .local_force = .{ .lances = 2, .quality = .regular, .lance_bv = 1_000, .lance_tons = 200 },
+        .strike_force = .{ .lances = 3, .quality = .veteran, .lance_bv = 1_200, .lance_tons = 250 },
+    });
+    gs.next_conflict_id += 1;
+    return id;
 }
 
 // ---- Tests ----
@@ -845,7 +1126,7 @@ test "recent_victor_world admits a world of a faction that recently beat the ins
     const p = before.people[found.pi];
     const victor_world = &planet.catalog[found.wi];
     var c = conflictForTest(&gs, p.id, before.people[before.ruler[found.wi].?].id, victor_world.key, 0, 1_000, 1_000);
-    gs.clock.day_index = c.expires_day;
+    gs.clock.day_index = c.expires_day.?;
     c.outcome = .defender_held;
     try gs.conflicts.put(gs.allocator(), c.id, c);
     const after = try Context.build(&gs);
@@ -855,7 +1136,7 @@ test "recent_victor_world admits a world of a faction that recently beat the ins
     const victor_pi = after.ruler[found.wi].?;
     try std.testing.expectEqual(@as(?u32, null), recentVictorWorld(&after, victor_pi, before.seat[found.pi].?));
     // Past the lookback the defeat is forgotten.
-    gs.clock.day_index = c.expires_day + tuning.politics.recent_defeat_lookback_days + 1;
+    gs.clock.day_index = c.expires_day.? + tuning.politics.recent_defeat_lookback_days + 1;
     const later = try Context.build(&gs);
     try std.testing.expectEqual(@as(?u32, null), recentVictorWorld(&later, found.pi, found.wi));
 }
@@ -1002,29 +1283,38 @@ test "the first month start opens conflicts whose days follow the travel rule, a
     try createdForTest(&gs);
     toMonthStartForTest(&gs);
     const logs = gs.event_log.items.len;
+    const first_id = gs.next_conflict_id;
     const opened = try runSchemes(&gs);
     try std.testing.expectEqual(@as(usize, tuning.politics.schemes_per_month), opened.len);
     try std.testing.expectEqual(logs, gs.event_log.items.len);
-    for (opened.slice(), 1..) |id, want| {
+    for (opened.slice(), first_id..) |id, want| {
         try std.testing.expectEqual(@as(u32, @intCast(want)), @intFromEnum(id));
         const c = gs.conflicts.get(id).?;
+        const o = conflict.offense(&c).?;
         const target = planet.find(c.planet_key).?;
-        const staging = planet.find(c.staging_planet_key).?;
+        const staging = planet.find(o.staging_planet_key).?;
         const travel = logistics.daysForJumps(planet.jumpsBetween(staging, target));
-        const prep = c.strike_day - travel - c.opened_day;
+        const prep = o.strike_day - travel - c.opened_day;
         try std.testing.expect(prep >= tuning.politics.scheme_prep_days_min and prep <= tuning.politics.scheme_prep_days_max);
         try std.testing.expectEqual(gs.clock.day_index, c.opened_day);
-        try std.testing.expect(c.opened_day < c.discovery_day and c.discovery_day < c.strike_day and c.strike_day < c.expires_day);
+        try std.testing.expect(c.opened_day < c.discovery_day and c.discovery_day < o.strike_day and o.strike_day < o.expires_day);
         try std.testing.expectEqual(conflict.Status.preparing, conflict.status(&c, gs.clock.day_index));
-        try std.testing.expect(!std.mem.eql(u8, c.staging_planet_key, c.planet_key));
-        try std.testing.expectEqualStrings(c.aggressor.faction_key, staging.faction);
+        try std.testing.expect(!std.mem.eql(u8, o.staging_planet_key, c.planet_key));
+        try std.testing.expectEqualStrings(o.aggressor.faction_key, staging.faction);
     }
-    try std.testing.expectEqual(@as(u32, @intCast(opened.len + 1)), gs.next_conflict_id);
+    try std.testing.expectEqual(first_id + @as(u32, @intCast(opened.len)), gs.next_conflict_id);
     // The drawn pair shares neither instigator nor world.
-    const a = gs.conflicts.values()[0];
-    const b = gs.conflicts.values()[1];
+    const a = gs.conflicts.get(opened.ids[0]).?;
+    const b = gs.conflicts.get(opened.ids[1]).?;
     try std.testing.expect(a.instigator != b.instigator and !std.mem.eql(u8, a.planet_key, b.planet_key));
     try validate(&gs);
+}
+
+/// Unresolved offensive conflicts.
+fn offensiveOpenForTest(gs: *const GameState) usize {
+    var n: usize = 0;
+    for (gs.conflicts.values()) |*c| n += @intFromBool(c.family == .offensive and c.outcome == null);
+    return n;
 }
 
 test "no second unresolved conflict opens on a world or for an instigator, and none opens at the cap" {
@@ -1036,17 +1326,24 @@ test "no second unresolved conflict opens on a world or for an instigator, and n
     const ctx = try Context.build(&gs);
     const pool = try candidates(std.testing.allocator, &ctx);
     defer std.testing.allocator.free(pool);
-    for (pool) |c| for (gs.conflicts.values()) |*open| {
+    // A standing need bars no scheme; an offensive conflict bars its world
+    // and its instigator.
+    for (pool) |c| for (gs.conflicts.values()) |*open| if (open.family == .offensive) {
         try std.testing.expect(!std.mem.eql(u8, planet.catalog[c.world].key, open.planet_key));
         try std.testing.expect(ctx.people[c.instigator].id != open.instigator);
     };
+    var standing_world = false;
+    for (pool) |c| for (gs.conflicts.values()) |*open| {
+        standing_world = standing_world or (open.family == .standing and std.mem.eql(u8, planet.catalog[c.world].key, open.planet_key));
+    };
+    try std.testing.expect(standing_world);
     // At the cap: the unresolved count is the cap and nothing opens.
-    var count = gs.conflicts.count();
-    while (count < tuning.politics.max_open_conflicts) : (count = gs.conflicts.count()) {
+    var count = offensiveOpenForTest(&gs);
+    while (count < tuning.politics.max_open_conflicts) : (count = offensiveOpenForTest(&gs)) {
         const more = try runSchemes(&gs);
         if (more.len == 0) break;
     }
-    try std.testing.expectEqual(@as(usize, tuning.politics.max_open_conflicts), gs.conflicts.count());
+    try std.testing.expectEqual(@as(usize, tuning.politics.max_open_conflicts), offensiveOpenForTest(&gs));
     const before = digest.stateHash(&gs);
     try std.testing.expectEqual(@as(usize, 0), (try runSchemes(&gs)).len);
     try std.testing.expectEqual(before, digest.stateHash(&gs));
@@ -1080,11 +1377,19 @@ test "two campaigns on one seed open the same conflicts over 24 months, an unrel
         try std.testing.expectEqual(ha.final(), hb.final());
         try std.testing.expectEqualSlices(u8, &a.rng.encode(.politics), &b.rng.encode(.politics));
     }
+    var offensive: usize = 0;
+    var stood_down: usize = 0;
     for (a.conflicts.values()) |*c| {
-        try std.testing.expect(c.opened_day < c.discovery_day and c.discovery_day < c.strike_day and c.strike_day < c.expires_day);
-        resolved += @intFromBool(c.outcome != null);
+        if (conflict.offense(c)) |o| {
+            try std.testing.expect(c.opened_day < c.discovery_day and c.discovery_day < o.strike_day and o.strike_day < o.expires_day);
+            offensive += 1;
+            resolved += @intFromBool(c.outcome != null);
+        } else stood_down += @intFromBool(c.outcome == .stood_down);
     }
-    try std.testing.expect(a.conflicts.count() > 2 * tuning.politics.schemes_per_month and resolved > 0);
+    try std.testing.expect(offensive > 2 * tuning.politics.schemes_per_month and resolved > 0);
+    // Without a contract to hold them, standing needs stand down once their
+    // lifetime passes and are replaced.
+    try std.testing.expect(stood_down > 0);
 }
 
 test "advancing the political world moves only the politics stream and leaves the board and listings alone" {
@@ -1150,15 +1455,15 @@ test "discovery, the strike and resolution happen on their days with one politic
     try std.testing.expectEqual(@as(usize, 1), politicsLinesForTest(&gs));
     try std.testing.expect(std.mem.indexOf(u8, gs.event_log.items[gs.event_log.items.len - 1].text, "learns of a threat to Skye") != null);
     try std.testing.expectEqual(conflict.Status.threatened, conflict.status(&gs.conflicts.get(id).?, gs.clock.day_index));
-    try advanceOnForTest(&gs, c.strike_day);
+    try advanceOnForTest(&gs, c.strike_day.?);
     try std.testing.expectEqual(@as(usize, 2), politicsLinesForTest(&gs));
     try std.testing.expect(std.mem.indexOf(u8, gs.event_log.items[gs.event_log.items.len - 1].text, "fighting begins on Skye") != null);
-    try advanceOnForTest(&gs, c.expires_day - 1);
+    try advanceOnForTest(&gs, c.expires_day.? - 1);
     try std.testing.expectEqual(@as(?conflict.Outcome, null), gs.conflicts.get(id).?.outcome);
-    try advanceOnForTest(&gs, c.expires_day);
+    try advanceOnForTest(&gs, c.expires_day.?);
     try std.testing.expectEqual(@as(usize, 3), politicsLinesForTest(&gs));
     try std.testing.expect(gs.conflicts.get(id).?.outcome != null);
-    try advanceOnForTest(&gs, c.expires_day + 1);
+    try advanceOnForTest(&gs, c.expires_day.? + 1);
     try std.testing.expectEqual(@as(usize, 3), politicsLinesForTest(&gs));
     try validate(&gs);
 }
@@ -1195,12 +1500,12 @@ test "resolution draws the outcome against the force chance and moves the world 
         defer gs.deinit();
         const id = try skyeConflictForTest(&gs, 1_000, 3_000);
         const c = gs.conflicts.get(id).?;
-        const chance = conflict.aggressorWinChanceBp(c.strike_force, c.local_force);
+        const chance = conflict.aggressorWinChanceBp(c.strike_force.?, c.local_force);
         try std.testing.expectEqual(@as(types.Bp, 2_500), chance);
         gs.rng.prngs[@intFromEnum(rng_mod.Stream.politics)] = rng_mod.Rng.fresh(politicsSeedForTest(chance, low), .politics);
         // A world near the top of its security range is clamped.
         try gs.world_states.put(gs.allocator(), "skye", .{ .security = 98, .employer_control = -97 });
-        try advanceOnForTest(&gs, c.expires_day);
+        try advanceOnForTest(&gs, c.expires_day.?);
         const outcome: conflict.Outcome = if (low) .aggressor_won else .defender_held;
         try std.testing.expectEqual(@as(?conflict.Outcome, outcome), gs.conflicts.get(id).?.outcome);
         const delta = world_state.conflictWorldDelta(outcome);
@@ -1223,10 +1528,10 @@ test "resolution at the largest forces a save holds draws against their exact ch
         const id = try skyeConflictForTest(&gs, max_bv, max_bv);
         const c = gs.conflicts.get(id).?;
         try validate(&gs);
-        const chance = conflict.aggressorWinChanceBp(c.strike_force, c.local_force);
+        const chance = conflict.aggressorWinChanceBp(c.strike_force.?, c.local_force);
         try std.testing.expectEqual(@divTrunc(types.full_bp, 2), chance);
         gs.rng.prngs[@intFromEnum(rng_mod.Stream.politics)] = rng_mod.Rng.fresh(politicsSeedForTest(chance, low), .politics);
-        try advanceOnForTest(&gs, c.expires_day);
+        try advanceOnForTest(&gs, c.expires_day.?);
         const outcome: conflict.Outcome = if (low) .aggressor_won else .defender_held;
         try std.testing.expectEqual(@as(?conflict.Outcome, outcome), gs.conflicts.get(id).?.outcome);
     }
@@ -1237,7 +1542,7 @@ test "a conflict on a world with no state row creates one through the world-stat
     defer gs.deinit();
     const id = try skyeConflictForTest(&gs, 1_000, 1_000);
     try std.testing.expect(gs.world_states.get("skye") == null);
-    try advanceOnForTest(&gs, gs.conflicts.get(id).?.expires_day);
+    try advanceOnForTest(&gs, gs.conflicts.get(id).?.expires_day.?);
     const delta = world_state.conflictWorldDelta(gs.conflicts.get(id).?.outcome.?);
     const ws = gs.world_states.get("skye").?;
     try std.testing.expectEqual(delta.security, ws.security);
@@ -1278,13 +1583,99 @@ test "a month start that opens conflicts, and a day that resolves one, change no
     try advanceWorld(&gs);
     try std.testing.expect(gs.conflicts.count() > 0);
     // The first resolution day, reached without its earlier transitions,
-    // and a 1st of the month so the schemes run after it.
-    const c = gs.conflicts.values()[0];
-    gs.clock.day_index = c.expires_day;
+    // and a 1st of the month so the standing needs and the schemes run
+    // after it.
+    const c = for (gs.conflicts.values()) |v| {
+        if (v.family == .offensive) break v;
+    } else unreachable;
+    gs.clock.day_index = c.expires_day.?;
     gs.clock.date = .{ .year = 3025, .month = 6, .day = 1 };
     try std.testing.expect(try expectAdvanceWorldAtomicForTest(&gs) > 0);
     try advanceWorld(&gs);
-    try std.testing.expect(gs.conflicts.values()[0].outcome != null);
+    try std.testing.expect(gs.conflicts.get(c.id).?.outcome != null);
+}
+
+test "a month start past the standing lifetime stands needs down and replaces them, changing nothing when any allocation fails" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73017 });
+    defer gs.deinit();
+    try createdForTest(&gs);
+    const held = for (gs.conflicts.values()) |v| {
+        if (v.family == .standing) break v;
+    } else unreachable;
+    // A running contract backs one need; it stands on.
+    try gs.contracts.put(gs.allocator(), @enumFromInt(gs.next_contract_id), .{
+        .id = @enumFromInt(gs.next_contract_id),
+        .kind = .garrison_duty,
+        .employer_key = held.defender.faction_key,
+        .enemy_key = "PER",
+        .planet_key = held.planet_key,
+        .terms = .{ .length_months = 6, .base_pay_month = 100_000 },
+        .status = .active,
+        .conflict_id = held.id,
+    });
+    gs.next_contract_id += 1;
+    const standing_before = gs.conflicts.count();
+    gs.clock.day_index = held.opened_day + tuning.politics.standing_lifetime_days;
+    gs.clock.date = .{ .year = 3025, .month = 7, .day = 1 };
+    try std.testing.expect(!standDownDue(&gs, &held, gs.clock.day_index));
+    const free = gs.conflicts.values()[@intFromBool(gs.conflicts.values()[0].id == held.id)];
+    try std.testing.expect(standDownDue(&gs, &free, gs.clock.day_index));
+    try std.testing.expect(!standDownDue(&gs, &free, gs.clock.day_index - 1));
+    try std.testing.expect(try expectAdvanceWorldAtomicForTest(&gs) > 0);
+    const first_new = gs.next_conflict_id;
+    try advanceWorld(&gs);
+    var stood_down: usize = 0;
+    var replaced: usize = 0;
+    for (gs.conflicts.values()) |*c| {
+        if (c.family != .standing) continue;
+        if (c.id == held.id) {
+            try std.testing.expectEqual(@as(?conflict.Outcome, null), c.outcome);
+        } else if (@intFromEnum(c.id) < first_new) {
+            try std.testing.expectEqual(@as(?conflict.Outcome, .stood_down), c.outcome);
+            stood_down += 1;
+        } else {
+            try std.testing.expectEqual(@as(?conflict.Outcome, null), c.outcome);
+            try std.testing.expectEqual(gs.clock.day_index, c.opened_day);
+            replaced += 1;
+        }
+    }
+    // Every need but the held one stood down, and each world got a new one.
+    try std.testing.expectEqual(standing_before - 1, stood_down);
+    try std.testing.expectEqual(stood_down, replaced);
+    try validate(&gs);
+}
+
+test "every hiring world with a ruler holds one standing need from the campaign's first day, instigated by its ruler" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73018 });
+    defer gs.deinit();
+    try createdForTest(&gs);
+    var expected: usize = 0;
+    for (planet.catalog) |*w| {
+        if (!faction.get(w.faction).hires or !personage.worldHasRuler(w)) continue;
+        expected += 1;
+        var found: usize = 0;
+        for (gs.conflicts.values()) |*c| if (std.mem.eql(u8, c.planet_key, w.key)) {
+            try std.testing.expectEqual(conflict.Family.standing, c.family);
+            try std.testing.expectEqualStrings(w.faction, c.defender.faction_key);
+            try std.testing.expectEqual(c.instigator, c.defender.personage);
+            try std.testing.expectEqual(personage.Role.planetary_ruler, gs.personages.get(c.instigator).?.role);
+            try std.testing.expectEqual(political_event.Family.standing, political_event.find(c.template_key).?.family);
+            try std.testing.expect(instigatorEligible(&gs.personages.get(c.instigator).?, political_event.find(c.template_key).?));
+            try std.testing.expectEqual(conflict.Status.standing, conflict.status(c, gs.clock.day_index));
+            found += 1;
+        };
+        try std.testing.expectEqual(@as(usize, 1), found);
+    }
+    try std.testing.expectEqual(expected, gs.conflicts.count());
+    // A world whose faction posts nothing holds none.
+    for (gs.conflicts.values()) |*c| try std.testing.expect(faction.get(planet.find(c.planet_key).?.faction).hires);
+    // The cause names the ruler and the world.
+    const c = gs.conflicts.values()[0];
+    const text = try causeText(std.testing.allocator, &gs, &c);
+    defer std.testing.allocator.free(text);
+    try std.testing.expect(std.mem.indexOf(u8, text, gs.personages.get(c.instigator).?.last_name) != null);
+    try std.testing.expect(std.mem.indexOf(u8, text, planet.find(c.planet_key).?.name) != null);
+    try validate(&gs);
 }
 
 test "the cause names the instigator, the target, the world and the sides" {

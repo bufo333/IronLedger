@@ -198,7 +198,7 @@ pub const StopReason = enum {
     /// The employer served the combat-ineffective breach notice
     /// (`contract_control.breachNoticeServed`).
     employer_notice,
-    /// The 1st of the month: payroll, the board refresh, turnover rolls.
+    /// The 1st of the month: payroll and turnover rolls.
     payday,
     /// A running contract closed: completed, breached or failed.
     contract_end,
@@ -214,6 +214,9 @@ pub const StopReason = enum {
     project,
     /// Between contracts: a rare hull appeared on an HQ board.
     listing,
+    /// Between contracts: new positions were posted on an HQ board
+    /// (docs/p5d-conflict-world-design.md §A posting cadence).
+    positions_posted,
     /// Between contracts: someone recovered, retired or resigned.
     personnel,
 };
@@ -242,6 +245,8 @@ pub const DayWatch = struct {
     next_event_id: u32,
     /// Listings numbered from this ID on were listed by the tick.
     next_listing_id: u32,
+    /// Offers numbered from this ID on were posted by the tick.
+    next_contract_id: u32,
     /// A fund courier lands on the day the tick runs.
     courier_lands: bool,
     delivered_orders: usize,
@@ -286,6 +291,7 @@ pub fn watchDay(alloc: std.mem.Allocator, gs: *GameState) !DayWatch {
     return .{
         .next_event_id = gs.event_queue.next_id,
         .next_listing_id = gs.next_listing_id,
+        .next_contract_id = gs.next_contract_id,
         .courier_lands = courier_lands,
         .delivered_orders = deliveredOrders(gs),
         .returning = returning.items,
@@ -326,6 +332,7 @@ pub fn advanceStop(gs: *GameState, watch: ?*const DayWatch) ?Stop {
     for (w.structural) |k| if (!structuralJobQueued(gs, k)) return .{ .reason = .bay_job };
     for (w.projects) |k| if (!projectQueued(gs, k)) return .{ .reason = .project };
     for (gs.market_listings.items) |*l| if (rareHullListed(l, day, w.next_listing_id)) return .{ .reason = .listing };
+    for (gs.contract_offers.items) |*o| if (@intFromEnum(o.id) >= w.next_contract_id) return .{ .reason = .positions_posted };
     for (w.people) |was| if (gs.person(was.id)) |p| if (personnelEvent(was.status, p.status)) return .{ .reason = .personnel };
     return null;
 }
@@ -1553,6 +1560,37 @@ test "advanceStop: a rare hull new to an HQ board stops; a common one or one alr
     try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "AS7-D", .rarity = .rare, .price = 1, .hq = gs.seat(), .listed_day = gs.clock.day_index, .expires_day = 400 });
     gs.next_listing_id += 1;
     try std.testing.expectEqual(@as(?StopReason, .listing), reasonOf(advanceStop(&gs, &watch)));
+}
+
+test "advanceStop: positions new to a board stop between contracts; none new, or new inside a contract, do not" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 8124 });
+    defer gs.deinit();
+    try atHome(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    try std.testing.expect(gs.contract_offers.items.len > 0);
+    const watch = try watchDay(arena.allocator(), &gs);
+    // The offers already on the board were seen.
+    try std.testing.expectEqual(@as(?Stop, null), advanceStop(&gs, &watch));
+    var posted = gs.contract_offers.items[0];
+    posted.id = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    try gs.contract_offers.append(gs.allocator(), posted);
+    try std.testing.expectEqual(@as(?StopReason, .positions_posted), reasonOf(advanceStop(&gs, &watch)));
+    // Inside a contract a new position is a notice.
+    try gs.contracts.put(gs.allocator(), @enumFromInt(9_999), .{ .id = @enumFromInt(9_999), .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "galatea", .terms = .{ .length_months = 6, .base_pay_month = 100_000 }, .status = .active, .assigned_company = firstCompany(&gs) });
+    try std.testing.expectEqual(@as(?Stop, null), advanceStop(&gs, &watch));
+}
+
+test "advance_until_stop: a defender's positions posting on their discovery day stop the command, as the owner names" {
+    const S = struct {
+        fn discovered(gs: *GameState) !void {
+            try atHome(gs);
+            // A conflict whose defender learns of it tomorrow.
+            _ = try @import("contract_market.zig").worldForTest(gs);
+        }
+    };
+    try std.testing.expectEqual(@as(?StopReason, .positions_posted), try ownerAgreesWithCommand(8125, S.discovered));
 }
 
 test "advanceStop: recovery is judged by identity — a postponed recovery is no stop, a masked one still is" {

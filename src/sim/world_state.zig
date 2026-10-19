@@ -83,12 +83,14 @@ pub fn finaleWorldDelta(f: *const arc_mod.Finale) WorldDelta {
 /// (docs/p5d-conflict-world-design.md §C resolution, rule 20): a world that
 /// fell loses security and its holder's control while the attacker's
 /// influence rises; one that held gains security and control. Either way
-/// the fighting strains the infrastructure. All values // TUNE: invented
+/// the fighting strains the infrastructure. A standing need that stands
+/// down saw no fighting and moves nothing. All values // TUNE: invented
 /// project values.
 pub fn conflictWorldDelta(outcome: conflict_mod.Outcome) WorldDelta {
     return switch (outcome) {
         .aggressor_won => .{ .security = -8, .employer_control = -10, .enemy_influence = 10, .infrastructure_strain = 6, .civilian_support = -4 }, // TUNE
         .defender_held => .{ .security = 4, .employer_control = 5, .enemy_influence = -5, .infrastructure_strain = 3 }, // TUNE
+        .stood_down => .{},
     };
 }
 

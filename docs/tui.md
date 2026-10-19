@@ -151,7 +151,7 @@ no room.
 | F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs · Reports (Campaign summary · Readiness · Battles · Merc companies leaderboard — Enter drills into a per-company detail sheet) |
 | F2 | Map | Star map · World |
 | F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool · Artillery panel (last `]` view) |
-| F4 | Contracts | Board · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log · `w` who's who (the contract's world governor, employer and enemy leaders) |
+| F4 | Contracts | Board (each offer's close day, on-station day and side; under it the selected offer's cause, side, on-station and close days) · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log · `w` who's who (the contract's world governor, employer and enemy leaders) |
 | F5 | Ledger | Treasuries · P&L · Ledger |
 | F6 | Supply | Sites · Demand · Order form · Shop |
 | F7 | HQ | Facilities/projects · Bays · Back office · Hiring hall |
@@ -736,7 +736,8 @@ medbay or restless crew stay on the Desk) ·
 `cli.advanceStopText`, the quiet sentence from `queries.quietOutlook` when
 no contract runs and nothing is building, and every log row the advance
 produced (`queries.logSpan`), oldest first, in front of the screen the stop
-is about — the tab where it is acted on, or the after-action, battle
+is about — the tab where it is acted on (F4 Contracts for new positions
+posted between contracts), or the after-action, battle
 decision, battle screen or battle orders it waits on, which Enter or Esc
 then opens; an outfit that folds goes to the saved GAME OVER instead) ·
 **Decision** (options with effects, default marked; a line too long for
@@ -784,7 +785,10 @@ and the TUI:
 - `toe` / `toeViews` (tree with slot states), `hull`, `personRecord`,
   `unassigned`, `hullInstanceForUnit`, `hullRecord`, `hullCombatHistory`,
   `hullMaintenanceLog`, `hullOwnershipChain`
-- `contracts` (board + active with objective/pool/VP/clock/exposure)
+- `contracts` (board with close day, on-station day and side + active with
+  the backer's cause and side, objective/pool/VP/clock/exposure);
+  `offerBrief` (the selected offer's cause, side, on-station and close days,
+  drawn under the board)
 - `allTreasuries`, `ledger(selected, period_days, max_rows)`
 - `supply` (sites with tons/capacity/burn/days, inbound), `demandLines`
 - `hqList`, `hqDetailView`, `hqCompanies`, `hqLinks` and `hqRoster`

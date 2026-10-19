@@ -3014,7 +3014,7 @@ pub const App = struct {
         }
         if (res.contact != .none) return .{ .orders = res.contact };
         return .{ .tab = switch (res.stopped) {
-            .employer_notice, .contract_end, .on_world => .contracts,
+            .employer_notice, .contract_end, .on_world, .positions_posted => .contracts,
             .payday, .insolvent, .bankrupt => .ledger,
             .arrival => .supply,
             .bay_job, .project => .hq,

@@ -436,6 +436,8 @@ pub const Error = error{
     UnknownContract,
     ObjectivesNotMet,
     CompanyInTransit,
+    TooLateToArrive,
+    OppositeSide,
     NoPlan,
     IllegalFit,
     RefitClassTooHigh,
@@ -585,6 +587,7 @@ pub const Result = struct {
         bay_job,
         project,
         listing,
+        positions_posted,
         personnel,
     } = .none,
     /// advance: the contract whose contact warning stopped a multi-day

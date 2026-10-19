@@ -72,10 +72,12 @@ printf '%s\n' \
   'shiparty 1 co:1' \
   'shiparty 1' \
   'sellarty 1' \
-  'candidates 9' \
-  'who 9' \
+  'found connaught Forward Base' \
+  'newco Bravo' \
+  'candidates 7' \
+  'who 7' \
   'who 99999' \
-  'accept 9 1' \
+  'accept 7 1' \
   'day 3 force' \
   'inbox' \
   'resolve 999 1' \
@@ -92,9 +94,9 @@ printf '%s\n' \
   'autoadmit maybe' \
   'commit 999 999 break_enemy' \
   'commit 999 999 notanintent' \
-  'tempo 9 1 advance' \
+  'tempo 7 1 advance' \
   'tempo 999 999 notaposture' \
-  'intervene 9 1 emergency_recon' \
+  'intervene 7 1 emergency_recon' \
   'intervene 999 999 notakind' \
   'mech 3' \
   'mech 999' \
@@ -108,26 +110,32 @@ printf '%s\n' \
   'resolve 1 3' \
   'log 3' \
   'day 7 force' \
+  'recall co:1' \
+  'day 28 force' \
+  'accept 22 1' \
+  'day 28 force' \
+  'offers' \
+  'accept 37 11' \
   'day 30 force' \
-  'day 30 force' \
-  'day 30 force' \
-  'day 30 force' \
-  'battle 9' \
-  'battle 9 pursue' \
-  'battle 9 reserve' \
-  'commit 9 2 secure_objective' \
-  'task 9 2 3 reserve' \
-  'battle 9 engage' \
+  'day 5 force' \
+  'day 1 force' \
+  'battle 22' \
+  'battle 22 pursue' \
+  'battle 22 reserve' \
+  'commit 22 4 secure_objective' \
+  'task 22 4 3 reserve' \
+  'battle 22 engage' \
   'sell 3' \
-  'battle 9 reserve' \
-  'battle 9 call recon' \
-  'battle 9 call air' \
-  'battle 9 call recon' \
-  'battle 9' \
-  'battle 9 roe hold' \
-  'battle 9 on' \
-  'battle 9 consolidate' \
-  'battle 9 withdraw' \
+  'battle 22 reserve' \
+  'battle 22 call recon' \
+  'battle 22 call air' \
+  'battle 22 call recon' \
+  'battle 22' \
+  'battle 22 roe hold' \
+  'battle 22 on' \
+  'battle 22 consolidate' \
+  'battle 22 withdraw' \
+  'conflicts' \
   'save' \
   'quit' > "$work/input"
 # A watchdog kills a hung REPL (macOS has no `timeout`); the exit status
@@ -229,7 +237,7 @@ check '#1 sold'
 # `battle`: an order not legal at the pause and any other command under the
 # battle lock are refused; the AAR names each phase and its order.
 check 'an engagement waits on your orders'
-check 'battle 9 engage'
+check 'battle 22 engage'
 check 'refused: that order cannot be given at this point of the battle'
 check 'engage: contact fought — the battle pauses for orders'
 check 'refused: a battle is being fought'
@@ -238,9 +246,10 @@ check 'press on: decisive fought'
 check 'the battle is over — after-action #'
 check 'AAR\]   contact — engage: margin'
 # P5b.2: at the contact pause the reserve is committed and recon called on
-# the committed Repel Probe; air cover without a fighter, recon a second
-# time, and a lever before contact are refused; the AAR names each lever.
-check 'battle 9 reserve  *commit the reserve'
+# the raid's committed depot strike; air cover without a fighter, recon a
+# second time, and a lever before contact are refused; the AAR names each
+# lever.
+check 'battle 22 reserve  *commit the reserve'
 check 'commit the reserve for the decisive phase — the odds are recomputed'
 check 'call emergency recon for the decisive phase — the odds are recomputed'
 check 'refused: the intervention gate is not met'
@@ -288,8 +297,16 @@ awk -v steps="$who_steps" '
 if grep -n -i -w -E 'procedural|generated|generator|authored|author|canon|sarna|project character|provenance|source|fictional|invented|real' "$work/who"; then
   echo "FOUND: an origin word in a who step's output"; exit 1
 fi
-# P5d.1e: `conflicts` lists the discovered conflicts; in the first month
-# none is open, let alone discovered. A trailing token is refused.
-check 'no conflict is known'
+# P5d.1e, P5d.1f: `conflicts` lists the standing needs with positions
+# posted and the discovered conflicts, with the side the outfit holds; a
+# trailing token is refused.
+check 'Border watch on Menkent  Lyran Commonwealth standing  a standing need  [0-9]* posted'
+check 'Allied reprisal on Connaught  Lyran Commonwealth against Free Worlds League  .*you: aggressor'
 check 'usage: conflicts'
+# P5d.1f: every offer says why it exists, which side it serves, when the
+# company must be on station and when it closes; holding the raid on one
+# side of a conflict refuses the other side's relief to another company.
+check '#26 why Fatima Abara (Governor of Alexandria) strikes at Connaught for an ally the Free Worlds League threatens.  ·  aggressor side  ·  on station d128 (34 days)  ·  closes d122'
+check 'closes the 1st'
+check 'refused: the outfit already holds a position on the other side of that conflict'
 echo "REPL SMOKE OK"

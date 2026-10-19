@@ -15,15 +15,17 @@ the clock for you: end turns past a deadline and the cautious default gets
 chosen in your name, entered in the log. Skimming a quiet garrison month
 is quick with **advance to the next stop** (`n`): time runs until the
 commander is genuinely needed — payday, a new decision, a contact window,
-between contracts a bay job done or a rare hull on the market — then the
+between contracts a bay job done, a rare hull on the market or new
+positions on the contract board — then the
 stop screen says why, lists everything logged since, and opens the screen
 the stop is about. Press `.` (or `day` in the console) for a single-day
 advance with the checklist opening first if warnings are up.
 
 **Monthly (the heartbeat):** payday. Every company's P&L lands on your desk —
 contract income vs. payroll, maintenance, supplies, freight, hardship pay.
-The contract market refreshes with offers *inside your influence rings*.
-Personnel market turns over. Loans tick. This is where you learn whether a
+The standing garrison and training work *inside your influence rings* is
+posted afresh; positions in the wars post on their own days through the
+month. Personnel market turns over. Loans tick. This is where you learn whether a
 deployment is bleeding you and why: the ledger is itemized down to
 "local supplies (3.0×, Deshler, 40 LY beyond ring)".
 Turnover risk remains visible on the Desk and each person's People record;
@@ -204,7 +206,8 @@ you own reports to you (Stages 9A–9C):
   employer's breach notice, payday, the contract closing or reaching its
   world, or a company or hull arriving; between contracts also deliveries,
   finished structural bay work and construction, a rare hull on the board,
-  and people recovering or leaving. The stop screen names the reason, lists
+  new positions posted on a contract board, and people recovering or
+  leaving. The stop screen names the reason, lists
   what was logged since you last looked — with nothing coming it says so in
   one sentence, naming the next payday — and opens the screen the stop is
   about. The advance never crosses an unanswered decision deadline: it stops
@@ -360,7 +363,10 @@ to catch up with its hulls.
 ## Reading a contract before you sign it
 
 Every HQ posts its own board — work inside its ring and beachhead band —
-and only the companies based there can take it. Each offer is rated in
+and only the companies based there can take it. Each offer says why it
+exists (the cause of the war or standing need behind it), which side it
+serves, the day the employer wants you on the world and the day it closes;
+the board shows each offer's cause under the cursor. Each offer is rated in
 **skulls**, half a skull at a time, for the company that would go: three
 skulls is an even, hard fight; fewer is easier; five is outmatched. The
 rating is the battle model's own arithmetic — your company's power as it
@@ -448,9 +454,26 @@ falls loses security and its holder's grip, and one that holds is the
 stronger for it, though either way the fighting strains it. Discoveries,
 the first blows and the outcomes appear in the log under `politics`. In the
 console, `conflicts` lists every war its defender has discovered, with the
-two sides, how it stands, when it struck and when it ends, and why it
-began; a war still in preparation shows nowhere. Contracts do not come from
-these wars yet.
+two sides, how it stands, when it struck and when it ends, the positions it
+has posted, the side you hold if any, and why it began; a war still in
+preparation shows nowhere.
+
+## Every contract comes from a war or a standing need (P5d.1f)
+
+Every offer on every board is posted by a war or by a governor's standing
+need, and says so. The side that attacks recruits from the day it commits —
+assaults and raids, and guerrilla work where the scheme allows — and the
+side attacked recruits relief, security and riot duty only once it
+discovers the threat. Garrison and cadre work comes from each governor's
+standing need to guard or train on its own world, posted afresh each month;
+a garrison there faces no named threat yet, so it sees no fighting until a
+threat emerges. A position wants your company on the world by the day the
+blow is due, and it closes on the last day a company from the posting HQ
+can still get there with a few days in hand: after that it leaves the
+board. You cannot take both sides of one war — while you hold a position on
+one side, the other side's positions are refused. The opposition an offer
+shows is the war's own: an attack meets the world's garrison, a defence
+meets the strike force on its way.
 
 ## Persistent actors (P4i)
 

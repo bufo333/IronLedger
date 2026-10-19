@@ -522,10 +522,12 @@ test "a start year no data row's window holds seats exactly the procedural world
     // The pinned value is `seatedWorldHashForTest` of this campaign as the
     // procedural-only seeding made it (244 personages, 493 relations), so
     // data rows outside their window change no draw, row, id, relation or
-    // stream state.
+    // stream state. The seating is `create_commander`'s, before the
+    // standing needs it draws next.
     var gs = GameState.init(std.testing.allocator, .{ .seed = 72001 });
     defer gs.deinit();
-    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer, .start_year = 3020 } });
+    _ = try @import("founding.zig").createCommanderAt(&gs, "T", .LC, .line_officer, 3020);
+    try seedForTest(&gs);
     for (gs.personages.values()) |p| {
         try std.testing.expectEqualStrings("", p.key);
         try std.testing.expectEqualStrings("", p.family_key);

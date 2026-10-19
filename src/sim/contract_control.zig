@@ -12,6 +12,7 @@ const std = @import("std");
 const tuning = @import("../domain/tuning.zig").t;
 const types = @import("../domain/types.zig");
 const contract_mod = @import("../domain/contract.zig");
+const conflict_mod = @import("../domain/conflict.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const planet_mod = @import("../domain/planet.zig");
 const logistics = @import("../econ/logistics.zig");
@@ -871,6 +872,20 @@ fn findOffer(gs: *GameState, offer_id: types.ContractId) ?usize {
     return null;
 }
 
+/// Whether a position may still be taken (docs/p5d-conflict-world-design.md
+/// §A "Arriving late" and "Both sides"; decisions D15, D16):
+/// `error.TooLateToArrive` once the day is past its `close_day`, and
+/// `error.OppositeSide` while the outfit holds a position on the other side
+/// of the same conflict (`Contract.holdsPosition`). A position with no
+/// backer is never refused for either. Pure.
+pub fn requireOpenPosition(gs: *const GameState, offer: *const contract_mod.Contract) error{ TooLateToArrive, OppositeSide }!void {
+    if (offer.close_day) |close| if (gs.clock.day_index > close) return error.TooLateToArrive;
+    if (offer.conflict_id == .none) return;
+    for (gs.contracts.values()) |*c| {
+        if (c.conflict_id == offer.conflict_id and c.side != offer.side and c.holdsPosition()) return error.OppositeSide;
+    }
+}
+
 pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: types.ForceId) !void {
     // ---- VALIDATE: no mutation ----
     const offer_index = findOffer(gs, offer_id) orelse return error.NoSuchOffer;
@@ -883,8 +898,25 @@ pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: ty
         if (c.assigned_company == company_id and c.isRunning()) return error.CompanyDeployed;
     }
     if (company.return_eta_day != null) return error.CompanyInTransit;
+    try requireOpenPosition(gs, &gs.contract_offers.items[offer_index]);
 
     // ---- PREPARE: reserve every fallible destination; no GameState mutation ----
+
+    // The arc's actors, rivals and officers draw their streams on the
+    // campaign's generator and join their maps (at the end, under new ids)
+    // as they are prepared; a failed preparation puts every stream back and
+    // removes them again (rule 12's rollback guard). The commit below
+    // cannot fail.
+    const prior_rng = gs.rng;
+    const prior_actors = gs.actors.count();
+    const prior_rivals = gs.rivals.count();
+    const prior_officer_arcs = gs.officer_arcs.count();
+    errdefer {
+        gs.rng = prior_rng;
+        while (gs.actors.count() > prior_actors) _ = gs.actors.pop();
+        while (gs.rivals.count() > prior_rivals) _ = gs.rivals.pop();
+        while (gs.officer_arcs.count() > prior_officer_arcs) _ = gs.officer_arcs.pop();
+    }
 
     // Scratch arena for the load-out plan and move list; lives until return.
     var scratch_arena = std.heap.ArenaAllocator.init(gs.scratch());
@@ -1074,22 +1106,33 @@ pub fn acceptContract(gs: *GameState, offer_id: types.ContractId, company_id: ty
     });
 }
 
-test "an offer carries its opposition, and acceptance sizes the pool from it" {
+test "an offer carries its backer's opposition, and acceptance sizes the pool from it" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 1205 });
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
-    try contract_market.refresh(&gs);
-    var saw_combat = false;
+    _ = try contract_market.worldForTest(&gs);
+    // Decision F4: an aggressor's position faces the defender's garrison,
+    // a defender's the strike force, and a standing need's no named threat.
+    var combat: ?contract_mod.Contract = null;
+    var standing = false;
     for (gs.contract_offers.items) |o| {
-        try std.testing.expect(o.hasOpfor());
-        const row = @import("../domain/opfor.zig").rowFor(o.kind);
-        try std.testing.expect(o.enemy_lances >= row.lances_min and o.enemy_lances <= row.lances_max);
-        if (!o.kind.isGarrisonClass()) saw_combat = true;
+        const backer = gs.conflicts.get(o.conflict_id).?;
+        if (conflict_mod.opposition(&backer, o.side)) |force| {
+            try std.testing.expect(o.hasOpfor());
+            try std.testing.expectEqual(force.lances, o.enemy_lances);
+            try std.testing.expectEqual(force.quality, o.enemy_quality);
+            try std.testing.expectEqual(force.lance_bv, o.enemy_lance_bv);
+            try std.testing.expectEqual(force.lance_tons, o.enemy_lance_tons);
+            combat = combat orelse o;
+        } else {
+            try std.testing.expect(!o.hasOpfor());
+            try std.testing.expectEqual(@as(u8, 0), o.enemy_lances);
+            standing = true;
+        }
     }
-    try std.testing.expect(saw_combat);
-    var c = gs.contract_offers.items[0];
-    c.kind = .planetary_assault;
+    try std.testing.expect(standing);
+    var c = combat.?;
     c.assigned_company = co;
     onAccept(&gs, &c);
     try std.testing.expectEqual(@import("../domain/opfor.zig").poolBv(c.opforBv(), c.terms.length_months), c.enemy_pool_bv);
@@ -1102,7 +1145,7 @@ test "accepting a contract leaves state whole when an allocation fails" {
     var gs = GameState.init(outer.allocator(), .{ .seed = 8301 });
     _ = try founding.createCommander(&gs, "T", .LC, .quartermaster);
     const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
-    try contract_market.refresh(&gs);
+    _ = try contract_market.worldForTest(&gs);
     try std.testing.expect(gs.contract_offers.items.len > 0);
 
     // Find an eligible offer so validation passes and the first prepare
@@ -1128,6 +1171,104 @@ test "accepting a contract leaves state whole when an allocation fails" {
 
     try std.testing.expectError(error.OutOfMemory, acceptContract(&gs, gs.contract_offers.items[idx].id, co));
     try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+/// A founded campaign with companies Alpha and Bravo and an offensive
+/// conflict on a world its seat HQ sees, the day after it opened, with
+/// positions posted on both its sides.
+fn bothSidesForTest(gs: *GameState) !struct { alpha: types.ForceId, bravo: types.ForceId, conflict: types.ConflictId, aggressor: types.ContractId, defender: types.ContractId } {
+    _ = try founding.createCommander(gs, "T", .LC, .quartermaster);
+    const alpha = try @import("starter_company.zig").generateInto(gs, "Alpha");
+    const bravo = try @import("starter_company.zig").generateInto(gs, "Bravo");
+    const id = try contract_market.worldForTest(gs);
+    gs.clock.day_index += 1;
+    gs.clock.date.day += 1;
+    try contract_market.refresh(gs);
+    var aggressor: ?types.ContractId = null;
+    var defender: ?types.ContractId = null;
+    for (gs.contract_offers.items) |o| if (o.conflict_id == id) switch (o.side) {
+        .aggressor => aggressor = aggressor orelse o.id,
+        .defender => defender = defender orelse o.id,
+    };
+    return .{ .alpha = alpha, .bravo = bravo, .conflict = id, .aggressor = aggressor.?, .defender = defender.? };
+}
+
+test "a position is taken on its close day and refused the day after with nothing changed" {
+    // docs/p5d-conflict-world-design.md §A "Arriving late"; rule 13.
+    const digest = @import("digest.zig");
+    const campaign_backup = @import("campaign_backup.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 74011 });
+    defer gs.deinit();
+    const w = try bothSidesForTest(&gs);
+    const close = for (gs.contract_offers.items) |o| {
+        if (o.id == w.aggressor) break o.close_day.?;
+    } else unreachable;
+    var on_close = try campaign_backup.take(&gs);
+    defer campaign_backup.discard(&on_close);
+    on_close.clock.day_index = close;
+    const taken = try commands.execute(&on_close, .{ .accept_contract = .{ .offer = w.aggressor, .company = w.alpha } });
+    try std.testing.expectEqual(w.aggressor, taken.contract);
+    try std.testing.expectEqual(@as(?u32, close), on_close.contracts.get(w.aggressor).?.close_day);
+    gs.clock.day_index = close + 1;
+    const before = digest.stateHash(&gs);
+    try std.testing.expectError(commands.Error.TooLateToArrive, commands.execute(&gs, .{ .accept_contract = .{ .offer = w.aggressor, .company = w.alpha } }));
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+}
+
+test "holding one side of a conflict refuses the other side's positions with nothing changed, either way round, and leaves other conflicts open" {
+    // docs/p5d-conflict-world-design.md §A "Both sides"; decision D16; rule 13.
+    const digest = @import("digest.zig");
+    for ([_]bool{ true, false }) |aggressor_first| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 74012 });
+        defer gs.deinit();
+        const w = try bothSidesForTest(&gs);
+        const first = if (aggressor_first) w.aggressor else w.defender;
+        const second = if (aggressor_first) w.defender else w.aggressor;
+        _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = first, .company = w.alpha } });
+        const before = digest.stateHash(&gs);
+        try std.testing.expectError(commands.Error.OppositeSide, commands.execute(&gs, .{ .accept_contract = .{ .offer = second, .company = w.bravo } }));
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+        // Another conflict's position is open to the same outfit.
+        const other = for (gs.contract_offers.items) |o| {
+            if (o.conflict_id != w.conflict and contract_market.offerEligible(&gs, &o, w.bravo)) break o.id;
+        } else unreachable;
+        _ = try commands.execute(&gs, .{ .accept_contract = .{ .offer = other, .company = w.bravo } });
+        // Once the held side's contract is over, the other side opens.
+        gs.contracts.getPtr(first).?.status = .completed;
+        try requireOpenPosition(&gs, for (gs.contract_offers.items) |*o| {
+            if (o.id == second) break o;
+        } else unreachable);
+    }
+}
+
+test "accepting a position changes nothing when any allocation fails" {
+    // Rules 12, 69: every acceptance allocation is prepared before the
+    // first mutation.
+    const digest = @import("digest.zig");
+    const campaign_backup = @import("campaign_backup.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 74013 });
+    defer gs.deinit();
+    const w = try bothSidesForTest(&gs);
+    const before = digest.stateHash(&gs);
+    var failures: usize = 0;
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        var copy = try campaign_backup.take(&gs);
+        defer campaign_backup.discard(&copy);
+        var failing = std.testing.FailingAllocator.init(copy.arena.child_allocator, .{ .fail_index = i });
+        const backing = copy.arena.child_allocator;
+        copy.arena.child_allocator = failing.allocator();
+        defer copy.arena.child_allocator = backing;
+        if (acceptContract(&copy, w.defender, w.alpha)) |_| {
+            try std.testing.expectEqual(contract_mod.ConflictSide.defender, copy.contracts.get(w.defender).?.side);
+            break;
+        } else |err| {
+            try std.testing.expectEqual(error.OutOfMemory, err);
+            try std.testing.expectEqual(before, digest.stateHash(&copy));
+            failures += 1;
+        }
+    }
+    try std.testing.expect(failures > 0);
 }
 
 test "idle companies stay where they worked; recall brings them home; redeploy from the field" {
@@ -1205,7 +1346,7 @@ test "acceptContract: arc contract attaches actors (len > 0) and advances next_a
         defer gs.deinit();
         _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
         const co = try starter_company.generateInto(&gs, "Alpha");
-        try contract_market.refresh(&gs);
+        _ = try contract_market.worldForTest(&gs);
         var arc_idx: ?usize = null;
         for (0..gs.contract_offers.items.len) |i| {
             const o = &gs.contract_offers.items[i];
@@ -1231,7 +1372,7 @@ test "acceptContract: arc contract attaches actors (len > 0) and advances next_a
         defer gs.deinit();
         _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
         const co = try starter_company.generateInto(&gs, "Alpha");
-        try contract_market.refresh(&gs);
+        _ = try contract_market.worldForTest(&gs);
         var noarc_idx: ?usize = null;
         for (0..gs.contract_offers.items.len) |i| {
             const o = &gs.contract_offers.items[i];

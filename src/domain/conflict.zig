@@ -1,9 +1,12 @@
-//! Conflicts: the persisted record of one political war over a world
-//! (docs/p5d-conflict-world-design.md §C, P5d.1e). Who backs each side,
-//! the §A timeline fixed at opening, the rolled defender and aggressor
-//! forces, and the outcome once resolved; the status is derived from the
-//! days. The pure rules every conflict obeys live here; opening,
-//! progression and resolution are `sim/politics.zig`'s.
+//! Conflicts: the persisted record of one political war over a world, or
+//! of a standing garrison or training need on one
+//! (docs/p5d-conflict-world-design.md §C, §E; P5d.1e, P5d.1f). Who backs
+//! each side, the §A timeline fixed at opening, the rolled defender and
+//! aggressor forces, and the outcome once resolved; the status is derived
+//! from the days. Every contract position is posted by one (§C "Offers
+//! come from conflicts"). The pure rules every conflict obeys live here;
+//! opening, progression and resolution are `sim/politics.zig`'s, posting
+//! `sim/contract_market.zig`'s.
 //! No MekHQ counterpart: MekHQ has no persistent political conflicts
 //! (docs/mekhq-map.md).
 
@@ -11,6 +14,7 @@ const std = @import("std");
 const types = @import("types.zig");
 const tuning = @import("tuning.zig").t;
 const opfor = @import("opfor.zig");
+const ConflictSide = @import("contract.zig").ConflictSide;
 
 /// A party backing one side (§B "Power"): a faction and the personage acting
 /// for it.
@@ -23,10 +27,24 @@ pub const Power = struct {
 /// A side's rolled force (§A "The opposing force is built from records").
 pub const Force = opfor.Force;
 
-/// How a resolved conflict ended. Persisted by tag name.
+/// How a resolved conflict ended. Persisted by tag name. An offensive
+/// conflict ends `aggressor_won` or `defender_held`; a standing one only
+/// `stood_down`.
 pub const Outcome = enum {
     aggressor_won,
     defender_held,
+    /// A standing need lapsed: its lifetime passed with no running contract
+    /// it backs (`politics.standDownDue`).
+    stood_down,
+};
+
+/// The two shapes of conflict (§C, §E). Persisted by tag name.
+pub const Family = enum {
+    /// A war: an aggressor strikes a defender's world on the §A timeline.
+    offensive,
+    /// A standing garrison or training need (§E "stability"): a defender
+    /// and no aggressor, threat, strike or end day.
+    standing,
 };
 
 /// Where a conflict stands on a day (§A timeline). Derived by `status`,
@@ -38,44 +56,116 @@ pub const Status = enum {
     threatened,
     /// The strike has landed and the fighting runs.
     open,
+    /// A standing need, open until it stands down.
+    standing,
     resolved,
 };
 
 pub const Conflict = struct {
     id: types.ConflictId,
+    family: Family = .offensive,
     /// The `political_events.zon` row that opened it.
     template_key: []const u8,
     /// The `planets.zon` key of the world fought over.
     planet_key: []const u8,
-    aggressor: Power,
+    /// Null exactly for a standing conflict.
+    aggressor: ?Power,
     defender: Power,
     /// The personage whose scheme opened it: the aggressor's or the
     /// defender's personage, as its template's side names.
     instigator: types.PersonageId,
     /// The aggressor faction's world nearest the target, which the strike
-    /// force leaves from (§A, D19).
-    staging_planet_key: []const u8,
-    /// The §A days: `opened_day < discovery_day < strike_day < expires_day`.
+    /// force leaves from (§A, D19). Null exactly for a standing conflict.
+    staging_planet_key: ?[]const u8,
+    /// The §A days. Offensive: `opened_day < discovery_day < strike_day <
+    /// expires_day`. Standing: `discovery_day = opened_day` (the need is
+    /// known from the start) and no strike or end day.
     opened_day: u32,
     discovery_day: u32,
-    strike_day: u32,
-    expires_day: u32,
+    strike_day: ?u32,
+    expires_day: ?u32,
     /// The defender's garrison, rolled at opening (§A local forces).
     local_force: Force,
-    /// The aggressor's house force (§A, D19).
-    strike_force: Force,
+    /// The aggressor's house force (§A, D19). Null exactly for a standing
+    /// conflict.
+    strike_force: ?Force,
     /// Null until resolution.
     outcome: ?Outcome = null,
 };
 
+/// An offensive conflict's aggressor-side parts, all present together.
+pub const Offense = struct {
+    aggressor: Power,
+    staging_planet_key: []const u8,
+    strike_day: u32,
+    expires_day: u32,
+    strike_force: Force,
+};
+
+/// The aggressor-side parts of an offensive conflict; null for a standing
+/// one, and for an offensive one missing any part (a malformed record,
+/// which `politics.validate` refuses at load).
+pub fn offense(c: *const Conflict) ?Offense {
+    if (c.family != .offensive) return null;
+    return .{
+        .aggressor = c.aggressor orelse return null,
+        .staging_planet_key = c.staging_planet_key orelse return null,
+        .strike_day = c.strike_day orelse return null,
+        .expires_day = c.expires_day orelse return null,
+        .strike_force = c.strike_force orelse return null,
+    };
+}
+
 /// A conflict's status on `day` (§A timeline): `resolved` once it has an
-/// outcome; otherwise `preparing` before `discovery_day`, `threatened`
-/// before `strike_day`, and `open` from it. The one status owner.
+/// outcome; a standing conflict is otherwise `standing`; an offensive one
+/// `preparing` before `discovery_day`, `threatened` before `strike_day`,
+/// and `open` from it. The one status owner.
 pub fn status(c: *const Conflict, day: u32) Status {
     if (c.outcome != null) return .resolved;
+    const strike = c.strike_day orelse return .standing;
     if (day < c.discovery_day) return .preparing;
-    if (day < c.strike_day) return .threatened;
+    if (day < strike) return .threatened;
     return .open;
+}
+
+/// The first day a side of an unresolved conflict posts positions (§A
+/// "Player offers per side", D15): the aggressor's from `opened_day` (T0),
+/// the defender's from `discovery_day`. A standing conflict's defender posts
+/// from `opened_day`, which is its `discovery_day`; it has no aggressor
+/// side (null). Pure.
+pub fn postsFrom(c: *const Conflict, side: ConflictSide) ?u32 {
+    return switch (side) {
+        .aggressor => if (c.family == .offensive) c.opened_day else null,
+        .defender => c.discovery_day,
+    };
+}
+
+/// The day a side's positions want the company on the world (§A
+/// `on_station_by`): the strike day, for either side of an offensive
+/// conflict; null for a standing conflict, which has no strike. Pure.
+pub fn onStationBy(c: *const Conflict) ?u32 {
+    return c.strike_day;
+}
+
+/// The faction a side's positions hire for (§C "The posting faction is that
+/// side's faction"); null for a standing conflict's aggressor side.
+pub fn sideFaction(c: *const Conflict, side: ConflictSide) ?[]const u8 {
+    return switch (side) {
+        .aggressor => if (c.aggressor) |a| a.faction_key else null,
+        .defender => c.defender.faction_key,
+    };
+}
+
+/// The force a side's positions fight (§A "The opposing force is built from
+/// records"; decision F4): the defender's `local_force` for the aggressor's
+/// positions, the aggressor's `strike_force` for the defender's, and none
+/// for a standing conflict's ("no named threat", §E). Pure.
+pub fn opposition(c: *const Conflict, side: ConflictSide) ?Force {
+    if (c.family == .standing) return null;
+    return switch (side) {
+        .aggressor => c.local_force,
+        .defender => c.strike_force,
+    };
 }
 
 /// The aggressor's chance to win an NPC-only resolution, in basis points
@@ -135,6 +225,7 @@ comptime {
     if (pol.local_force_security_per_lance == 0) @compileError(file ++ "local_force_security_per_lance must be positive");
     if (pol.secession_loyalty_max < 1 or pol.secession_loyalty_max > 100) @compileError(file ++ "secession_loyalty_max must lie in 1..100");
     if (pol.schemes_per_month < 1 or pol.max_open_conflicts < 1) @compileError(file ++ "schemes_per_month and max_open_conflicts must be positive");
+    if (pol.standing_lifetime_days < 1) @compileError(file ++ "standing_lifetime_days must be positive");
 }
 
 test "status follows the days and the outcome" {
@@ -162,6 +253,68 @@ test "status follows the days and the outcome" {
     c.outcome = .defender_held;
     try std.testing.expectEqual(Status.resolved, status(&c, 10));
     try std.testing.expectEqual(Status.resolved, status(&c, 90));
+}
+
+test "a standing conflict stands until it stands down, posts only its defender's positions from opening, and names no threat" {
+    const local: Force = .{ .lances = 2, .quality = .regular, .lance_bv = 900, .lance_tons = 150 };
+    var c: Conflict = .{
+        .id = @enumFromInt(1),
+        .family = .standing,
+        .template_key = "border_watch",
+        .planet_key = "skye",
+        .aggressor = null,
+        .defender = .{ .faction_key = "LC", .personage = @enumFromInt(2) },
+        .instigator = @enumFromInt(2),
+        .staging_planet_key = null,
+        .opened_day = 10,
+        .discovery_day = 10,
+        .strike_day = null,
+        .expires_day = null,
+        .local_force = local,
+        .strike_force = null,
+    };
+    try std.testing.expectEqual(Status.standing, status(&c, 10));
+    try std.testing.expectEqual(Status.standing, status(&c, 10_000));
+    try std.testing.expectEqual(@as(?u32, null), postsFrom(&c, .aggressor));
+    try std.testing.expectEqual(@as(?u32, 10), postsFrom(&c, .defender));
+    try std.testing.expectEqual(@as(?u32, null), onStationBy(&c));
+    try std.testing.expectEqual(@as(?Force, null), opposition(&c, .defender));
+    try std.testing.expectEqual(@as(?[]const u8, null), sideFaction(&c, .aggressor));
+    try std.testing.expectEqualStrings("LC", sideFaction(&c, .defender).?);
+    try std.testing.expectEqual(@as(?Offense, null), offense(&c));
+    c.outcome = .stood_down;
+    try std.testing.expectEqual(Status.resolved, status(&c, 10));
+}
+
+test "an offensive conflict posts the aggressor's positions from opening and the defender's from discovery, each facing the other's force" {
+    const local: Force = .{ .lances = 2, .quality = .green, .lance_bv = 900, .lance_tons = 150 };
+    const strike: Force = .{ .lances = 3, .quality = .veteran, .lance_bv = 1_200, .lance_tons = 220 };
+    var c: Conflict = .{
+        .id = @enumFromInt(1),
+        .template_key = "border_grab",
+        .planet_key = "skye",
+        .aggressor = .{ .faction_key = "FWL", .personage = @enumFromInt(1) },
+        .defender = .{ .faction_key = "LC", .personage = @enumFromInt(2) },
+        .instigator = @enumFromInt(1),
+        .staging_planet_key = "atreus",
+        .opened_day = 10,
+        .discovery_day = 30,
+        .strike_day = 50,
+        .expires_day = 90,
+        .local_force = local,
+        .strike_force = strike,
+    };
+    try std.testing.expectEqual(@as(?u32, 10), postsFrom(&c, .aggressor));
+    try std.testing.expectEqual(@as(?u32, 30), postsFrom(&c, .defender));
+    try std.testing.expectEqual(@as(?u32, 50), onStationBy(&c));
+    try std.testing.expectEqual(local, opposition(&c, .aggressor).?);
+    try std.testing.expectEqual(strike, opposition(&c, .defender).?);
+    try std.testing.expectEqualStrings("FWL", sideFaction(&c, .aggressor).?);
+    try std.testing.expectEqualStrings("LC", sideFaction(&c, .defender).?);
+    try std.testing.expectEqual(@as(u32, 90), offense(&c).?.expires_day);
+    // A record missing any aggressor-side part has no offense.
+    c.staging_planet_key = null;
+    try std.testing.expectEqual(@as(?Offense, null), offense(&c));
 }
 
 test "the aggressor's chance is its share of the two forces' BV" {

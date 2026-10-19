@@ -1,12 +1,13 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 73, the current store and campaign format. Schema
--- 71 is the oldest supported format: a v71 or v72 store reaches 73 on open
--- through each migration in turn, all in one transaction (Store.migrate:
--- v71 → v72 rebuilds `personage`, v72 → v73 adds `conflict`; see each
+-- Matches schema_version 74, the current store and campaign format. Schema
+-- 71 is the oldest supported format: a v71, v72 or v73 store reaches 74 on
+-- open through each migration in turn, all in one transaction
+-- (Store.migrate: v71 → v72 rebuilds `personage`, v72 → v73 adds
+-- `conflict`, v73 → v74 rebuilds `conflict` and `contract`; see each
 -- below). Older and newer formats are refused before persistent mutation
 -- under docs/engineering-contract.md rule 51; only empty stores initialize
--- schema 73.
+-- schema 74.
 -- The executable DDL and dormant historical migration declarations live in
 -- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
@@ -550,8 +551,23 @@ CREATE TABLE contract (
     arc_finale_key  TEXT    NOT NULL DEFAULT '',     -- which finale was selected; empty until the terminal beat resolves
     -- P4g
     command_capacity INTEGER NOT NULL DEFAULT 0,    -- remaining command capacity for this contract arc
-    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
+    -- The position's backer (v74; docs/p5d-conflict-world-design.md §C
+    -- "No contract without a backer"). The loader (politics.validate) also
+    -- refuses a backer whose faction on that side is not the employer and
+    -- an on_station_by other than the backer's strike day.
+    conflict_id     INTEGER CHECK (conflict_id IS NULL OR (typeof(conflict_id)='integer' AND conflict_id BETWEEN 1 AND 4294967295)), -- -> conflict.id; NULL only on a row a v73 store held
+    side            TEXT    NOT NULL DEFAULT 'defender' CHECK (typeof(side)='text' AND side IN ('aggressor','defender')), -- contract.ConflictSide
+    on_station_by   INTEGER CHECK (on_station_by IS NULL OR (typeof(on_station_by)='integer' AND on_station_by BETWEEN 0 AND 4294967295)), -- the backer's strike day; NULL for a standing need's position
+    close_day       INTEGER CHECK (close_day IS NULL OR (typeof(close_day)='integer' AND close_day BETWEEN 0 AND 4294967295)),         -- last day it may be accepted; NULL: it closes at the month start
+    CHECK (conflict_id IS NOT NULL OR (side = 'defender' AND on_station_by IS NULL AND close_day IS NULL)),
+    CHECK ((close_day IS NULL) = (on_station_by IS NULL) AND (close_day IS NULL OR close_day <= on_station_by)),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, conflict_id) REFERENCES conflict(cid, id) DEFERRABLE INITIALLY DEFERRED
 );
+-- Migration v73 → v74: the table is rebuilt (create–copy–drop–rename, rows
+-- in stored order). A v73 contract or offer has no backer: it gains
+-- conflict_id NULL, side 'defender' and no on_station_by or close_day; such
+-- an offer leaves the board at the next month start.
 
 -- Operations instantiated on a contract: missions offered during arc beats.
 -- (P4b) A row exists from instantiation through the campaign save; outcome is
@@ -1417,48 +1433,59 @@ CREATE TABLE personage_relation (
 );
 CREATE INDEX IF NOT EXISTS ix_personage_relation_cid ON personage_relation(cid);
 
--- conflict: world conflicts (docs/p5d-conflict-world-design.md §C, v73), in
--- id order, resolved ones kept. Each opened from a
--- data/tables/political_events.zon template; its §A days are fixed at
--- opening and its status (preparing, threatened, open, resolved) is derived,
--- never stored. The loader (politics.validate) also refuses an unknown
--- template, world or faction, an instigator that is not the side personage
--- its template names, a staging world other than the aggressor faction's
--- nearest, a preparation (strike day less the travel, after opening) or a
--- fighting span outside its tuned range, an opening after today, an
--- unresolved conflict at or past its expiry or a resolved one before it,
--- two unresolved conflicts on one world, more than max_open_conflicts
--- unresolved, and an id at or above meta next_conflict_id.
+-- conflict: world conflicts (docs/p5d-conflict-world-design.md §C, §E;
+-- v73, rebuilt at v74), in id order, resolved ones kept. Each opened from a
+-- data/tables/political_events.zon template: an `offensive` one (a war)
+-- from an `opening` row, a `standing` one (a ruler's standing garrison or
+-- training need) from a `standing` row. An offensive conflict's §A days are
+-- fixed at opening; a standing one has no aggressor side, is known from its
+-- opening, is instigated by its defender and ends only stood down. The
+-- status (preparing, threatened, open, standing, resolved) is derived, never
+-- stored. The loader (politics.validate) also refuses an unknown template,
+-- world or faction, a template of the other family, an instigator that is
+-- not the side personage its template names, a staging world other than the
+-- aggressor faction's nearest, a preparation (strike day less the travel,
+-- after opening) or a fighting span outside its tuned range, an opening
+-- after today, an unresolved conflict at or past its expiry or a resolved
+-- one before it, two unresolved offensive conflicts on one world, more than
+-- max_open_conflicts unresolved, a standing need of another faction than
+-- its world's or a second one on its world, and an id at or above meta
+-- next_conflict_id.
 --
 -- Migration v72 → v73: v72 has no conflict table and no next_conflict_id.
 -- A v72 campaign has no conflict; the table is created empty, every campaign
 -- gets next_conflict_id = 1, and no other row changes.
+-- Migration v73 → v74: the table is rebuilt (create–copy–drop–rename, rows
+-- in stored order). Every v73 conflict is offensive: it gains family
+-- 'offensive' and keeps every column as stored.
 CREATE TABLE conflict (
     cid                 INTEGER NOT NULL,
     ord                 INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), -- id order
     id                  INTEGER NOT NULL CHECK (typeof(id)='integer' AND id BETWEEN 1 AND 4294967295), -- ConflictId
     template_key        TEXT    NOT NULL CHECK (typeof(template_key)='text' AND length(template_key) > 0), -- -> political_events.zon row
     planet_key          TEXT    NOT NULL CHECK (typeof(planet_key)='text' AND length(planet_key) > 0),     -- -> planets catalog: the world fought over
-    aggressor_faction   TEXT    NOT NULL CHECK (typeof(aggressor_faction)='text' AND length(aggressor_faction) > 0), -- -> factions catalog
-    aggressor_personage INTEGER NOT NULL CHECK (typeof(aggressor_personage)='integer' AND aggressor_personage BETWEEN 1 AND 4294967295), -- PersonageId
+    aggressor_faction   TEXT    CHECK (aggressor_faction IS NULL OR (typeof(aggressor_faction)='text' AND length(aggressor_faction) > 0)), -- -> factions catalog; NULL for a standing need
+    aggressor_personage INTEGER CHECK (aggressor_personage IS NULL OR (typeof(aggressor_personage)='integer' AND aggressor_personage BETWEEN 1 AND 4294967295)), -- PersonageId
     defender_faction    TEXT    NOT NULL CHECK (typeof(defender_faction)='text' AND length(defender_faction) > 0),   -- -> factions catalog
     defender_personage  INTEGER NOT NULL CHECK (typeof(defender_personage)='integer' AND defender_personage BETWEEN 1 AND 4294967295), -- PersonageId; the cause's target
     instigator          INTEGER NOT NULL CHECK (typeof(instigator)='integer' AND instigator BETWEEN 1 AND 4294967295), -- PersonageId; the template's side personage
-    staging_planet_key  TEXT    NOT NULL CHECK (typeof(staging_planet_key)='text' AND length(staging_planet_key) > 0), -- the aggressor faction's world nearest the target
+    staging_planet_key  TEXT    CHECK (staging_planet_key IS NULL OR (typeof(staging_planet_key)='text' AND length(staging_planet_key) > 0)), -- the aggressor faction's world nearest the target
     opened_day          INTEGER NOT NULL CHECK (typeof(opened_day)='integer' AND opened_day BETWEEN 0 AND 4294967295),
     discovery_day       INTEGER NOT NULL CHECK (typeof(discovery_day)='integer' AND discovery_day BETWEEN 0 AND 4294967295),
-    strike_day          INTEGER NOT NULL CHECK (typeof(strike_day)='integer' AND strike_day BETWEEN 0 AND 4294967295),
-    expires_day         INTEGER NOT NULL CHECK (typeof(expires_day)='integer' AND expires_day BETWEEN 0 AND 4294967295),
+    strike_day          INTEGER CHECK (strike_day IS NULL OR (typeof(strike_day)='integer' AND strike_day BETWEEN 0 AND 4294967295)),
+    expires_day         INTEGER CHECK (expires_day IS NULL OR (typeof(expires_day)='integer' AND expires_day BETWEEN 0 AND 4294967295)),
     local_lances        INTEGER NOT NULL CHECK (typeof(local_lances)='integer' AND local_lances BETWEEN 1 AND 255), -- the defender's garrison
     local_quality       TEXT    NOT NULL CHECK (typeof(local_quality)='text' AND local_quality IN ('green','regular','veteran','elite')),
     local_lance_bv      INTEGER NOT NULL CHECK (typeof(local_lance_bv)='integer' AND local_lance_bv >= 0),
     local_lance_tons    INTEGER NOT NULL CHECK (typeof(local_lance_tons)='integer' AND local_lance_tons BETWEEN 0 AND 4294967295),
-    strike_lances       INTEGER NOT NULL CHECK (typeof(strike_lances)='integer' AND strike_lances BETWEEN 1 AND 255), -- the aggressor's house force
-    strike_quality      TEXT    NOT NULL CHECK (typeof(strike_quality)='text' AND strike_quality IN ('green','regular','veteran','elite')),
-    strike_lance_bv     INTEGER NOT NULL CHECK (typeof(strike_lance_bv)='integer' AND strike_lance_bv >= 0),
-    strike_lance_tons   INTEGER NOT NULL CHECK (typeof(strike_lance_tons)='integer' AND strike_lance_tons BETWEEN 0 AND 4294967295),
-    outcome             TEXT    CHECK (outcome IS NULL OR (typeof(outcome)='text' AND outcome IN ('aggressor_won','defender_held'))), -- NULL until resolved
-    CHECK (opened_day < discovery_day AND discovery_day < strike_day AND strike_day < expires_day),
+    strike_lances       INTEGER CHECK (strike_lances IS NULL OR (typeof(strike_lances)='integer' AND strike_lances BETWEEN 1 AND 255)), -- the aggressor's house force; NULL for a standing need
+    strike_quality      TEXT    CHECK (strike_quality IS NULL OR (typeof(strike_quality)='text' AND strike_quality IN ('green','regular','veteran','elite'))),
+    strike_lance_bv     INTEGER CHECK (strike_lance_bv IS NULL OR (typeof(strike_lance_bv)='integer' AND strike_lance_bv >= 0)),
+    strike_lance_tons   INTEGER CHECK (strike_lance_tons IS NULL OR (typeof(strike_lance_tons)='integer' AND strike_lance_tons BETWEEN 0 AND 4294967295)),
+    outcome             TEXT    CHECK (outcome IS NULL OR (typeof(outcome)='text' AND outcome IN ('aggressor_won','defender_held','stood_down'))), -- NULL until resolved
+    family              TEXT    NOT NULL CHECK (typeof(family)='text' AND family IN ('offensive','standing')), -- conflict.Family
+    CHECK (family <> 'offensive' OR (aggressor_faction IS NOT NULL AND aggressor_personage IS NOT NULL AND staging_planet_key IS NOT NULL AND strike_day IS NOT NULL AND expires_day IS NOT NULL AND strike_lances IS NOT NULL AND strike_quality IS NOT NULL AND strike_lance_bv IS NOT NULL AND strike_lance_tons IS NOT NULL AND opened_day < discovery_day AND discovery_day < strike_day AND strike_day < expires_day AND (outcome IS NULL OR outcome <> 'stood_down'))),
+    CHECK (family <> 'standing' OR (aggressor_faction IS NULL AND aggressor_personage IS NULL AND staging_planet_key IS NULL AND strike_day IS NULL AND expires_day IS NULL AND strike_lances IS NULL AND strike_quality IS NULL AND strike_lance_bv IS NULL AND strike_lance_tons IS NULL AND discovery_day = opened_day AND instigator = defender_personage AND (outcome IS NULL OR outcome = 'stood_down'))),
     PRIMARY KEY (cid, id),
     UNIQUE (cid, ord),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,

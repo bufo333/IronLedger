@@ -180,13 +180,16 @@ pub fn foundArcCampaignForTest(
 ) !struct { contract: types.ContractId, company: types.ForceId } {
     _ = try founding.createCommander(gs, "Script", .LC, .line_officer);
     const co = try starter_company.generateInto(gs, "Alpha");
+    _ = try contract_market.worldForTest(gs);
 
-    // Hunt the offer board for an eligible arc offer (up to 12 months).
+    // Hunt the offer board, day by day for up to a year, for an eligible
+    // arc offer with an opposition to fight its operations: a standing
+    // need's garrison names no threat.
     var arc_offer_id: ?types.ContractId = null;
-    for (0..12) |_| {
+    for (0..360) |_| {
         // Prefer non-beachhead arc offers.
         for (gs.contract_offers.items) |*offer| {
-            if (operations.selectArcKeyFor(offer.kind) == null) continue;
+            if (operations.selectArcKeyFor(offer.kind) == null or !offer.hasOpfor()) continue;
             if (!contract_market.offerEligible(gs, offer, co)) continue;
             if (!offer.beachhead) {
                 arc_offer_id = offer.id;
@@ -196,13 +199,13 @@ pub fn foundArcCampaignForTest(
         if (arc_offer_id != null) break;
         // Accept a beachhead arc offer if that's all that's available.
         for (gs.contract_offers.items) |*offer| {
-            if (operations.selectArcKeyFor(offer.kind) == null) continue;
+            if (operations.selectArcKeyFor(offer.kind) == null or !offer.hasOpfor()) continue;
             if (!contract_market.offerEligible(gs, offer, co)) continue;
             arc_offer_id = offer.id;
             break;
         }
         if (arc_offer_id != null) break;
-        _ = commands.execute(gs, .{ .advance_days = 30 }) catch {};
+        _ = commands.execute(gs, .{ .advance_days = 1 }) catch {};
     }
     const offer_id = arc_offer_id orelse return error.NoArcOfferFound;
     _ = try commands.execute(gs, .{ .accept_contract = .{ .offer = offer_id, .company = co } });
@@ -379,7 +382,7 @@ test "logistics-heavy play avoids arc collapse" {
 
 test "force-preservation play loses no hulls" {
     // seed pinned empirically; re-pin if balance changes
-    const seed: u64 = 8;
+    const seed: u64 = 3;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();
@@ -393,7 +396,7 @@ test "campaign styles diverge in ending and hull loss" {
     const seed_cautious: u64 = 3;
     const seed_intel: u64 = 3003;
     const seed_logistics: u64 = 4004;
-    const seed_fp: u64 = 8;
+    const seed_fp: u64 = 3;
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const al = arena.allocator();

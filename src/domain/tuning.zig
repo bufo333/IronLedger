@@ -169,6 +169,14 @@ pub const Tuning = struct {
         /// reach fill the gap between.
         offers_min: u8,
         offers_max: u8,
+        /// Most positions one side of one conflict posts on one HQ's board,
+        /// in positions (docs/p5d-conflict-world-design.md §C board
+        /// density; decision F3).
+        positions_per_side: u8,
+        /// Days a position closes before the last day the posting HQ can
+        /// still put a company on the world by its `on_station_by` (§A
+        /// posting cadence, `contract_market.closeDay`).
+        position_close_grace_days: u32,
         /// Part availability (MekHQ acquisition target by tech base
         /// and TechManual availability code): the roll modifier per
         /// availability letter, the penalty a periphery world puts on
@@ -975,6 +983,10 @@ pub const Tuning = struct {
         /// World-security points per lance a conflict's local force gains
         /// or loses (§A local forces).
         local_force_security_per_lance: u16,
+        /// Days a standing conflict stands before it may stand down, in
+        /// days from its opening; it stands on while a contract it backs
+        /// runs (§E; decision F1).
+        standing_lifetime_days: u32,
     },
 };
 

@@ -841,7 +841,7 @@ test "attached carrier travels outward redeploys recalls and returns with compan
     const bought = try buyAt(&gs, home);
     _ = try attach(&gs, .{ .formation = bought.artillery_formation, .company = co });
     try std.testing.expectEqual(before.needed + dom.carrier_vehicle_bays, (try lift.planLiftQuery(&gs, co)).needed);
-    try contract_market.refresh(&gs);
+    _ = try contract_market.worldForTest(&gs);
     const offer = for (gs.contract_offers.items) |*o| {
         if (contract_market.offerEligible(&gs, o, co)) break o.id;
     } else return error.TestUnexpectedResult;
