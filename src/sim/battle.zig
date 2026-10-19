@@ -122,11 +122,11 @@ pub fn effectiveRoe(gs: *GameState, c: *const contract_mod.Contract, company: ty
 }
 
 /// An active contract with someone to fight. Garrison work fights too
-/// (ARCH §8): the enemy probes the perimeter, but a contract with no rolled
-/// opposing force has nothing to probe with.
+/// (ARCH §8): the enemy probes the perimeter, but garrison work with no
+/// opposing force has nothing to probe with (`Contract.facesNoThreat`).
 fn fightsEngagements(c: *const contract_mod.Contract) bool {
     if (c.status != .active) return false;
-    return !(c.kind.isGarrisonClass() and !c.hasOpfor());
+    return !c.facesNoThreat();
 }
 
 /// battle_resolution phase, daily: schedule the first engagement of each

@@ -173,9 +173,9 @@ pub const Tuning = struct {
         /// in positions (docs/p5d-conflict-world-design.md §C board
         /// density; decision F3).
         positions_per_side: u8,
-        /// Days a position closes before the last day the posting HQ can
-        /// still put a company on the world by its `on_station_by` (§A
-        /// posting cadence, `contract_market.closeDay`).
+        /// Days a position closes before the last day the company best
+        /// placed to go can still reach the world by its `on_station_by`
+        /// (§A posting cadence, `contract_market.closeDay`).
         position_close_grace_days: u32,
         /// Part availability (MekHQ acquisition target by tech base
         /// and TechManual availability code): the roll modifier per

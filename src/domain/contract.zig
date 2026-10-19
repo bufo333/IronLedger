@@ -280,10 +280,12 @@ pub const Contract = struct {
     breach_day: ?u32 = null,
     /// One negotiation round per offer: spent, whatever the outcome.
     negotiated: bool = false,
-    /// The opposing force, rolled with the offer: lances brought to
-    /// an engagement, their skill level, and one lance's BV off the enemy
-    /// house's RAT. Zero lances = no rolled opposition (`hasOpfor` false);
-    /// the enemy is sized to the company.
+    /// The opposing force: lances brought to an engagement, their skill
+    /// level, and one lance's BV, taken at posting from the backing
+    /// conflict's force facing the offer's side (decision F4). Zero lances
+    /// = no opposing force (`hasOpfor` false):
+    /// garrison work then faces no threat (`facesNoThreat`), other work an
+    /// enemy sized to the company.
     enemy_lances: u8 = 0,
     enemy_quality: types.ExperienceLevel = .regular,
     enemy_lance_bv: i64 = 0,
@@ -350,6 +352,14 @@ pub const Contract = struct {
 
     pub fn hasOpfor(self: *const Contract) bool {
         return self.enemy_lances > 0 and self.enemy_lance_bv > 0;
+    }
+
+    /// Garrison-class work with no opposing force: it faces no named
+    /// threat and fights no engagement (ARCH §8; docs/p5d-conflict-world-design.md
+    /// §E, decision F4), as a standing need's position does. Other work
+    /// without an opposing force meets an enemy sized to the company.
+    pub fn facesNoThreat(self: *const Contract) bool {
+        return self.kind.isGarrisonClass() and !self.hasOpfor();
     }
 
     /// The opposition's strength in a typical engagement.

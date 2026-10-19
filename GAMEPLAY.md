@@ -468,8 +468,9 @@ discovers the threat. Garrison and cadre work comes from each governor's
 standing need to guard or train on its own world, posted afresh each month;
 a garrison there faces no named threat yet, so it sees no fighting until a
 threat emerges. A position wants your company on the world by the day the
-blow is due, and it closes on the last day a company from the posting HQ
-can still get there with a few days in hand: after that it leaves the
+blow is due, and it closes on the last day your company best placed to go
+when it posted can still get there with a few days in hand: after that it
+leaves the
 board. You cannot take both sides of one war — while you hold a position on
 one side, the other side's positions are refused. The opposition an offer
 shows is the war's own: an attack meets the world's garrison, a defence

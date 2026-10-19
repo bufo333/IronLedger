@@ -3595,12 +3595,18 @@ pub const Store = struct {
     }
 
     // Contracts & offers.
+    /// The backer columns (`conflict_id`, `side`, `on_station_by`,
+    /// `close_day`) are each NULL where allowed or of their type, and `side`
+    /// is matched on the column's full bytes, so a fraction or a valid tag
+    /// with a tail is `CorruptSave` rather than the value it truncates to
+    /// (rule 47). `politics.validateBacker` then checks the backer itself.
     fn loadContract(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT is_offer, id, kind, employer, enemy, planet, status, company, start_day, score, dist_ly, beachhead, transit_days, arrive_day, end_day, monthly_net, next_battle, battles, casualties, objective, committed_bv, pool, pool_remaining, vp, ineffective_since, breach_day, length_months, base_pay, advance_pct, signing_bonus, transport_pct, overhead_pct, battle_loss_pct, salvage_pct, salvage_exchange, command_rights, negotiated, enemy_lances, enemy_quality, enemy_lance_bv, enemy_lance_tons, offer_hq, orders_day, arc_key, arc_beat, escalation_clock, arc_finale_key, command_capacity, conflict_id, side, on_station_by, close_day FROM contract WHERE cid = ?1 ORDER BY is_offer, ord");
+        const st = try self.db.prepare("SELECT is_offer, id, kind, employer, enemy, planet, status, company, start_day, score, dist_ly, beachhead, transit_days, arrive_day, end_day, monthly_net, next_battle, battles, casualties, objective, committed_bv, pool, pool_remaining, vp, ineffective_since, breach_day, length_months, base_pay, advance_pct, signing_bonus, transport_pct, overhead_pct, battle_loss_pct, salvage_pct, salvage_exchange, command_rights, negotiated, enemy_lances, enemy_quality, enemy_lance_bv, enemy_lance_tons, offer_hq, orders_day, arc_key, arc_beat, escalation_clock, arc_finale_key, command_capacity, conflict_id, side, on_station_by, close_day, typeof(conflict_id) IN ('integer','null') AND typeof(side)='text' AND typeof(on_station_by) IN ('integer','null') AND typeof(close_day) IN ('integer','null') FROM contract WHERE cid = ?1 ORDER BY is_offer, ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
+            if (st.int(52) != 1) return error.CorruptSave;
             const c: contract_mod.Contract = .{
                 .id = try toId(types.ContractId, st.int(1)),
                 .kind = st.enumValue(contract_mod.ContractKind, 2) orelse return error.CorruptSave,
@@ -3640,7 +3646,7 @@ pub const Store = struct {
                 .arc_finale_key = try st.text(46, alloc),
                 .command_capacity = try st.intAs(u8, 47),
                 .conflict_id = if (st.isNull(48)) .none else if (st.int(48) == 0) return error.CorruptSave else try toId(types.ConflictId, st.int(48)),
-                .side = st.enumValue(contract_mod.ConflictSide, 49) orelse return error.CorruptSave,
+                .side = std.meta.stringToEnum(contract_mod.ConflictSide, try st.text(49, alloc)) orelse return error.CorruptSave,
                 .on_station_by = try optU32(st.optInt(50)),
                 .close_day = try optU32(st.optInt(51)),
                 .terms = .{
@@ -12771,6 +12777,12 @@ test "a tampered conflict refuses to load" {
         .{ .name = "an offer whose employer is not its side's faction", .sql = "UPDATE contract SET employer = CASE employer WHEN 'LC' THEN 'FWL' ELSE 'LC' END WHERE is_offer = 1 AND ord = " ++ s.offensive_offer },
         .{ .name = "an offer on the aggressor side of a standing need", .sql = "UPDATE contract SET side = 'aggressor' WHERE is_offer = 1 AND ord = " ++ s.standing_offer },
         .{ .name = "an offer on a side outside the enum", .sql = "UPDATE contract SET side = 'neutral' WHERE is_offer = 1 AND ord = " ++ s.standing_offer },
+        // Each fraction truncates to the row's own valid value.
+        .{ .name = "a fractional backer id", .sql = "UPDATE contract SET conflict_id = conflict_id + 0.5 WHERE is_offer = 1 AND ord = " ++ s.standing_offer, .fk_off = true },
+        .{ .name = "a fractional on-station day", .sql = "UPDATE contract SET on_station_by = on_station_by + 0.5 WHERE is_offer = 1 AND ord = " ++ s.offensive_offer },
+        .{ .name = "a fractional close day", .sql = "UPDATE contract SET close_day = close_day + 0.5 WHERE is_offer = 1 AND ord = " ++ s.offensive_offer },
+        .{ .name = "an offer side holding a valid tag, a NUL and more", .sql = "UPDATE contract SET side = CAST(x'646566656e6465720078' AS TEXT) WHERE is_offer = 1 AND ord = " ++ s.standing_offer },
+        .{ .name = "an offer side stored as a blob", .sql = "UPDATE contract SET side = CAST(side AS BLOB) WHERE is_offer = 1 AND ord = " ++ s.standing_offer },
         .{ .name = "an offer wanting the company on another day than its backer", .sql = "UPDATE contract SET on_station_by = on_station_by + 1 WHERE is_offer = 1 AND ord = " ++ s.offensive_offer },
         .{ .name = "an offer closing after its on-station day", .sql = "UPDATE contract SET close_day = on_station_by + 1 WHERE is_offer = 1 AND ord = " ++ s.offensive_offer },
         .{ .name = "an offer closing with no on-station day", .sql = "UPDATE contract SET close_day = 5 WHERE is_offer = 1 AND ord = " ++ s.standing_offer },

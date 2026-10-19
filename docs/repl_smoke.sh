@@ -138,29 +138,31 @@ printf '%s\n' \
   'conflicts' \
   'save' \
   'quit' > "$work/input"
-# A watchdog kills a hung REPL (macOS has no `timeout`); the exit status
-# is checked either way.
-"$exe" --repl --store "$db" < "$work/input" > "$work/output" 2>&1 &
-repl=$!
-# The watchdog's sleep is its own child, killed with it, so none outlives
-# the run.
-(
-  sleep "${SMOKE_TIMEOUT_S:-300}" &
-  nap=$!
-  trap 'kill "$nap" 2>/dev/null; exit 0' TERM
-  wait "$nap" && kill -9 "$repl" 2>/dev/null
-) &
-watchdog=$!
-status=0
-wait "$repl" || status=$?
-kill "$watchdog" 2>/dev/null || true
-wait "$watchdog" 2>/dev/null || true
+# run_repl STORE INPUT OUTPUT: a watchdog kills a hung REPL (macOS has no
+# `timeout`); the exit status is checked either way. The watchdog's sleep
+# is its own child, killed with it, so none outlives the run.
+run_repl() {
+  "$exe" --repl --store "$1" < "$2" > "$3" 2>&1 &
+  repl=$!
+  (
+    sleep "${SMOKE_TIMEOUT_S:-300}" &
+    nap=$!
+    trap 'kill "$nap" 2>/dev/null; exit 0' TERM
+    wait "$nap" && kill -9 "$repl" 2>/dev/null
+  ) &
+  watchdog=$!
+  status=0
+  wait "$repl" || status=$?
+  kill "$watchdog" 2>/dev/null || true
+  wait "$watchdog" 2>/dev/null || true
+  if [ "$status" -ne 0 ]; then
+    echo "REPL exited with status $status (killed after ${SMOKE_TIMEOUT_S:-300}s if 137)"
+    tail -40 "$3"
+    exit 1
+  fi
+}
+run_repl "$db" "$work/input" "$work/output"
 out=$(cat "$work/output")
-if [ "$status" -ne 0 ]; then
-  echo "REPL exited with status $status (killed after ${SMOKE_TIMEOUT_S:-300}s if 137)"
-  echo "$out" | tail -40
-  exit 1
-fi
 check() { echo "$out" | grep -q -- "$1" || { echo "MISSING: $1"; echo "$out" | tail -40; exit 1; }; }
 check 'no air wing slot'
 check 'that HQ has no free company slot'
@@ -309,4 +311,37 @@ check 'usage: conflicts'
 check '#26 why Fatima Abara (Governor of Alexandria) strikes at Connaught for an ally the Free Worlds League threatens.  ·  aggressor side  ·  on station d128 (34 days)  ·  closes d122'
 check 'closes the 1st'
 check 'refused: the outfit already holds a position on the other side of that conflict'
+# P5d.1f: a position past its close day is refused. Daily play retires an
+# offer the day after it closes, so a second campaign in its own private
+# store is saved with a raid on its board, that raid's close day is moved
+# to yesterday in the store (a state the loader accepts), and the reloaded
+# campaign's `accept` of it is refused before any market refresh.
+closed_db="$work/closed.db"
+printf '%s\n' \
+  'start LC quartermaster Erik Kalmar' \
+  'newco Alpha' \
+  'day 60 force' \
+  'save' \
+  'quit' > "$work/closed-setup"
+run_repl "$closed_db" "$work/closed-setup" "$work/closed-setup-output"
+closed_id=$(python3 - "$closed_db" <<'PY'
+import sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+cid, today = db.execute("SELECT cid, value FROM meta WHERE key = 'day_index'").fetchone()
+row = db.execute("SELECT id FROM contract WHERE cid = ? AND is_offer = 1 AND offer_hq = 1 AND close_day IS NOT NULL ORDER BY ord LIMIT 1", (cid,)).fetchone()
+if row is None:
+    sys.exit("no raid on the board to close")
+db.execute("UPDATE contract SET close_day = ? WHERE cid = ? AND is_offer = 1 AND id = ?", (today - 1, cid, row[0]))
+db.commit()
+print(row[0])
+PY
+) || { echo "MISSING: a raid on the closed-offer campaign's board"; exit 1; }
+printf '%s\n' \
+  'load 1' \
+  "accept $closed_id 1" \
+  'quit' > "$work/closed-input"
+run_repl "$closed_db" "$work/closed-input" "$work/closed-output"
+out=$(cat "$work/closed-output")
+check 'loaded campaign \[1\]'
+check 'refused: that position has closed — no company of its board can reach the world in time'
 echo "REPL SMOKE OK"

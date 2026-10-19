@@ -933,7 +933,10 @@ unresolved conflict in id order and each side whose posting day has come
 rated `house_min_index` or above), whose world the HQ sees, which it has not
 posted for already (an offer on its board or a contract taken from it), and
 whose `on_station_by` it can still reach: `closeDay` is `on_station_by −
-postingTransitDays(HQ world, world) − position_close_grace_days`. It posts
+bestTransitDays − position_close_grace_days`, the ETA of the company best
+placed to go on the posting day (the nearest one not under contract or in
+transit, from where it stands, else the seat), the same ETA the board
+shows. It posts
 up to `positions_per_side` positions while the board holds fewer than its
 offer count, each kind drawn on `.market` among the side's kinds that keep
 the board under its kind cap (a third) and garrison-class cap (half), never

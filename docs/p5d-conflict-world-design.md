@@ -470,7 +470,8 @@ for every kind.
   `.market` from the aggressor's template `position_kinds` or the
   defender's relief, security and riot (D3), under the existing per-HQ
   offer count, kind and garrison-class caps. `close_day` is `on_station_by`
-  less the travel from the posting HQ's world (`postingTransitDays`) less
+  less the best company's ETA on the posting day
+  (`contract_market.bestTransitDays`, the ETA the board shows) less
   `position_close_grace_days`; a side whose close day has passed posts
   nothing. An offer's opposition is the backer's force facing its side
   (F4): the defender's `local_force` for the aggressor's positions, the

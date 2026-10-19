@@ -1080,27 +1080,9 @@ pub fn standings(alloc: Alloc, gs: *GameState) ![]const []const u8 {
     return out.toOwnedSlice(alloc);
 }
 
-/// Days to an offer's world as `accept` will reckon them: from the nearest
-/// company that could go (not under contract, not in transit), else from
-/// the outfit's seat. An offer carries no transit of its own until it is
-/// accepted.
-pub fn offerTransitDays(gs: *GameState, offer: *const contract_mod.Contract) u32 {
-    const to = planet_mod.find(offer.planet_key) orelse return 0;
-    var best: ?u32 = null;
-    var fit = gs.forces.iterator();
-    while (fit.next()) |e| {
-        const co = e.value_ptr;
-        if (co.echelon != .company or posture.isCompanyDeployed(gs, co.id) or co.return_eta_day != null) continue;
-        const from = planet_mod.find(companyPlanetKey(gs, co.id) orelse continue) orelse continue;
-        const days: u32 = logistics_mod.daysBetween(from, to);
-        if (best == null or days < best.?) best = days;
-    }
-    if (best) |b| return b;
-    const seat = if (gs.seatPlanetKey()) |k| planet_mod.find(k) else null;
-    if (seat) |s| return logistics_mod.daysBetween(s, to);
-    const jumps = planet_mod.jumpsForLy(offer.dist_ly);
-    return logistics_mod.daysForJumps(jumps);
-}
+/// Days to an offer's world for the company best placed to go
+/// (`contract_market.bestTransitDays`, the ETA its close day reckons with).
+pub const offerTransitDays = @import("contract_market.zig").offerTransitDays;
 
 const offer_rating = @import("offer_rating.zig");
 const rating_mod = @import("rating.zig");
@@ -1112,6 +1094,7 @@ pub const rateOffer = offer_rating.rateOffer;
 pub const skullText = offer_rating.skullText;
 
 pub fn opforText(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract) ![]const u8 {
+    if (c.facesNoThreat()) return "no named threat: no engagements";
     if (!c.hasOpfor()) return "opposition sized to the company";
     const intel = try intelLevel(gs, @import("offer_rating.zig").intelHq(gs, c));
     const li = try lanceIntel(gs, c);
@@ -1179,8 +1162,9 @@ pub fn factionLegend(alloc: Alloc) ![]const u8 {
 /// The board's rating cells: skulls · rating · company · own
 /// tons · weight mix · enemy tons, for the readiest company in range.
 fn boardRatingCells(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) ![6][]const u8 {
-    // A position with no named threat (a standing need's) has nothing to rate.
-    if (findOfferPtr(gs, offer_id)) |o| if (!o.hasOpfor()) return .{ "{d}—{/}", "{d}—{/}", "{d}no named threat{/}", "", "", "" };
+    // A position with no opposing force has nothing to rate: a standing
+    // need's faces no threat, other work an enemy sized to the company.
+    if (findOfferPtr(gs, offer_id)) |o| if (!o.hasOpfor()) return .{ "{d}—{/}", "{d}—{/}", if (o.facesNoThreat()) "{d}no named threat{/}" else "{d}sized to the company{/}", "", "", "" };
     const r = (try bestRating(alloc, gs, offer_id)) orelse return .{ "{d}—{/}", "{d}—{/}", "{d}no company in range{/}", "", "", "" };
     const mk = skullMarkup(r.half_hi);
     var a: [8]u8 = undefined;
@@ -1201,6 +1185,7 @@ fn boardRatingCells(alloc: Alloc, gs: *GameState, offer_id: types.ContractId) ![
 /// "2–3 lances, green" — the opposition for a board cell (`opforText`
 /// says it in full).
 pub fn opforShort(alloc: Alloc, gs: *GameState, c: *const contract_mod.Contract) ![]const u8 {
+    if (c.facesNoThreat()) return "no named threat";
     if (!c.hasOpfor()) return "sized to the company";
     const intel = try intelLevel(gs, @import("offer_rating.zig").intelHq(gs, c));
     const li = try lanceIntel(gs, c);
@@ -6731,15 +6716,37 @@ test "skulls on the board, the candidates, the active pane — and an outmatched
     const difficulty = for (board_cols, 0..) |col, i| {
         if (std.mem.eql(u8, col.name, "difficulty")) break i;
     } else unreachable;
+    const opposition = difficulty + 6;
+    try std.testing.expectEqualStrings("opposition", board_cols[opposition].name);
     // A position with an opposition is rated in skulls; a standing need's,
-    // with no named threat, is not.
+    // with no named threat, is not, and every cell and the full opposition
+    // text say so.
     var rated: ?types.ContractId = null;
+    var unthreatened: usize = 0;
     for (view.board) |row| {
         try std.testing.expectEqual(board_cols.len, row.cells.len);
-        const threat = findOfferPtr(&gs, row.id).?.hasOpfor();
+        const offer = findOfferPtr(&gs, row.id).?;
+        const threat = offer.hasOpfor();
         try std.testing.expectEqual(threat, std.mem.indexOf(u8, row.cells[difficulty], "●") != null);
-        if (threat) rated = rated orelse row.id else try std.testing.expect(std.mem.indexOf(u8, row.cells[difficulty + 2], "no named threat") != null);
+        if (threat) {
+            rated = rated orelse row.id;
+            continue;
+        }
+        try std.testing.expect(offer.facesNoThreat());
+        try std.testing.expect(std.mem.indexOf(u8, row.cells[difficulty + 2], "no named threat") != null);
+        try std.testing.expectEqualStrings("no named threat", row.cells[opposition]);
+        try std.testing.expect(std.mem.indexOf(u8, try opforText(a, &gs, offer), "no named threat") != null);
+        unthreatened += 1;
     }
+    try std.testing.expect(unthreatened > 0);
+    // Work outside the garrison class with no opposing force (one a schema
+    // v73 store held) still meets an enemy sized to the company.
+    var legacy = findOfferPtr(&gs, rated.?).?.*;
+    legacy.kind = .recon_raid;
+    legacy.enemy_lances = 0;
+    try std.testing.expect(!legacy.facesNoThreat());
+    try std.testing.expectEqualStrings("sized to the company", try opforShort(a, &gs, &legacy));
+    try std.testing.expectEqualStrings("opposition sized to the company", try opforText(a, &gs, &legacy));
     // The board renders at natural width with every column under its name.
     const lines = try (try view.boardTable(a)).render(a);
     try std.testing.expectEqual(view.board.len + 1, lines.len);
@@ -6818,6 +6825,48 @@ test "an offer's brief and board row carry its cause, side, station day and clos
     try std.testing.expectEqualStrings("aggressor", row.cells[col("side")]);
     try std.testing.expectEqual(@as(?[]const u8, null), try offerBrief(a, &gs, @enumFromInt(999_999)));
     try std.testing.expectError(error.OutOfMemory, offerBrief(std.testing.failing_allocator, &gs, offer.id));
+}
+
+test "the board's transit and close day are the afield company's, not its HQ's" {
+    // docs/p5d-conflict-world-design.md §A posting cadence; rules 3, 29,
+    // 71: the company idles on a world whose transit to the raid's differs
+    // from its HQ's.
+    const commands = @import("commands.zig");
+    const cm = @import("contract_market.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 74022 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .quartermaster } });
+    const co = (try commands.execute(&gs, .{ .new_company = "Alpha" })).created_force;
+    const raid = try cm.worldForTest(&gs);
+    const c = gs.conflicts.get(raid).?;
+    const world = planet_mod.find(c.planet_key).?;
+    const hq_world = planet_mod.find(gs.hqs.getPtr(gs.seat()).?.planet_key).?;
+    const afield = cm.afieldWorldForTest(world, hq_world);
+    const from_afield = logistics_mod.daysBetween(afield, world);
+    try std.testing.expect(from_afield != logistics_mod.daysBetween(hq_world, world));
+    gs.force(co).?.location_planet = afield.key;
+    gs.contract_offers.clearRetainingCapacity();
+    try cm.refresh(&gs);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const offer = for (gs.contract_offers.items) |o| {
+        if (o.conflict_id == raid) break o;
+    } else unreachable;
+    const close = c.strike_day.? - from_afield - @import("../domain/tuning.zig").t.market.position_close_grace_days;
+    try std.testing.expectEqual(@as(?u32, close), offer.close_day);
+    const view = try contracts(a, &gs, gs.seat());
+    const row = for (view.board) |r| {
+        if (r.id == offer.id) break r;
+    } else unreachable;
+    const col = struct {
+        fn of(name: []const u8) usize {
+            for (board_cols, 0..) |bc, i| if (std.mem.eql(u8, bc.name, name)) return i;
+            unreachable;
+        }
+    }.of;
+    try std.testing.expectEqualStrings(try std.fmt.allocPrint(a, "{d}d", .{from_afield}), row.cells[col("transit")]);
+    try std.testing.expect(std.mem.indexOf(u8, row.cells[col("closes")], try std.fmt.allocPrint(a, "d{d}", .{close})) != null);
 }
 
 // ----------------------------------------------------------- leaderboard

@@ -262,13 +262,14 @@ pub fn execCreateCommander(gs: *GameState, c: @FieldType(Command, "create_comman
     // Every world's ruler, every power's leader and the start year's data
     // personages (docs/p5d-conflict-world-design.md §B), seated and
     // reserved before the first mutation so a seeding failure leaves the
-    // campaign unchanged (rules 11–12); committed after the last fallible
-    // step in `foundCampaign`.
+    // campaign unchanged (rules 11–12). `foundCampaign` commits them before
+    // the standing needs, which read them.
     const seeding = try personages.prepareSeeding(gs, c.start_year);
     defer seeding.deinit(gs);
-    // The boards and rosters cannot be prepared before the commander and HQ
-    // exist, so a failure after `createCommanderAt` commits restores this
-    // backup (rule 11's rollback fallback).
+    // The standing needs, boards and rosters cannot be prepared before the
+    // commander, HQ and personages exist, so a failure anywhere in
+    // `foundCampaign` restores this backup, committed personages included
+    // (rule 11's rollback fallback).
     var backup = try campaign_backup.take(gs);
     foundCampaign(gs, c, reserved_logo, &seeding) catch |err| {
         campaign_backup.restore(gs, backup);

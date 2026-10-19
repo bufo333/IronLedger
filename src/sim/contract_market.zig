@@ -31,6 +31,7 @@ const toe = @import("toe.zig");
 const lift_mod = @import("lift.zig");
 const personnel = @import("personnel.zig");
 const posture = @import("posture.zig");
+const sites = @import("sites.zig");
 const commands = @import("commands.zig");
 const commander = @import("../domain/commander.zig");
 const black_market = @import("black_market.zig");
@@ -76,16 +77,37 @@ pub fn threatPayBp(kind: contract.ContractKind, lances: u8, quality: types.Exper
     return @intCast(10_000 + delta);
 }
 
-/// Days a company based at the posting HQ takes to reach `world`: the
-/// shared travel rule from the HQ's world (`logistics.daysBetween`). The
-/// ETA `closeDay` reckons with (docs/p5d-conflict-world-design.md §A
-/// posting cadence).
-pub fn postingTransitDays(hq_world: *const planet.Planet, world: *const planet.Planet) u32 {
-    return logistics.daysBetween(hq_world, world);
+/// Days to `world` as `accept` will reckon them for the company best placed
+/// to go: the nearest company not under contract and not in transit, from
+/// where it stands (`sites.sitePlanetKey`), else the outfit's seat; with
+/// neither, the jumps `dist_ly` spans. The one ETA rule: the board shows it
+/// and a position's `close_day` reckons with it on the day it posts
+/// (docs/p5d-conflict-world-design.md §A posting cadence). Pure.
+pub fn bestTransitDays(gs: *GameState, world: *const planet.Planet, dist_ly: u32) u32 {
+    var best: ?u32 = null;
+    var fit = gs.forces.iterator();
+    while (fit.next()) |e| {
+        const co = e.value_ptr;
+        if (co.echelon != .company or posture.isCompanyDeployed(gs, co.id) or co.return_eta_day != null) continue;
+        const from = planet.find(sites.sitePlanetKey(gs, .{ .company = co.id }) orelse continue) orelse continue;
+        const days = logistics.daysBetween(from, world);
+        if (best == null or days < best.?) best = days;
+    }
+    if (best) |b| return b;
+    if (gs.seatPlanetKey()) |k| if (planet.find(k)) |seat| return logistics.daysBetween(seat, world);
+    return logistics.daysForJumps(planet.jumpsForLy(dist_ly));
+}
+
+/// `bestTransitDays` to an offer's world; 0 for a world the catalogue
+/// does not hold. An offer carries no transit of its own until it is
+/// accepted.
+pub fn offerTransitDays(gs: *GameState, offer: *const contract.Contract) u32 {
+    const to = planet.find(offer.planet_key) orelse return 0;
+    return bestTransitDays(gs, to, offer.dist_ly);
 }
 
 /// The last day a position wanting a company on its world by
-/// `on_station_by` may be accepted from a board `transit_days` away (§A
+/// `on_station_by` may be accepted from `transit_days` away (§A
 /// posting cadence; decision F2): `on_station_by − transit_days −
 /// position_close_grace_days`. Null when that day would fall before day 0,
 /// so the position is out of reach from that board. Pure.
@@ -148,7 +170,7 @@ const Posting = struct {
 ///    in the HQ's ring or beachhead band (`market.visibilityFor`), the HQ
 ///    has not already posted for it (`sidePosted`), and a position wanting
 ///    a company by the conflict's `on_station_by` can still be reached
-///    (`closeDay` of `postingTransitDays`). It posts up to
+///    (`closeDay` of `bestTransitDays`). It posts up to
 ///    `positions_per_side` positions while the board holds fewer than its
 ///    HQ's offer count (`market.contractOfferCount`, halved at a field
 ///    HQ). Each position's kind is drawn on `.market` among the side's
@@ -258,7 +280,7 @@ fn postBoard(gs: *GameState, rng: *rng_mod.Rng, hq_id: types.HqId, base: types.C
             const on_station_by = conflict_mod.onStationBy(c);
             var close_day: ?u32 = null;
             if (on_station_by) |by| {
-                close_day = closeDay(by, postingTransitDays(hq_world, world)) orelse continue;
+                close_day = closeDay(by, bestTransitDays(gs, world, dist)) orelse continue;
                 if (close_day.? < today) continue;
             }
             const all_kinds = try sideKinds(c, side);
@@ -301,6 +323,21 @@ fn postBoard(gs: *GameState, rng: *rng_mod.Rng, hq_id: types.HqId, base: types.C
             }
         }
     }
+}
+
+/// The world nearest `world` by transit from which the transit to `world`
+/// differs from `hq_world`'s: where a company may idle afield so that its
+/// ETA and its HQ's disagree. Tests only.
+pub fn afieldWorldForTest(world: *const planet.Planet, hq_world: *const planet.Planet) *const planet.Planet {
+    std.debug.assert(@import("builtin").is_test);
+    const from_hq = logistics.daysBetween(hq_world, world);
+    var best: ?*const planet.Planet = null;
+    for (planet.catalog) |*w| {
+        const days = logistics.daysBetween(w, world);
+        if (days == from_hq) continue;
+        if (best == null or days < logistics.daysBetween(best.?, world)) best = w;
+    }
+    return best.?;
 }
 
 /// A founded campaign's political world for board tests: its personages
@@ -1302,9 +1339,8 @@ test "a position closes on the last day its board can still reach the world, and
     const w = try twoConflictsForTest(&gs);
     const today = gs.clock.day_index;
     try postOnForTest(&gs, today);
-    const hq_world = planet.find(gs.hqs.getPtr(gs.seat()).?.planet_key).?;
     const c = gs.conflicts.get(w.x).?;
-    const close = closeDay(c.strike_day.?, postingTransitDays(hq_world, planet.find(c.planet_key).?)).?;
+    const close = closeDay(c.strike_day.?, bestTransitDays(&gs, planet.find(c.planet_key).?, 0)).?;
     var posted: usize = 0;
     for (gs.contract_offers.items) |o| if (o.conflict_id == w.x) {
         try std.testing.expectEqual(@as(?u32, close), o.close_day);
@@ -1318,6 +1354,39 @@ test "a position closes on the last day its board can still reach the world, and
     try std.testing.expectEqual(@as(usize, 0), postedForTest(&gs, w.x, .aggressor));
     // A side whose close day has passed posts nothing later.
     try std.testing.expectEqual(@as(usize, 0), postedForTest(&gs, w.x, .defender));
+}
+
+test "a position's close day reckons from where the company best placed to go stands, not from its HQ" {
+    // docs/p5d-conflict-world-design.md §A posting cadence; rule 71: the
+    // company idles afield on a world whose transit to the conflict's
+    // differs from its HQ's.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 74004 });
+    defer gs.deinit();
+    const w = try twoConflictsForTest(&gs);
+    const c = gs.conflicts.get(w.x).?;
+    const world = planet.find(c.planet_key).?;
+    const hq_world = planet.find(gs.hqs.getPtr(gs.seat()).?.planet_key).?;
+    const from_hq = logistics.daysBetween(hq_world, world);
+    const afield = afieldWorldForTest(world, hq_world);
+    const from_afield = logistics.daysBetween(afield, world);
+    try std.testing.expect(from_afield != from_hq);
+    const alpha = for (gs.forces.values()) |*f| {
+        if (f.echelon == .company) break f;
+    } else unreachable;
+    alpha.location_planet = afield.key;
+    try std.testing.expectEqual(from_afield, bestTransitDays(&gs, world, 0));
+    try postOnForTest(&gs, gs.clock.day_index);
+    const grace = tuning.market.position_close_grace_days;
+    var posted: usize = 0;
+    for (gs.contract_offers.items) |*o| if (o.conflict_id == w.x) {
+        try std.testing.expectEqual(@as(?u32, c.strike_day.? - from_afield - grace), o.close_day);
+        try std.testing.expectEqual(from_afield, offerTransitDays(&gs, o));
+        posted += 1;
+    };
+    try std.testing.expect(posted > 0);
+    // A company on its way home cannot go: the ETA is the seat's.
+    alpha.return_eta_day = gs.clock.day_index + 5;
+    try std.testing.expectEqual(from_hq, bestTransitDays(&gs, world, 0));
 }
 
 test "closeDay is the station day less the board's transit and the grace, and out of reach before day 0" {
