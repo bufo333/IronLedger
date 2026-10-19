@@ -55,7 +55,7 @@ A package has one primary invariant or subsystem outcome.
 - [x] P5c situations slice (ROADMAP P5c.1–P5c.4): actor-owned situations with
   typed flags on relationship and world state; three situations on the garrison
   arc with one callback inside the contract; the matching event deck retired.
-- [ ] Playtest gate: John plays the P5a–P5c slice on one garrison contract before
+- [x] Playtest gate: John plays the P5a–P5c slice on one garrison contract before
   P5d is dispatched. If it is not fun, P5d onward is redesigned in ROADMAP.md
   before scheduling. P5a's stop cadence measures one to four stops per garrison
   month on seed 4200 against ROADMAP P5a's four to six, for John to judge in
