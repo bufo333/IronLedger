@@ -610,5 +610,6 @@
         .secession_loyalty_max = 40, // TUNE: project value
         .local_force_security_per_lance = 50, // TUNE: project value
         .standing_lifetime_days = 180, // TUNE: project value
+        .news_reach_ly = 100, // TUNE: decision D10, light-years, inclusive
     },
 }

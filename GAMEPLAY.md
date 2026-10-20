@@ -451,12 +451,22 @@ blow lands — then the strike force arrives from its nearest world and the
 fighting starts, and some weeks later the war is decided by the strength
 of the two forces. The result changes the world fought over: a world that
 falls loses security and its holder's grip, and one that holds is the
-stronger for it, though either way the fighting strains it. Discoveries,
-the first blows and the outcomes appear in the log under `politics`. In the
+stronger for it, though either way the fighting strains it. In the
 console, `conflicts` lists every war its defender has discovered, with the
 two sides, how it stands, when it struck and when it ends, the positions it
 has posted, the side you hold if any, and why it began; a war still in
 preparation shows nowhere.
+
+You hear of a war's discovery, its first blows and its outcome as news
+only when it happens within 100 light-years of one of your HQs or
+companies (P5d.1g). A company on a contract counts where the contract is,
+even while it is still on its way there; one heading home counts at its
+home HQ. Each piece of news is fixed on the day it breaks: moving an HQ
+later never brings back what it missed. News within reach appears in the
+log under `politics` and on the Desk's NEWSWIRE pane (Enter reads a whole
+item), and the console's `news [n]` prints the newest. News never stops
+time. Wars nobody of yours hears of still run their course and change their
+worlds; `conflicts` still lists them.
 
 ## Every contract comes from a war or a standing need (P5d.1f)
 

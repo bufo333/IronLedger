@@ -379,6 +379,17 @@ send("\x1b", 0.5); send("\x1b", 0.5)
 send("1"); send("\t", 0.4); send("\t", 0.4); send("\r", 1.0)   # Desk LOG pane: Enter opens the whole entry, wrapped
 assert "LOG ENTRY" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)
+# The Desk's NEWSWIRE pane (docs/p5d-conflict-world-design.md §K): Tab
+# reaches it last; Enter reads the item under the cursor when there is one,
+# and Esc closes it (or only clears the status line when there is none).
+mark = len(out)
+send("1"); send("\t", 0.3); send("\t", 0.3); send("\t", 0.3); send("\t", 0.6)
+desk = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "replace")
+assert "NEWSWIRE" in desk and ("no news within reach" in desk or " ly from " in desk), desk[-3000:]
+send("\r", 0.8)
+if "no news within reach" not in desk:
+    assert "NEWS ITEM" in plain()[-30000:], plain()[-3000:]
+send("\x1b", 0.6)
 send("e", 1.5)                 # emblem picker on the Desk
 p = plain()
 assert "EMBLEM ·" in p and "preset   Wolf's Head" in p, p[-2000:]

@@ -391,6 +391,25 @@ cheap, copyable, and impossible to mix up.
   holding the outfit's contract, with its positions and the side the outfit
   holds; a `preparing` conflict shows nowhere. Every contract position is
   posted from a conflict (§9.2); battles and rivals read no conflict yet.
+- **News item** — `news_item.NewsItem` (`domain/news.zig`) in
+  `GameState.news_items`, keyed by `NewsId` from `next_news_id`, in id
+  (emission) order, all kept (docs/p5d-conflict-world-design.md §K "News").
+  One is made for each discovery, strike and resolution of an offensive
+  conflict that a presence hears (`politics.advanceWorld`, §6); a standing
+  need makes none. It stores its kind (`discovery`, `strike`,
+  `resolution`), its conflict, the presence that heard it (`hq` or
+  `company`) and that presence's world, and its text: the plain sentence of
+  its `[politics]` log line, rendered once. Its day (the conflict's day for
+  the kind), distance (`reachLy`) and severity (`severity`: a discovery or a
+  strike notable, a resolution major) are derived, never stored. Reach is
+  one owner, `news.newsReach(gs, planet_key)`: the nearest HQ or company
+  world (`posture.companyWorld`, §9.7) within `tuning.politics.news_reach_ly`
+  (100 ly, inclusive; separate from influence rings), an HQ before a company
+  at equal distance, then the lower id; it draws nothing. Reach is fixed on
+  the day the news breaks and never back-filled. `news.validate` is the load
+  check. `queries.newsRows` lists the newest items, newest first, for the
+  Desk's NEWSWIRE pane and REPL `news [n]`; it formats and never decides
+  reach.
 - **Actor** — a contract-introduced NPC (liaison, official, enemy commander,
   etc.) that persists across contracts. Each actor carries four relationship
   dimensions (trust, debt, respect, hostility; −100…100) and typed **flags**
@@ -565,17 +584,23 @@ part of the spec:
    After the hiring halls churn and before the contract board posts, the
    political world moves (`politics.advanceWorld`; docs/p5d-conflict-world-design.md
    §K steps 2–3): first today's due conflict days by (day, `ConflictId`) —
-   discovery and the strike each log a `[politics]` line, and at
-   `expires_day` one `.politics` draw against `aggressorWinChanceBp`
-   resolves the conflict, moves its world by `world_state.conflictWorldDelta`
-   and logs it; then on the 1st `maintainStanding` stands down the lapsed
-   standing needs and draws new ones, and `runSchemes` opens up to
-   `schemes_per_month` conflicts, unlogged because an opening is secret.
-   Every fallible step is prepared before the first mutation, and a later
-   step's failure rolls the earlier ones back. Player state, presence and
-   visibility are never inputs, but a standing need stands on while a
-   contract it backs holds its position. Then the contract board posts the
-   day's positions from the conflicts and retires the closed ones (§9.2).
+   discovery, the strike, and at `expires_day` the resolution: one
+   `.politics` draw against `aggressorWinChanceBp` resolves the conflict and
+   moves its world by `world_state.conflictWorldDelta`, which writes its
+   `[world]` line at any distance. A due day that a presence hears
+   (`news.newsReach`: an HQ or a company within `news_reach_ly`, at the
+   day's start) is news: one `[politics]` line and one **News item** (§5)
+   carrying the same sentence. A day no presence hears logs no `[politics]`
+   line and makes no item, and still happens. Then on the 1st
+   `maintainStanding` stands down the lapsed standing needs and draws new
+   ones, and `runSchemes` opens up to `schemes_per_month` conflicts,
+   unlogged because an opening is secret. Every fallible step is prepared
+   before the first mutation, and a later step's failure rolls the earlier
+   ones back, news included. Player state, presence and visibility are never
+   inputs to progression — presence decides only what is news — but a
+   standing need stands on while a contract it backs holds its position.
+   News never stops time. Then the contract board posts the day's positions
+   from the conflicts and retires the closed ones (§9.2).
 5. **Maintenance** *(weekly per unit)* — tech rolls vs. target number
    (modified by part quality, supply state, facility, tech workload);
    failures degrade quality/parts, MekHQ-style.
@@ -1136,6 +1161,14 @@ home benefits. Effects: morale decay, the autoresolve fatigue penalty
 (§7), slower maintenance and healing. Capped at 100 — degraded, never
 spiraling (§9.6 philosophy).
 
+Where a company is comes from one cascade, `posture.companyPosture`: its
+contract (en route, then on station), then the road home, then a world it
+idles on, else home. The world it stands on is `posture.companyWorld`: the
+contract's world (en route, the destination), else the world it idles on,
+else its home HQ's — also while returning, since starting home clears its
+world. Transfer days (`queries.companyChoices`) and news reach
+(`news.newsReach`, §6) read it.
+
 **Training happens at home.** XP is *earned* anywhere (combat, garrison
 duty, tech work), but *converting* XP into skill levels — mekwarrior
 gunnery/piloting, mek tech, mechanic — requires a training program at the
@@ -1597,8 +1630,8 @@ campaign holds is not checked: the start year is not saved.
 **Older stores migrate on open** through a chain of migrations, each from
 one version to the next (`Store.migrate`; schema 71 is the oldest
 supported format, `oldest_supported_schema_version`). A v71 store runs v71
-→ v72, v72 → v73 and v73 → v74; a v72 store the last two; a v73 store only
-v73 → v74. The whole chain
+→ v72, v72 → v73, v73 → v74 and v74 → v75; a v72 store the last three; a
+v73 store the last two; a v74 store only v74 → v75. The whole chain
 is one transaction with foreign keys off, ending with an empty `PRAGMA
 foreign_key_check` (else `CorruptStore`) and the current schema check
 before COMMIT; any failure rolls back with the file at its original
@@ -1606,9 +1639,10 @@ version. Each migration keeps a frozen definition of its source format and
 validates it before its own statements: a malformed or mixed-version store
 is `CorruptStore`, untouched. `ddl_v72` and `index_ddl_v72` are schema
 v72's DDL byte for byte, and `conflict_v73_ddl` is the `conflict` table
-v73 added (a test pins their SHA-256); `ddl_v71` is derived from `ddl_v72`,
-`ddl_v73` is v72's plus `conflict_v73_ddl`, and the current `ddl` is v73's
-with `contract` and `conflict` in their v74 definitions.
+v73 added, and `ddl_v74` and `index_ddl_v74` are schema v74's (a test pins
+their SHA-256); `ddl_v71` is derived from `ddl_v72`, `ddl_v73` is v72's plus
+`conflict_v73_ddl`, `ddl_v74` is v73's with `contract` and `conflict` in
+their v74 definitions, and the current `ddl` is v74's plus `news_item`.
 
 - **v71 → v72** (`migrateV71ToV72`). The source check: every v71 table and
   column (the frozen v71 `personage` definition, every other table as v72
@@ -1638,9 +1672,16 @@ with `contract` and `conflict` in their v74 definitions.
   value, id, counter and stream is unchanged. An offer without a backer
   loads (only offers posted at v74 come from conflicts) and leaves the board
   at the next month start.
+- **v74 → v75** (`migrateV74ToV75`). The source check: every v74 table and
+  column (`ddl_v74`), no `news_item` table, no `next_news_id` counter, and
+  only v74 campaigns. It creates `news_item` and `ix_news_item_cid`, gives
+  every campaign `next_news_id = 1`, and sets every campaign and the store
+  to 75. A v74 campaign has no news item, and reach is never back-filled, so
+  it migrates with none; every other value, id, counter and stream is
+  unchanged.
 
 A migrated campaign loads with the digest of the same state saved directly
-at v74 and plays on as it would have.
+at v75 and plays on as it would have.
 
 **Conflicts are saved** (schema 74): one `conflict` row each (ordinal, id,
 template key, world, aggressor and defender factions and personages,
@@ -1672,6 +1713,21 @@ and an offensive conflict missing an aggressor-side part or stood down. Any
 lance BV the schema admits resolves exactly: the win chance is computed in
 i128. A save made under a `political_events.zon` without a template a
 conflict uses is refused.
+
+**News items are saved** (schema 75): one `news_item` row each (ordinal,
+id, kind, conflict id, presence kind, the presence's world and the text)
+and the meta counter `next_news_id`. SQL checks bound the ordinal, id and
+conflict id, the kind and presence tags, and require a non-empty world and
+text; `(cid, id)`, `(cid, ord)` and `(cid, conflict_id, kind)` are unique,
+and the conflict is tied to a `conflict` row by foreign key. The loader
+decodes each row exactly (tags on their full bytes, checked integers, the
+ordinal equal to the row's position), and `news.validate` refuses a counter
+of 0, an id not above the previous row's or at or above the counter, a
+conflict the campaign does not hold or a standing need, an item whose day is
+after today, a resolution of an unresolved conflict, an unknown presence
+world or one beyond `news_reach_ly` of the conflict's world, empty text or
+text that is not UTF-8, and two items of one kind for one conflict. Stored
+text is reloaded, never regenerated.
 
 **Each position's backer is saved** (schema 74) on its `contract` row:
 `conflict_id` (NULL without a backer), `side`, `on_station_by` and

@@ -129,9 +129,11 @@ A package has one primary invariant or subsystem outcome.
   and a between-contracts stop marks new positions; `TooLateToArrive` and
   `OppositeSide` refusals; the opposition is the local or strike force, none
   for a standing need; schema v74 with a chained v71/v72/v73 → v74 migration.
-- [ ] P5d.1g news reach and Newswire: one reach owner (absorbing the
-  company-position rule), news items, the Newswire pane and REPL `news` for
-  conflict open, discovery and resolution. Needs P5d.1e.
+- [x] P5d.1g news reach and Newswire: one reach owner (`news.newsReach`,
+  100 ly from any HQ or company, on `posture.companyWorld`), a persisted news
+  item for each discovery, strike and resolution heard, whose `[politics]`
+  line replaces the galaxy-wide one; the Desk NEWSWIRE pane and REPL `news`;
+  news never stops time; schema v75 with a chained v71–v74 → v75 migration.
 - [ ] P5d.1h NPC operating base and location: every NPC company has a base and
   current world and a flat ready day; purchases limited to base market reach;
   shown in the company list; no movement yet. Needs P5d.2, P5d.3 and P5d.4b.

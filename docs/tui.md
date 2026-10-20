@@ -148,7 +148,7 @@ no room.
 
 | Tab | Screen | Panes |
 |---|---|---|
-| F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · HQs · Reports (Campaign summary · Readiness · Battles · Merc companies leaderboard — Enter drills into a per-company detail sheet) |
+| F1 | Desk | Emblem · Checklist · Inbox · Companies · Log · Newswire (the newest news items heard within reach; Enter reads one) · HQs · Reports (Campaign summary · Readiness · Battles · Merc companies leaderboard — Enter drills into a per-company detail sheet) |
 | F2 | Map | Star map · World |
 | F3 | Forces | TO&E tree · Hull/Person detail · Unassigned pool · Artillery panel (last `]` view) |
 | F4 | Contracts | Board (each offer's close day, on-station day and side; under it the selected offer's cause, side, on-station and close days) · Active · History (closed contracts: outcome, world, days served, VP, pay received) · Contract log · `w` who's who (the contract's world governor, employer and enemy leaders) |
@@ -193,6 +193,7 @@ filters to the active context (see the Keys description above).
 | `Enter` | inbox | open the decision under the cursor |
 | `Enter` | log | read the whole log entry under the cursor |
 | `Enter` | reports | open the selected report (read-only; Esc closes) |
+| `Enter` | newswire | read the whole news item under the cursor |
 | `b` | any | the engagements still on record: pick one to read |
 | `e` | any | choose the outfit's emblem |
 
@@ -779,7 +780,8 @@ Every screen reads a **query** in `src/sim/queries.zig`, shared by the REPL
 and the TUI:
 
 - `desk` (checklist warnings from `checklist.turnWarnings`; inbox;
-  company postures; HQ summaries; log tail with filter)
+  company postures; HQ summaries; log tail with filter; the newest news
+  rows from `newsRows`)
 - `map` (worlds with ring/beachhead/dark classification per HQ, offers per
   world, HQ and company markers)
 - `toe` / `toeViews` (tree with slot states), `hull`, `personRecord`,

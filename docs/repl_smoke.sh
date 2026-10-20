@@ -35,6 +35,11 @@ printf '%s\n' \
   'who nosuchkey' \
   'conflicts' \
   'conflicts x' \
+  'news' \
+  'news 3' \
+  'news x' \
+  'news 0' \
+  'news 3 4' \
   'sellstock hq:1 ammo_lrm 1' \
   'stockpolicy hq:1 ammo_lrm 4 8' \
   'autoadmit off' \
@@ -305,6 +310,11 @@ fi
 check 'Border watch on Menkent  Lyran Commonwealth standing  a standing need  [0-9]* posted'
 check 'Allied reprisal on Connaught  Lyran Commonwealth against Free Worlds League  .*you: aggressor'
 check 'usage: conflicts'
+# P5d.1g: `news` and `news 3` print the newest items heard within reach, on
+# day 0 none; a count that is not a positive number, or a second one, is
+# refused.
+[ "$(echo "$out" | grep -c -- 'no news within reach.')" = 2 ] || { echo "MISSING: news and news 3 on day 0"; echo "$out" | tail -40; exit 1; }
+[ "$(echo "$out" | grep -c -- 'usage: news \[count\]')" = 3 ] || { echo "MISSING: three news usage refusals"; echo "$out" | tail -40; exit 1; }
 # P5d.1f: every offer says why it exists, which side it serves, when the
 # company must be on station and when it closes; holding the raid on one
 # side of a conflict refuses the other side's relief to another company.

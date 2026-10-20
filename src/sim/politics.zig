@@ -1,13 +1,14 @@
 //! The political world's progression (docs/p5d-conflict-world-design.md §C,
-//! §E, §K "Progression is independent of the player"; P5d.1e, P5d.1f).
-//! `advanceWorld`, the markets-phase owner, moves due conflicts through
-//! discovery, the strike and NPC-only resolution, and on the 1st keeps
-//! every hiring world's standing garrison or training need
-//! (`maintainStanding`) and has `runSchemes` open new offensive conflicts
-//! from the `political_events.zon` opening templates. Also the one cause
-//! formatter and the load-time check every campaign's conflicts keep. A
-//! standing need stands down only once no contract it backs runs; no other
-//! player state, presence or visibility is an input. The contract board
+//! §E, §K "Progression is independent of the player"; P5d.1e, P5d.1f,
+//! P5d.1g). `advanceWorld`, the markets-phase owner, moves due conflicts
+//! through discovery, the strike and NPC-only resolution, each one news
+//! when a presence hears it (`news.newsReach`), and on the 1st keeps every
+//! hiring world's standing garrison or training need (`maintainStanding`)
+//! and has `runSchemes` open new offensive conflicts from the
+//! `political_events.zon` opening templates. Also the one cause formatter
+//! and the load-time check every campaign's conflicts keep. A standing need
+//! stands down only once no contract it backs runs; no other player state,
+//! presence or visibility is an input to progression. The contract board
 //! posts its positions from these conflicts (`contract_market.refresh`).
 //! No MekHQ counterpart: MekHQ has no persistent political conflicts
 //! (docs/mekhq-map.md).
@@ -26,6 +27,8 @@ const world_state_dom = @import("../domain/world_state.zig");
 const logistics = @import("../econ/logistics.zig");
 const personages = @import("personages.zig");
 const world_state = @import("world_state.zig");
+const news_dom = @import("../domain/news.zig");
+const news = @import("news.zig");
 const table = @import("table.zig");
 const rng_mod = @import("rng.zig");
 const state_mod = @import("state.zig");
@@ -501,27 +504,34 @@ fn plan(ctx: *const Context, rng: *rng_mod.Rng, cand: Candidate, id: types.Confl
 
 // ---------------------------------------------------------------- progression
 
-const DueKind = enum { discovery, strike, resolution };
+/// The public days a due step falls on are the news kinds (§K "Evaluation").
+const DueKind = news_dom.NewsKind;
 
-/// One due transition, prepared: its log line, and for a resolution the
-/// drawn outcome and the prepared world-state move.
+/// One due transition, prepared: its news (the `[politics]` line and the
+/// item, both null when no presence hears it; decision G1), and for a
+/// resolution the drawn outcome and the prepared world-state move.
 const DueStep = struct {
     index: usize,
     kind: DueKind,
-    log: state_mod.LogEntry,
+    log: ?state_mod.LogEntry,
+    news: ?news_dom.NewsItem,
     outcome: conflict.Outcome = .defender_held,
     world: world_state.PreparedWorldAdjust = undefined,
     /// The world's state before `commitDue` moved it; null when it had no row.
     prior_world: ?world_state_dom.WorldState = null,
 };
 
-/// Today's due transitions, every fallible step done (log text and room,
-/// world-state room, the resolution draws on a copy of `.politics`).
+/// Today's due transitions, every fallible step done (log and item text,
+/// log, news and world-state room, the news ids, the resolution draws on a
+/// copy of `.politics`).
 const PreparedDue = struct {
     steps: []DueStep,
     politics: std.Random.DefaultPrng,
     prior_politics: std.Random.DefaultPrng,
     log_len: usize,
+    /// News items the steps carry; they take the ids from `prior_next_news_id`.
+    news_count: u32,
+    prior_next_news_id: u32,
 
     fn deinit(self: *const PreparedDue, gs: *GameState) void {
         gs.scratch().free(self.steps);
@@ -530,15 +540,21 @@ const PreparedDue = struct {
 
 /// Prepare today's due transitions (§K step 2), by (day, `ConflictId`):
 /// every unresolved conflict whose `discovery_day`, `strike_day` or
-/// `expires_day` is today, in id order. Discovery and the strike each get
-/// one `[politics]` line. At `expires_day` the conflict resolves NPC-only
-/// (§C resolution; decision E4): one `.politics` draw below
-/// `conflict.aggressorWinChanceBp` is the aggressor's win, the world moves
-/// by `world_state.conflictWorldDelta` (one `[world]` line), and one
-/// `[politics]` line names the result. Changes nothing but log, world-state
-/// and arena room.
+/// `expires_day` is today, in id order. At `expires_day` the conflict
+/// resolves NPC-only (§C resolution; decision E4): one `.politics` draw
+/// below `conflict.aggressorWinChanceBp` is the aggressor's win, and the
+/// world moves by `world_state.conflictWorldDelta` (one `[world]` line).
+/// Each step that a presence hears (`news.newsReach`, at the day's start)
+/// is news (§K "News"; decision G1): one `[politics]` line and one news
+/// item, both carrying the step's sentence, the items taking the next
+/// `NewsId`s in step order. A step no presence hears logs no `[politics]`
+/// line and makes no item; it still happens. Reach draws nothing. Changes
+/// nothing but log, news, world-state and arena room. `CorruptSave` for a
+/// broken reference, or a news counter that is 0 or cannot hold the new
+/// ids.
 fn prepareDue(gs: *GameState) error{ OutOfMemory, CorruptSave }!PreparedDue {
     const today = gs.clock.day_index;
+    if (gs.next_news_id == 0) return error.CorruptSave;
     var count: usize = 0;
     var resolutions: usize = 0;
     for (gs.conflicts.values()) |*c| {
@@ -551,6 +567,7 @@ fn prepareDue(gs: *GameState) error{ OutOfMemory, CorruptSave }!PreparedDue {
     errdefer gs.scratch().free(steps);
     try gs.reserveLog(count + resolutions);
     try gs.world_states.ensureUnusedCapacity(gs.allocator(), resolutions);
+    try gs.news_items.ensureUnusedCapacity(gs.allocator(), count);
     var text = std.heap.ArenaAllocator.init(gs.scratch());
     defer text.deinit();
     const ta = text.allocator();
@@ -558,34 +575,54 @@ fn prepareDue(gs: *GameState) error{ OutOfMemory, CorruptSave }!PreparedDue {
     var rng = gs.rng;
     const r = rng.random(.politics);
     var at: usize = 0;
+    var news_count: u32 = 0;
     for (gs.conflicts.values(), 0..) |*c, index| {
         if (c.outcome != null or c.family == .standing) continue;
         const o = conflict.offense(c) orelse return error.CorruptSave;
         const world = (planet.find(c.planet_key) orelse return error.CorruptSave).name;
         const aggressor = (faction.find(o.aggressor.faction_key) orelse return error.CorruptSave).name;
         const defender = (faction.find(c.defender.faction_key) orelse return error.CorruptSave).name;
+        var step: DueStep = undefined;
+        var sentence: []const u8 = undefined;
         if (c.discovery_day == today) {
-            steps[at] = .{ .index = index, .kind = .discovery, .log = try gs.prepareLog(.politics, .{}, "[politics] {s} learns of a threat to {s}: {s}", .{ defender, world, try causeText(ta, gs, c) }) };
-            at += 1;
+            step = .{ .index = index, .kind = .discovery, .log = null, .news = null };
+            sentence = try std.fmt.allocPrint(ta, "{s} learns of a threat to {s}: {s}", .{ defender, world, try causeText(ta, gs, c) });
         } else if (o.strike_day == today) {
-            steps[at] = .{ .index = index, .kind = .strike, .log = try gs.prepareLog(.politics, .{}, "[politics] fighting begins on {s}: {s} against {s}", .{ world, aggressor, defender }) };
-            at += 1;
+            step = .{ .index = index, .kind = .strike, .log = null, .news = null };
+            sentence = try std.fmt.allocPrint(ta, "fighting begins on {s}: {s} against {s}", .{ world, aggressor, defender });
         } else if (o.expires_day == today) {
             const row = political_event.find(c.template_key) orelse return error.CorruptSave;
             const won = r.uintLessThan(u32, @intCast(types.full_bp)) < conflict.aggressorWinChanceBp(o.strike_force, c.local_force);
             const outcome: conflict.Outcome = if (won) .aggressor_won else .defender_held;
-            steps[at] = .{
+            step = .{
                 .index = index,
                 .kind = .resolution,
+                .log = null,
+                .news = null,
                 .outcome = outcome,
                 .world = try world_state.prepareWorldAdjust(gs, c.planet_key, world_state.conflictWorldDelta(outcome), row.name),
-                .log = if (won)
-                    try gs.prepareLog(.politics, .{}, "[politics] {s} takes {s} from {s}", .{ aggressor, world, defender })
-                else
-                    try gs.prepareLog(.politics, .{}, "[politics] {s} holds {s} against {s}", .{ defender, world, aggressor }),
             };
-            at += 1;
+            sentence = if (won)
+                try std.fmt.allocPrint(ta, "{s} takes {s} from {s}", .{ aggressor, world, defender })
+            else
+                try std.fmt.allocPrint(ta, "{s} holds {s} against {s}", .{ defender, world, aggressor });
+        } else continue;
+        if (try news.newsReach(gs, c.planet_key)) |reach| {
+            const id = @as(u64, gs.next_news_id) + news_count;
+            if (id >= std.math.maxInt(u32)) return error.CorruptSave;
+            step.log = try gs.prepareLog(.politics, .{}, "[politics] {s}", .{sentence});
+            step.news = .{
+                .id = @enumFromInt(@as(u32, @intCast(id))),
+                .kind = step.kind,
+                .conflict = c.id,
+                .reach_from = reach.from,
+                .reach_from_planet_key = try gs.allocator().dupe(u8, reach.from_planet_key),
+                .text = try gs.allocator().dupe(u8, sentence),
+            };
+            news_count += 1;
         }
+        steps[at] = step;
+        at += 1;
     }
     std.debug.assert(at == count);
     return .{
@@ -593,29 +630,33 @@ fn prepareDue(gs: *GameState) error{ OutOfMemory, CorruptSave }!PreparedDue {
         .politics = rng.prngs[@intFromEnum(rng_mod.Stream.politics)],
         .prior_politics = gs.rng.prngs[@intFromEnum(rng_mod.Stream.politics)],
         .log_len = gs.event_log.items.len,
+        .news_count = news_count,
+        .prior_next_news_id = gs.next_news_id,
     };
 }
 
 /// Put prepared due transitions on the books, in order. Infallible; each
 /// step records what `rollbackDue` restores.
 fn commitDue(gs: *GameState, due: *PreparedDue) void {
-    std.debug.assert(gs.event_log.items.len == due.log_len);
-    for (due.steps) |*s| switch (s.kind) {
-        .discovery, .strike => gs.commitLog(s.log),
-        .resolution => {
+    std.debug.assert(gs.event_log.items.len == due.log_len and gs.next_news_id == due.prior_next_news_id);
+    for (due.steps) |*s| {
+        if (s.kind == .resolution) {
             const c = &gs.conflicts.values()[s.index];
             c.outcome = s.outcome;
             s.prior_world = gs.world_states.get(c.planet_key);
             world_state.commitWorldAdjust(gs, s.world);
-            gs.commitLog(s.log);
-        },
-    };
+        }
+        if (s.log) |entry| gs.commitLog(entry);
+        if (s.news) |item| gs.news_items.putAssumeCapacity(item.id, item);
+    }
+    gs.next_news_id += due.news_count;
     gs.rng.prngs[@intFromEnum(rng_mod.Stream.politics)] = due.politics;
 }
 
 /// Undo a `commitDue` (rule 12's rollback guard): the outcomes, each
 /// world's prior state (a row the commit added is removed again, last
-/// first), the log and the `.politics` stream.
+/// first), the news items and their counter, the log and the `.politics`
+/// stream.
 fn rollbackDue(gs: *GameState, due: *const PreparedDue) void {
     var i = due.steps.len;
     while (i > 0) {
@@ -631,6 +672,8 @@ fn rollbackDue(gs: *GameState, due: *const PreparedDue) void {
         }
         c.outcome = null;
     }
+    for (0..due.news_count) |_| _ = gs.news_items.pop().?;
+    gs.next_news_id = due.prior_next_news_id;
     gs.event_log.items.len = due.log_len;
     gs.rng.prngs[@intFromEnum(rng_mod.Stream.politics)] = due.prior_politics;
 }
@@ -638,9 +681,11 @@ fn rollbackDue(gs: *GameState, due: *const PreparedDue) void {
 /// The markets-phase political step (§K "Progression is independent of the
 /// player"): today's due transitions (`prepareDue`), then on the 1st of
 /// the month the standing needs (`maintainStanding`) and `runSchemes`. NPC
-/// movements and beats are later increments'. Reads no player state,
-/// presence or visibility but the contracts a standing need backs.
-/// Failure-atomic: an error leaves the campaign as it was (rules 12, 17).
+/// movements and beats are later increments'. Progression reads no player
+/// state, presence or visibility but the contracts a standing need backs;
+/// presence decides only which steps are also news (`news.newsReach`).
+/// News never stops time (decision D11). Failure-atomic: an error leaves
+/// the campaign as it was (rules 12, 17).
 pub fn advanceWorld(gs: *GameState) error{ OutOfMemory, CorruptSave }!void {
     var due = try prepareDue(gs);
     defer due.deinit(gs);
@@ -1416,9 +1461,11 @@ test "advancing the political world moves only the politics stream and leaves th
 }
 
 /// A campaign holding one conflict of known forces on Skye, attacked from
-/// a world hostile to the Lyran Commonwealth.
+/// a world hostile to the Lyran Commonwealth. Its seat HQ stands on Skye,
+/// so every step of the conflict is news (`news.newsReach`).
 fn skyeConflictForTest(gs: *GameState, strike_bv: i64, local_bv: i64) !types.ConflictId {
     try createdForTest(gs);
+    gs.hqs.getPtr(gs.seat()).?.planet_key = "skye";
     var attacker: ?types.PersonageId = null;
     var defender: ?types.PersonageId = null;
     for (gs.personages.values()) |p| {
@@ -1477,10 +1524,204 @@ test "two due conflicts on one day go in id order" {
     gs.next_conflict_id += 1;
     second.planet_key = "tharkad";
     try gs.conflicts.put(gs.allocator(), second.id, second);
+    // A second HQ on Tharkad, beyond reach of Skye, hears the second.
+    const far: types.HqId = @enumFromInt(gs.next_hq_id);
+    gs.next_hq_id += 1;
+    try gs.hqs.put(gs.allocator(), far, .{ .id = far, .name = "Far", .tier = .field, .planet_key = "tharkad" });
     try advanceOnForTest(&gs, second.discovery_day);
     const log = gs.event_log.items;
     try std.testing.expect(std.mem.indexOf(u8, log[log.len - 2].text, "threat to Skye") != null);
     try std.testing.expect(std.mem.indexOf(u8, log[log.len - 1].text, "threat to Tharkad") != null);
+    // Their items take the ids in the same order.
+    const items = gs.news_items.values();
+    try std.testing.expectEqual(@as(usize, 2), items.len);
+    try std.testing.expectEqual(first, items[0].conflict);
+    try std.testing.expectEqual(second.id, items[1].conflict);
+    try std.testing.expect(@intFromEnum(items[0].id) < @intFromEnum(items[1].id));
+    try std.testing.expectEqualStrings("skye", items[0].reach_from_planet_key);
+    try std.testing.expectEqualStrings("tharkad", items[1].reach_from_planet_key);
+}
+
+/// The sentence a `[politics]` log entry carries, after its tag.
+fn politicsSentenceForTest(entry: *const state_mod.LogEntry) []const u8 {
+    const tag = "[politics] ";
+    const at = std.mem.indexOf(u8, entry.text, tag).?;
+    return entry.text[at + tag.len ..];
+}
+
+test "a conflict a presence hears is news on its discovery, strike and resolution days, and on no other" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73019 });
+    defer gs.deinit();
+    const id = try skyeConflictForTest(&gs, 1_000, 1_000);
+    const c = gs.conflicts.get(id).?;
+    // Every standing need is due on no day: none makes news.
+    var standing: usize = 0;
+    for (gs.conflicts.values()) |v| standing += @intFromBool(v.family == .standing);
+    try std.testing.expect(standing > 0);
+    const days = [_]u32{ c.discovery_day, c.strike_day.?, c.expires_day.? };
+    const kinds = [_]news_dom.NewsKind{ .discovery, .strike, .resolution };
+    const severities = [_]news_dom.Severity{ .notable, .notable, .major };
+    var day = c.opened_day;
+    while (day <= c.expires_day.? + 1) : (day += 1) {
+        const items_before = gs.news_items.count();
+        const lines_before = politicsLinesForTest(&gs);
+        try advanceOnForTest(&gs, day);
+        const at = std.mem.indexOfScalar(u32, &days, day) orelse {
+            try std.testing.expectEqual(items_before, gs.news_items.count());
+            try std.testing.expectEqual(lines_before, politicsLinesForTest(&gs));
+            continue;
+        };
+        try std.testing.expectEqual(items_before + 1, gs.news_items.count());
+        try std.testing.expectEqual(lines_before + 1, politicsLinesForTest(&gs));
+        const item = gs.news_items.values()[items_before];
+        try std.testing.expectEqual(@as(u32, @intCast(items_before + 1)), @intFromEnum(item.id));
+        try std.testing.expectEqual(kinds[at], item.kind);
+        try std.testing.expectEqual(id, item.conflict);
+        try std.testing.expectEqual(news_dom.PresenceKind.hq, item.reach_from);
+        try std.testing.expectEqualStrings("skye", item.reach_from_planet_key);
+        try std.testing.expectEqual(@as(?u32, day), news_dom.day(&item, &gs.conflicts.get(id).?));
+        try std.testing.expectEqual(severities[at], news_dom.severity(item.kind));
+        // The item's text is the sentence its log line carries.
+        const entry = &gs.event_log.items[gs.event_log.items.len - 1];
+        try std.testing.expectEqual(state_mod.LogCategory.politics, entry.category);
+        try std.testing.expectEqualStrings(politicsSentenceForTest(entry), item.text);
+    }
+    try std.testing.expectEqual(@as(u32, 4), gs.next_news_id);
+    try news.validate(&gs);
+}
+
+test "a conflict no presence hears still resolves on its day, moves its world and draws as its heard twin, with no news" {
+    var heard = GameState.init(std.testing.allocator, .{ .seed = 73020 });
+    defer heard.deinit();
+    var unheard = GameState.init(std.testing.allocator, .{ .seed = 73020 });
+    defer unheard.deinit();
+    const id = try skyeConflictForTest(&heard, 1_000, 1_000);
+    _ = try skyeConflictForTest(&unheard, 1_000, 1_000);
+    // Tharkad is beyond reach of Skye, and the campaign has no company.
+    unheard.hqs.getPtr(unheard.seat()).?.planet_key = "tharkad";
+    try std.testing.expectEqual(@as(?news.Reach, null), try news.newsReach(&unheard, "skye"));
+    const c = heard.conflicts.get(id).?;
+    for ([_]*GameState{ &heard, &unheard }) |g| {
+        var day = c.opened_day;
+        while (day <= c.expires_day.?) : (day += 1) try advanceOnForTest(g, day);
+    }
+    const outcome = unheard.conflicts.get(id).?.outcome;
+    try std.testing.expect(outcome != null);
+    try std.testing.expectEqual(heard.conflicts.get(id).?.outcome, outcome);
+    try std.testing.expectEqualSlices(u8, &heard.rng.encode(.politics), &unheard.rng.encode(.politics));
+    var hw = std.hash.Wyhash.init(0);
+    var uw = std.hash.Wyhash.init(0);
+    digest.update(&hw, heard.world_states);
+    digest.update(&uw, unheard.world_states);
+    try std.testing.expectEqual(hw.final(), uw.final());
+    try std.testing.expect(unheard.world_states.get("skye") != null);
+    // The world line is written at any distance; news only in reach.
+    for ([_]*GameState{ &heard, &unheard }) |g| {
+        var world_lines: usize = 0;
+        for (g.event_log.items) |e| world_lines += @intFromBool(std.mem.indexOf(u8, e.text, "[world] ") != null);
+        try std.testing.expectEqual(@as(usize, 1), world_lines);
+    }
+    try std.testing.expectEqual(@as(usize, 3), heard.news_items.count());
+    try std.testing.expectEqual(@as(usize, 3), politicsLinesForTest(&heard));
+    try std.testing.expectEqual(@as(usize, 0), unheard.news_items.count());
+    try std.testing.expectEqual(@as(usize, 0), politicsLinesForTest(&unheard));
+    try std.testing.expectEqual(@as(u32, 1), unheard.next_news_id);
+}
+
+test "two campaigns on one seed with their HQs on different worlds hold the same political world, and their news differs" {
+    // Rule 71 and §K "Progression is independent of the player": presence
+    // decides only who hears.
+    var a = GameState.init(std.testing.allocator, .{ .seed = 73021 });
+    defer a.deinit();
+    var b = GameState.init(std.testing.allocator, .{ .seed = 73021 });
+    defer b.deinit();
+    try createdForTest(&a);
+    try createdForTest(&b);
+    a.hqs.getPtr(a.seat()).?.planet_key = "skye";
+    b.hqs.getPtr(b.seat()).?.planet_key = "tharkad";
+    for (0..12) |_| {
+        for ([_]*GameState{ &a, &b }) |g| {
+            g.clock.advance();
+            try advanceWorld(g);
+            while (g.clock.date.day != 1) {
+                g.clock.advance();
+                try advanceWorld(g);
+            }
+        }
+    }
+    var discovered: usize = 0;
+    var struck: usize = 0;
+    var resolved: usize = 0;
+    for (a.conflicts.values()) |*c| if (conflict.offense(c)) |o| {
+        discovered += @intFromBool(c.discovery_day <= a.clock.day_index);
+        struck += @intFromBool(o.strike_day <= a.clock.day_index);
+        resolved += @intFromBool(c.outcome != null);
+    };
+    try std.testing.expect(discovered > 0 and struck > 0 and resolved > 0);
+    inline for (.{ "personages", "conflicts", "world_states" }) |field| {
+        var ha = std.hash.Wyhash.init(0);
+        var hb = std.hash.Wyhash.init(0);
+        digest.update(&ha, @field(a, field));
+        digest.update(&hb, @field(b, field));
+        try std.testing.expectEqual(ha.final(), hb.final());
+    }
+    try std.testing.expectEqualSlices(u8, &a.rng.encode(.politics), &b.rng.encode(.politics));
+    try std.testing.expect(a.news_items.count() + b.news_items.count() > 0);
+    var na = std.hash.Wyhash.init(0);
+    var nb = std.hash.Wyhash.init(0);
+    digest.update(&na, a.news_items);
+    digest.update(&nb, b.news_items);
+    try std.testing.expect(na.final() != nb.final());
+    try news.validate(&a);
+    try news.validate(&b);
+}
+
+test "a day whose only happening is news within reach stops time no more than the same day out of reach" {
+    // Decision D11: news never stops time.
+    const checklist = @import("checklist.zig");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var heard = GameState.init(std.testing.allocator, .{ .seed = 73022 });
+    defer heard.deinit();
+    var unheard = GameState.init(std.testing.allocator, .{ .seed = 73022 });
+    defer unheard.deinit();
+    const id = try skyeConflictForTest(&heard, 1_000, 1_000);
+    _ = try skyeConflictForTest(&unheard, 1_000, 1_000);
+    unheard.hqs.getPtr(unheard.seat()).?.planet_key = "tharkad";
+    const discovery = heard.conflicts.get(id).?.discovery_day;
+    var stops: [2]?checklist.Stop = undefined;
+    for ([_]*GameState{ &heard, &unheard }, &stops) |g, *stop| {
+        g.clock.day_index = discovery - 1;
+        g.clock.date = .{ .year = 3025, .month = 3, .day = 14 };
+        const watch = try checklist.watchDay(arena.allocator(), g);
+        try advanceOnForTest(g, discovery);
+        stop.* = checklist.advanceStop(g, &watch);
+    }
+    try std.testing.expectEqual(@as(usize, 1), heard.news_items.count());
+    try std.testing.expectEqual(@as(usize, 0), unheard.news_items.count());
+    try std.testing.expectEqual(stops[1], stops[0]);
+    try std.testing.expectEqual(@as(?checklist.Stop, null), stops[0]);
+}
+
+test "a news counter that cannot hold the day's items, or is 0, refuses the day and changes nothing" {
+    for ([_]u32{ std.math.maxInt(u32), 0 }) |counter| {
+        var gs = GameState.init(std.testing.allocator, .{ .seed = 73023 });
+        defer gs.deinit();
+        const id = try skyeConflictForTest(&gs, 1_000, 1_000);
+        gs.next_news_id = counter;
+        gs.clock.day_index = gs.conflicts.get(id).?.discovery_day;
+        gs.clock.date = .{ .year = 3025, .month = 3, .day = 15 };
+        const before = digest.stateHash(&gs);
+        try std.testing.expectError(error.CorruptSave, advanceWorld(&gs));
+        try std.testing.expectEqual(before, digest.stateHash(&gs));
+    }
+    // One below the last id holds exactly one more item.
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 73023 });
+    defer gs.deinit();
+    const id = try skyeConflictForTest(&gs, 1_000, 1_000);
+    gs.next_news_id = std.math.maxInt(u32) - 1;
+    try advanceOnForTest(&gs, gs.conflicts.get(id).?.discovery_day);
+    try std.testing.expectEqual(@as(u32, std.math.maxInt(u32)), gs.next_news_id);
 }
 
 /// A seed whose first `.politics` basis-point draw is below `chance` when
@@ -1574,7 +1815,7 @@ fn expectAdvanceWorldAtomicForTest(gs: *const GameState) !usize {
     }
 }
 
-test "a month start that opens conflicts, and a day that resolves one, change nothing when any allocation fails" {
+test "a month start that opens conflicts, and a day that resolves one as news, change nothing when any allocation fails" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 73015 });
     defer gs.deinit();
     try createdForTest(&gs);
@@ -1584,15 +1825,21 @@ test "a month start that opens conflicts, and a day that resolves one, change no
     try std.testing.expect(gs.conflicts.count() > 0);
     // The first resolution day, reached without its earlier transitions,
     // and a 1st of the month so the standing needs and the schemes run
-    // after it.
+    // after it. The seat HQ stands on its world, so the resolution is news
+    // that a later failure must take back too.
     const c = for (gs.conflicts.values()) |v| {
         if (v.family == .offensive) break v;
     } else unreachable;
+    gs.hqs.getPtr(gs.seat()).?.planet_key = c.planet_key;
     gs.clock.day_index = c.expires_day.?;
     gs.clock.date = .{ .year = 3025, .month = 6, .day = 1 };
     try std.testing.expect(try expectAdvanceWorldAtomicForTest(&gs) > 0);
+    try std.testing.expectEqual(@as(usize, 0), gs.news_items.count());
     try advanceWorld(&gs);
     try std.testing.expect(gs.conflicts.get(c.id).?.outcome != null);
+    try std.testing.expectEqual(@as(usize, 1), gs.news_items.count());
+    try std.testing.expectEqual(news_dom.NewsKind.resolution, gs.news_items.values()[0].kind);
+    try std.testing.expectEqual(@as(u32, 2), gs.next_news_id);
 }
 
 test "a month start past the standing lifetime stands needs down and replaces them, changing nothing when any allocation fails" {

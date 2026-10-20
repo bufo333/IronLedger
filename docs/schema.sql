@@ -1,13 +1,13 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 74, the current store and campaign format. Schema
--- 71 is the oldest supported format: a v71, v72 or v73 store reaches 74 on
--- open through each migration in turn, all in one transaction
+-- Matches schema_version 75, the current store and campaign format. Schema
+-- 71 is the oldest supported format: a v71, v72, v73 or v74 store reaches 75
+-- on open through each migration in turn, all in one transaction
 -- (Store.migrate: v71 → v72 rebuilds `personage`, v72 → v73 adds
--- `conflict`, v73 → v74 rebuilds `conflict` and `contract`; see each
--- below). Older and newer formats are refused before persistent mutation
--- under docs/engineering-contract.md rule 51; only empty stores initialize
--- schema 74.
+-- `conflict`, v73 → v74 rebuilds `conflict` and `contract`, v74 → v75 adds
+-- `news_item`; see each below). Older and newer formats are refused before
+-- persistent mutation under docs/engineering-contract.md rule 51; only empty
+-- stores initialize schema 75.
 -- The executable DDL and dormant historical migration declarations live in
 -- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
@@ -75,7 +75,7 @@ CREATE TABLE campaign (
     commander       TEXT,
     day             INTEGER NOT NULL,                -- day_index at save
     date            TEXT    NOT NULL,                -- in-game date at save
-    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 73 (a v71 or v72 store's campaigns are migrated with it); older/newer versions are refused before load or overwrite
+    schema_version  INTEGER NOT NULL CHECK (schema_version > 0), -- must be 75 (a v71–v74 store's campaigns are migrated with it); older/newer versions are refused before load or overwrite
     save_seq        INTEGER NOT NULL,                -- store-wide save counter, orders "most recent"
     player_id       INTEGER NOT NULL DEFAULT 0       -- -> player.id; 0 = none
 );
@@ -105,6 +105,8 @@ CREATE TABLE campaign (
 -- v70 requires next_personage_id, nonzero and greater than every personage id.
 -- v73 requires next_conflict_id, nonzero and greater than every conflict id;
 -- the v72 → v73 migration sets it to 1 for every campaign.
+-- v75 requires next_news_id, nonzero and greater than every news item id;
+-- the v74 → v75 migration sets it to 1 for every campaign.
 CREATE TABLE meta (
     cid             INTEGER NOT NULL,
     key             TEXT    NOT NULL,
@@ -1494,6 +1496,37 @@ CREATE TABLE conflict (
     FOREIGN KEY (cid, instigator) REFERENCES personage(cid, id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_conflict_cid ON conflict(cid);
+
+-- news_item: the political news the outfit heard (docs/p5d-conflict-world-design.md
+-- §K "News"; v75), in id (emission) order, all kept. One per discovery,
+-- strike and resolution of an offensive conflict within news_reach_ly of
+-- an HQ or a company on the day it broke; a standing need makes none. The
+-- day, distance and severity are derived from the conflict, never stored.
+-- The loader (news.validate) also refuses a standing conflict, a day after
+-- today, a resolution of an unresolved conflict, an unknown presence world
+-- or one beyond reach of the conflict's world, text that is not UTF-8, and
+-- an id at or above meta next_news_id.
+--
+-- Migration v74 → v75: v74 has no news_item table and no next_news_id. A
+-- v74 campaign has no news item and reach is never back-filled; the table
+-- is created empty, every campaign gets next_news_id = 1, and no other row
+-- changes.
+CREATE TABLE news_item (
+    cid                   INTEGER NOT NULL,
+    ord                   INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), -- id order
+    id                    INTEGER NOT NULL CHECK (typeof(id)='integer' AND id BETWEEN 1 AND 4294967295), -- NewsId
+    kind                  TEXT    NOT NULL CHECK (typeof(kind)='text' AND kind IN ('discovery','strike','resolution')), -- news_item.NewsKind
+    conflict_id           INTEGER NOT NULL CHECK (typeof(conflict_id)='integer' AND conflict_id BETWEEN 1 AND 4294967295), -- -> conflict.id
+    reach_from            TEXT    NOT NULL CHECK (typeof(reach_from)='text' AND reach_from IN ('hq','company')), -- the presence that heard it
+    reach_from_planet_key TEXT    NOT NULL CHECK (typeof(reach_from_planet_key)='text' AND length(reach_from_planet_key) > 0), -- -> planets catalog: that presence's world
+    text                  TEXT    NOT NULL CHECK (typeof(text)='text' AND length(text) > 0), -- plain text, rendered once
+    PRIMARY KEY (cid, id),
+    UNIQUE (cid, ord),
+    UNIQUE (cid, conflict_id, kind),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, conflict_id) REFERENCES conflict(cid, id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_news_item_cid ON news_item(cid);
 
 -- Artillery formation and HQ offer fields are persisted (schema v60).
 -- Catalogue facts and attached location are derived; quotes are scratch.

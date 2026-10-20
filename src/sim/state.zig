@@ -34,6 +34,7 @@ const artillery_dom = @import("../domain/artillery_formation.zig");
 const hull_instance_mod = @import("../domain/hull_instance.zig");
 const personage_mod = @import("../domain/personage.zig");
 const conflict_mod = @import("../domain/conflict.zig");
+const news_mod = @import("../domain/news.zig");
 
 pub const Config = struct {
     seed: u64 = 3025,
@@ -401,6 +402,10 @@ pub const GameState = struct {
     /// Every conflict opened, resolved ones included, in id order
     /// (docs/p5d-conflict-world-design.md §C; `politics.validate`).
     conflicts: std.AutoArrayHashMapUnmanaged(types.ConflictId, conflict_mod.Conflict) = .empty,
+    /// Every news item the outfit heard, in id (emission) order
+    /// (docs/p5d-conflict-world-design.md §K "News"; `news.validate`).
+    /// Text and keys live in the campaign arena.
+    news_items: std.AutoArrayHashMapUnmanaged(types.NewsId, news_mod.NewsItem) = .empty,
 
     /// Persistent bounded per-world state, keyed by planet_key (P4h.4).
     world_states: std.StringArrayHashMapUnmanaged(world_state_mod.WorldState) = .empty,
@@ -428,6 +433,7 @@ pub const GameState = struct {
     next_hull_instance_id: u32 = 1,
     next_personage_id: u32 = 1,
     next_conflict_id: u32 = 1,
+    next_news_id: u32 = 1,
 
     pub fn init(gpa: std.mem.Allocator, config: Config) GameState {
         return .{
@@ -1483,6 +1489,8 @@ pub const GameState = struct {
         .{ "next_personage_id", .persisted },
         .{ "conflicts", .persisted },
         .{ "next_conflict_id", .persisted },
+        .{ "news_items", .persisted },
+        .{ "next_news_id", .persisted },
     };
 
     pub fn persistenceOf(comptime name: []const u8) Persistence {

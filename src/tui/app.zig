@@ -121,6 +121,10 @@ const Modal = union(enum) {
     /// long lines. The index is into `queries.desk().log`,
     /// revalidated against the query every frame (rule 40).
     log_entry: usize,
+    /// One news item, word-wrapped; the Desk's NEWSWIRE pane clips long
+    /// lines. The id is revalidated against `queries.newsRows` every frame
+    /// (rule 40).
+    news_item: types.NewsId,
     /// Generic pickers: one look for every "choose one of these".
     pick_company: struct { what: enum { unit, person, stock }, id: u32, key_buf: [32]u8 = undefined, key_len: u8 = 0 },
     pick_hq: types.PersonId,
@@ -1514,7 +1518,7 @@ pub const App = struct {
         const al = self.a();
         switch (self.modal) {
             .none => {},
-            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_arty_crew, .pick_arty_tech, .pick_arty_unassign, .pick_arty_send, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .whos_who, .arty_detail, .stop_report => try self.drawList(al),
+            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_arty_crew, .pick_arty_tech, .pick_arty_unassign, .pick_arty_send, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .news_item, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .whos_who, .arty_detail, .stop_report => try self.drawList(al),
             .after_action => |id| try self.drawAfterAction(al, id),
             .end_turn => {
                 const g = self.state();
@@ -2383,7 +2387,7 @@ pub const App = struct {
     };
 
     const screen_table = [_]ScreenSpec{
-        .{ .tab = .desk, .name = "F1 Desk", .draw = screens.desk.draw, .move = screens.desk.move, .handle = screens.desk.handle, .legend = &screens.desk.legend, .pane_names = &.{ "checklist", "inbox", "log", "reports" }, .panes = 4, .narrow_panes = 4 },
+        .{ .tab = .desk, .name = "F1 Desk", .draw = screens.desk.draw, .move = screens.desk.move, .handle = screens.desk.handle, .legend = &screens.desk.legend, .pane_names = &.{ "checklist", "inbox", "log", "reports", "newswire" }, .panes = 5, .narrow_panes = 5 },
         .{ .tab = .map, .name = "F2 Map", .draw = screens.map.draw, .move = screens.map.move, .handle = screens.map.handle, .legend = &screens.map.legend, .pane_names = &.{"star map"}, .panes = 1, .narrow_panes = 1, .scroll_h = screens.map.scrollH },
         .{ .tab = .forces, .name = "F3 Forces", .draw = screens.forces.draw, .move = screens.forces.move, .handle = screens.forces.handle, .legend = &screens.forces.legend, .pane_names = &.{ "TO&E", "side pane" }, .panes = 2, .narrow_panes = 1 },
         .{ .tab = .contracts, .name = "F4 Contracts", .draw = screens.contracts.draw, .move = screens.contracts.move, .handle = screens.contracts.handle, .legend = &screens.contracts.legend, .pane_names = &.{ "board", "active", "history" }, .panes = 3, .narrow_panes = 3 },
@@ -3650,6 +3654,13 @@ pub const App = struct {
                 const w = layout.modal.log_entry_w;
                 const rows = if (view.log.len == 0) &[_][]const u8{"{d}nothing logged yet{/}"} else try screen_mod.wrap(al, view.log[@min(idx, view.log.len - 1)], self.modalTextWidth(w));
                 return .{ .title = "LOG ENTRY · any key closes", .rows = rows, .read_only = true, .w = w, .max_h = full_h };
+            },
+            .news_item => |id| {
+                const w = layout.modal.log_entry_w;
+                const shown = for (try q.newsRows(al, self.state(), std.math.maxInt(usize))) |row| {
+                    if (row.id == id) break row.text;
+                } else "{d}that news item is no longer on record{/}";
+                return .{ .title = "NEWS ITEM · any key closes", .rows = try screen_mod.wrap(al, shown, self.modalTextWidth(w)), .read_only = true, .w = w, .max_h = full_h };
             },
             .contract_log => |cid| {
                 const all = try q.battleLog(al, self.state(), cid, std.math.maxInt(usize));
@@ -4961,7 +4972,7 @@ pub const App = struct {
     fn handleModalKey(self: *App, key: Key) !void {
         switch (self.modal) {
             .none => {},
-            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_arty_crew, .pick_arty_tech, .pick_arty_unassign, .pick_arty_send, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .whos_who, .arty_detail, .stop_report => try self.listKey(key),
+            .help, .decision, .battle, .raise_hulls, .raise_support, .music, .summary, .readiness, .raise_crews, .negotiate, .pick_company, .pick_hq, .pick_crew, .pick_unassign, .pick_arty_crew, .pick_arty_tech, .pick_arty_unassign, .pick_arty_send, .pick_part, .accept_pick, .lance_pick, .upgrade, .install_part, .install_loc, .install_at, .seat, .emblem, .hull, .contract_log, .log_entry, .news_item, .battle_list, .record, .operation_pick, .intent_pick, .task_pick, .tempo_pick, .intervention_pick, .operation_report, .mech, .leaderboard, .leaderboard_detail, .whos_who, .arty_detail, .stop_report => try self.listKey(key),
             .after_action => |id| {
                 const hit = keys.lookup(AfterActionAction, &after_action_bindings, 0, key) orelse return;
                 switch (hit.action) {

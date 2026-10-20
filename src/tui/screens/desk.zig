@@ -78,11 +78,15 @@ pub fn draw(self: *App) anyerror!void {
     if (rest_h >= 3) {
         const by: u16 = b.y + top_h + co_h;
         // The right column holds the reports hub and, when wide, the HQ summaries;
-        // the log takes the rest. Reports stays present at every width (rule 86 /
-        // the pane is always drawn so the structural test keeps all four panes).
+        // the log and the newswire take the rest. Reports stays present at every
+        // width (rule 86 / the pane is always drawn so the structural test keeps
+        // every pane).
         const right_w: u16 = if (self.narrow()) layout.minor.of(b.w) else (b.w - layout.major.of(b.w));
         const log_w: u16 = b.w - right_w;
-        self.listPane(.{ .x = b.x, .y = by, .w = log_w, .h = rest_h }, "LOG", view.log, 2, self.paneFocused(2), true);
+        // The log over the newswire, both present at every width (rule 38).
+        const log_h: u16 = layout.major.of(rest_h);
+        self.listPane(.{ .x = b.x, .y = by, .w = log_w, .h = log_h }, "LOG", view.log, 2, self.paneFocused(2), true);
+        self.listPane(.{ .x = b.x, .y = by + log_h, .w = log_w, .h = rest_h - log_h }, "NEWSWIRE", try newswireLines(al, view), 4, self.paneFocused(4), true);
 
         const rx: u16 = b.x + log_w;
         const rp_h: u16 = @min(rest_h, @as(u16, @intCast(reports.len + 3)));
@@ -119,6 +123,15 @@ fn inboxPane(al: std.mem.Allocator, view: q.Desk) !InboxPane {
     return .{ .lines = lines.items, .event = event.items };
 }
 
+/// The NEWSWIRE pane's lines: one per row of `view.news`, in its order, so
+/// the cursor's index is the row's; the empty state when there is none.
+fn newswireLines(al: std.mem.Allocator, view: q.Desk) ![]const []const u8 {
+    if (view.news.len == 0) return &.{"{d}no news within reach{/}"};
+    const lines = try al.alloc([]const u8, view.news.len);
+    for (view.news, lines) |row, *line| line.* = row.text;
+    return lines;
+}
+
 pub fn move(self: *App, delta: i32) anyerror!void {
     const al = self.a();
     const g = self.state();
@@ -127,17 +140,19 @@ pub fn move(self: *App, delta: i32) anyerror!void {
         0 => self.moveCursor(0, delta, view.checklist.len),
         1 => self.moveCursor(1, delta, (try inboxPane(al, view)).lines.len),
         3 => self.moveCursor(3, delta, reports.len),
+        4 => self.moveCursor(4, delta, view.news.len),
         else => self.moveCursor(2, delta, view.log.len),
     }
 }
 
-const Action = enum { go_to, decide, read_entry, open_report, battles, emblem };
+const Action = enum { go_to, decide, read_entry, open_report, read_item, battles, emblem };
 
 pub const bindings = [_]app.keys.Binding(Action){
     .{ .match = .{ .key = .enter }, .action = .go_to, .label = "go to", .group = .act, .pane = 0, .help = "go where the warning points (a contact warning opens its battle orders, a due engagement its battle screen)" },
     .{ .match = .{ .key = .enter }, .action = .decide, .label = "decide", .group = .act, .pane = 1, .help = "open the decision under the cursor" },
     .{ .match = .{ .key = .enter }, .action = .read_entry, .label = "read entry", .group = .act, .pane = 2, .help = "read the whole log entry under the cursor" },
     .{ .match = .{ .key = .enter }, .action = .open_report, .label = "open report", .group = .act, .pane = 3, .help = "open the selected report (read-only; Esc closes)" },
+    .{ .match = .{ .key = .enter }, .action = .read_item, .label = "read item", .group = .act, .pane = 4, .help = "read the whole news item under the cursor" },
     .{ .match = app.keys.Match.char('b'), .action = .battles, .label = "battles", .group = .act, .help = "the engagements still on record: pick one to read" },
     .{ .match = app.keys.Match.char('e'), .action = .emblem, .label = "emblem", .group = .act, .help = "choose the outfit's emblem" },
 };
@@ -183,6 +198,11 @@ pub fn handle(self: *App, k: app.Key) anyerror!bool {
                 .leaderboard => self.openModal(.leaderboard),
             }
         },
+        .read_item => {
+            const view = try q.desk(al, g, q.desk_log_rows);
+            // The NEWSWIRE pane clips; the modal wraps the whole item.
+            if (view.news.len > 0) self.openModal(.{ .news_item = view.news[@min(self.cur(4).*, view.news.len - 1)].id });
+        },
         .battles => {
             self.battles_from_list = true;
             self.openModal(.battle_list);
@@ -204,15 +224,69 @@ test "every inbox line belongs to the decision it was drawn for" {
         .{ .event_id = @enumFromInt(7), .kind = "a", .company = "Alpha", .deadline_day = 9, .days_left = 3, .description = "", .options = &.{ "x", "y" }, .default_choice = 0 },
         .{ .event_id = @enumFromInt(4), .kind = "b", .company = "Bravo", .deadline_day = 9, .days_left = 1, .description = "", .options = &.{"z"}, .default_choice = 0 },
     };
-    const view: q.Desk = .{ .rating_line = "", .checklist = &.{}, .inbox = &rows, .companies = &.{}, .hqs = &.{}, .log = &.{} };
+    const view: q.Desk = .{ .rating_line = "", .checklist = &.{}, .inbox = &rows, .companies = &.{}, .hqs = &.{}, .log = &.{}, .news = &.{} };
     const pane = try inboxPane(al, view);
     try std.testing.expectEqual(pane.lines.len, pane.event.len);
     // Header, two options and a gap for the first; header, one option and a gap for the second.
     try std.testing.expectEqual(@as(usize, 7), pane.lines.len);
     for (pane.event[0..4]) |e| try std.testing.expectEqual(@as(app.types.EventId, @enumFromInt(7)), e);
     for (pane.event[4..]) |e| try std.testing.expectEqual(@as(app.types.EventId, @enumFromInt(4)), e);
-    const empty: q.Desk = .{ .rating_line = "", .checklist = &.{}, .inbox = &.{}, .companies = &.{}, .hqs = &.{}, .log = &.{} };
+    const empty: q.Desk = .{ .rating_line = "", .checklist = &.{}, .inbox = &.{}, .companies = &.{}, .hqs = &.{}, .log = &.{}, .news = &.{} };
     try std.testing.expectEqual(@as(usize, 0), (try inboxPane(al, empty)).event.len);
+}
+
+test "the newswire shows one line per news row in order, and its empty state when there is none" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    const empty: q.Desk = .{ .rating_line = "", .checklist = &.{}, .inbox = &.{}, .companies = &.{}, .hqs = &.{}, .log = &.{}, .news = &.{} };
+    const none = try newswireLines(al, empty);
+    try std.testing.expectEqual(@as(usize, 1), none.len);
+    try std.testing.expectEqualStrings("{d}no news within reach{/}", none[0]);
+    var rows = [_]q.NewsRow{
+        .{ .id = @enumFromInt(9), .conflict = @enumFromInt(2), .text = "newer" },
+        .{ .id = @enumFromInt(4), .conflict = @enumFromInt(1), .text = "older" },
+    };
+    var view = empty;
+    view.news = &rows;
+    const lines = try newswireLines(al, view);
+    try std.testing.expectEqual(@as(usize, 2), lines.len);
+    try std.testing.expectEqualStrings("newer", lines[0]);
+    try std.testing.expectEqualStrings("older", lines[1]);
+}
+
+test "the desk's five panes cycle and clamp wide and narrow, and Enter on the newswire opens the item under the cursor" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    _ = try app.game.news.heardForTest(c.app.state(), "skye");
+    _ = try app.game.news.heardForTest(c.app.state(), "tharkad");
+    try toTab(c, .desk);
+    // The rows live in the frame arena, which every key press resets.
+    const news = (try q.desk(c.app.a(), c.app.state(), q.desk_log_rows)).news;
+    try std.testing.expect(news.len >= 2);
+    const second = news[1].id;
+    const count = news.len;
+    for ([_]u16{ 200, 100 }) |w| {
+        try c.app.screen.resize(w, 50);
+        try app.pressForTest(c, .escape);
+        c.app.focus = 0;
+        // Tab reaches the newswire last and wraps to the checklist.
+        for (0..4) |_| try app.pressForTest(c, .tab);
+        try std.testing.expectEqual(@as(u8, 4), c.app.focus);
+        try app.pressForTest(c, .tab);
+        try std.testing.expectEqual(@as(u8, 0), c.app.focus);
+        try app.pressForTest(c, .backtab);
+        try std.testing.expectEqual(@as(u8, 4), c.app.focus);
+        // The cursor clamps to the rows the newswire holds.
+        for (0..count + 3) |_| try app.pressForTest(c, .{ .char = 'j' });
+        try std.testing.expectEqual(count - 1, c.app.cur(4).*);
+        c.app.cur(4).* = 1;
+        try app.pressForTest(c, .enter);
+        try std.testing.expect(c.app.modal == .news_item);
+        try std.testing.expectEqual(second, c.app.modal.news_item);
+        try app.pressForTest(c, .escape);
+        try std.testing.expect(c.app.modal == .none);
+    }
 }
 
 fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {

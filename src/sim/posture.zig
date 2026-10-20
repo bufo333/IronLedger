@@ -27,6 +27,19 @@ pub fn companyPosture(gs: *GameState, company: types.ForceId) CompanyPosture {
     return .home;
 }
 
+/// The world a company stands on (ARCH §9.7; docs/p5d-conflict-world-design.md
+/// §K "Reach"): its deployment contract's world, en route (the destination)
+/// or on station; else the world it idles on; else its home HQ's world. A
+/// company returning home stands on its home HQ's world, because
+/// `contract_control` clears `location_planet` when it starts home. Null
+/// only when it has no home HQ. The one company-position rule: transfer
+/// days and news reach (`news.newsReach`) read it.
+pub fn companyWorld(gs: *GameState, company: types.ForceId) ?[]const u8 {
+    if (gs.deploymentContract(company)) |c| return c.planet_key;
+    if (gs.force(company)) |f| if (f.location_planet) |p| return p;
+    return if (gs.hqs.getPtr(gs.homeHqFor(company))) |h| h.planet_key else null;
+}
+
 /// Is the company physically at its home HQ (not deployed, not idling
 /// on a contract world, not travelling)?
 pub fn isCompanyHome(gs: *GameState, company: types.ForceId) bool {
@@ -42,22 +55,42 @@ pub fn isCompanyDeployed(gs: *GameState, company: types.ForceId) bool {
 test "company posture is one cascade: contract, then the road home, then a world, else home" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 5 });
     defer gs.deinit();
-    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const home = try founding.createCommander(&gs, "T", .LC, .line_officer);
     _ = try @import("starter_company.zig").generateInto(&gs, "Alpha");
     var co: types.ForceId = .none;
     var it = gs.forces.iterator();
     while (it.next()) |e| if (e.value_ptr.echelon == .company) {
         co = e.value_ptr.id;
     };
+    const home_world = gs.hqs.get(home).?.planet_key;
+    try std.testing.expect(!std.mem.eql(u8, home_world, "galatea") and !std.mem.eql(u8, home_world, "skye"));
     try std.testing.expect(companyPosture(&gs, co) == .home);
     try std.testing.expect(isCompanyHome(&gs, co) and !isCompanyDeployed(&gs, co));
+    try std.testing.expectEqualStrings(home_world, companyWorld(&gs, co).?);
     const f = gs.forces.getPtr(co).?;
     f.location_planet = "galatea";
     try std.testing.expect(companyPosture(&gs, co) == .idle_afield);
     try std.testing.expect(!isCompanyHome(&gs, co) and !isCompanyDeployed(&gs, co));
+    try std.testing.expectEqualStrings("galatea", companyWorld(&gs, co).?);
+    // On the road home the company has left its world (`contract_control`
+    // clears it) and stands on its home HQ's.
+    f.location_planet = null;
     f.return_eta_day = 40;
     try std.testing.expect(companyPosture(&gs, co) == .returning);
     try std.testing.expectEqual(@as(u32, 40), companyPosture(&gs, co).returning);
+    try std.testing.expectEqualStrings(home_world, companyWorld(&gs, co).?);
+    f.return_eta_day = null;
+    // A contract it runs puts it on the contract's world, en route (the
+    // destination) and on station, ahead of the world it idles on.
+    f.location_planet = "galatea";
+    const cid: types.ContractId = @enumFromInt(gs.next_contract_id);
+    gs.next_contract_id += 1;
+    try gs.contracts.put(gs.allocator(), cid, .{ .id = cid, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "skye", .terms = .{ .length_months = 6, .base_pay_month = 100_000 }, .status = .transit, .assigned_company = co });
+    try std.testing.expect(companyPosture(&gs, co) == .en_route);
+    try std.testing.expectEqualStrings("skye", companyWorld(&gs, co).?);
+    gs.contracts.getPtr(cid).?.status = .active;
+    try std.testing.expect(companyPosture(&gs, co) == .deployed);
+    try std.testing.expectEqualStrings("skye", companyWorld(&gs, co).?);
 }
 
 test "posture x sites.siteForForce: siteForForce returns company site iff !isCompanyHome" {

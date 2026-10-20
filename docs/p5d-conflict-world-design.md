@@ -799,9 +799,9 @@ presence is:
   - `en_route`: its destination contract world;
   - `returning`: its home HQ world.
 
-The position rule moves from the private `queries.companyPlanetKey` into this
-sim owner. The query then delegates to it (rules 3, 29), so one rule serves
-both.
+The position rule moves from the private `queries.companyPlanetKey` into
+`posture.companyWorld`, which the reach owner and the transfer queries both
+call (rules 3, 29), so one rule serves both.
 
 - **Threshold:** `tuning.politics.news_reach_ly = 100` (`// TUNE`,
   light-years, inclusive, measured by `planet.distanceLy`). It is declared once
@@ -875,6 +875,33 @@ the same world.
 Each is classified (rule 45) and digest-covered (rule 53). An unknown template
 or dangling ref is `CorruptSave` (rule 47). Stored news text is reloaded, not
 regenerated.
+
+**Landed in P5d.1g.** News reach and the Newswire, at schema v75 with the
+v74 → v75 migration (an empty `news_item` table and `next_news_id = 1`):
+
+- the position rule lives in `posture.companyWorld`, and the reach owner is
+  `news.newsReach(gs, planet_key)` in `sim/news.zig` (not `politics`): the
+  nearest HQ or company world within `news_reach_ly = 100` (decision D10),
+  an HQ before a company at equal distance, then the lower id, evaluated in
+  the markets phase before the day's arrivals and returns;
+- news is made for discovery, the strike and resolution of an offensive
+  conflict only; an opening stays secret (E3) and a standing need makes
+  none;
+- decision G1: the news item's `[politics]` line replaces E3's line. A
+  happening in reach logs exactly one `[politics]` line and makes one item
+  with the same sentence; one out of reach logs no `[politics]` line and
+  makes no item, still resolves, still writes its `[world]` line, and stays
+  visible through `conflicts` (E2);
+- a `NewsItem` stores `id`, `kind`, `conflict`, `reach_from`,
+  `reach_from_planet_key` and `text`; its day (the conflict's day for the
+  kind), world, template, distance and severity are derived from its
+  conflict, never stored, refining the field list above;
+- severity: a discovery and a strike are `notable`, a resolution `major`;
+  none is `routine` until 1n, so every item reaches the P5a digest through
+  its log line;
+- `queries.newsRows` serves the Desk NEWSWIRE pane (its newest
+  `newswire_rows`, Enter reads one) and REPL `news [n]`; rows carry their
+  `NewsId` and conflict id. Personage refs and personage-only items are 1n's.
 
 ## §L NPC company operations: base, upkeep, recovery and solvency (D20–D29)
 
@@ -1292,15 +1319,20 @@ whose design depends on a different choice is re-planned.
     the backer's stored force at posting (the `local_force` for an
     aggressor's position, the `strike_force` for a defender's, none for a
     standing need's); offers no longer roll their own.
+- **P5d.1g decision. John's choice (P5d.1g plan):**
+  - *G1 — `[politics]` lines out of reach.* The news item's log line
+    replaces E3's: an in-reach discovery, strike or resolution logs one
+    `[politics]` line, its news item's; an out-of-reach one logs none and
+    makes no item. The `[world]` resolution line is written at any distance.
 - **D9 — playtest gate.** The gate entry is unchecked on `main`, and no verdict
   from John is recorded on `main`. *Recommended:* check it, worded as John's
   verdict, once John confirms it. *Alternative:* leave it for separate
   reconciliation. Until John confirms, the gate stays unchecked.
-- **D10 — news reach.** *Recommended:* a fixed 100 ly from every HQ and every
-  company presence. *Alternatives:* `max(news_reach_ly, influenceLy)`; HQs
-  only.
-- **D11 — does news stop time?** *Recommended:* no; only decisions stop.
-  *Alternative:* `major` news in reach stops.
+- **D10 — news reach.** *John's choice (P5d.1g plan):* a fixed 100 ly from
+  every HQ and every company presence. *Alternatives:* `max(news_reach_ly,
+  influenceLy)`; HQs only.
+- **D11 — does news stop time?** *John's choice (P5d.1g plan):* no; only
+  decisions stop. *Alternative:* `major` news in reach stops.
 - **D12 — threat intelligence and discovery.**
   - *Recommended:* discovery = the earlier of an intelligence lag after T0
     (shortened by defender intelligence) and a last-leg detection warning. It

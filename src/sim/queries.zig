@@ -635,6 +635,11 @@ pub fn contactWarning(alloc: Alloc, gs: *GameState, id: types.ContractId) ![]con
 /// without walking the whole log every frame.
 pub const desk_log_rows: usize = 40;
 
+/// News rows the Desk's NEWSWIRE pane holds and REPL `news` prints by
+/// default: every item persists, the newest this many show
+/// (docs/p5d-conflict-world-design.md §K "News"). As many as the log pane.
+pub const newswire_rows: usize = 40; // TUNE: the Desk log's count
+
 pub const Desk = struct {
     /// The outfit's Dragoons rating in a line.
     rating_line: []const u8,
@@ -643,6 +648,8 @@ pub const Desk = struct {
     companies: []const table.Row,
     hqs: []const []const u8,
     log: []const []const u8,
+    /// The newest `newswire_rows` news items (`newsRows`), newest first.
+    news: []NewsRow,
 };
 
 fn jumpFor(kind: checklist.WarningKind) u8 {
@@ -741,6 +748,7 @@ pub fn desk(alloc: Alloc, gs: *GameState, log_rows: usize) !Desk {
         .companies = try companies.toOwnedSlice(alloc),
         .hqs = try hqs.toOwnedSlice(alloc),
         .log = try log.toOwnedSlice(alloc),
+        .news = try newsRows(alloc, gs, newswire_rows),
     };
 }
 
@@ -5995,14 +6003,6 @@ pub const crew_pick_cols: []const table.Col = &.{ .{ .name = "person" }, .{ .nam
 pub const unassign_pick_cols: []const table.Col = &.{ .{ .name = "slot" }, .{ .name = "person" } };
 pub const part_pick_cols: []const table.Col = &.{ .{ .name = "part" }, .{ .name = "name" }, .{ .name = "cost", .justify = .right }, .{ .name = "tons", .justify = .right }, .{ .name = "on hand", .justify = .right }, .{ .name = "source" } };
 
-/// The world a company stands on, as transfers reckon it: its contract
-/// world, the world it idles on, else its home HQ (the pool: the seat).
-fn companyPlanetKey(gs: *GameState, company: types.ForceId) ?[]const u8 {
-    if (gs.deploymentContract(company)) |c| return c.planet_key;
-    if (gs.force(company)) |f| if (f.location_planet) |p| return p;
-    return if (gs.hqs.getPtr(gs.homeHqFor(company))) |h| h.planet_key else null;
-}
-
 /// Where a company stands, in a few words (`posture.companyPosture`).
 pub fn companyStands(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]const u8 {
     return switch (posture.companyPosture(gs, company)) {
@@ -6014,15 +6014,15 @@ pub fn companyStands(alloc: Alloc, gs: *GameState, company: types.ForceId) ![]co
 }
 
 fn daysBetweenCompanies(gs: *GameState, from: types.ForceId, to: types.ForceId) u32 {
-    const a = planet_mod.find(companyPlanetKey(gs, from) orelse "") orelse return 0;
-    const b = planet_mod.find(companyPlanetKey(gs, to) orelse "") orelse return 0;
+    const a = planet_mod.find(posture.companyWorld(gs, from) orelse "") orelse return 0;
+    const b = planet_mod.find(posture.companyWorld(gs, to) orelse "") orelse return 0;
     if (a == b) return 0;
     return logistics_mod.daysBetween(a, b);
 }
 
 fn daysFromWorld(gs: *GameState, from_key: []const u8, to: types.ForceId) u32 {
     const a = planet_mod.find(from_key) orelse return 0;
-    const b = planet_mod.find(companyPlanetKey(gs, to) orelse "") orelse return 0;
+    const b = planet_mod.find(posture.companyWorld(gs, to) orelse "") orelse return 0;
     if (a == b) return 0;
     return logistics_mod.daysBetween(a, b);
 }
@@ -12036,4 +12036,118 @@ test "a conflict row escapes the names it shows, and a campaign with nothing pos
     gs.clock.day_index = c.discovery_day;
     gs.personages.getPtr(c.instigator).?.last_name = "{c}Red";
     try std.testing.expect(std.mem.indexOf(u8, (try conflictRowForTest(a, &gs, c.id)).?, "{{c}Red") != null);
+}
+
+// ------------------------------------------------------------------ news
+
+const news_dom = @import("../domain/news.zig");
+
+/// One `news` row: the item it shows, the conflict it tells of, and its
+/// line.
+pub const NewsRow = struct {
+    id: types.NewsId,
+    conflict: types.ConflictId,
+    text: []const u8,
+};
+
+/// The newest `limit` news items, newest first (rules 29–32;
+/// docs/p5d-conflict-world-design.md §K "News"). A row shows the day the
+/// item tells of, its severity as a mark (amber notable, red major; rule
+/// 43), its text escaped (rule 41), and how far it travelled to the world
+/// it was heard on, and whether an HQ or a company heard it there. Reach was
+/// decided when the item broke (`news.newsReach`); this only formats.
+/// `CorruptSave` when an item's conflict or a world does not resolve;
+/// allocation errors propagate.
+pub fn newsRows(alloc: Alloc, gs: *GameState, limit: usize) ![]NewsRow {
+    const items = gs.news_items.values();
+    var rows: std.ArrayListUnmanaged(NewsRow) = .empty;
+    var i = items.len;
+    while (i > 0 and rows.items.len < limit) {
+        i -= 1;
+        const n = &items[i];
+        const c = gs.conflicts.getPtr(n.conflict) orelse return error.CorruptSave;
+        const day = news_dom.day(n, c) orelse return error.CorruptSave;
+        const distance = news_dom.reachLy(n, c) orelse return error.CorruptSave;
+        const from = planet_mod.find(n.reach_from_planet_key) orelse return error.CorruptSave;
+        const mark: []const u8 = switch (news_dom.severity(n.kind)) {
+            .routine => "{d}·{/}",
+            .notable => "{a}·{/}",
+            .major => "{c}!{/}",
+        };
+        const heard: []const u8 = switch (n.reach_from) {
+            .hq => "HQ",
+            .company => "company",
+        };
+        try rows.append(alloc, .{ .id = n.id, .conflict = n.conflict, .text = try std.fmt.allocPrint(alloc, "{{d}}d{d: <4}{{/}} {s} {s}  {{d}}{d} ly from {s} ({s}){{/}}", .{
+            day,
+            mark,
+            try table.plain(alloc, n.text),
+            distance,
+            try table.plain(alloc, from.name),
+            heard,
+        }) });
+    }
+    return rows.toOwnedSlice(alloc);
+}
+
+test "news rows are the newest items first, cut at the limit, each with its id, conflict, severity mark and reach" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 75301 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    try std.testing.expectEqual(@as(usize, 0), (try newsRows(a, &gs, newswire_rows)).len);
+    gs.hqs.getPtr(gs.seat()).?.planet_key = "galatea";
+    const id = try politics.openConflictForTest(&gs, "skye", "border_grab");
+    const c = gs.conflicts.get(id).?;
+    for ([_]u32{ c.discovery_day, c.strike_day.?, c.expires_day.? }) |day| {
+        gs.clock.day_index = day;
+        gs.clock.date = .{ .year = 3025, .month = 3, .day = 15 };
+        try politics.advanceWorld(&gs);
+    }
+    try std.testing.expectEqual(@as(usize, 3), gs.news_items.count());
+    const rows = try newsRows(a, &gs, newswire_rows);
+    try std.testing.expectEqual(@as(usize, 3), rows.len);
+    for (rows, [_]u32{ 3, 2, 1 }) |r, want| {
+        try std.testing.expectEqual(want, @intFromEnum(r.id));
+        try std.testing.expectEqual(id, r.conflict);
+    }
+    const ly = planet_mod.distanceLy(planet_mod.find("skye").?, planet_mod.find("galatea").?);
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].text, "{c}!{/}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].text, try std.fmt.allocPrint(a, "d{d}", .{c.expires_day.?})) != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].text, try std.fmt.allocPrint(a, "{d} ly from Galatea (HQ)", .{ly})) != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[1].text, "{a}·{/}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[2].text, "learns of a threat to Skye") != null);
+    // The limit keeps the newest.
+    const one = try newsRows(a, &gs, 1);
+    try std.testing.expectEqual(@as(usize, 1), one.len);
+    try std.testing.expectEqual(rows[0].id, one[0].id);
+    try std.testing.expectEqual(@as(usize, 0), (try newsRows(a, &gs, 0)).len);
+    // The Desk shows the same rows.
+    const view = try desk(a, &gs, desk_log_rows);
+    try std.testing.expectEqual(rows.len, view.news.len);
+    for (rows, view.news) |r, d| try std.testing.expectEqualStrings(r.text, d.text);
+}
+
+test "a news row escapes a hostile stored text, and propagates allocation failure and a dangling conflict" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 75302 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    gs.hqs.getPtr(gs.seat()).?.planet_key = "skye";
+    const id = try politics.openConflictForTest(&gs, "skye", "border_grab");
+    gs.clock.day_index = gs.conflicts.get(id).?.discovery_day;
+    gs.clock.date = .{ .year = 3025, .month = 3, .day = 15 };
+    try politics.advanceWorld(&gs);
+    const item = &gs.news_items.values()[0];
+    item.text = "{c}Red\x1b[31m";
+    const row = (try newsRows(a, &gs, newswire_rows))[0];
+    try std.testing.expect(std.mem.indexOf(u8, row.text, "{{c}Red") != null);
+    try std.testing.expect(std.mem.indexOfScalar(u8, row.text, 0x1b) == null);
+    try std.testing.expectError(error.OutOfMemory, newsRows(std.testing.failing_allocator, &gs, newswire_rows));
+    item.conflict = @enumFromInt(gs.next_conflict_id + 1);
+    try std.testing.expectError(error.CorruptSave, newsRows(a, &gs, newswire_rows));
 }

@@ -987,6 +987,11 @@ pub const Tuning = struct {
         /// days from its opening; it stands on while a contract it backs
         /// runs (§E; decision F1).
         standing_lifetime_days: u32,
+        /// Farthest a political happening is heard, in light-years from
+        /// the nearest HQ or company presence, inclusive
+        /// (docs/p5d-conflict-world-design.md §K "Reach"; decision D10).
+        /// Separate from HQ influence rings.
+        news_reach_ly: u32,
     },
 };
 

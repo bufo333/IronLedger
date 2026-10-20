@@ -114,6 +114,10 @@ pub const PersonageId = enum(u32) { none = 0, _ };
 /// so a conflict reference cannot be passed where a personage or contract
 /// index is expected (rule 56).
 pub const ConflictId = enum(u32) { none = 0, _ };
+/// One persisted news item (docs/p5d-conflict-world-design.md §K "News");
+/// typed so a news reference cannot be passed where a conflict or event
+/// index is expected (rule 56).
+pub const NewsId = enum(u32) { none = 0, _ };
 pub const ArtilleryFormationId = enum(u32) { none = 0, _ };
 pub const ArtilleryOfferId = enum(u32) { none = 0, _ };
 
