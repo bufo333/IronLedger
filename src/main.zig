@@ -756,15 +756,10 @@ fn runRepl(session: *game.lobby.Session, io: std.Io, gpa: std.mem.Allocator, sto
                 std.debug.print("{s}\n", .{text});
             }
         } else if (std.mem.eql(u8, verb, "news")) {
-            // news [count]: a positive count, at most one argument.
-            const count: usize = if (tokens.next()) |tok| std.fmt.parseInt(usize, tok, 10) catch {
-                std.debug.print("usage: news [count]\n", .{});
+            const count = game.cli.parseNewsCount(&tokens, q.newswire_rows) catch |err| {
+                std.debug.print("{s} — usage: {s}\n", .{ game.cli.errorText(err), game.cli.usage("news").? });
                 continue;
-            } else q.newswire_rows;
-            if (count == 0 or tokens.next() != null) {
-                std.debug.print("usage: news [count]\n", .{});
-                continue;
-            }
+            };
             const rows = q.newsRows(al, gs, count) catch |err| {
                 showError(err);
                 continue;

@@ -126,6 +126,17 @@ pub fn dueEngagementForTest(gs: *GameState) !types.ContractId {
     return error.NoCompany;
 }
 
+/// Empty, unassigned companies until the campaign has `count`, for client
+/// tests that lay out a Desk with that many company rows. Unassigned, so no
+/// HQ's company cap applies.
+pub fn companiesForTest(gs: *GameState, count: usize) !void {
+    var have: usize = 0;
+    for (gs.forces.values()) |f| {
+        if (f.echelon == .company) have += 1;
+    }
+    while (have < count) : (have += 1) _ = try gs.createForce("Test Company", .company, .none);
+}
+
 /// Twelve reachable wrecks: a salvage decision long enough to scroll in the
 /// smallest supported modal.
 const many_wrecks = blk: {

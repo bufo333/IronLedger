@@ -138,6 +138,15 @@ pub fn parseEntityFilter(tokens: *std.mem.TokenIterator(u8, .scalar)) ParseError
     return filter;
 }
 
+/// Strict parser for the REPL's `news` view verb (rule 10): an optional
+/// positive count, `default_count` when absent, and nothing after it.
+pub fn parseNewsCount(tokens: *std.mem.TokenIterator(u8, .scalar), default_count: usize) ParseError!usize {
+    const count: usize = if (tokens.next()) |tok| std.fmt.parseInt(usize, tok, 10) catch return error.BadNumber else default_count;
+    if (count == 0) return error.BadNumber;
+    if (tokens.next() != null) return error.BadArguments;
+    return count;
+}
+
 pub fn num(comptime T: type, tok: ?[]const u8) ParseError!T {
     return std.fmt.parseInt(T, tok orelse return error.BadArguments, 10) catch return error.BadNumber;
 }
@@ -1054,6 +1063,7 @@ pub fn usage(verb: []const u8) ?[]const u8 {
         .{ "day", "day [n] [force]  (1-365 days; force skips the end-turn checklist)" },
         .{ "next", "next [cap]  (advance until the next stop; cap defaults to tuning.auto_advance_cap_days)" },
         .{ "manning", "manning co:N" },
+        .{ "news", "news [count]" },
         .{ "recallidle", "recallidle co:N" },
         .{ "admit", "admit <person>" },
         .{ "repay", "repay <loan#> <amount>" },
@@ -1407,6 +1417,23 @@ test "parseLogFilter: valid category accepted, unknown refused, trailing token r
     try t.expectError(error.BadSite, parse("frobnicate"));
     try t.expectError(error.BadArguments, parse("battle extra"));
     try t.expectEqual(game.state.LogCategory.finance, (try parse("finance")).category);
+}
+
+test "parseNewsCount: the default or a positive count, every other form refused" {
+    const t = std.testing;
+    const parse = struct {
+        fn f(line: []const u8) ParseError!usize {
+            var it = std.mem.tokenizeScalar(u8, line, ' ');
+            return parseNewsCount(&it, 40);
+        }
+    }.f;
+    try t.expectEqual(@as(usize, 40), try parse(""));
+    try t.expectEqual(@as(usize, 3), try parse("3"));
+    try t.expectError(error.BadNumber, parse("x"));
+    try t.expectError(error.BadNumber, parse("0"));
+    try t.expectError(error.BadNumber, parse("-1"));
+    try t.expectError(error.BadArguments, parse("3 4"));
+    try t.expectEqualStrings("news [count]", usage("news").?);
 }
 
 test "parseEntityFilter: valid treasury accepted, unknown refused, trailing token refused" {

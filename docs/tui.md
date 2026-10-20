@@ -95,7 +95,11 @@ command line   `:` prompt (opens on `:`), hints on the right
   and lays every screen out from the width and height it has: panes split
   the body by ratio, side panes drop below 120 columns (`narrow()`), the
   Desk emblem needs 160, and every table sizes its columns to content and
-  scrolls sideways when the pane is narrower. Below 80 × 24
+  scrolls sideways when the pane is narrower. On a short Desk the
+  checklist band gives up rows, down to `layout.desk_top_min_rows`, so
+  the log and the newswire keep at least one row each; when the
+  companies table still leaves too little, the newswire, then the log
+  and reports, are not drawn and Tab skips them. Below 80 × 24
   the client shows what it needs instead of fragments. There are no fixed
   tiers; a bigger terminal simply shows more rows and wider panes.
   `docs/tui-mockup.html` shows the layout at 200 × 50.

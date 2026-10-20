@@ -12,6 +12,12 @@ pub const narrow_cols: u16 = 120;
 pub const wide_cols: u16 = 150;
 /// Above this many columns the Desk shows the crest beside the checklist.
 pub const emblem_cols: u16 = 160;
+/// The fewest rows a bordered list pane is drawn in: its two borders and
+/// one row to read and select.
+pub const list_pane_min_rows: u16 = 3;
+/// The Desk's checklist and inbox band yields rows to the panes below it,
+/// never past this many.
+pub const desk_top_min_rows: u16 = 7;
 
 pub fn narrow(cols: u16) bool {
     return cols < narrow_cols;
