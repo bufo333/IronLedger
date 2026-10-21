@@ -32,6 +32,7 @@ const operations_m = @import("operations.zig");
 const operation_mod = @import("../domain/operation.zig");
 const readiness_m = @import("readiness.zig");
 const black_market = @import("black_market.zig");
+const npc_base = @import("npc_base.zig");
 const hull_instance_for_pool = @import("../domain/hull_instance.zig");
 const battle_preparation = @import("battle_preparation.zig");
 const battle_casualties = @import("battle_casualties.zig");
@@ -1509,7 +1510,7 @@ test "non artillery engagement reference preserves every gameplay field and stre
         defer gs.deinit();
         const id = try engagementFixture(&gs, real_pool);
         try resolveEngagement(&gs, gs.contracts.getPtr(id).?);
-        try std.testing.expectEqual(if (real_pool) @as(u64, 14511676169581142753) else @as(u64, 9362499418440933783), digest.nonArtilleryReferenceHash(&gs));
+        try std.testing.expectEqual(if (real_pool) @as(u64, 12360350312068517582) else @as(u64, 7047923483382500479), digest.nonArtilleryReferenceHash(&gs));
     }
 }
 
@@ -1694,7 +1695,8 @@ const Opposition = struct {
 /// `opforPool`) and, on the pool path, reserves the lost-field dispersal and
 /// draws the fielded hulls into `resolution_alloc`, all before weather.
 /// Null when the enemy forfeits: its pool is absent, empty, or every
-/// remaining hull was combat-ineffective earlier on this contract.
+/// remaining hull was combat-ineffective earlier on this contract or is
+/// still travelling to its merc company's base (`npc_base.hullFieldable`).
 fn drawOpposition(gs: *GameState, c: *const contract_mod.Contract, resolution_alloc: std.mem.Allocator) !?Opposition {
     const resolution = opforPool(gs, c);
     var draw_candidates: []const types.HullInstanceId = &.{};
@@ -1721,13 +1723,21 @@ fn drawOpposition(gs: *GameState, c: *const contract_mod.Contract, resolution_al
                 }
             }
             const excluded = excl_buf_raw[0..excl_len];
-            // Filtered candidates: pool members not in the exclusion set.
-            if (excluded.len == 0) {
+            // A hull still travelling to its merc company's base is never
+            // fielded (docs/p5d-conflict-world-design.md §L1; only merc
+            // hulls carry an arrival).
+            const day = gs.clock.day_index;
+            const en_route = for (pool.hulls.items) |hid| {
+                if (!npc_base.hullFieldable(gs, hid, day)) break true;
+            } else false;
+            // Filtered candidates: fieldable pool members not in the exclusion set.
+            if (excluded.len == 0 and !en_route) {
                 draw_candidates = pool.hulls.items;
             } else {
                 const filt_buf_raw = try gs.scratch().alloc(types.HullInstanceId, pool.hulls.items.len);
                 var filt_len: usize = 0;
                 for (pool.hulls.items) |hid| {
+                    if (!npc_base.hullFieldable(gs, hid, day)) continue;
                     var excl = false;
                     for (excluded) |eid| if (eid == hid) {
                         excl = true;
@@ -1741,7 +1751,7 @@ fn drawOpposition(gs: *GameState, c: *const contract_mod.Contract, resolution_al
                 filtered_candidates = filt_buf_raw;
                 draw_candidates = filt_buf_raw[0..filt_len];
             }
-            if (draw_candidates.len == 0) return null; // all remaining hulls combat_ineffective
+            if (draw_candidates.len == 0) return null; // every remaining hull combat_ineffective or en route
             const garrison_probe = c.kind.isGarrisonClass();
             draw_count = opfor.drawSize(draw_candidates.len, c.enemy_lances, garrison_probe);
 
@@ -5600,6 +5610,7 @@ fn seedMercPoolContract(gs: *GameState, co: types.ForceId, n: usize, terms: cont
         .unit_name = "Pool Raiders",
         .faction_key = "DC",
         .side = .enemy,
+        .home_planet_key = "luthien",
     });
     var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
     for (0..n) |_| {
@@ -5662,6 +5673,34 @@ fn expectMercRosterMirror(gs: *GameState) !void {
             try std.testing.expectEqual(@as(hull_instance_for_pool.HullOwner, .{ .merc_company = id }), gs.hull_instances.get(hid).?.owner);
         }
     }
+}
+
+test "the battle draw never fields a merc hull still travelling to its base, and a pool all en route forfeits" {
+    // docs/p5d-conflict-world-design.md §L1 "not fieldable before".
+    const testing = std.testing;
+    var gs = GameState.init(testing.allocator, .{ .seed = 4013 });
+    defer gs.deinit();
+    gs.clock.day_index = 1;
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const co = try @import("starter_company.zig").generateInto(&gs, "Alpha");
+    const c = try seedMercPoolContract(&gs, co, 4, .{ .length_months = 6, .base_pay_month = 400_000 });
+    const roster = gs.merc_company_rosters.get(@enumFromInt(1)).?.items;
+    const fieldable = roster[0];
+    const arrive_day = gs.clock.day_index + 10;
+    for (roster[1..]) |hull| try gs.merc_hull_arrivals.put(gs.allocator(), hull, arrive_day);
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+
+    // Three en route: only the hull at the base can be drawn.
+    const one = (try drawOpposition(&gs, c, arena.allocator())).?;
+    try testing.expectEqualSlices(types.HullInstanceId, &.{fieldable}, one.drawn);
+    // All four en route: the enemy forfeits.
+    try gs.merc_hull_arrivals.put(gs.allocator(), fieldable, arrive_day);
+    try testing.expect(try drawOpposition(&gs, c, arena.allocator()) == null);
+    // On their arrival day every hull can be drawn again.
+    gs.clock.day_index = arrive_day;
+    const all = (try drawOpposition(&gs, c, arena.allocator())).?;
+    try testing.expect(all.drawn.len > 1);
 }
 
 test "a held field with no salvage claim strikes the merc company's destroyed hulls off" {

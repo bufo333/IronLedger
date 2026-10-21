@@ -1,13 +1,14 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 75, the current store and campaign format. Schema
--- 71 is the oldest supported format: a v71, v72, v73 or v74 store reaches 75
--- on open through each migration in turn, all in one transaction
+-- Matches schema_version 76, the current store and campaign format. Schema
+-- 71 is the oldest supported format: a v71, v72, v73, v74 or v75 store
+-- reaches 76 on open through each migration in turn, all in one transaction
 -- (Store.migrate: v71 → v72 rebuilds `personage`, v72 → v73 adds
 -- `conflict`, v73 → v74 rebuilds `conflict` and `contract`, v74 → v75 adds
--- `news_item`; see each below). Older and newer formats are refused before
--- persistent mutation under docs/engineering-contract.md rule 51; only empty
--- stores initialize schema 75.
+-- `news_item`, v75 → v76 rebuilds `merc_company` and adds
+-- `merc_hull_arrival`; see each below). Older and newer formats are refused
+-- before persistent mutation under docs/engineering-contract.md rule 51; only
+-- empty stores initialize schema 76.
 -- The executable DDL and dormant historical migration declarations live in
 -- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.
@@ -1325,7 +1326,16 @@ CREATE INDEX IF NOT EXISTS ix_faction_roster_cid ON faction_roster(cid);
 
 -- merc_company: world mercenary company entities (P3e entity split, §8).
 -- Identity record for an independent merc outfit operating in the same theatre as the player.
--- No producer until P3e.5; collection is empty until then.
+-- Seeded at campaign creation and founded as replacements.
+-- npc_base.validate also refuses a base that is no world or not of the
+-- company's faction, and a ready_day before founded_day.
+--
+-- Migration v75 → v76: v75 has no home_planet_key or ready_day. The table is
+-- rebuilt create–copy–drop–rename in stored order (merc_company_roster's
+-- foreign key names the rebuilt table); each company's home_planet_key is
+-- npc_base.compatibilityBase of its faction (its capital, but Star's End for
+-- PER, whose capital Galatea is an LC world), its ready_day its founded_day;
+-- a faction_key with no compatibility base is CorruptStore.
 CREATE TABLE merc_company (
     cid              INTEGER NOT NULL,
     ord              INTEGER NOT NULL,                  -- stable insertion order for deterministic digest
@@ -1343,10 +1353,32 @@ CREATE TABLE merc_company (
     logo_key         TEXT    NOT NULL DEFAULT '',       -- logo basename; '' legacy
     band_key         TEXT    NOT NULL,                  -- -> data/tables/merc_bands.zon; unknown = CorruptSave (v68)
     understrength_since INTEGER CHECK (understrength_since IS NULL OR (typeof(understrength_since)='integer' AND understrength_since BETWEEN 0 AND 4294967295)), -- day_index first found below its band's line; NULL = at its line; > campaign.day = CorruptSave (v69)
+    home_planet_key  TEXT    NOT NULL CHECK (typeof(home_planet_key)='text' AND length(home_planet_key) > 0), -- -> planets catalog: the base, a world of its faction (v76)
+    ready_day        INTEGER NOT NULL CHECK (typeof(ready_day)='integer' AND ready_day BETWEEN 0 AND 4294967295), -- day_index it can first muster; >= founded_day (v76)
     PRIMARY KEY (cid, id),
     FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED
 );
 CREATE INDEX IF NOT EXISTS ix_merc_company_cid ON merc_company(cid);
+
+-- merc_hull_arrival: merc hulls bought off their company's base world and
+-- still travelling there (docs/p5d-conflict-world-design.md §L1; v76), in
+-- insertion order. The company owns each but cannot field it before
+-- arrive_day. npc_base.validate also refuses a hull no active merc company
+-- owns and holds on its roster.
+--
+-- Migration v75 → v76: a v75 purchase was fieldable at once, so the table is
+-- created empty.
+CREATE TABLE merc_hull_arrival (
+    cid              INTEGER NOT NULL,
+    ord              INTEGER NOT NULL CHECK (typeof(ord)='integer' AND ord >= 0), -- insertion order
+    hull_instance_id INTEGER NOT NULL CHECK (typeof(hull_instance_id)='integer' AND hull_instance_id BETWEEN 1 AND 4294967295), -- -> hull_instance.id
+    arrive_day       INTEGER NOT NULL CHECK (typeof(arrive_day)='integer' AND arrive_day BETWEEN 0 AND 4294967295), -- day_index it reaches the base
+    PRIMARY KEY (cid, hull_instance_id),
+    UNIQUE (cid, ord),
+    FOREIGN KEY (cid) REFERENCES campaign(id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (cid, hull_instance_id) REFERENCES hull_instance(cid, id) DEFERRABLE INITIALLY DEFERRED
+);
+CREATE INDEX IF NOT EXISTS ix_merc_hull_arrival_cid ON merc_hull_arrival(cid);
 
 -- merc_company_roster: living merc-company hull pools (P3e entity split; replaces rival_roster).
 -- One row per owned hull per merc company. Same ord/order semantics as faction_roster.

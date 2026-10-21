@@ -800,10 +800,14 @@ and the TUI:
 - `hqList`, `hqDetailView`, `hqCompanies`, `hqLinks` and `hqRoster`
 - `lab(unit)` (from `meklab.validate` + `state.labItems`)
 - `people(filter)` and `personRecord(id)`
-- `leaderboard` (all NPC merc companies sorted by C-bills; each row carries
-  a `LeaderboardRow.id` the Desk Reports hub uses to open the detail sheet)
-- `mercCompanyDetail(id)` (read-only lines: identity, lifecycle, treasury,
-  fieldable BV, hull roster, linked rival standing)
+- `leaderboard` (all NPC merc companies sorted by C-bills, with a `base`
+  column after the company naming its base world, owned hulls and fieldable
+  BV; each row carries a `LeaderboardRow.id` the Desk Reports hub uses to
+  open the detail sheet)
+- `mercCompanyDetail(id)` (read-only lines: identity, base, location and
+  ready day — "ready" or its date — lifecycle, treasury, fieldable BV, hull
+  roster with each hull still travelling to the base tagged `(en route,
+  arrives …)`, linked rival standing)
 - `artilleryFormationRows` (typed `ArtilleryFormationRow` list: `.id`, `.text`
   with quality, hull id, placement, crew and readiness, `.hull`, the
   `.placement` tag and the attached `.company`; used by the Forces artillery

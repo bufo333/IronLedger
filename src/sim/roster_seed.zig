@@ -20,6 +20,7 @@ const roster_gen = @import("../gen/roster_gen.zig");
 const logo = @import("../domain/logo.zig");
 const merc_lifecycle = @import("merc_lifecycle.zig");
 const merc_identity = @import("merc_identity.zig");
+const npc_base = @import("npc_base.zig");
 const GameState = @import("state.zig").GameState;
 
 /// Maximum entries in faction.table; used for fixed stack arrays.
@@ -175,8 +176,11 @@ pub fn seedFactionRosters(gs: *GameState) !void {
 /// (.rosters stream). Within a company, identity/logo/band draws precede all
 /// pool draws, so the stream-consumption order is fixed for any given seed:
 /// company 0 identity, company 0 logo, company 0 band, company 0 pool hull
-/// 0..N-1, company 1 identity, … The eligible logo pool is the sorted catalog
-/// minus gs.player_logo_key (if any).
+/// 0..N-1, company 1 identity, … After every company, a second pass draws
+/// each company's base in company-id order (`npc_base.drawBase`, .rivals;
+/// docs/p5d-conflict-world-design.md §L1), so identities, bands and pools do
+/// not depend on it. Every seeded company's `ready_day` is 0. The eligible
+/// logo pool is the sorted catalog minus gs.player_logo_key (if any).
 /// Each unit_name is `merc_identity.unitName` over the names seeded before it,
 /// so seeded names are distinct (ignoring ASCII case) without an extra draw.
 /// This order is documented here so any change to it requires a deliberate
@@ -312,6 +316,13 @@ pub fn seedMercCompanies(gs: *GameState) !void {
         }
     }
 
+    // Bases (.rivals), in company-id order, after every company's identity,
+    // logo, band and pool draws (docs/p5d-conflict-world-design.md §L1).
+    for (built_companies[0..count]) |*mc| {
+        const base = npc_base.drawBase(&rng_copy, mc.faction_key) orelse return error.CorruptSave;
+        mc.home_planet_key = base.key; // static catalog memory
+    }
+
     // ---- Reserve ----
     // All gs.* capacity reservations happen here, before any gs.* count changes.
     // A failure here leaves gs.merc_companies, gs.merc_company_rosters,
@@ -365,6 +376,7 @@ pub fn seedMercCompanies(gs: *GameState) !void {
 // ---- Tests ----
 
 const digest = @import("digest.zig");
+const planet_mod = @import("../domain/planet.zig");
 
 test "seedFactionRosters: each manufacturing faction gets the expected roster size" {
     var gs = GameState.init(std.testing.allocator, .{ .seed = 7001 });
@@ -609,6 +621,44 @@ test "seedMercCompanies: each band seeds its companies, line and capital, and th
         if (raw > max_hid) max_hid = raw;
     }
     try std.testing.expect(gs.next_hull_instance_id > max_hid);
+}
+
+test "seedMercCompanies bases every company on a world of its own faction, Periphery included, fixed by the seed" {
+    // docs/p5d-conflict-world-design.md §L1, decision M3. The base pass runs
+    // after every identity, band and pool draw, so seeded names stay as the
+    // seed gave them (the seed-26 names pinned in store.zig's tests).
+    const Bases = [12][]const u8;
+    const S = struct {
+        fn seeded(seed: u64, periphery: *bool) !Bases {
+            var gs = GameState.init(std.testing.allocator, .{ .seed = seed });
+            defer gs.deinit();
+            _ = try @import("founding.zig").createCommander(&gs, "T", .LC, .line_officer);
+            gs.clock.date.year = 3025;
+            try seedMercCompanies(&gs);
+            var out: Bases = undefined;
+            for (gs.merc_companies.values(), &out) |company, *key| {
+                const world = planet_mod.find(company.home_planet_key) orelse return error.TestUnexpectedResult;
+                try std.testing.expectEqualStrings(company.faction_key, world.faction);
+                try std.testing.expectEqual(@as(u32, 0), company.ready_day);
+                if (std.mem.eql(u8, company.faction_key, "PER")) periphery.* = true;
+                key.* = world.key; // static catalog memory
+            }
+            return out;
+        }
+    };
+    var periphery = false;
+    const first = try S.seeded(7020, &periphery);
+    const again = try S.seeded(7020, &periphery);
+    for (first, again) |a, b| try std.testing.expectEqualStrings(a, b);
+    const other = try S.seeded(7021, &periphery);
+    const differs = for (first, other) |a, b| {
+        if (!std.mem.eql(u8, a, b)) break true;
+    } else false;
+    try std.testing.expect(differs);
+    // Some seed founds a Periphery company; it too is based on a Periphery world.
+    var seed: u64 = 7022;
+    while (!periphery and seed < 7100) : (seed += 1) _ = try S.seeded(seed, &periphery);
+    try std.testing.expect(periphery);
 }
 
 test "seedMercCompanies logs one founding line per company in company-id order" {

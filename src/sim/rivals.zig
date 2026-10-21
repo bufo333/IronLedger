@@ -19,6 +19,7 @@ const chassis_mod = @import("../domain/chassis.zig");
 const force = @import("../domain/force.zig");
 const unit = @import("../domain/unit.zig");
 const tuning = @import("../domain/tuning.zig").t;
+const npc_base = @import("npc_base.zig");
 
 /// Generate rival names and identity using the `.rivals` RNG stream (rule 57).
 /// Deterministic per seed; drawing does not perturb `.actors`, `.battle`, or `.generation`.
@@ -81,8 +82,10 @@ pub fn statusFor(standing: i16) rival_mod.RivalStatus {
     return .active;
 }
 
-/// Single named owner: sum of chassis BV over all `.active` hulls in a
-/// merc company's pool (docs/p3c-economy-design.md §4, §8.G; rule 20/24).
+/// Single named owner: sum of chassis BV over the `.active` hulls in a
+/// merc company's pool that it can field today (`npc_base.hullFieldable`:
+/// none still travelling to its base) (docs/p3c-economy-design.md §4, §8.G;
+/// docs/p5d-conflict-world-design.md §L1; rule 20/24).
 /// Returns 0 when the id has no roster entry (no campaign company).
 /// Pure, no allocation, no I/O.
 pub fn mercCompanyFieldableBv(gs: *GameState, id: types.MercCompanyId) i64 {
@@ -91,6 +94,7 @@ pub fn mercCompanyFieldableBv(gs: *GameState, id: types.MercCompanyId) i64 {
     for (roster.items) |hid| {
         const inst = gs.hull_instances.getPtr(hid) orelse continue;
         if (inst.status != .active) continue;
+        if (!npc_base.hullFieldable(gs, hid, gs.clock.day_index)) continue;
         const ch = chassis_mod.find(inst.base_key) orelse continue;
         total += @as(i64, ch.bv);
     }
@@ -109,17 +113,17 @@ pub fn mercCompanyInsolvent(gs: *GameState, id: types.MercCompanyId) bool {
 
 /// Single owner of "may this merc company be a contract OpFor" (rule 20).
 /// Eligible iff active (dissolved_day == 0), solvent (!mercCompanyInsolvent),
-/// and its active meks reach its band's `merc_band.lineTarget`
-/// (docs/p5d-conflict-world-design.md §L8, D23). Vehicles and aerospace hulls
-/// contribute BV but never satisfy mek readiness. A company with no roster
-/// entry, or whose `band_key` names no band, is under strength → ineligible
-/// (rule 1).
+/// and the active meks it can field today (`mercCompanyFieldableCounts`)
+/// reach its band's `merc_band.lineTarget` (docs/p5d-conflict-world-design.md
+/// §L1, §L8, D23). Vehicles and aerospace hulls contribute BV but never
+/// satisfy mek readiness. A company with no roster entry, or whose
+/// `band_key` names no band, is under strength → ineligible (rule 1).
 pub fn mercCompanyEligibleAsOpFor(gs: *GameState, id: types.MercCompanyId) bool {
     const mc = gs.merc_companies.getPtr(id) orelse return false;
     if (mc.dissolved_day != 0) return false;
     if (mercCompanyInsolvent(gs, id)) return false;
     const band = merc_band.find(mc.band_key) orelse return false;
-    return !mercCompanyUnderstrength(band, mercCompanyHullCounts(gs, id));
+    return !mercCompanyUnderstrength(band, mercCompanyFieldableCounts(gs, id));
 }
 
 /// Single owner of "is a merc company of `band` with `counts` below its line"
@@ -163,15 +167,31 @@ pub const MercHullCounts = struct {
     }
 };
 
-/// Count the `.active` hulls in a merc company's roster by chassis kind.
-/// Other kinds and unknown chassis are not counted; an id with no roster
-/// entry counts zero. Pure.
+/// Count the `.active` hulls a merc company owns, by chassis kind, those
+/// still travelling to its base included: the procurement need, the
+/// understrength record and the dissolution runway read owned strength, so
+/// a hull in transit fills its slot and is not bought twice. Other kinds and
+/// unknown chassis are not counted; an id with no roster entry counts zero.
+/// Pure.
 pub fn mercCompanyHullCounts(gs: *const GameState, id: types.MercCompanyId) MercHullCounts {
+    return countHulls(gs, id, false);
+}
+
+/// Count the `.active` hulls a merc company can field today, by chassis
+/// kind: `mercCompanyHullCounts` less the hulls still travelling to its base
+/// (`npc_base.hullFieldable`; docs/p5d-conflict-world-design.md §L1 "not
+/// fieldable before"). OpFor readiness reads it. Pure.
+pub fn mercCompanyFieldableCounts(gs: *const GameState, id: types.MercCompanyId) MercHullCounts {
+    return countHulls(gs, id, true);
+}
+
+fn countHulls(gs: *const GameState, id: types.MercCompanyId, fieldable_only: bool) MercHullCounts {
     const roster = gs.merc_company_rosters.get(id) orelse return .{};
     var counts: MercHullCounts = .{};
     for (roster.items) |hid| {
         const inst = gs.hull_instances.get(hid) orelse continue;
         if (inst.status != .active) continue;
+        if (fieldable_only and !npc_base.hullFieldable(gs, hid, gs.clock.day_index)) continue;
         const chassis = chassis_mod.find(inst.base_key) orelse continue;
         counts.add(chassis.kind);
     }

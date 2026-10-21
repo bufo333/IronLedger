@@ -305,6 +305,17 @@ lower tiers stand in vehicles where they are short of meks. A company is not
 ready to take the field against you until its four lances are all meks. New
 companies that replace a folded one start at the bottom tier.
 
+Every rival company has a home world in its own house's space (a Periphery
+outfit's is a Periphery world), shown on the Merc companies report beside its
+name. It buys only within 60 light-years of that home: boards, contract
+worlds and black-market worlds further out are beyond its reach. A house's
+factory surplus is the exception: any company can order it, and it is shipped
+from the house capital, so a company far from that capital waits the travel
+time before the hull reaches it. A hull still in transit is the company's,
+but it cannot fight until it arrives: it does not count toward the four lances
+a company needs to take the field against you, nor toward its strength in
+battle.
+
 ## The Lab: construction editor (P3d)
 
 The **Lab screen** (F8) shows the selected hull's per-location critical-slot

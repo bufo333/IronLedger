@@ -510,6 +510,7 @@
         .merc_company_air_reserve_lances = 1, // TUNE — docs/p2-conventional-combat-design.md §NPC Policy
         .merc_company_insolvency_bv = 2000, // TUNE — below ~a light lance; verify against chassis.zon BV range
         .npc_understrength_runway_months = 12, // TUNE — docs/p5d-conflict-world-design.md §L7, the owner-approved 12-month runway
+        .npc_market_reach_ly = 60, // TUNE — docs/p5d-conflict-world-design.md §L1, D21; light-years, inclusive; two standard jumps
         .pirate_pool_hulls = 16, // TUNE — docs/p3c-economy-design.md §8.C
         .pirate_replenishment_hulls_per_year = 2, // TUNE — docs/p3f-faction-loop-design.md §2.6
     },

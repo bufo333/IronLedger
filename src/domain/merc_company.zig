@@ -49,6 +49,15 @@ pub const MercCompany = struct {
     /// pass: the granularity is one month. Never later than the campaign day
     /// (docs/p5d-conflict-world-design.md §L7, §J).
     understrength_since: ?u32 = null,
+    /// Key of the company's base world in data/planets.zon, held in static
+    /// catalog memory: a world of the company's own faction, set at seed and
+    /// founding (`npc_base.drawBase`). Never empty on a loaded company
+    /// (`npc_base.validate`; docs/p5d-conflict-world-design.md §A, §L1).
+    home_planet_key: []const u8 = "",
+    /// First campaign day the company can muster: 0 for a seeded company, its
+    /// founding day for a replacement; never before `founded_day`
+    /// (docs/p5d-conflict-world-design.md §A "ready_day").
+    ready_day: u32 = 0,
 };
 
 test "MercCompany defaults" {
@@ -64,4 +73,6 @@ test "MercCompany defaults" {
     try std.testing.expectEqualStrings("", mc.logo_key);
     try std.testing.expectEqualStrings("", mc.band_key);
     try std.testing.expectEqual(@as(?u32, null), mc.understrength_since);
+    try std.testing.expectEqualStrings("", mc.home_planet_key);
+    try std.testing.expectEqual(@as(u32, 0), mc.ready_day);
 }

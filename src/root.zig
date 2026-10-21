@@ -100,6 +100,7 @@ pub const table = @import("sim/table.zig");
 pub const black_market = @import("sim/black_market.zig");
 pub const merc_lifecycle = @import("sim/merc_lifecycle.zig");
 pub const merc_identity = @import("sim/merc_identity.zig");
+pub const npc_base = @import("sim/npc_base.zig");
 pub const personages = @import("sim/personages.zig");
 pub const personage_relations = @import("sim/personage_relations.zig");
 pub const politics = @import("sim/politics.zig");

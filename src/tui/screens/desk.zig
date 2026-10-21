@@ -456,6 +456,39 @@ test "the reports pane opens the selected report under the cursor" {
     try std.testing.expect(c.app.modal == .leaderboard);
 }
 
+test "the merc companies leaderboard shows a base column, and its detail sheet the base and ready day, at full size and at 80x24" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    const S = struct {
+        /// Whether any screen row shows `needle`.
+        fn shows(cl: *app.ClientForTest, needle: []const u8) !bool {
+            const al = cl.app.a();
+            for (0..cl.app.screen.rows) |y| {
+                var row: std.ArrayListUnmanaged(u8) = .empty;
+                var buf: [4]u8 = undefined;
+                for (0..cl.app.screen.cols) |x| try row.appendSlice(al, buf[0..try std.unicode.utf8Encode(cl.app.screen.get(@intCast(x), @intCast(y)).ch, &buf)]);
+                if (std.mem.indexOf(u8, row.items, needle) != null) return true;
+            }
+            return false;
+        }
+    };
+    for ([_][2]u16{ .{ 200, 50 }, .{ 80, 24 } }) |size| {
+        try c.app.screen.resize(size[0], size[1]);
+        try toTab(c, .desk);
+        c.app.modal = .none;
+        c.app.focus = 3;
+        c.app.cur(3).* = 3;
+        try app.pressForTest(c, .enter);
+        try std.testing.expect(c.app.modal == .leaderboard);
+        try std.testing.expect(try S.shows(c, " base "));
+        try app.pressForTest(c, .enter);
+        try std.testing.expect(c.app.modal == .leaderboard_detail);
+        try std.testing.expect(try S.shows(c, "base        "));
+        try std.testing.expect(try S.shows(c, "ready       "));
+        try app.pressForTest(c, .escape);
+    }
+}
+
 test "Enter on a checklist warning goes where the warning says; e opens the emblem picker" {
     const c = try app.clientForTest(std.testing.allocator);
     defer app.deinitForTest(c, std.testing.allocator);

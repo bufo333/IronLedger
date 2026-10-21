@@ -134,9 +134,13 @@ A package has one primary invariant or subsystem outcome.
   item for each discovery, strike and resolution heard, whose `[politics]`
   line replaces the galaxy-wide one; the Desk NEWSWIRE pane and REPL `news`;
   news never stops time; schema v75 with a chained v71–v74 → v75 migration.
-- [ ] P5d.1h NPC operating base and location: every NPC company has a base and
-  current world and a flat ready day; purchases limited to base market reach;
-  shown in the company list; no movement yet. Needs P5d.2, P5d.3 and P5d.4b.
+- [x] P5d.1h NPC operating base and location: every NPC company has a base
+  world of its own faction (`npc_base`, drawn on `.rivals`), a derived current
+  world and a ready day; its buys and black-market draws take only listings
+  within 60 ly of its base, faction surplus and liquidations from anywhere as
+  wholesale from the seller's capital; a hull bought off the base world cannot
+  fight before it arrives; the base on the Merc companies report; no movement
+  yet; schema v76 with a chained v71–v75 → v76 migration.
 - [ ] P5d.4d NPC hull condition and base repair: a persisted condition per NPC
   hull written by battle and lost-field recovery; repair at base priced by the
   player's maintenance owners; fieldable BV and readiness read condition.

@@ -390,6 +390,19 @@ send("\r", 0.8)
 if "no news within reach" not in desk:
     assert "NEWS ITEM" in plain()[-30000:], plain()[-3000:]
 send("\x1b", 0.6)
+# The Desk's REPORTS pane opens the merc companies leaderboard, which names
+# each company's base; Enter reads a company's base, location and ready day
+# (docs/p5d-conflict-world-design.md §L1). Esc closes the sheet, then the board.
+mark = len(out)
+send("1"); send("\t", 0.3); send("\t", 0.3); send("\t", 0.6)
+send("j", 0.2); send("j", 0.2); send("j", 0.4); send("\r", 1.0)
+board = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "replace")
+assert "MERC COMPANIES" in board and re.search(r"\bbase\b", board), board[-3000:]
+mark = len(out)
+send("\r", 1.0)
+sheet = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "replace")
+assert "MERC COMPANY" in sheet and re.search(r"base +\S", sheet) and re.search(r"ready +\S", sheet), sheet[-3000:]
+send("\x1b", 0.6); send("\x1b", 0.6)
 send("e", 1.5)                 # emblem picker on the Desk
 p = plain()
 assert "EMBLEM ·" in p and "preset   Wolf's Head" in p, p[-2000:]

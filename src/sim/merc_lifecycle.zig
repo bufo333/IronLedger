@@ -25,13 +25,16 @@ const merc_band = @import("../domain/merc_band.zig");
 const logo = @import("../domain/logo.zig");
 const merc_identity = @import("merc_identity.zig");
 const logo_name = @import("../gen/logo_name.zig");
+const planet = @import("../domain/planet.zig");
+const npc_base = @import("npc_base.zig");
 const state_mod = @import("state.zig");
 const GameState = state_mod.GameState;
 
 /// Single owner of merc-company liquidation (rule 20/76).
 /// Deterministic, no RNG. Transfers every hull in the company's roster to
 /// `.market` ownership and appends a regular (non-black-market) listing at
-/// factory-fresh pricing. Sets `dissolved_day` to `day` and logs the
+/// factory-fresh pricing, and drops the arrival of each listed hull still
+/// travelling to the base. Sets `dissolved_day` to `day` and logs the
 /// dissolution with its `dissolutionCause`, or `liquidated` when that rule
 /// does not hold.
 ///
@@ -67,8 +70,11 @@ pub fn liquidateMercCompany(
 /// and the monthly `runMercLifecycle` tick.
 ///
 /// The selector maintains a mek target, temporary vehicle line substitutions,
-/// and a bounded aerospace reserve from eligible market listings. It returns
-/// without a draw when no affordable candidate can fill the next slot.
+/// and a bounded aerospace reserve from eligible market listings its base
+/// reaches (`npc_base.listingReachable`). It returns without a draw when no
+/// affordable, reachable candidate can fill the next slot. A hull bought off
+/// the base world is recorded in `GameState.merc_hull_arrivals` until it
+/// arrives.
 ///
 /// Does NOT write `gs.rng` — the caller commits the rng copy.
 /// Failure-atomic (rules 7, 11-13).
@@ -87,14 +93,7 @@ pub fn buyHullsForCompany(
     try listings.ensureTotalCapacity(scratch, gs.market_listings.items.len);
     for (gs.market_listings.items) |listing| listings.appendAssumeCapacity(.{ .listing = listing });
 
-    var planned_company = PlannedCompany{
-        .id = company_id,
-        .band = try rivals.mercCompanyBand(company),
-        .cbills = company.cbills,
-        .counts = rivals.mercCompanyHullCounts(gs, company_id),
-        .dissolved_day = company.dissolved_day,
-        .logo_key = company.logo_key,
-    };
+    var planned_company = try plannedCompany(gs, company_id, company);
     var rng_copy = rng.*;
     var next_hull_instance_id = gs.next_hull_instance_id;
     const buy = try planBuy(scratch, gs, &listings, &planned_company, day, &rng_copy, &next_hull_instance_id);
@@ -114,8 +113,10 @@ pub fn buyHullsForCompany(
 }
 
 /// Single owner of replacement merc company spawn (rule 20/76).
-/// Draws the next archetype and hiring faction in the same order as
-/// `seedMercCompanies`. Its logo is `merc_identity.firstUnusedLogo`: the first
+/// Draws the next archetype, hiring faction and identity in the same order
+/// as `seedMercCompanies`, then its base (`npc_base.drawBase`, on `.rivals`)
+/// before its founding buy, which reaches from that base; its `ready_day`
+/// is `day`. Its logo is `merc_identity.firstUnusedLogo`: the first
 /// catalog key no company, active or dissolved, has ever held and never the
 /// player's reserved `player_logo_key`, or `""` once the catalog is used up.
 /// Its name is `merc_identity.unitName`, distinct from every company's name.
@@ -145,14 +146,7 @@ pub fn spawnReplacementCompany(
     var companies = std.ArrayListUnmanaged(PlannedCompany).empty;
     try companies.ensureTotalCapacity(scratch, gs.merc_companies.count() + 1);
     for (gs.merc_companies.keys(), gs.merc_companies.values()) |id, company| {
-        companies.appendAssumeCapacity(.{
-            .id = id,
-            .band = try rivals.mercCompanyBand(company),
-            .cbills = company.cbills,
-            .counts = rivals.mercCompanyHullCounts(gs, id),
-            .dissolved_day = company.dissolved_day,
-            .logo_key = company.logo_key,
-        });
+        companies.appendAssumeCapacity(try plannedCompany(gs, id, company));
     }
 
     var rng_copy = rng.*;
@@ -181,11 +175,27 @@ const PlannedListing = struct {
 const PlannedCompany = struct {
     id: types.MercCompanyId,
     band: *const merc_band.Band,
+    /// The company's base world (`npc_base.companyBase`).
+    base: *const planet.Planet,
     cbills: types.CBills,
     counts: rivals.MercHullCounts,
     dissolved_day: u32,
     logo_key: []const u8,
 };
+
+/// A stored company's planning record. `CorruptSave` for an unknown band or
+/// base (rule 1).
+fn plannedCompany(gs: *const GameState, id: types.MercCompanyId, company: merc_company_mod.MercCompany) error{CorruptSave}!PlannedCompany {
+    return .{
+        .id = id,
+        .band = try rivals.mercCompanyBand(company),
+        .base = try npc_base.companyBase(company),
+        .cbills = company.cbills,
+        .counts = rivals.mercCompanyHullCounts(gs, id),
+        .dissolved_day = company.dissolved_day,
+        .logo_key = company.logo_key,
+    };
+}
 
 const PurchaseAcquisition = union(enum) { transfer: types.HullInstanceId, mint: types.HullInstanceId };
 
@@ -194,6 +204,9 @@ const Purchase = struct {
     listing_id: types.ListingId,
     price: types.CBills,
     acquisition: PurchaseAcquisition,
+    /// The day the hull reaches the buyer's base (`npc_base.deliveryArrival`);
+    /// null when it is bought on the base world and fieldable at once.
+    arrive_day: ?u32,
 };
 
 const BuyPlan = struct {
@@ -214,6 +227,7 @@ const LifecycleStage = struct {
     market_listings: std.ArrayListUnmanaged(market.Listing),
     hull_ownership_history: std.ArrayListUnmanaged(hull_instance_mod.HullOwnershipHistory),
     hull_instances: std.AutoArrayHashMapUnmanaged(types.HullInstanceId, hull_instance_mod.HullInstance),
+    merc_hull_arrivals: std.AutoArrayHashMapUnmanaged(types.HullInstanceId, u32),
     next_listing_id: u32,
     next_merc_company_id: u32,
     next_hull_instance_id: u32,
@@ -326,8 +340,11 @@ fn prepareLifecycleLog(gs: *GameState, alloc: std.mem.Allocator, actions: []cons
 /// It stages the complete initial-company pass in reclaimable scratch memory,
 /// then reserves persistent storage and commits every action, an
 /// understrength record alone included, with the staged RNG state and its
-/// campaign-log lines. Company iteration and draw order match the monthly
-/// lifecycle rule; replacements are not processed until the next pass.
+/// campaign-log lines. The commit also drops every hull arrival whose day
+/// has come (`npc_base.hullFieldable`), so a pass with nothing else to do
+/// still commits when one is due. Company iteration and draw order match the
+/// monthly lifecycle rule; replacements are not processed until the next
+/// pass.
 pub fn runMercLifecycle(gs: *GameState) !void {
     var scratch_arena = std.heap.ArenaAllocator.init(gs.scratch());
     defer scratch_arena.deinit();
@@ -342,14 +359,7 @@ pub fn runMercLifecycle(gs: *GameState) !void {
     var companies = std.ArrayListUnmanaged(PlannedCompany).empty;
     try companies.ensureTotalCapacity(scratch, gs.merc_companies.count());
     for (gs.merc_companies.keys(), gs.merc_companies.values()) |id, mc| {
-        companies.appendAssumeCapacity(.{
-            .id = id,
-            .band = try rivals.mercCompanyBand(mc),
-            .cbills = mc.cbills,
-            .counts = rivals.mercCompanyHullCounts(gs, id),
-            .dissolved_day = mc.dissolved_day,
-            .logo_key = mc.logo_key,
-        });
+        companies.appendAssumeCapacity(try plannedCompany(gs, id, mc));
     }
 
     var actions = std.ArrayListUnmanaged(LifecycleAction).empty;
@@ -392,7 +402,7 @@ pub fn runMercLifecycle(gs: *GameState) !void {
         }
     }
 
-    if (actions.items.len == 0) return;
+    if (actions.items.len == 0 and !arrivalsDue(gs, day)) return;
 
     const transaction_arena = try gs.lifecycleArena();
     errdefer gs.discardLifecycleArena(transaction_arena);
@@ -444,7 +454,7 @@ fn planLiquidation(scratch: std.mem.Allocator, gs: *const GameState, company_id:
     return result;
 }
 
-fn planReplacement(scratch: std.mem.Allocator, gs: *const GameState, companies: *std.ArrayListUnmanaged(PlannedCompany), listings: *std.ArrayListUnmanaged(PlannedListing), day: u32, rng: *rng_mod.Rng, next_company_id: *u32, next_hull_instance_id: *u32) !ReplacementPlan {
+fn planReplacement(scratch: std.mem.Allocator, gs: *GameState, companies: *std.ArrayListUnmanaged(PlannedCompany), listings: *std.ArrayListUnmanaged(PlannedListing), day: u32, rng: *rng_mod.Rng, next_company_id: *u32, next_hull_instance_id: *u32) !ReplacementPlan {
     var hiring_faction_idx: [32]usize = undefined;
     var num_hiring: usize = 0;
     for (faction_mod.table, 0..) |*f, i| if (f.hires) {
@@ -456,6 +466,8 @@ fn planReplacement(scratch: std.mem.Allocator, gs: *const GameState, companies: 
     const archetype = &rival_mod.table.archetypes[rng.random(.rivals).uintLessThan(usize, rival_mod.table.archetypes.len)];
     const faction = &faction_mod.table[hiring_faction_idx[rng.random(.rivals).uintLessThan(usize, num_hiring)]];
     const identity = roster_gen.rollMercCompanyIdentity(rng, .rivals, archetype, faction.key);
+    // The founding buy reaches from the base, so the base is drawn first.
+    const base = npc_base.drawBase(rng, faction.key) orelse return error.CorruptSave;
     // `companies` holds every company, dissolved ones and this pass's earlier
     // replacements included, so no key is ever handed out twice.
     const held = try scratch.alloc([]const u8, companies.items.len);
@@ -465,13 +477,13 @@ fn planReplacement(scratch: std.mem.Allocator, gs: *const GameState, companies: 
     const id: types.MercCompanyId = @enumFromInt(next_company_id.*);
     next_company_id.* += 1;
     const band = merc_band.replacementBand();
-    var company = PlannedCompany{ .id = id, .band = band, .cbills = band.capital_cbills, .counts = .{}, .dissolved_day = 0, .logo_key = logo_key };
+    var company = PlannedCompany{ .id = id, .band = band, .base = base, .cbills = band.capital_cbills, .counts = .{}, .dissolved_day = 0, .logo_key = logo_key };
     try companies.append(scratch, company);
     const buy = try planBuy(scratch, gs, listings, &company, day, rng, next_hull_instance_id);
     companies.items[companies.items.len - 1].counts = company.counts;
     companies.items[companies.items.len - 1].cbills = company.cbills;
     return .{
-        .company = .{ .id = id, .archetype_key = archetype.key, .commander_first = identity.first, .commander_last = identity.last, .faction_key = faction.key, .side = identity.side, .doctrine = identity.doctrine, .cbills = band.capital_cbills, .founded_day = day, .logo_key = logo_key, .band_key = band.key, .understrength_since = understrengthSince(band, company.counts, null, day) },
+        .company = .{ .id = id, .archetype_key = archetype.key, .commander_first = identity.first, .commander_last = identity.last, .faction_key = faction.key, .side = identity.side, .doctrine = identity.doctrine, .cbills = band.capital_cbills, .founded_day = day, .logo_key = logo_key, .band_key = band.key, .understrength_since = understrengthSince(band, company.counts, null, day), .home_planet_key = base.key, .ready_day = day },
         .unit_name_parts = .{ .last = identity.last, .noun = archetype.unit_noun },
         .buy = if (buy.purchases.len > 0) buy else null,
     };
@@ -479,8 +491,11 @@ fn planReplacement(scratch: std.mem.Allocator, gs: *const GameState, companies: 
 
 /// Select one NPC procurement intent. Priority is mek, vehicle substitution,
 /// then aerospace reserve; candidate order is the market board's stable order.
-/// Failed availability or affordability searches draw no RNG.
-fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *const GameState, listings: *std.ArrayListUnmanaged(PlannedListing), company: *PlannedCompany, day: u32, rng: *rng_mod.Rng, next_hull_instance_id: *u32) !?Purchase {
+/// A listing the company's base cannot reach is never a candidate
+/// (`npc_base.listingReachable`; docs/p5d-conflict-world-design.md D21).
+/// Failed availability, affordability or reach searches draw no RNG. The
+/// purchase carries the hull's `npc_base.deliveryArrival` from its source.
+fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *GameState, listings: *std.ArrayListUnmanaged(PlannedListing), company: *PlannedCompany, day: u32, rng: *rng_mod.Rng, next_hull_instance_id: *u32) !?Purchase {
     const counts = company.counts;
     const band = company.band;
     var wanted_kind: unit.UnitKind = if (rivals.mercCompanyNeedsHull(band, counts, .mek)) .mek else if (rivals.mercCompanyNeedsHull(band, counts, .vehicle)) .vehicle else if (rivals.mercCompanyNeedsHull(band, counts, .aerospace)) .aerospace else return null;
@@ -495,6 +510,7 @@ fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *const GameState, listin
             if (chassis.kind != wanted_kind) continue;
             if (wanted_kind == .mek and listing.hull_instance_id == .none) continue;
             if ((wanted_kind == .vehicle or wanted_kind == .aerospace) and !chassis_mod.conventionalMarketEligible(chassis, gs.clock.date.year)) continue;
+            if (!try npc_base.listingReachable(gs, company.base, listing)) continue;
             try candidates.append(scratch, i);
         }
         if (candidates.items.len > 0) break :collect;
@@ -511,6 +527,7 @@ fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *const GameState, listin
     if (candidates.items.len == 0) return null;
     const listing_index = candidates.items[rng.random(.market).uintLessThan(usize, candidates.items.len)];
     const listing = listings.items[listing_index].listing;
+    const source = try npc_base.listingSource(gs, listing);
     const acquisition: PurchaseAcquisition = if (listing.hull_instance_id == .none) blk: {
         if (next_hull_instance_id.* == std.math.maxInt(u32)) return error.HullInstanceIdExhausted;
         const id: types.HullInstanceId = @enumFromInt(next_hull_instance_id.*);
@@ -525,10 +542,10 @@ fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *const GameState, listin
         .aerospace => company.counts.aerospace += 1,
         else => unreachable,
     }
-    return .{ .listing_index = listing_index, .listing_id = listing.id, .price = listing.price, .acquisition = acquisition };
+    return .{ .listing_index = listing_index, .listing_id = listing.id, .price = listing.price, .acquisition = acquisition, .arrive_day = npc_base.deliveryArrival(source.origin(), company.base, day) };
 }
 
-fn planBuy(scratch: std.mem.Allocator, gs: *const GameState, listings: *std.ArrayListUnmanaged(PlannedListing), company: *PlannedCompany, day: u32, rng: *rng_mod.Rng, next_hull_instance_id: *u32) !BuyPlan {
+fn planBuy(scratch: std.mem.Allocator, gs: *GameState, listings: *std.ArrayListUnmanaged(PlannedListing), company: *PlannedCompany, day: u32, rng: *rng_mod.Rng, next_hull_instance_id: *u32) !BuyPlan {
     var purchases = std.ArrayListUnmanaged(Purchase).empty;
     while (try selectNpcProcurement(scratch, gs, listings, company, day, rng, next_hull_instance_id)) |purchase| {
         try purchases.append(scratch, purchase);
@@ -583,6 +600,7 @@ fn stageLifecycleCommit(
         .market_listings = .empty,
         .hull_ownership_history = .empty,
         .hull_instances = .empty,
+        .merc_hull_arrivals = .empty,
         .next_listing_id = next_listing_id,
         .next_merc_company_id = next_merc_company_id,
         .next_hull_instance_id = next_hull_instance_id,
@@ -609,6 +627,11 @@ fn stageLifecycleCommit(
         hull.loadout = .empty;
         try hull.loadout.appendSlice(alloc, source.loadout.items);
         stage.hull_instances.putAssumeCapacity(id, hull);
+    }
+    // An arrival whose day has come is dropped: the hull is fieldable.
+    try stage.merc_hull_arrivals.ensureTotalCapacity(alloc, gs.merc_hull_arrivals.count());
+    for (gs.merc_hull_arrivals.keys(), gs.merc_hull_arrivals.values()) |hull_id, arrive_day| {
+        if (!npc_base.hullFieldable(gs, hull_id, day)) stage.merc_hull_arrivals.putAssumeCapacity(hull_id, arrive_day);
     }
 
     for (actions) |action| switch (action) {
@@ -637,6 +660,9 @@ fn stageLiquidation(stage: *LifecycleStage, alloc: std.mem.Allocator, company_id
                 .prior_owner_key = company.faction_key,
             });
             try stage.market_listings.append(alloc, listings[i]);
+            // A liquidated hull still travelling to the base is listed where
+            // it is; it has no arrival any more (false when it had arrived).
+            _ = stage.merc_hull_arrivals.orderedRemove(hull_id);
         }
         roster.clearRetainingCapacity();
     }
@@ -684,6 +710,7 @@ fn stageBuy(stage: *LifecycleStage, alloc: std.mem.Allocator, buy: BuyPlan, day:
             },
         };
         try roster.append(alloc, hull_id);
+        if (purchase.arrive_day) |arrive_day| try stage.merc_hull_arrivals.put(alloc, hull_id, arrive_day);
         spent += purchase.price;
     }
     stage.merc_companies.getPtr(buy.company_id).?.cbills -= spent;
@@ -705,9 +732,19 @@ fn commitLifecycleStage(gs: *GameState, stage: LifecycleStage) void {
     gs.market_listings = stage.market_listings;
     gs.hull_ownership_history = stage.hull_ownership_history;
     gs.hull_instances = stage.hull_instances;
+    gs.merc_hull_arrivals = stage.merc_hull_arrivals;
     gs.next_listing_id = stage.next_listing_id;
     gs.next_merc_company_id = stage.next_merc_company_id;
     gs.next_hull_instance_id = stage.next_hull_instance_id;
+}
+
+/// Whether some hull arrival is due on `day` (`npc_base.hullFieldable`), so
+/// the monthly pass must commit to drop it.
+fn arrivalsDue(gs: *const GameState, day: u32) bool {
+    for (gs.merc_hull_arrivals.keys()) |hull_id| {
+        if (npc_base.hullFieldable(gs, hull_id, day)) return true;
+    }
+    return false;
 }
 
 fn findListing(listings: []const market.Listing, id: types.ListingId) ?market.Listing {
@@ -731,6 +768,67 @@ const test_band = "band_3";
 
 fn testLineTarget() usize {
     return merc_band.lineTarget(merc_band.find(test_band).?);
+}
+
+/// The base of the fixture companies below, all of faction DC: the DC
+/// capital, so a DC-sold wholesale listing is delivered on their base world
+/// and fieldable at once (`npc_base.listingSource`).
+const test_base = "luthien";
+
+/// Make a market hull a DC-sold wholesale listing's hull: its one open
+/// ownership interval names DC.
+fn sellAsDcSurplusForTest(gs: *GameState, hull_id: types.HullInstanceId) !void {
+    try gs.hull_ownership_history.append(gs.allocator(), .{ .hull_instance_id = hull_id, .acquisition_type = .initial, .prior_owner_key = "DC" });
+}
+
+/// A field HQ on the fixture base world: its board carries the fixtures'
+/// minted conventional listings where the companies stand.
+fn baseBoardForTest(gs: *GameState) !types.HqId {
+    return boardOnForTest(gs, test_base);
+}
+
+/// A field HQ on `world`, whose board stands there.
+fn boardOnForTest(gs: *GameState, world: []const u8) !types.HqId {
+    const id: types.HqId = @enumFromInt(gs.next_hq_id);
+    gs.next_hq_id += 1;
+    try gs.hqs.put(gs.allocator(), id, .{ .id = id, .name = "Board", .tier = .field, .planet_key = world });
+    return id;
+}
+
+/// A market LCT-1V on `board`'s board at `price`, its listing on that world.
+fn listMekOnBoardForTest(gs: *GameState, board: types.HqId, price: types.CBills) !types.HullInstanceId {
+    const hull_id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hull_id, .{ .id = hull_id, .base_key = "LCT-1V", .owner = .market });
+    try sellAsDcSurplusForTest(gs, hull_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = price, .hq = board, .hull_instance_id = hull_id });
+    gs.next_listing_id += 1;
+    return hull_id;
+}
+
+/// A DC-sold world-less LCT-1V at `price`: wholesale from Luthien.
+fn listDcSurplusMekForTest(gs: *GameState, price: types.CBills) !types.HullInstanceId {
+    const hull_id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
+    gs.next_hull_instance_id += 1;
+    try gs.hull_instances.put(gs.allocator(), hull_id, .{ .id = hull_id, .base_key = "LCT-1V", .owner = .market });
+    try sellAsDcSurplusForTest(gs, hull_id);
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = price, .hull_instance_id = hull_id });
+    gs.next_listing_id += 1;
+    return hull_id;
+}
+
+/// The first catalog world of `faction_key` (any faction when null) other
+/// than `from` whose distance from it is within `min_ly`..`max_ly`,
+/// inclusive.
+fn worldAtForTest(faction_key: ?[]const u8, from: []const u8, min_ly: u32, max_ly: u32) !*const planet.Planet {
+    const origin = planet.find(from).?;
+    for (planet.catalog) |*p| {
+        if (p == origin) continue;
+        if (faction_key) |key| if (!std.mem.eql(u8, p.faction, key)) continue;
+        const ly = planet.distanceLy(origin, p);
+        if (ly >= min_ly and ly <= max_ly) return p;
+    }
+    return error.TestUnexpectedResult;
 }
 
 test "liquidateMercCompany: transfers hulls to market, clears roster, sets dissolved_day" {
@@ -857,6 +955,7 @@ test "buyHullsForCompany: buys affordable+eligible hulls, spends cbills, asset-s
         .band_key = test_band,
         .dissolved_day = 0,
         .cbills = cbills_start,
+        .home_planet_key = test_base,
     });
 
     // Add 2 affordable regular listings (< cbills) and 1 unaffordable.
@@ -866,9 +965,7 @@ test "buyHullsForCompany: buys affordable+eligible hulls, spends cbills, asset-s
     try gs.hull_instances.put(alloc, h1, .{ .id = h1, .base_key = "LCT-1V", .owner = .market });
     try gs.hull_instances.put(alloc, h2, .{ .id = h2, .base_key = "LCT-1V", .owner = .market });
     try gs.hull_instances.put(alloc, h3, .{ .id = h3, .base_key = "JR7-D", .owner = .market });
-    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h1, .from_day = 0, .to_day = null, .acquisition_type = .transfer, .prior_owner_key = "market" });
-    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h2, .from_day = 0, .to_day = null, .acquisition_type = .transfer, .prior_owner_key = "market" });
-    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h3, .from_day = 0, .to_day = null, .acquisition_type = .transfer, .prior_owner_key = "market" });
+    for ([_]types.HullInstanceId{ h1, h2, h3 }) |h| try sellAsDcSurplusForTest(&gs, h);
     const cheap_price: types.CBills = 500_000;
     const expensive_price: types.CBills = 50_000_000; // unaffordable
     try gs.market_listings.append(alloc, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = cheap_price, .id = @enumFromInt(1), .hull_instance_id = h1, .black_market = false });
@@ -896,7 +993,8 @@ test "selectNpcProcurement: affordable mek beats affordable vehicle" {
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Procurement Co", .faction_key = "DC", .band_key = test_band, .cbills = 10 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Procurement Co", .faction_key = "DC", .band_key = test_band, .cbills = 10, .home_planet_key = test_base });
+    const board = try baseBoardForTest(&gs);
     var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
     for (0..testLineTarget() - 1) |_| {
         const id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
@@ -910,7 +1008,7 @@ test "selectNpcProcurement: affordable mek beats affordable vehicle" {
     try gs.hull_instances.put(gs.allocator(), backed_mek, .{ .id = backed_mek, .base_key = "LCT-1V", .owner = .market });
     try gs.hull_ownership_history.append(gs.allocator(), .{ .hull_instance_id = backed_mek, .acquisition_type = .initial, .prior_owner_key = "DC" });
     try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = backed_mek });
-    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(2), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1 });
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(2), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1, .hq = board });
     var rng = gs.rng;
     try buyHullsForCompany(&gs, a, company_id, 1, &rng);
     const counts = rivals.mercCompanyHullCounts(&gs, company_id);
@@ -930,15 +1028,18 @@ test "selectNpcProcurement: a later mek remains eligible after vehicle substitut
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Substitution Co", .faction_key = "DC", .band_key = test_band, .cbills = 10 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Substitution Co", .faction_key = "DC", .band_key = test_band, .cbills = 10, .home_planet_key = test_base });
+    const board = try baseBoardForTest(&gs);
     const mek: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
     gs.next_hull_instance_id += 1;
     const later_mek: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
     gs.next_hull_instance_id += 1;
     try gs.hull_instances.put(gs.allocator(), mek, .{ .id = mek, .base_key = "LCT-1V", .owner = .market });
     try gs.hull_instances.put(gs.allocator(), later_mek, .{ .id = later_mek, .base_key = "LCT-1V", .owner = .market });
+    try sellAsDcSurplusForTest(&gs, mek);
+    try sellAsDcSurplusForTest(&gs, later_mek);
     try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 11, .hull_instance_id = mek });
-    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(2), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1 });
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(2), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1, .hq = board });
     try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(3), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = later_mek, .available_after = 2 });
     var rng = gs.rng;
     try buyHullsForCompany(&gs, a, company_id, 1, &rng);
@@ -959,7 +1060,8 @@ test "selectNpcProcurement: fighters fill only the air reserve" {
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Air Reserve Co", .faction_key = "DC", .band_key = test_band, .cbills = 100 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Air Reserve Co", .faction_key = "DC", .band_key = test_band, .cbills = 100, .home_planet_key = test_base });
+    const board = try baseBoardForTest(&gs);
     var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
     for (0..testLineTarget()) |i| {
         const id: types.HullInstanceId = @enumFromInt(1 + @as(u32, @intCast(i)));
@@ -970,7 +1072,7 @@ test "selectNpcProcurement: fighters fill only the air reserve" {
     gs.next_hull_instance_id = @intCast(testLineTarget() + 1);
     const air_target = @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size;
     for (0..air_target + 1) |i| {
-        try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1 + @as(u32, @intCast(i))), .kind = .unit, .item_key = "TR-7", .rarity = .common, .price = 1 });
+        try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1 + @as(u32, @intCast(i))), .kind = .unit, .item_key = "TR-7", .rarity = .common, .price = 1, .hq = board });
     }
 
     var rng = gs.rng;
@@ -989,8 +1091,8 @@ test "selectNpcProcurement: fighters never fill line positions" {
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Fighter Only Co", .faction_key = "DC", .band_key = test_band, .cbills = 100 });
-    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "TR-7", .rarity = .common, .price = 1 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Fighter Only Co", .faction_key = "DC", .band_key = test_band, .cbills = 100, .home_planet_key = test_base });
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "TR-7", .rarity = .common, .price = 1, .hq = try baseBoardForTest(&gs) });
 
     var rng = gs.rng;
     try buyHullsForCompany(&gs, a, company_id, 1, &rng);
@@ -1010,7 +1112,8 @@ fn seedBandProcurementFixture(gs: *GameState, band_key: []const u8, reserve_full
     gs.market_listings.clearRetainingCapacity();
     const alloc = gs.allocator();
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(alloc, company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Band Co", .faction_key = "DC", .band_key = band_key, .cbills = 100 });
+    try gs.merc_companies.put(alloc, company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Band Co", .faction_key = "DC", .band_key = band_key, .cbills = 100, .home_planet_key = test_base });
+    const board = try baseBoardForTest(gs);
     const meks = merc_band.lineTarget(merc_band.find(band_key).?) - 1;
     const fighters = if (reserve_full) @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size else 0;
     var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
@@ -1022,8 +1125,8 @@ fn seedBandProcurementFixture(gs: *GameState, band_key: []const u8, reserve_full
         try roster.append(alloc, id);
     }
     try gs.merc_company_rosters.put(alloc, company_id, roster);
-    try gs.market_listings.append(alloc, .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1 });
-    if (!reserve_full) try gs.market_listings.append(alloc, .{ .id = @enumFromInt(2), .kind = .unit, .item_key = "TR-7", .rarity = .common, .price = 1 });
+    try gs.market_listings.append(alloc, .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1, .hq = board });
+    if (!reserve_full) try gs.market_listings.append(alloc, .{ .id = @enumFromInt(2), .kind = .unit, .item_key = "TR-7", .rarity = .common, .price = 1, .hq = board });
     return company_id;
 }
 
@@ -1073,19 +1176,21 @@ test "selectNpcProcurement: a full vehicle line does not block a later mek" {
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Ground Co", .faction_key = "DC", .band_key = test_band, .cbills = 100 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Ground Co", .faction_key = "DC", .band_key = test_band, .cbills = 100, .home_planet_key = test_base });
+    const board = try baseBoardForTest(&gs);
     var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
     for (0..testLineTarget()) |i| {
         const id: types.HullInstanceId = @enumFromInt(1 + @as(u32, @intCast(i)));
         try gs.hull_instances.put(gs.allocator(), id, .{ .id = id, .base_key = "SCP-1N", .owner = .{ .merc_company = company_id } });
         try roster.append(gs.allocator(), id);
-        try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1 + @as(u32, @intCast(i))), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1 });
+        try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1 + @as(u32, @intCast(i))), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1, .hq = board });
     }
     try gs.merc_company_rosters.put(gs.allocator(), company_id, roster);
     gs.next_hull_instance_id = @intCast(testLineTarget() + 1);
     const later_mek: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
     gs.next_hull_instance_id += 1;
     try gs.hull_instances.put(gs.allocator(), later_mek, .{ .id = later_mek, .base_key = "LCT-1V", .owner = .market });
+    try sellAsDcSurplusForTest(&gs, later_mek);
     try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(testLineTarget() + 1), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = later_mek });
 
     var rng = gs.rng;
@@ -1105,7 +1210,8 @@ test "selectNpcProcurement: a full vehicle line buys air reserve before a later 
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Air Reserve Substitution Co", .faction_key = "DC", .band_key = test_band, .cbills = 100 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Air Reserve Substitution Co", .faction_key = "DC", .band_key = test_band, .cbills = 100, .home_planet_key = test_base });
+    const board = try baseBoardForTest(&gs);
     var roster = std.ArrayListUnmanaged(types.HullInstanceId).empty;
     for (0..testLineTarget()) |i| {
         const id: types.HullInstanceId = @enumFromInt(1 + @as(u32, @intCast(i)));
@@ -1117,10 +1223,11 @@ test "selectNpcProcurement: a full vehicle line buys air reserve before a later 
     const later_mek: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
     gs.next_hull_instance_id += 1;
     try gs.hull_instances.put(gs.allocator(), later_mek, .{ .id = later_mek, .base_key = "LCT-1V", .owner = .market });
+    try sellAsDcSurplusForTest(&gs, later_mek);
     try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = later_mek, .available_after = 2 });
     const air_target = @as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size;
     for (0..air_target) |i| {
-        try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(2 + @as(u32, @intCast(i))), .kind = .unit, .item_key = "TR-7", .rarity = .common, .price = 1 });
+        try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(2 + @as(u32, @intCast(i))), .kind = .unit, .item_key = "TR-7", .rarity = .common, .price = 1, .hq = board });
     }
 
     var rng = gs.rng;
@@ -1147,9 +1254,9 @@ test "selectNpcProcurement: minted vehicle has design loadout and purchase prove
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Mint Co", .faction_key = "DC", .band_key = test_band, .cbills = 10 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Mint Co", .faction_key = "DC", .band_key = test_band, .cbills = 10, .home_planet_key = test_base });
     const minted_id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
-    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1 });
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1, .hq = try baseBoardForTest(&gs) });
     var rng = gs.rng;
     try buyHullsForCompany(&gs, a, company_id, 1, &rng);
     const hull = gs.hull_instances.get(minted_id).?;
@@ -1172,6 +1279,7 @@ test "buyHullsForCompany: saturated minted hull ID refuses without mutation or R
         .faction_key = "DC",
         .band_key = test_band,
         .cbills = 10,
+        .home_planet_key = test_base,
     });
     try gs.market_listings.append(gs.allocator(), .{
         .id = @enumFromInt(1),
@@ -1179,6 +1287,7 @@ test "buyHullsForCompany: saturated minted hull ID refuses without mutation or R
         .item_key = "SCP-1N",
         .rarity = .common,
         .price = 1,
+        .hq = try baseBoardForTest(&gs),
     });
     gs.next_hull_instance_id = std.math.maxInt(u32);
 
@@ -1198,8 +1307,8 @@ test "selectNpcProcurement: future listing admits no candidate, mutation, or RNG
     defer gs.deinit();
     _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
     const company_id: types.MercCompanyId = @enumFromInt(1);
-    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Waiting Co", .faction_key = "DC", .band_key = test_band, .cbills = 10 });
-    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1, .available_after = 2 });
+    try gs.merc_companies.put(gs.allocator(), company_id, .{ .id = company_id, .archetype_key = "enemy_raiders", .unit_name = "Waiting Co", .faction_key = "DC", .band_key = test_band, .cbills = 10, .home_planet_key = test_base });
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(1), .kind = .unit, .item_key = "SCP-1N", .rarity = .common, .price = 1, .available_after = 2, .hq = try baseBoardForTest(&gs) });
     const before = digest.stateHash(&gs);
     var rng = gs.rng;
     const rng_before = rng;
@@ -1225,10 +1334,11 @@ test "buyHullsForCompany: OOM atomicity — stateHash unchanged on failure" {
         .band_key = test_band,
         .dissolved_day = 0,
         .cbills = 10_000_000,
+        .home_planet_key = test_base,
     });
     const h1: types.HullInstanceId = @enumFromInt(1);
     try gs.hull_instances.put(alloc, h1, .{ .id = h1, .base_key = "LCT-1V", .owner = .market });
-    try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = h1, .from_day = 0, .to_day = null, .acquisition_type = .transfer, .prior_owner_key = "market" });
+    try sellAsDcSurplusForTest(&gs, h1);
     try gs.market_listings.append(alloc, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 500_000, .id = @enumFromInt(1), .hull_instance_id = h1, .black_market = false });
 
     const hash_before = digest.stateHash(&gs);
@@ -1256,9 +1366,10 @@ test "buyHullsForCompany: late transaction OOM leaves no roster entry or retaine
             .faction_key = "DC",
             .band_key = test_band,
             .cbills = 10_000_000,
+            .home_planet_key = test_base,
         });
         try gs.hull_instances.put(gs.allocator(), hull_id, .{ .id = hull_id, .base_key = "LCT-1V", .owner = .market });
-        try gs.hull_ownership_history.append(gs.allocator(), .{ .hull_instance_id = hull_id, .from_day = 0, .acquisition_type = .transfer, .prior_owner_key = "market" });
+        try sellAsDcSurplusForTest(&gs, hull_id);
         try gs.market_listings.append(gs.allocator(), .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .id = @enumFromInt(1), .hull_instance_id = hull_id });
 
         const before = digest.stateHash(&gs);
@@ -1302,6 +1413,7 @@ test "spawnReplacementCompany: unique id, founded_day, dissolved_day==0, lowest 
         .band_key = test_band,
         .dissolved_day = 0,
         .logo_key = logo.all_keys[0],
+        .home_planet_key = test_base,
     });
     gs.next_merc_company_id = 2;
 
@@ -1367,6 +1479,7 @@ test "spawnReplacementCompany never reuses a logo a dissolved company held" {
         .band_key = test_band,
         .dissolved_day = 5,
         .logo_key = logo.all_keys[0],
+        .home_planet_key = test_base,
     });
     gs.next_merc_company_id = 2;
 
@@ -1392,6 +1505,7 @@ test "spawnReplacementCompany founds logo-less companies under distinct names on
             .band_key = test_band,
             .dissolved_day = if (i % 2 == 0) 5 else 0,
             .logo_key = key,
+            .home_planet_key = test_base,
         });
     }
     gs.next_merc_company_id = @intCast(logo.all_keys.len);
@@ -1526,6 +1640,7 @@ test "spawnReplacementCompany: planning scratch comes from gs.scratch() and is r
             .faction_key = "DC",
             .band_key = test_band,
             .logo_key = logo.all_keys[i],
+            .home_planet_key = test_base,
         });
     }
     gs.next_merc_company_id = 17;
@@ -1580,6 +1695,7 @@ fn putLifecycleCompany(gs: *GameState, id: u32, name: []const u8, meks: usize, c
         .cbills = cbills,
         .logo_key = logo.all_keys[id - 1],
         .understrength_since = since,
+        .home_planet_key = test_base,
     });
     var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
     for (0..meks) |_| {
@@ -1639,6 +1755,7 @@ test "runMercLifecycle: a low-BV company with cash survives, records today and s
         const hull_id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
         gs.next_hull_instance_id += 1;
         try gs.hull_instances.put(gs.allocator(), hull_id, .{ .id = hull_id, .base_key = "LCT-1V", .owner = .market });
+        try sellAsDcSurplusForTest(&gs, hull_id);
         try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = hull_id });
         gs.next_listing_id += 1;
         const log_before = gs.event_log.items.len;
@@ -1781,6 +1898,7 @@ test "runMercLifecycle records understrength_since on the first short pass, keep
         const hull_id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
         gs.next_hull_instance_id += 1;
         try gs.hull_instances.put(gs.allocator(), hull_id, .{ .id = hull_id, .base_key = "LCT-1V", .owner = .market });
+        try sellAsDcSurplusForTest(&gs, hull_id);
         try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = hull_id });
         gs.next_listing_id += 1;
     }
@@ -1830,6 +1948,7 @@ test "a replacement founded below its line carries its founding day" {
             const hull_id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
             gs.next_hull_instance_id += 1;
             try gs.hull_instances.put(gs.allocator(), hull_id, .{ .id = hull_id, .base_key = "LCT-1V", .owner = .market });
+            try sellAsDcSurplusForTest(&gs, hull_id);
             try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = hull_id });
             gs.next_listing_id += 1;
         };
@@ -1869,6 +1988,7 @@ test "runMercLifecycle: (c) determinism — two same-seed campaigns hash equal a
             .band_key = test_band,
             .dissolved_day = 0,
             .logo_key = logo.all_keys[0],
+            .home_planet_key = test_base,
         });
         const h_bad: types.HullInstanceId = @enumFromInt(1);
         try gs.hull_instances.put(alloc2, h_bad, .{ .id = h_bad, .base_key = "LCT-1V", .owner = .{ .merc_company = mc1 } });
@@ -1890,7 +2010,9 @@ test "runMercLifecycle: (c) determinism — two same-seed campaigns hash equal a
 /// below their line. Companies 1 and 3 have negative cash, no commitment and
 /// an `understrength_since` 13 months back, so both dissolve; company 2 has
 /// cash, a record from last month, and a market deep enough to reach its line,
-/// so its buy clears that record.
+/// so its buy clears that record. Half the meks are DC wholesale, half on a
+/// board on a DC world within reach of the companies' base but off it, so
+/// company 2's buy records arrivals; its first hull's arrival is due today.
 fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
     const alloc = gs.allocator();
     _ = try founding.createCommander(gs, "T", .LC, .line_officer);
@@ -1908,6 +2030,7 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
         .cbills = -1,
         .logo_key = logo.all_keys[0],
         .understrength_since = dayMonthsBefore(gs, 13),
+        .home_planet_key = test_base,
     });
     try gs.merc_companies.put(alloc, under_strength, .{
         .id = under_strength,
@@ -1918,6 +2041,7 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
         .cbills = 10_000_000,
         .logo_key = logo.all_keys[1],
         .understrength_since = dayMonthsBefore(gs, 1),
+        .home_planet_key = test_base,
     });
     try gs.merc_companies.put(alloc, drained, .{
         .id = drained,
@@ -1928,6 +2052,7 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
         .cbills = -1,
         .logo_key = logo.all_keys[2],
         .understrength_since = dayMonthsBefore(gs, 13),
+        .home_planet_key = test_base,
     });
 
     // Companies 1 and 2 hold five LCT-1V, company 3 one: all below the line.
@@ -1951,17 +2076,14 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
         }
         try gs.merc_company_rosters.put(alloc, company_id, roster);
     }
+    try gs.merc_hull_arrivals.put(alloc, gs.merc_company_rosters.get(under_strength).?.items[0], gs.clock.day_index);
     // Enough meks for the first replacement's line and company 2's top-up.
-    for (0..48) |_| {
+    const nearby = try boardOnForTest(gs, (try worldAtForTest("DC", test_base, 1, tuning.generation.npc_market_reach_ly)).key);
+    for (0..48) |i| {
         const hull_id: types.HullInstanceId = @enumFromInt(gs.next_hull_instance_id);
         gs.next_hull_instance_id += 1;
         try gs.hull_instances.put(alloc, hull_id, .{ .id = hull_id, .base_key = "LCT-1V", .owner = .market });
-        try gs.hull_ownership_history.append(alloc, .{
-            .hull_instance_id = hull_id,
-            .from_day = 0,
-            .acquisition_type = .transfer,
-            .prior_owner_key = "market",
-        });
+        try sellAsDcSurplusForTest(gs, hull_id);
         try gs.market_listings.append(alloc, .{
             .kind = .unit,
             .item_key = "LCT-1V",
@@ -1969,9 +2091,11 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
             .price = 1,
             .id = @enumFromInt(gs.next_listing_id),
             .hull_instance_id = hull_id,
+            .hq = if (i % 2 == 0) .none else nearby,
         });
         gs.next_listing_id += 1;
     }
+    const board = try baseBoardForTest(gs);
     for (0..@as(usize, tuning.generation.merc_company_air_reserve_lances) * force.lance_size) |_| {
         try gs.market_listings.append(alloc, .{
             .kind = .unit,
@@ -1979,6 +2103,7 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
             .rarity = .common,
             .price = 1,
             .id = @enumFromInt(gs.next_listing_id),
+            .hq = board,
         });
         gs.next_listing_id += 1;
     }
@@ -2062,8 +2187,9 @@ test "a replacement that bought nothing is insolvent and no OpFor, yet keeps its
 test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" {
     // Rule 69: the fixture executes two runway dissolutions with their
     // replacements and a separate under-strength purchase that clears its
-    // `understrength_since`; every preparation failure preserves gameplay,
-    // live collection storage, and campaign-arena capacity.
+    // `understrength_since`, records arrivals and drops a due one; every
+    // preparation failure preserves gameplay (arrivals included), live
+    // collection storage, and campaign-arena capacity.
     var outer = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer outer.deinit();
 
@@ -2080,6 +2206,8 @@ test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" 
         const hulls_before = gs.hull_instances.keys().ptr;
         const bankrupt_roster_before = gs.merc_company_rosters.get(@enumFromInt(1)).?.items.ptr;
         const under_strength_roster_before = gs.merc_company_rosters.get(@enumFromInt(2)).?.items.ptr;
+        const due = gs.merc_company_rosters.get(@enumFromInt(2)).?.items[0];
+        const arrivals_before = gs.merc_hull_arrivals.keys().ptr;
 
         var failing = std.testing.FailingAllocator.init(outer.allocator(), .{ .fail_index = fail_index });
         gs.arena.child_allocator = failing.allocator();
@@ -2089,6 +2217,12 @@ test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" 
             try std.testing.expect(gs.merc_companies.getPtr(@enumFromInt(3)).?.dissolved_day != 0);
             try std.testing.expect(gs.merc_company_rosters.get(@enumFromInt(2)).?.items.len >= testLineTarget());
             try std.testing.expectEqual(@as(?u32, null), gs.merc_companies.get(@enumFromInt(2)).?.understrength_since);
+            // The due arrival is dropped; off-world buys record theirs.
+            try std.testing.expect(!gs.merc_hull_arrivals.contains(due));
+            var recorded: usize = 0;
+            for (gs.merc_hull_arrivals.keys()) |hull| recorded += @intFromBool(gs.hull_instances.get(hull).?.owner.merc_company == @as(types.MercCompanyId, @enumFromInt(2)));
+            try std.testing.expect(recorded > 0);
+            try npc_base.validate(&gs);
             gs.deinit();
             break;
         } else |err| {
@@ -2102,6 +2236,7 @@ test "runMercLifecycle: allocator failures leave a multi-action pass unchanged" 
             try std.testing.expectEqual(hulls_before, gs.hull_instances.keys().ptr);
             try std.testing.expectEqual(bankrupt_roster_before, gs.merc_company_rosters.get(@enumFromInt(1)).?.items.ptr);
             try std.testing.expectEqual(under_strength_roster_before, gs.merc_company_rosters.get(@enumFromInt(2)).?.items.ptr);
+            try std.testing.expectEqual(arrivals_before, gs.merc_hull_arrivals.keys().ptr);
             gs.deinit();
         }
     }
@@ -2124,6 +2259,7 @@ test "runMercLifecycle: repeated active monthly passes retain bounded staging me
         .band_key = test_band,
         .cbills = 1,
         .logo_key = logo.all_keys[0],
+        .home_planet_key = test_base,
     });
     gs.next_merc_company_id = 2;
     try gs.hull_instances.put(gs.allocator(), hull_id, .{
@@ -2131,6 +2267,7 @@ test "runMercLifecycle: repeated active monthly passes retain bounded staging me
         .base_key = "LCT-1V",
         .owner = .market,
     });
+    try sellAsDcSurplusForTest(&gs, hull_id);
     const listing = market.Listing{
         .kind = .unit,
         .item_key = "LCT-1V",
@@ -2149,9 +2286,218 @@ test "runMercLifecycle: repeated active monthly passes retain bounded staging me
         _ = gs.merc_company_rosters.orderedRemove(company_id);
         gs.hull_instances.getPtr(hull_id).?.owner = .market;
         _ = gs.hull_ownership_history.pop();
+        // Reopen the DC interval, so the listing is DC surplus again.
+        gs.hull_ownership_history.items[gs.hull_ownership_history.items.len - 1].to_day = null;
         try gs.market_listings.append(gs.allocator(), listing);
         gs.clock.advance();
         try runMercLifecycle(&gs);
         try std.testing.expectEqual(bytes_after_first_pass, debug_alloc.total_requested_bytes);
     }
+}
+
+const logistics = @import("../econ/logistics.zig");
+
+test "a monthly buy takes a listing with a world only within its base's reach, and a wholesale one from any base" {
+    // docs/p5d-conflict-world-design.md D21, M1; rule 71: two companies of one
+    // band with equal cash and need, one based on the listing's world, the
+    // other beyond 60 ly of it.
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 7621 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    gs.market_listings.clearRetainingCapacity();
+    advancePaydays(&gs, 1);
+    const far_world = try worldAtForTest("DC", test_base, 61, std.math.maxInt(u32));
+    const far = try putLifecycleCompany(&gs, 1, "Far Co", testLineTarget() - 1, 1_000, null);
+    gs.merc_companies.getPtr(far).?.home_planet_key = far_world.key;
+    const near = try putLifecycleCompany(&gs, 2, "Near Co", testLineTarget() - 1, 1_000, null);
+    const board = try baseBoardForTest(&gs);
+    const located = try listMekOnBoardForTest(&gs, board, 1);
+
+    // The far company plans first and cannot reach the listing; the near one takes it.
+    try runMercLifecycle(&gs);
+    try std.testing.expectEqual(hull_instance_mod.HullOwner{ .merc_company = near }, gs.hull_instances.get(located).?.owner);
+    try std.testing.expectEqual(testLineTarget() - 1, rivals.mercCompanyHullCounts(&gs, far).meks);
+    try std.testing.expectEqual(testLineTarget(), rivals.mercCompanyHullCounts(&gs, near).meks);
+    // Bought on the near company's base world: fieldable at once.
+    try std.testing.expect(!gs.merc_hull_arrivals.contains(located));
+
+    // With only listings it cannot reach, the far company draws nothing.
+    const out_of_reach = try listMekOnBoardForTest(&gs, board, 1);
+    const before = digest.stateHash(&gs);
+    var rng = gs.rng;
+    const rng_before = rng;
+    try buyHullsForCompany(&gs, a, far, gs.clock.day_index, &rng);
+    try std.testing.expectEqual(before, digest.stateHash(&gs));
+    try std.testing.expectEqual(rng_before, rng);
+
+    // A wholesale listing reaches it, delivered from the DC capital.
+    const wholesale = try listDcSurplusMekForTest(&gs, 1);
+    const day = gs.clock.day_index;
+    try buyHullsForCompany(&gs, a, far, day, &rng);
+    try std.testing.expectEqual(hull_instance_mod.HullOwner{ .merc_company = far }, gs.hull_instances.get(wholesale).?.owner);
+    try std.testing.expectEqual(hull_instance_mod.HullOwner.market, gs.hull_instances.get(out_of_reach).?.owner);
+    try std.testing.expectEqual(day + logistics.deliveryDays(planet.find(test_base).?, far_world), gs.merc_hull_arrivals.get(wholesale).?);
+    try npc_base.validate(&gs);
+}
+
+test "a hull bought off the base world is owned at once but fieldable only from its arrival day, and the next monthly pass drops its arrival" {
+    // docs/p5d-conflict-world-design.md §L1 "not fieldable before".
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 7622 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    gs.market_listings.clearRetainingCapacity();
+    advancePaydays(&gs, 1);
+    const near_world = try worldAtForTest("DC", test_base, 1, tuning.generation.npc_market_reach_ly);
+    const id = try putLifecycleCompany(&gs, 1, "Arriving Co", testLineTarget() - 2, 1_000, null);
+    const off_world = try listMekOnBoardForTest(&gs, try boardOnForTest(&gs, near_world.key), 1);
+    const on_world = try listMekOnBoardForTest(&gs, try baseBoardForTest(&gs), 1);
+    const day = gs.clock.day_index;
+    var rng = gs.rng;
+    try buyHullsForCompany(&gs, a, id, day, &rng);
+
+    // The off-world hull arrives after the delivery days of its route; the
+    // on-world one records nothing.
+    const arrive_day = day + logistics.deliveryDays(near_world, planet.find(test_base).?);
+    try std.testing.expect(arrive_day > day + 1);
+    try std.testing.expectEqual(arrive_day, gs.merc_hull_arrivals.get(off_world).?);
+    try std.testing.expect(!gs.merc_hull_arrivals.contains(on_world));
+    try std.testing.expect(npc_base.hullFieldable(&gs, on_world, day));
+    try npc_base.validate(&gs);
+
+    const target = testLineTarget();
+    const bv: i64 = chassis_mod.find("LCT-1V").?.bv;
+    // The day before it arrives: owned, at the line, yet not fieldable.
+    while (gs.clock.day_index < arrive_day - 1) gs.clock.advance();
+    try std.testing.expectEqual(target, rivals.mercCompanyHullCounts(&gs, id).meks);
+    try std.testing.expectEqual(target - 1, rivals.mercCompanyFieldableCounts(&gs, id).meks);
+    try std.testing.expectEqual(@as(i64, @intCast(target - 1)) * bv, rivals.mercCompanyFieldableBv(&gs, id));
+    try std.testing.expect(!rivals.mercCompanyEligibleAsOpFor(&gs, id));
+    // On its arrival day: in every count.
+    gs.clock.advance();
+    try std.testing.expectEqual(arrive_day, gs.clock.day_index);
+    try std.testing.expectEqual(target, rivals.mercCompanyFieldableCounts(&gs, id).meks);
+    try std.testing.expectEqual(@as(i64, @intCast(target)) * bv, rivals.mercCompanyFieldableBv(&gs, id));
+    try std.testing.expect(rivals.mercCompanyEligibleAsOpFor(&gs, id));
+    // The next monthly pass drops the arrival, its only change.
+    advancePaydays(&gs, 1);
+    const log_before = gs.event_log.items.len;
+    try runMercLifecycle(&gs);
+    try std.testing.expectEqual(@as(usize, 0), gs.merc_hull_arrivals.count());
+    try std.testing.expectEqual(log_before, gs.event_log.items.len);
+}
+
+test "a line full only counting hulls en route is not understrength and buys no duplicate" {
+    // Owned strength drives need and the understrength record
+    // (docs/p5d-conflict-world-design.md §L1, §L7).
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 7623 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    gs.market_listings.clearRetainingCapacity();
+    advancePaydays(&gs, 1);
+    const id = try putLifecycleCompany(&gs, 1, "Waiting Co", testLineTarget(), 1_000, null);
+    const en_route = gs.merc_company_rosters.get(id).?.items[0];
+    try gs.merc_hull_arrivals.put(gs.allocator(), en_route, gs.clock.day_index + 40);
+    const board = try baseBoardForTest(&gs);
+    const spare = try listMekOnBoardForTest(&gs, board, 1);
+
+    try runMercLifecycle(&gs);
+    try std.testing.expectEqual(hull_instance_mod.HullOwner.market, gs.hull_instances.get(spare).?.owner);
+    try std.testing.expectEqual(@as(?u32, null), gs.merc_companies.get(id).?.understrength_since);
+    try std.testing.expectEqual(testLineTarget() - 1, rivals.mercCompanyFieldableCounts(&gs, id).meks);
+    try std.testing.expect(gs.merc_hull_arrivals.contains(en_route));
+}
+
+test "liquidating a company lists its hull still en route and drops that hull's arrival" {
+    const a = std.testing.allocator;
+    var gs = GameState.init(a, .{ .seed = 7624 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    const id = try putLifecycleCompany(&gs, 1, "Folding Co", 3, 1_000, null);
+    const en_route = gs.merc_company_rosters.get(id).?.items[1];
+    try gs.merc_hull_arrivals.put(gs.allocator(), en_route, gs.clock.day_index + 9);
+    try npc_base.validate(&gs);
+
+    try liquidateMercCompany(&gs, gs.allocator(), id, gs.clock.day_index);
+    try std.testing.expect(findListingByHull(gs.market_listings.items, en_route) != null);
+    try std.testing.expectEqual(hull_instance_mod.HullOwner.market, gs.hull_instances.get(en_route).?.owner);
+    try std.testing.expectEqual(@as(usize, 0), gs.merc_hull_arrivals.count());
+    try npc_base.validate(&gs);
+}
+
+test "a replacement is based on a world of its own faction, ready on its founding day, and its founding buy reaches from that base" {
+    // docs/p5d-conflict-world-design.md §L1; decision M3.
+    const a = std.testing.allocator;
+    // A dry run on an empty market finds the base: it is drawn before the
+    // founding buy, so the market a same-seed campaign holds cannot move it.
+    var probe = GameState.init(a, .{ .seed = 7626 });
+    defer probe.deinit();
+    _ = try founding.createCommander(&probe, "T", .LC, .line_officer);
+    probe.market_listings.clearRetainingCapacity();
+    var probe_rng = probe.rng;
+    const spawned_id = try spawnReplacementCompany(&probe, a, 30, &probe_rng);
+    const spawned = probe.merc_companies.get(spawned_id).?;
+    const base = planet.find(spawned.home_planet_key).?;
+    try std.testing.expectEqualStrings(spawned.faction_key, base.faction);
+    try std.testing.expectEqual(@as(u32, 30), spawned.founded_day);
+    try std.testing.expectEqual(@as(u32, 30), spawned.ready_day);
+    try npc_base.validate(&probe);
+
+    var gs = GameState.init(a, .{ .seed = 7626 });
+    defer gs.deinit();
+    _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+    gs.market_listings.clearRetainingCapacity();
+    const far_world = for (planet.catalog) |*p| {
+        if (planet.distanceLy(base, p) > tuning.generation.npc_market_reach_ly) break p;
+    } else unreachable;
+    const at_base = try listMekOnBoardForTest(&gs, try boardOnForTest(&gs, base.key), 1);
+    const out_of_reach = try listMekOnBoardForTest(&gs, try boardOnForTest(&gs, far_world.key), 1);
+    var rng = gs.rng;
+    const id = try spawnReplacementCompany(&gs, a, 30, &rng);
+    try std.testing.expectEqualStrings(base.key, gs.merc_companies.get(id).?.home_planet_key);
+    try std.testing.expectEqual(hull_instance_mod.HullOwner{ .merc_company = id }, gs.hull_instances.get(at_base).?.owner);
+    try std.testing.expectEqual(hull_instance_mod.HullOwner.market, gs.hull_instances.get(out_of_reach).?.owner);
+    try npc_base.validate(&gs);
+}
+
+test "an NPC hull and the player's hull bought over the same route arrive after the same days" {
+    // docs/p5d-conflict-world-design.md §A "one travel rule".
+    const commands = @import("commands.zig");
+    const a = std.testing.allocator;
+    // The first seed whose starting world has another world within reach.
+    var seed: u64 = 7625;
+    var gs, const alpha, const home, const away = while (true) : (seed += 1) {
+        if (seed > 7700) return error.TestUnexpectedResult;
+        var g = GameState.init(a, .{ .seed = seed });
+        errdefer g.deinit();
+        _ = try commands.execute(&g, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+        const co = (try commands.execute(&g, .{ .new_company = "Alpha" })).created_force;
+        const world = planet.find(g.hqs.get(g.homeHqFor(co)).?.planet_key).?;
+        const near = worldAtForTest(null, world.key, 1, tuning.generation.npc_market_reach_ly) catch {
+            g.deinit();
+            continue;
+        };
+        break .{ g, co, world, near };
+    };
+    defer gs.deinit();
+    const board = try boardOnForTest(&gs, away.key);
+    gs.hqs.getPtr(board).?.funds = 100_000_000;
+    const day = gs.clock.day_index;
+
+    // The player buys on the away board for the company at home.
+    try gs.market_listings.append(gs.allocator(), .{ .id = @enumFromInt(gs.next_listing_id), .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 500_000, .hq = board, .expires_day = day + 30 });
+    gs.next_listing_id += 1;
+    const player = try commands.execute(&gs, .{ .buy_hull_for = .{ .listing = gs.market_listings.items.len - 1, .company = alpha } });
+    try std.testing.expect(player.eta_days > 0);
+
+    // An NPC company based on the same home world buys on the same board.
+    const npc = try putLifecycleCompany(&gs, gs.next_merc_company_id, "Neighbour Co", testLineTarget() - 1, 1_000, null);
+    gs.merc_companies.getPtr(npc).?.faction_key = home.faction;
+    gs.merc_companies.getPtr(npc).?.home_planet_key = home.key;
+    const hull = try listMekOnBoardForTest(&gs, board, 1);
+    var rng = gs.rng;
+    try buyHullsForCompany(&gs, a, npc, day, &rng);
+    try std.testing.expectEqual(day + player.eta_days, gs.merc_hull_arrivals.get(hull).?);
 }

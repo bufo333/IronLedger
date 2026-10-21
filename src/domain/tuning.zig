@@ -821,6 +821,10 @@ pub const Tuning = struct {
         /// band's line before it can dissolve (docs/p5d-conflict-world-design.md
         /// §L7 "Dissolution": the owner-approved 12-month runway). // TUNE
         npc_understrength_runway_months: u32,
+        /// Light-years from a world merc company's base within which it can
+        /// buy a listing that has a world, inclusive (`npc_base.withinMarketReach`;
+        /// docs/p5d-conflict-world-design.md §L1, D21). // TUNE
+        npc_market_reach_ly: u32,
         /// Flat starting hull-pool size for the Periphery/pirates faction (PER)
         /// at campaign creation. PER manufactures nothing
         /// (replenishment_hulls_per_year = 0) and is salvage-replenished only, so

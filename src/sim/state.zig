@@ -391,6 +391,14 @@ pub const GameState = struct {
     /// canonical-owner role as faction_rosters: HullInstance.owner
     /// (.merc_company) is the per-hull mirror its producers keep consistent.
     merc_company_rosters: std.AutoArrayHashMapUnmanaged(types.MercCompanyId, std.ArrayListUnmanaged(types.HullInstanceId)) = .empty,
+    /// Hulls a merc company has bought off its base world and that are still
+    /// travelling there: hull id → arrival day, in insertion order. Each key
+    /// is in its active owner's roster; the company owns the hull but cannot
+    /// field it before that day (`npc_base.hullFieldable`;
+    /// docs/p5d-conflict-world-design.md §L1). Written only by the merc
+    /// lifecycle stage and the NPC black-market draw, each of which installs
+    /// a whole new map with its roster maps.
+    merc_hull_arrivals: std.AutoArrayHashMapUnmanaged(types.HullInstanceId, u32) = .empty,
 
     /// Persistent world personages (docs/p5d-conflict-world-design.md §B).
     /// With a commander, exactly one ruler per hiring world and one leader per
@@ -1483,6 +1491,7 @@ pub const GameState = struct {
         .{ "next_hull_instance_id", .persisted },
         .{ "faction_rosters", .persisted },
         .{ "merc_company_rosters", .persisted },
+        .{ "merc_hull_arrivals", .persisted },
         .{ "world_states", .persisted },
         .{ "personages", .persisted },
         .{ "personage_relations", .persisted },

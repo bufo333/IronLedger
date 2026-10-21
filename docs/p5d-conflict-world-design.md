@@ -928,6 +928,41 @@ catalog order. The base:
 - has a repair capacity `npc_base_repair_hours_month` set by band (§L8), not by
   a player-style facility build (D20).
 
+**Landed in P5d.1h.** Every NPC company has a base, a derived current world and
+a `ready_day`, and buys within reach of its base, at schema v76 with the
+v75 → v76 migration (`src/sim/npc_base.zig` owns all of it):
+
+- John's choices (P5d.1h plan): D20 and D21 as recommended (no repair
+  capacity yet: P5d.4d adds it); **M1**, a world-less faction-surplus or
+  liquidation listing is the seller's wholesale offer, buyable from every base
+  and delivered from the capital of the faction its hull's open ownership
+  interval names, while a listing with a world (HQ board, contract world,
+  black-market world) is buyable only on or within reach of the base; **M2**,
+  `npc_market_reach_ly = 60`, inclusive; **M3**, every company is based on a
+  world of its own faction, so a `PER` company's base is a Periphery world
+  (refining "a non-PER world" above, which no `PER` company has);
+- the base is drawn by `npc_base.drawBase` on `.rivals`, weighted by industry
+  like the starter HQ (`planet.weightedPickByFaction`): at seed in a second
+  pass after every company's identity, band and pool draws, and for a
+  replacement right after its identity, before its founding buy;
+- the current world is derived (`npc_base.currentWorld`: the base), so there
+  is no stored `location_planet_key` until P5d.1i adds `Movement`;
+- `ready_day` is 0 for a seeded company and the founding day for a
+  replacement until P5d.1i adds the return and its refit;
+- owned and fieldable strength are split: the procurement need, the
+  understrength record and the dissolution runway read owned hulls, so a hull
+  in transit fills its slot and is not bought twice; fieldable BV, OpFor
+  readiness and the battle draw read only hulls that have arrived
+  (`GameState.merc_hull_arrivals`, dropped by the monthly lifecycle pass);
+- a v75 company is migrated to `npc_base.compatibilityBase` of its faction:
+  its capital when that world is the faction's own, otherwise the faction's
+  world nearest the capital, ties in catalog order (amendment a1). Every
+  hiring faction's capital is its own but the Periphery's (Galatea, an LC
+  world), so a migrated `PER` company is based on Star's End; the migration
+  reads no seed and draws no RNG;
+- P5d.4i's "replacement within base reach" is met for reach; 4i keeps the
+  reserve floor and upgrades.
+
 **§L2 Hull condition.** A new persisted record per NPC-owned hull reuses the
 existing `market.HullCondition` fields (`armor_pct`, `quality`,
 `damaged_slots`, `destroyed_slots`, `missing_components`), so one struct feeds
@@ -1376,11 +1411,14 @@ whose design depends on a different choice is re-planned.
 - **D20 — what an NPC base is.** *Recommended:* a base world with a band-set
   repair capacity; no facility construction. *Alternatives:* NPC companies
   build HQ facilities like the player (large scope); no base (repair
-  anywhere, which loses the reason to go home).
+  anywhere, which loses the reason to go home). **John's choice (P5d.1h
+  plan):** the recommendation.
 - **D21 — NPC market reach.** *Recommended:* purchases only from listings on or
   within `npc_market_reach_ly` of the base, off-world buys arriving by the
   shared travel rule. *Alternatives:* keep today's galaxy-wide reach (no
-  locality); the player's `Hq.influenceLy` rings.
+  locality); the player's `Hq.influenceLy` rings. **John's choice (P5d.1h
+  plan):** the recommendation, with world-less wholesale listings buyable from
+  every base and delivered from the seller's capital (§L1 "Landed in P5d.1h").
 - **D22 — parts model.** *Recommended:* an abstract spares stock in C-bills.
   *Alternative:* per-part inventories like the player (much larger state and
   test surface).

@@ -48,6 +48,7 @@ const artillery_ops_q = @import("artillery_operations.zig");
 const artillery_rules_q = @import("../domain/artillery_operations.zig");
 const hq_operations = @import("hq_ops.zig");
 const personnel_owner = @import("personnel.zig");
+const npc_base = @import("npc_base.zig");
 
 const Alloc = std.mem.Allocator;
 
@@ -6872,9 +6873,10 @@ test "the board's transit and close day are the afield company's, not its HQ's" 
 // ----------------------------------------------------------- leaderboard
 
 pub const leaderboard_cols: []const table.Col = &.{
-    .{ .name = "id", .justify = .right },      .{ .name = "company" },               .{ .name = "founder" },
-    .{ .name = "founded", .justify = .right }, .{ .name = "dissolved" },             .{ .name = "cbills", .justify = .right },
-    .{ .name = "hulls", .justify = .right },   .{ .name = "bv", .justify = .right }, .{ .name = "" },
+    .{ .name = "id", .justify = .right },     .{ .name = "company" },                    .{ .name = "base" },
+    .{ .name = "founder" },                   .{ .name = "founded", .justify = .right }, .{ .name = "dissolved" },
+    .{ .name = "cbills", .justify = .right }, .{ .name = "hulls", .justify = .right },   .{ .name = "bv", .justify = .right },
+    .{ .name = "" },
 };
 
 pub const LeaderboardRow = struct {
@@ -6882,13 +6884,16 @@ pub const LeaderboardRow = struct {
     cells: table.Row,
 };
 
-/// Every merc company as one sortable row, sorted by cbills descending.
-/// Insolvent active companies carry an amber tag. Pure, arena-allocated.
+/// Every merc company as one sortable row, sorted by cbills descending:
+/// its base world's name (`npc_base.companyBase`), its owned hull count and
+/// its fieldable BV. Insolvent active companies carry an amber tag.
+/// `CorruptSave` for a base that names no world. Pure, arena-allocated.
 pub fn leaderboard(alloc: Alloc, gs: *GameState) ![]LeaderboardRow {
     var out: std.ArrayListUnmanaged(LeaderboardRow) = .empty;
     var it = gs.merc_companies.iterator();
     while (it.next()) |e| {
         const mc = e.value_ptr;
+        const base = try npc_base.companyBase(mc.*);
         const roster = gs.merc_company_rosters.get(mc.id);
         const hull_count: usize = if (roster) |r| r.items.len else 0;
         const bv = rivals_m.mercCompanyFieldableBv(gs, mc.id);
@@ -6906,6 +6911,7 @@ pub fn leaderboard(alloc: Alloc, gs: *GameState) ![]LeaderboardRow {
             .cells = try table.row(alloc, &.{
                 try std.fmt.allocPrint(alloc, "{d}", .{@intFromEnum(mc.id)}),
                 name_cell,
+                base.name,
                 try std.fmt.allocPrint(alloc, "{s} {s}", .{ mc.commander_first, mc.commander_last }),
                 try std.fmt.allocPrint(alloc, "d{d}", .{mc.founded_day}),
                 dissolved_cell,
@@ -6927,11 +6933,15 @@ pub fn leaderboard(alloc: Alloc, gs: *GameState) ![]LeaderboardRow {
     return out.toOwnedSlice(alloc);
 }
 
-/// Detail sheet for one merc company: identity, lifecycle, treasury,
-/// strength, hull roster, and linked rival standing when present.
-/// Returns markup lines suitable for a scrolling sheet modal.
+/// Detail sheet for one merc company: identity, base, current world and
+/// ready day, lifecycle, treasury, strength, hull roster with each hull
+/// still travelling to the base tagged with its arrival
+/// (`npc_base.enRouteUntil`), and linked rival standing when present.
+/// Returns markup lines suitable for a scrolling sheet modal. `CorruptSave`
+/// for a base or current world that names no world.
 pub fn mercCompanyDetail(alloc: Alloc, gs: *GameState, id: types.MercCompanyId) ![]const []const u8 {
     const mc = gs.merc_companies.getPtr(id) orelse return &.{};
+    const today = gs.clock.day_index;
     var lines: std.ArrayListUnmanaged([]const u8) = .empty;
     try lines.append(alloc, "");
     // Identity.
@@ -6939,6 +6949,12 @@ pub fn mercCompanyDetail(alloc: Alloc, gs: *GameState, id: types.MercCompanyId) 
     try lines.append(alloc, try std.fmt.allocPrint(alloc, "  commander   {s} {s}", .{ mc.commander_first, mc.commander_last }));
     try lines.append(alloc, try std.fmt.allocPrint(alloc, "  archetype   {s}", .{mc.archetype_key}));
     try lines.append(alloc, try std.fmt.allocPrint(alloc, "  faction     {s}  side {s}  doctrine {s}", .{ mc.faction_key, @tagName(mc.side), @tagName(mc.doctrine) }));
+    // Base, where it stands, and when it can muster.
+    const location = planet_mod.find(npc_base.currentWorld(mc.*)) orelse return error.CorruptSave;
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  base        {s}", .{(try npc_base.companyBase(mc.*)).name}));
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  location    {s}", .{location.name}));
+    const ready: []const u8 = if (npc_base.readyOn(mc.*, today)) "{g}ready{/}" else try clock_mod.etaText(alloc, mc.ready_day, today);
+    try lines.append(alloc, try std.fmt.allocPrint(alloc, "  ready       {s}", .{ready}));
     try lines.append(alloc, "");
     // Lifecycle.
     const diss: []const u8 = if (mc.dissolved_day == 0) "{g}active{/}" else try std.fmt.allocPrint(alloc, "d{d}", .{mc.dissolved_day});
@@ -6955,7 +6971,12 @@ pub fn mercCompanyDetail(alloc: Alloc, gs: *GameState, id: types.MercCompanyId) 
         try lines.append(alloc, try std.fmt.allocPrint(alloc, "  hulls ({d})", .{roster.items.len}));
         for (roster.items) |hid| {
             const inst = gs.hull_instances.getPtr(hid) orelse continue;
-            const status_tag: []const u8 = if (inst.status == .permanently_destroyed) " {c}(destroyed){/}" else "";
+            const status_tag: []const u8 = if (inst.status == .permanently_destroyed)
+                " {c}(destroyed){/}"
+            else if (npc_base.enRouteUntil(gs, hid, today)) |arrive_day|
+                try std.fmt.allocPrint(alloc, " {{a}}(en route, arrives {s}){{/}}", .{try clock_mod.etaText(alloc, arrive_day, today)})
+            else
+                "";
             try lines.append(alloc, try std.fmt.allocPrint(alloc, "    {s}{s}", .{ inst.base_key, status_tag }));
         }
     }
@@ -6985,8 +7006,8 @@ test "leaderboard: row per company, sorted by cbills desc, active/dissolved tags
     // Seed two merc companies with IDs unlikely to collide.
     const mc1: types.MercCompanyId = @enumFromInt(501);
     const mc2: types.MercCompanyId = @enumFromInt(502);
-    try gs.merc_companies.put(alloc, mc1, .{ .id = mc1, .unit_name = "Alpha Wolves", .commander_first = "Hans", .commander_last = "Reinhardt", .faction_key = "LC", .cbills = 2_000_000, .founded_day = 10, .dissolved_day = 0 });
-    try gs.merc_companies.put(alloc, mc2, .{ .id = mc2, .unit_name = "Iron Vipers", .commander_first = "Yuki", .commander_last = "Sato", .faction_key = "DC", .cbills = 1_000_000, .founded_day = 5, .dissolved_day = 42 });
+    try gs.merc_companies.put(alloc, mc1, .{ .id = mc1, .unit_name = "Alpha Wolves", .commander_first = "Hans", .commander_last = "Reinhardt", .faction_key = "LC", .cbills = 2_000_000, .founded_day = 10, .dissolved_day = 0, .home_planet_key = "tharkad" });
+    try gs.merc_companies.put(alloc, mc2, .{ .id = mc2, .unit_name = "Iron Vipers", .commander_first = "Yuki", .commander_last = "Sato", .faction_key = "DC", .cbills = 1_000_000, .founded_day = 5, .dissolved_day = 42, .home_planet_key = "luthien" });
 
     // Roster with one hull for mc1.
     const hid: types.HullInstanceId = @enumFromInt(9001);
@@ -7000,12 +7021,22 @@ test "leaderboard: row per company, sorted by cbills desc, active/dissolved tags
     // mc1 has more cbills → comes first.
     try std.testing.expectEqual(mc1, rows[0].id);
     try std.testing.expectEqual(mc2, rows[1].id);
+    const col = struct {
+        fn of(name: []const u8) usize {
+            for (leaderboard_cols, 0..) |c, i| if (std.mem.eql(u8, c.name, name)) return i;
+            unreachable;
+        }
+    }.of;
+    // The base column follows the company and names each base world.
+    try std.testing.expectEqual(col("company") + 1, col("base"));
+    try std.testing.expectEqualStrings("Tharkad", rows[0].cells[col("base")]);
+    try std.testing.expectEqualStrings("Luthien", rows[1].cells[col("base")]);
     // dissolved cell: mc1 active, mc2 dissolved on day 42.
-    try std.testing.expect(std.mem.indexOf(u8, rows[0].cells[4], "active") != null);
-    try std.testing.expect(std.mem.indexOf(u8, rows[1].cells[4], "d42") != null);
-    // hull count column (index 6).
-    try std.testing.expect(std.mem.indexOf(u8, rows[0].cells[6], "1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, rows[1].cells[6], "0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].cells[col("dissolved")], "active") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[1].cells[col("dissolved")], "d42") != null);
+    // hull count column.
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].cells[col("hulls")], "1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[1].cells[col("hulls")], "0") != null);
 
     // mercCompanyDetail for mc1 returns non-empty lines naming the commander and faction.
     const detail = try mercCompanyDetail(a, &gs, mc1);
@@ -7018,6 +7049,71 @@ test "leaderboard: row per company, sorted by cbills desc, active/dissolved tags
     }
     try std.testing.expect(found_commander);
     try std.testing.expect(found_faction);
+}
+
+test "mercCompanyDetail shows base, location and ready day, tags a hull en route with its arrival, and the leaderboard owns-counts it but fields none of it" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 43 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const alloc = gs.allocator();
+    for (0..10) |_| gs.clock.advance();
+    const today = gs.clock.day_index;
+    const id: types.MercCompanyId = @enumFromInt(1);
+    try gs.merc_companies.put(alloc, id, .{ .id = id, .unit_name = "Gamma Lancers", .faction_key = "DC", .founded_day = today, .ready_day = today + 4, .home_planet_key = "luthien" });
+    const home: types.HullInstanceId = @enumFromInt(1);
+    const travelling: types.HullInstanceId = @enumFromInt(2);
+    try gs.hull_instances.put(alloc, home, .{ .id = home, .base_key = "SHD-2H", .owner = .{ .merc_company = id } });
+    try gs.hull_instances.put(alloc, travelling, .{ .id = travelling, .base_key = "LCT-1V", .owner = .{ .merc_company = id } });
+    var roster: std.ArrayListUnmanaged(types.HullInstanceId) = .empty;
+    try roster.appendSlice(alloc, &.{ home, travelling });
+    try gs.merc_company_rosters.put(alloc, id, roster);
+    try gs.merc_hull_arrivals.put(alloc, travelling, today + 7);
+
+    const lines = try mercCompanyDetail(a, &gs, id);
+    const has = struct {
+        fn line(all: []const []const u8, want: []const u8) bool {
+            for (all) |l| if (std.mem.indexOf(u8, l, want) != null) return true;
+            return false;
+        }
+    }.line;
+    try std.testing.expect(has(lines, "base        Luthien"));
+    try std.testing.expect(has(lines, "location    Luthien"));
+    try std.testing.expect(has(lines, try std.fmt.allocPrint(a, "ready       {s}", .{try clock_mod.etaText(a, today + 4, today)})));
+    try std.testing.expect(has(lines, try std.fmt.allocPrint(a, "LCT-1V {{a}}(en route, arrives {s}){{/}}", .{try clock_mod.etaText(a, today + 7, today)})));
+    try std.testing.expect(!has(lines, "SHD-2H {a}(en route"));
+
+    // The leaderboard counts the owned hulls; its BV is the fieldable one.
+    const rows = try leaderboard(a, &gs);
+    try std.testing.expectEqualStrings("2", rows[0].cells[7]);
+    try std.testing.expectEqualStrings(try moneyShort(a, chassis_mod.find("SHD-2H").?.bv), rows[0].cells[8]);
+
+    // On its days the hull arrives and the company is ready.
+    for (0..7) |_| gs.clock.advance();
+    const later = try mercCompanyDetail(a, &gs, id);
+    try std.testing.expect(has(later, "ready       {g}ready{/}"));
+    try std.testing.expect(!has(later, "en route"));
+
+    // Allocation failure propagates; it never becomes partial or empty output.
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        var scratch = std.heap.ArenaAllocator.init(failing.allocator());
+        defer scratch.deinit();
+        if (mercCompanyDetail(scratch.allocator(), &gs, id)) |_| break else |err| try std.testing.expectEqual(error.OutOfMemory, err);
+    }
+    fail_index = 0;
+    while (true) : (fail_index += 1) {
+        var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = fail_index });
+        var scratch = std.heap.ArenaAllocator.init(failing.allocator());
+        defer scratch.deinit();
+        if (leaderboard(scratch.allocator(), &gs)) |_| break else |err| try std.testing.expectEqual(error.OutOfMemory, err);
+    }
+    // A base that names no world is corruption, never a blank cell.
+    gs.merc_companies.getPtr(id).?.home_planet_key = "nowhere";
+    try std.testing.expectError(error.CorruptSave, leaderboard(a, &gs));
+    try std.testing.expectError(error.CorruptSave, mercCompanyDetail(a, &gs, id));
 }
 
 // ------------------------------------------------------------ REPL views

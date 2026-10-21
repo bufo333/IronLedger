@@ -1239,7 +1239,7 @@ An empty or unknown `planet_key` is unreachable by any buyer. On the first day
 of each month, `runNpcBlackMarketDraw` (called from `tick.runMarkets` after
 `faction_surplus.runMonthly`) evaluates each NPC buyer with its own
 `BuyerKind`, so pirates consume only PER-world listings and mercs consume only
-non-PER listings. A merc company pays the listing price, debited in the same
+non-PER listings within their base's market reach (below). A merc company pays the listing price, debited in the same
 commit as the hull transfer, and takes only a hull it still needs and can
 afford, so the draw never spends it below zero; pirates pay nothing.
 `rivals.mercCompanyNeedsHull` owns that need test for both the draw and the
@@ -1251,8 +1251,8 @@ Those historical upgrades do not establish supported save formats; support is
 governed by [contract rule 51](docs/engineering-contract.md#51-save-format-support-is-explicit).
 
 **Merc-company insolvency (P3e.7).** A world merc company whose fieldable
-battle value — the sum of chassis BV across all `.active` hulls in its pool
-— falls below `tuning.generation.merc_company_insolvency_bv` is inactive and
+battle value — the sum of chassis BV across the `.active` hulls in its pool
+that it can field today, none still travelling to its base (below) — falls below `tuning.generation.merc_company_insolvency_bv` is inactive and
 can no longer be selected as the OpFor for a new arc contract. The predicate
 is derived, not persisted (no schema change); it is re-evaluated on each read
 and prevents selection for a new arc contract. It is not permanent: the monthly
@@ -1321,6 +1321,38 @@ meks. A replacement company is founded at the first, lowest band
 (`merc_band.replacementBand`) with that band's capital. The company's
 `band_key` persists in the `merc_company` table from schema v68, and a save
 naming a band no row has is refused as `CorruptSave`.
+
+**Merc-company base and market reach (P5d.1h).** `src/sim/npc_base.zig` owns
+where a world merc company is based, where it stands, what it can buy and when
+a bought hull can fight (docs/p5d-conflict-world-design.md §A, §L1; decisions
+D20, D21). Every company has a base, `MercCompany.home_planet_key`: a world of
+its own faction (a Periphery company's is a Periphery world), drawn by
+`npc_base.drawBase` on `.rivals`, industry-weighted like the starter HQ — at
+seed in a second pass after every company's identity, band and pool draws, and
+for a replacement right after its identity, before its founding buy. Its
+current world (`npc_base.currentWorld`) is derived, never stored: the base,
+because no NPC company moves yet. `MercCompany.ready_day` is 0 for a seeded
+company and the founding day for a replacement. Every NPC hull purchase — the
+monthly fill-to-target buy and the paid black-market draw — takes only a
+listing `npc_base.listingReachable` admits: a listing with a world (an HQ
+board's, a contract world's, a black-market world) only on or within
+`tuning.generation.npc_market_reach_ly` (60 ly, inclusive) of the base; a
+world-less faction-surplus or liquidation listing always, as the seller's
+wholesale offer delivered from the capital of the faction its hull's open
+ownership interval names (`npc_base.listingSource`). A hull bought off the
+base world arrives after the player's hull-delivery days for that route
+(`npc_base.deliveryArrival`, `logistics.deliveryDays`);
+`GameState.merc_hull_arrivals` records it until then. Owned and fieldable
+strength are split: `rivals.mercCompanyHullCounts` stays the owned count the
+procurement need, the understrength record and the dissolution runway read,
+so a hull in transit fills its slot and is not bought twice;
+`rivals.mercCompanyFieldableCounts`, `mercCompanyFieldableBv` (so
+`mercCompanyInsolvent`), `mercCompanyEligibleAsOpFor` and the battle draw
+(`battle.drawOpposition`) admit only hulls `npc_base.hullFieldable` admits.
+The monthly lifecycle pass drops each arrival whose day has come inside its
+staged commit; liquidation drops the arrivals of the hulls it lists. The
+lifecycle stage and the black-market draw each install a whole new arrival
+map beside the roster maps they replace.
 
 **Hulls are priced by what they are.** A listed mek carries a rolled
 condition — armor, quality grade, damaged and destroyed slots, missing
@@ -1529,8 +1561,8 @@ a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
 **Current format boundary.** New empty stores
-initialize schema 74 transactionally. Existing store and campaign versions
-must both be 74 once the store is open; a schema 71, 72 or 73 store is
+initialize schema 76 transactionally. Existing store and campaign versions
+must both be 76 once the store is open; a schema 71 to 75 store is
 migrated on open (below), older formats (70 included) are refused intact and newer
 formats retain their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
@@ -1631,8 +1663,9 @@ campaign holds is not checked: the start year is not saved.
 **Older stores migrate on open** through a chain of migrations, each from
 one version to the next (`Store.migrate`; schema 71 is the oldest
 supported format, `oldest_supported_schema_version`). A v71 store runs v71
-→ v72, v72 → v73, v73 → v74 and v74 → v75; a v72 store the last three; a
-v73 store the last two; a v74 store only v74 → v75. The whole chain
+→ v72, v72 → v73, v73 → v74, v74 → v75 and v75 → v76; a v72 store the last
+four; a v73 store the last three; a v74 store the last two; a v75 store only
+v75 → v76. The whole chain
 is one transaction with foreign keys off, ending with an empty `PRAGMA
 foreign_key_check` (else `CorruptStore`) and the current schema check
 before COMMIT; any failure rolls back with the file at its original
@@ -1640,10 +1673,13 @@ version. Each migration keeps a frozen definition of its source format and
 validates it before its own statements: a malformed or mixed-version store
 is `CorruptStore`, untouched. `ddl_v72` and `index_ddl_v72` are schema
 v72's DDL byte for byte, and `conflict_v73_ddl` is the `conflict` table
-v73 added, and `ddl_v74` and `index_ddl_v74` are schema v74's (a test pins
-their SHA-256); `ddl_v71` is derived from `ddl_v72`, `ddl_v73` is v72's plus
+v73 added, and `ddl_v74` and `index_ddl_v74` are schema v74's and
+`ddl_v75` and `index_ddl_v75` schema v75's (a test pins their SHA-256);
+`ddl_v71` is derived from `ddl_v72`, `ddl_v73` is v72's plus
 `conflict_v73_ddl`, `ddl_v74` is v73's with `contract` and `conflict` in
-their v74 definitions, and the current `ddl` is v74's plus `news_item`.
+their v74 definitions, `ddl_v75` is v74's plus `news_item`, and the current
+`ddl` is v75's with `merc_company` in its v76 definition plus
+`merc_hull_arrival`.
 
 - **v71 → v72** (`migrateV71ToV72`). The source check: every v71 table and
   column (the frozen v71 `personage` definition, every other table as v72
@@ -1680,9 +1716,37 @@ their v74 definitions, and the current `ddl` is v74's plus `news_item`.
   to 75. A v74 campaign has no news item, and reach is never back-filled, so
   it migrates with none; every other value, id, counter and stream is
   unchanged.
+- **v75 → v76** (`migrateV75ToV76`). The source check: every v75 table and
+  column (`ddl_v75`), exactly the v75 `merc_company` columns, no
+  `merc_hull_arrival` table, every company's `faction_key` one with a
+  compatibility base and its `founded_day` a campaign day, and only v75
+  campaigns. It rebuilds `merc_company` from the v76 DDL
+  (create–copy–drop–rename, rows in stored order, so
+  `merc_company_roster`'s foreign key names the rebuilt table): each company's
+  `home_planet_key` is `npc_base.compatibilityBase` of its faction — the
+  capital when that world is the faction's own, else the faction's world
+  nearest the capital, ties in catalog order (every faction's capital but the
+  Periphery's; a `PER` company gets Star's End, since its capital Galatea is
+  an LC world) — a documented compatibility value written as a compile-time
+  `CASE faction_key`, and its `ready_day` its `founded_day`. It creates
+  `merc_hull_arrival` empty, because a v75 purchase was fieldable at once,
+  and its index, and sets every campaign and the store to 76. It reads no seed
+  and draws no RNG; every other value, id, counter and stream is unchanged.
 
 A migrated campaign loads with the digest of the same state saved directly
-at v75 and plays on as it would have.
+at v76 and plays on as it would have.
+
+**Merc-company bases and hull arrivals are saved** (schema 76): `merc_company`
+holds each company's `home_planet_key` (non-empty text) and `ready_day` (a
+campaign day), and `merc_hull_arrival` one row per hull still travelling to
+its company's base (ordinal, hull id, arrival day; `(cid, hull_instance_id)`
+and `(cid, ord)` unique, a foreign key to `hull_instance`). The loader holds a
+base in catalog memory and refuses an unknown world, a non-integer or
+out-of-range day, an ordinal other than the row's position and a duplicate
+hull; `npc_base.validate` then refuses an empty or unknown base, a base not of
+the company's faction, a `ready_day` before `founded_day`, and an arrival for
+an unknown hull, a hull no merc company owns, one its owner's roster does not
+hold, or one of a dissolved company.
 
 **Conflicts are saved** (schema 74): one `conflict` row each (ordinal, id,
 template key, world, aggressor and defender factions and personages,
