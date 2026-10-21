@@ -8,9 +8,10 @@ IRON LEDGER is a terminal strategy game about running a mercenary outfit in
 the BattleTech universe during the scarcity years of the 3025 Succession Wars.
 You are the commander of the whole operation — not a pilot. You chase contracts
 across the Inner Sphere, keep the 'Mechs running, the troops paid, and the
-supply lines open, then send your companies into battles that resolve on their
-own from everything you set up beforehand: training, maintenance, ammunition,
-provisions, morale, and the support echelons behind them. You win through
+supply lines open, then send your companies into battles decided by
+everything you set up beforehand: training, maintenance, ammunition,
+provisions, morale, and the support echelons behind them. You give orders at
+the command level between a battle's phases, never to a pilot. You win through
 logistics, people, and money; the tabletop is deliberately skipped, and the
 campaign around it is the game.
 
@@ -29,6 +30,10 @@ the pilot; logistics wins battles; multi-company concurrent operations on a live
 star map; faithful rules where they count; and a deterministic simulation with
 the same seed giving the same outcome every time.
 
+The Inner Sphere does not wait for you. Its rulers and governors scheme and go
+to war on their own, and every contract you see is posted by one of those wars
+or by a governor's standing need.
+
 <br clear="all">
 
 <img align="right" width="110" src="data/logos/balance_point_mercenaries.png" alt="">
@@ -43,8 +48,11 @@ implies.
 
 Each deployment plays out as an operational story. You set each operation's
 intent, task your lances, decide whether to scout, strike, prepare, or wait,
-and live with the local consequences. When battle comes it is hands-off: the
-after-action report tells you what your preparation was worth.
+and live with the local consequences. When battle comes you command, not
+pilot: you set the rules of engagement and lance roles before contact, then
+decide between phases whether to press on, commit the reserve, call an
+intervention, or pull back. The after-action report tells you what your
+preparation and those calls were worth.
 
 <br clear="all">
 
@@ -198,7 +206,17 @@ Refusing commands shows as `refused: <sentence>` in the status line with
 plain language from `cli.errorText`; no error code reaches the screen.
 
 `?` opens the full key reference; `q` returns to the Welcome screen (save /
-discard / stay); `n` ends the turn; `N` advances seven turns.
+discard / stay); `.` ends the turn; `N` ends seven turns; `n` advances to the
+next stop.
+
+**Advancing to the next stop** (`n`, or `next` at the command line) skips the
+end-turn checklist and runs forward, up to three months, until the commander is
+needed: contact, a new decision, payday, a contract closing or reaching its
+world, a company or hull arriving, and between contracts also deliveries,
+finished bay work, a rare hull on the board, or new positions posted. The stop
+screen names the reason, lists what was logged on the way, and opens the screen
+the stop is about. It never crosses an unanswered decision deadline: it stops
+the day before and waits, and only an explicit `.` lets the default apply.
 
 Pass `--ascii` for terminals that render box-drawing glyphs double-width; the
 client substitutes `+ - |` and `# .` throughout.
@@ -217,12 +235,16 @@ client substitutes `+ - |` and `# .` throughout.
 
 The Desk is the campaign's central hub. Panes: **Emblem** (company crest),
 **Checklist** (urgent warnings), **Inbox** (decisions with deadlines),
-**Companies** (posture summary), **Log** (campaign history), **HQs** (network
-status), and **Reports** (P&L and readiness).
+**Companies** (posture summary), **Log** (campaign history), **Newswire** (news
+of wars heard within reach), **HQs** (network status), and **Reports**
+(campaign summary, readiness, battles, and the Merc companies leaderboard of
+rival outfits, each with its own detail sheet).
 
-`Enter` on the checklist jumps to the warning's source; `Enter` on the inbox
-opens the decision; `b` browses after-action reports; `e` opens the emblem
-editor; `n` ends the turn (the end-turn checklist opens first).
+`Enter` on the checklist jumps to the warning's source (a contact warning opens
+its battle orders, a due engagement its battle screen); `Enter` on the inbox
+opens the decision; `Enter` on the newswire reads the whole item; `b` browses
+after-action reports; `e` opens the emblem editor; `.` ends the turn (the
+end-turn checklist opens first).
 
 ![Desk](docs/screenshots/desk.svg)
 
@@ -250,8 +272,8 @@ for the world under the cursor; `o` opens the contract board.
 
 The TO&E tree: outfit → companies → lances → hulls, with slot states and hull
 condition at a glance. `[`/`]` cycles views (all forces, each company,
-unassigned hulls, the hangar). `r` cycles the side pane between readiness,
-manning, and damage. `Enter` assigns crew to the hull under the cursor; `a`
+unassigned hulls, the hangar, artillery). `r` cycles the side pane between
+readiness, manning, and damage. `Enter` assigns crew to the hull under the cursor; `a`
 seats a specific person; `u` clears a seat; `l` moves a hull into a lance; `x`
 sends it to another company.
 
@@ -271,16 +293,24 @@ what it contributes.
 
 ![Hangar](docs/screenshots/hangar.svg)
 
+The artillery view lists the outfit's Mobile Long Tom carriers: `f` and `g`
+seat crew and the mechanic, `i` reloads the magazines, `v` queues a depot
+repair, `e` attaches a carrier to a company or detaches it, `s` freights a
+pooled carrier to another HQ, and `p` sells it.
+
 <br clear="all">
 
 ### F4 Contracts
 
 <img align="right" width="110" src="data/logos/ghostline_mercenaries.png" alt="">
 
-Three panes: **Board** (open offers at the current HQ), **Active** (running
-contracts), and **History** (closed contracts with outcome, world, days served,
-victory points, pay received). `[`/`]` switches HQ boards. Enter on the board
-accepts an offer (you pick the company); `b` negotiates (one round per offer).
+Three panes: **Board** (open offers at the current HQ, each with its side,
+on-station day and close day, and the cause behind the selected offer beneath
+it), **Active** (running contracts), and **History** (closed contracts with
+outcome, world, days served, victory points, pay received). `[`/`]` switches HQ
+boards. Enter on the board accepts an offer (you pick the company); `b`
+negotiates (one round per offer); `w` on any contract shows who's who: its
+world's governor and the leaders of its employer and its enemy.
 
 ![Contracts](docs/screenshots/contracts.svg)
 
@@ -376,8 +406,9 @@ HQ; `t` trains the primary skill; `L` sends on leave; `T` sets triage priority;
 <img align="right" width="110" src="data/logos/last_argument_mercenaries.png" alt="">
 
 Boards at the current HQ: hull listings, parts catalogue, and demand lines
-for damaged slots. `[`/`]` switches HQs; `/`/`,` cycles market filters. Enter
-buys the listing under the cursor; `b` fabricates a structural component; `K`
+for damaged slots; an HQ's board ends with its monthly artillery offer. `[`/`]`
+switches HQs; `/`/`,` cycles market filters. Enter buys the listing or artillery
+offer under the cursor; `b` fabricates a structural component; `K`
 adds a part to the keep-stocked list; `x` removes a standing order.
 
 ![Market](docs/screenshots/market.svg)
@@ -411,10 +442,25 @@ crest. Arrows move; Backspace erases; type to paint; `u` undoes; Enter saves.
 
 ![Emblem editor](docs/screenshots/emblem-editor.svg)
 
-**End-turn checklist** — opens before every advance while a warning prompts.
-`n` ends the turn anyway; `1`–`9` jumps to the warning's source; Esc stays.
+**End-turn checklist** — opens before `.` or `N` while a warning prompts. `y`
+ends the turn anyway (the days asked for); `n` advances to the next stop
+instead; `1`–`9` jumps to the warning's source; Esc stays.
 
 ![End-turn checklist](docs/screenshots/end-turn.svg)
+
+**Battle orders** — open from a contact warning a few days before an
+engagement, with the situation and the odds. `←`/`→` step the rules of
+engagement and each lance's role, recomputing the odds; Enter buys an emergency
+resupply on the contract world, recalls the company (a breach, confirmed
+first), or confirms the orders. Esc leaves the current settings standing.
+
+**Battle screen** — on the engagement's day the turn holds until you fight it.
+`e` joins contact, and the battle pauses on a phase report: the margin, the
+hits taken so far, and the odds of the next phase under your orders. At the
+contact pause `p` presses on to the decisive phase, `r` steps the ROE, `R`
+commits the reserve lance, `i` and Enter call an intervention, and `w`
+withdraws. After the decisive phase `u` pursues or `c` consolidates a held
+field; from a lost one `v` covers the recovery of the wrecks or `w` leaves.
 
 <br clear="all">
 
@@ -443,24 +489,37 @@ dimensions (security, civilian support, infrastructure strain, employer control,
 enemy influence) change through operation outcomes and are visible on the Map
 and Contracts screens.
 
+On garrison and security duty the monthly event deck gives way to
+**situations**: on the 1st the contract's own people — a black-market contact,
+a militia commander — may bring you one decision, and every option names its
+cost. Your answers are remembered: they shape later situations, local prices on
+that world, and how the contract ends. Weekly happenings go on as before.
+
 *(Sources: ARCHITECTURE.md §7, §8; docs/tui.md "Operations board")*
 
 <br clear="all">
 
-### Contracts and hands-off battle resolution
+### Contracts and battle resolution
 
 <img align="left" width="110" src="data/logos/orbital_scar_mercenaries.png" alt="">
 
 Twelve contract types from the AtB/CamOps rules: Garrison Duty, Cadre Duty,
 Security Duty, Riot Duty, Planetary Assault, Relief Duty, Guerrilla Warfare,
 Pirate Hunting, Diversionary Raid, Objective Raid, Recon Raid, Extraction
-Raid. Each carries its own event deck, terms (command rights, salvage share,
-transport percentage, signing bonus, advance), and opposition.
+Raid. Each carries its own terms (command rights, salvage share, transport
+percentage, signing bonus, advance) and opposition; garrison and security duty
+bring situations where other contracts draw monthly events.
 
-Combat resolution uses one opposed roll per engagement, modified by BV2-derived
-hull strength × crew skill × condition × ammo state, plus campaign modifiers:
-supply state, fatigue, morale, mess quality, recon, commander tactics, terrain,
-attached support and air cover. The after-action report traces every hit,
+A battle is fought in phases — contact, decisive, then pursuit or withdrawal —
+each a slice of one battle model driven by BV2-derived hull strength × crew
+skill × condition × ammo state, plus campaign modifiers: supply state, fatigue,
+morale, mess quality, recon, commander tactics, terrain, attached support and
+air cover. The dice are fixed when contact is joined. Between phases the turn
+pauses on a phase report with the odds, and your orders — press on, change the
+ROE, commit the reserve, call an intervention, withdraw, pursue or cover the
+wrecks — change what happens next, never what already happened. Below the
+command level it stays hands-off: no pilots to steer and no hex map. The
+after-action report names every phase and order and traces every hit,
 casualty, ammunition burn, and salvage haul to the inputs behind them. Per-lance
 tasking (main effort, screen, reserve, escort, recovery, recon) adjusts the
 odds; each tasked lance appears in the AAR.
@@ -469,6 +528,46 @@ Post-battle flows directly into existing systems: wounded to medical, damage to
 tech queues and parts demand, salvage to inventory and market, XP to skills.
 
 *(Sources: ARCHITECTURE.md §5, §7)*
+
+<br clear="all">
+
+### The Inner Sphere at war
+
+Every world whose house hires mercenaries has a governor, and every great power
+that hires has a leader seated on its capital. In a 3025 start the great
+houses' leaders, their heirs and families, and the realm's notable rulers are
+the setting's own figures under their own titles. They are bound by fealty and
+family, rivalries, alliances and grudges, and on the 1st of each month some of
+them move: a ruler covets a hostile neighbour's world, a governor strikes at a
+rival, a disloyal governor declares its world free, pirates raid. Each war is
+prepared in secret, discovered, strikes and is decided without you, and the
+result changes the world fought over. At the command line `who` shows who leads a power or
+governs a world, with their ties, and `conflicts` lists the wars their
+defenders have discovered.
+
+**Every contract comes from a war or a standing need.** The attacker posts
+assaults and raids from the day it commits; the defender posts relief,
+security and riot duty once it discovers the threat; governors post garrison
+and cadre work on their own worlds each month. An offer wants your company on
+the world by the day the blow is due and leaves the board once the
+best-placed company could no longer arrive in time. While you hold a position
+on one side of a war, the other side's positions are refused.
+
+**News travels only so far.** You hear of a war's discovery, first blows and
+outcome when it happens within 100 light-years of one of your HQs or
+companies, on the Desk's Newswire and through `news`. News never stops time,
+and wars nobody of yours hears of still run their course.
+
+**Rival companies work the same field.** Rival merc companies come in tiers
+from "1-2 skull" to "5 skull" outfits. Each has a home world in its own
+house's space and buys only within 60 light-years of it, including the wrecks
+left on a lost field when they surface on the black market. A company folds
+after a year below strength with no money and no contract, and is replaced the
+same month; the log records both. The Desk's Merc companies leaderboard ranks
+them.
+
+*(Sources: GAMEPLAY.md "Who rules the Inner Sphere", "Wars between the
+powers", "Every contract comes from a war or a standing need")*
 
 <br clear="all">
 
@@ -603,6 +702,16 @@ drops per-hull cost to a fraction, but a mothballed mek needs reactivation —
 tech-days scaled by quality — before it can fight or transfer. Your strategic
 reserve is six weeks from ready at best.
 
+**Conventional forces and artillery.** Combat vehicles and aerospace fighters
+come from markets that replenish rather than from a faction's finite hull pool;
+each is its own machine, maintained, repaired, fielded and salvaged like a mek,
+and vehicles fight on their crews' vehicle gunnery and driving. An HQ's board
+also carries a monthly offer of a Mobile Long Tom artillery carrier. A carrier
+attaches to a company or waits in an HQ's pool, freights between HQs, needs
+four operators and a mechanic, reloads its magazines, and repairs in the field
+or the bay. In battle it fires salvos and suppresses the enemy; its crew can
+take casualties and the carrier itself can be lost.
+
 *(Sources: ARCHITECTURE.md §9.8)*
 
 <br clear="all">
@@ -703,7 +812,7 @@ officials, their offices, seats and families — are restated in the game's own
 words from [Sarna](https://www.sarna.net/) (BattleTechWiki); no text is
 copied.
 
-Saves from the previous formats (schema 71, 72 and 73) upgrade automatically,
+Saves from the previous formats (schema 71 through 75) upgrade automatically,
 in place, the first time this version opens them.
 
 BattleTech and 'Mech are trademarks of The Topps Company, Inc. This is a fan
