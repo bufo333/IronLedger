@@ -1666,9 +1666,9 @@ campaign holds is not checked: the start year is not saved.
 **Older stores migrate on open** through a chain of migrations, each from
 one version to the next (`Store.migrate`; schema 71 is the oldest
 supported format, `oldest_supported_schema_version`). A v71 store runs v71
-→ v72, v72 → v73, v73 → v74, v74 → v75 and v75 → v76; a v72 store the last
-four; a v73 store the last three; a v74 store the last two; a v75 store only
-v75 → v76. The whole chain
+→ v72, v72 → v73, v73 → v74, v74 → v75, v75 → v76 and v76 → v77; a v72
+store the last five; a v73 store the last four; a v74 store the last three;
+a v75 store the last two; a v76 store only v76 → v77. The whole chain
 is one transaction with foreign keys off, ending with an empty `PRAGMA
 foreign_key_check` (else `CorruptStore`) and the current schema check
 before COMMIT; any failure rolls back with the file at its original
@@ -1676,13 +1676,14 @@ version. Each migration keeps a frozen definition of its source format and
 validates it before its own statements: a malformed or mixed-version store
 is `CorruptStore`, untouched. `ddl_v72` and `index_ddl_v72` are schema
 v72's DDL byte for byte, and `conflict_v73_ddl` is the `conflict` table
-v73 added, and `ddl_v74` and `index_ddl_v74` are schema v74's and
-`ddl_v75` and `index_ddl_v75` schema v75's (a test pins their SHA-256);
+v73 added, and `ddl_v74` and `index_ddl_v74` are schema v74's,
+`ddl_v75` and `index_ddl_v75` schema v75's and `ddl_v76` and
+`index_ddl_v76` schema v76's (a test pins their SHA-256);
 `ddl_v71` is derived from `ddl_v72`, `ddl_v73` is v72's plus
 `conflict_v73_ddl`, `ddl_v74` is v73's with `contract` and `conflict` in
-their v74 definitions, `ddl_v75` is v74's plus `news_item`, and the current
-`ddl` is v75's with `merc_company` in its v76 definition plus
-`merc_hull_arrival`.
+their v74 definitions, `ddl_v75` is v74's plus `news_item`, `ddl_v76` is
+v75's with `merc_company` in its v76 definition plus `merc_hull_arrival`,
+and the current `ddl` and `index_ddl` are v76's unchanged.
 
 - **v71 → v72** (`migrateV71ToV72`). The source check: every v71 table and
   column (the frozen v71 `personage` definition, every other table as v72
@@ -1735,9 +1736,26 @@ their v74 definitions, `ddl_v75` is v74's plus `news_item`, and the current
   `merc_hull_arrival` empty, because a v75 purchase was fieldable at once,
   and its index, and sets every campaign and the store to 76. It reads no seed
   and draws no RNG; every other value, id, counter and stream is unchanged.
+- **v76 → v77** (`migrateV76ToV77`). The source check: every v76 table and
+  column (`ddl_v76`), no `theme` setting, and only v76 campaigns. It inserts
+  the store-wide `theme` setting at `standard` (`default_theme`, the
+  documented compatibility value) and sets every campaign and the store to
+  77. No table changes; the theme is client state outside every campaign,
+  so no gameplay value, id, counter or stream changes.
 
 A migrated campaign loads with the digest of the same state saved directly
-at v76 and plays on as it would have.
+at v77 and plays on as it would have.
+
+**The client's theme is a store-wide setting** (schema 77): the `setting`
+row `theme` holds a `Theme` tag (`standard` 1, `classic` 2, `high_contrast`
+3; permanent, never reused). A new store writes `standard` in its
+initialization transaction. A current-format store whose `theme` row is
+missing, not an integer or not a theme is refused at open with
+`CorruptStore`, untouched; `Store.setTheme` updates the one row and an
+update that changes none is `CorruptStore`. The TUI reads and writes it only
+through `Lobby.theme` and `Lobby.setTheme` (rule 9), applying a new theme
+only after the store keeps it (rule 44); the music settings keep their
+lenient reads. Themes and what they draw are in docs/tui.md "Rendering".
 
 **Merc-company bases and hull arrivals are saved** (schema 76): `merc_company`
 holds each company's `home_planet_key` (non-empty text) and `ready_day` (a

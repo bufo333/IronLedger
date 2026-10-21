@@ -16,6 +16,7 @@ pub const png = @import("png.zig");
 const music_mod = @import("music.zig");
 const paths = @import("paths.zig");
 const splash = @import("splash.zig");
+const theme_mod = @import("theme.zig");
 pub const layout = @import("layout.zig");
 
 pub const Term = term_mod.Term;
@@ -428,6 +429,9 @@ pub const App = struct {
     forces_view: usize = 0,
     /// Settings form: the highlighted row.
     settings_cursor: usize = 0,
+    /// The theme on screen: the screen's default look until `loadTheme`
+    /// applies the one the store holds.
+    theme: game.lobby.Theme = .classic,
     /// Forces side pane on a company row: DAMAGE, READINESS or MANNING (r cycles).
     forces_pane: enum { damage, readiness, manning } = .damage,
     /// The raise-a-company wizard's state.
@@ -483,6 +487,7 @@ pub const App = struct {
         self.w_outfit.set("The Unforgiven");
         self.w_company.set("Alpha Company");
         try self.pickDefaultPlayer();
+        try self.loadTheme();
         self.probeTerminal();
         if (self.music) |*m| {
             m.setEnabled(self.store.getSetting("music", 1) != 0);
@@ -600,6 +605,31 @@ pub const App = struct {
         if (players.len > 0) self.player_id = players[0].id;
     }
 
+    /// Draw with the theme the store holds. A store that cannot say which
+    /// is an error, never a default (rule 79).
+    pub fn loadTheme(self: *App) !void {
+        self.applyTheme(try self.store.theme());
+    }
+
+    fn applyTheme(self: *App, id: game.lobby.Theme) void {
+        self.theme = id;
+        self.screen.look = theme_mod.of(id).look;
+    }
+
+    /// Step the theme `dir` along the cycle and store it. The new look
+    /// applies only once the store has accepted it (rule 44): a failed
+    /// write keeps the current theme on screen and says why.
+    fn cycleTheme(self: *App, dir: i8) void {
+        const next = theme_mod.next(self.theme, dir);
+        self.store.setTheme(next) catch |err| {
+            self.say(.crit, "theme not changed: {s}", .{game.cli.errorText(err)});
+            return;
+        };
+        self.applyTheme(next);
+        const entry = theme_mod.of(next);
+        self.say(.good, "theme: {s} — {s}", .{ entry.name, entry.blurb });
+    }
+
     // ------------------------------------------------------------------ drawing
 
     fn draw(self: *App) !void {
@@ -623,7 +653,11 @@ pub const App = struct {
             .game => try self.drawGame(),
         }
         const modal_open = self.modal != .none and !(self.modal == .input and self.modal.input == .command);
-        if (!too_small) try self.drawModal();
+        if (!too_small) {
+            // The screen recedes behind a modal, which draws over it at full colour.
+            if (modal_open) self.screen.scrim();
+            try self.drawModal();
+        }
         try self.screen.flush(self.term.out);
         if (self.graphics == .kitty) {
             try emblem_mod.kittyDeleteAll(self.term.out);
@@ -1477,7 +1511,7 @@ pub const App = struct {
             return;
         };
         const r = self.modalRect(layout.modal.after_action_w, self.screen.rows -| 1);
-        const b = self.screen.pane(r, .{ .title = view.title, .double = true, .right_title = view.right_title });
+        const b = self.screen.pane(r, .{ .title = view.title, .modal = true, .right_title = view.right_title });
         if (b.w < layout.modal.after_action_stack_cols) {
             // One column: the AAR as it reads in the log, wrapped to the
             // width there is and scrollable. Clipping it would hide the
@@ -1510,7 +1544,7 @@ pub const App = struct {
 
     /// A titled box of text lines (the flow dialogs: end turn, quit, game over).
     fn dialog(self: *App, title: []const u8, rows: []const []const u8, w: u16, h: u16) void {
-        const inner = self.screen.pane(self.modalRect(w, h), .{ .title = title, .double = true });
+        const inner = self.screen.pane(self.modalRect(w, h), .{ .title = title, .modal = true });
         self.screen.lines(inner, rows, 0, null);
     }
 
@@ -1556,7 +1590,7 @@ pub const App = struct {
                 try rows.append(al, "");
                 try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keys.title(al, "", &amount_legend)}));
                 const r = self.modalRect(layout.modal.amount_w, @intCast(@min(rows.items.len + 2, self.screen.rows -| 1)));
-                const inner = self.screen.pane(r, .{ .title = form.title(), .double = true });
+                const inner = self.screen.pane(r, .{ .title = form.title(), .modal = true });
                 self.screen.lines(inner, rows.items, 0, null);
             },
             .battle_orders => |id| {
@@ -1568,7 +1602,7 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (form.rows, 0..) |row, i| try rows.append(al, if (i == self.modal_cursor and row.active) try std.fmt.allocPrint(al, "{{a}}▶{{/}}{s}", .{row.text[1..]}) else row.text);
                 const r = self.modalRect(layout.modal.settings_w, @intCast(@min(rows.items.len + 2, self.screen.rows -| 1)));
-                const inner = self.screen.pane(r, .{ .title = try formTitle(al, form.title, "later"), .double = true });
+                const inner = self.screen.pane(r, .{ .title = try formTitle(al, form.title, "later"), .modal = true });
                 self.screen.lines(inner, rows.items, 0, self.modal_cursor);
             },
             .settings => {
@@ -1577,7 +1611,7 @@ pub const App = struct {
                 var rows: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (form.rows, 0..) |row, i| try rows.append(al, if (i == self.settings_cursor and row.active) try std.fmt.allocPrint(al, "{{a}}▶{{/}}{s}", .{row.text[1..]}) else row.text);
                 const r = self.modalRect(layout.modal.settings_w, @intCast(@min(rows.items.len + 2, self.screen.rows -| 1)));
-                const inner = self.screen.pane(r, .{ .title = try formTitle(al, "SETTINGS", "close"), .double = true });
+                const inner = self.screen.pane(r, .{ .title = try formTitle(al, "SETTINGS", "close"), .modal = true });
                 self.screen.lines(inner, rows.items, 0, if (form.selectable > 0) self.settings_cursor else null);
             },
             .game_over_saved => {
@@ -1634,7 +1668,7 @@ pub const App = struct {
                 try rows.append(al, "  Backspace steps back and blanks · u undoes everything since the editor opened");
                 try rows.append(al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{try keys.title(al, "", &editor_legend)}));
                 const r = self.modalRect(layout.modal.emblem_editor_w, @intCast(rows.items.len + 2));
-                const inner = self.screen.pane(r, .{ .title = "EMBLEM EDITOR · cells", .double = true, .right_title = "left: editing · right: as shown" });
+                const inner = self.screen.pane(r, .{ .title = "EMBLEM EDITOR · cells", .modal = true, .right_title = "left: editing · right: as shown" });
                 self.screen.lines(inner, rows.items, 0, null);
             },
             .input => |kind| {
@@ -1661,7 +1695,7 @@ pub const App = struct {
                     .delete_player => "DELETE PLAYER?",
                     .raise_name => "RAISE A COMPANY",
                     .command => "",
-                }, .double = true });
+                }, .modal = true });
                 self.screen.lines(inner, &rows, 0, null);
             },
         }
@@ -2525,7 +2559,7 @@ pub const App = struct {
 
     // ---- settings form: one look with the pickers and the amount form ----
 
-    pub const SettingKey = enum { music, volume, track, soundtrack, auto_admit, difficulty, shares, info };
+    pub const SettingKey = enum { music, volume, track, soundtrack, theme, auto_admit, difficulty, shares, info };
     const SettingRow = struct { key: SettingKey, active: bool, text: []const u8 };
     const SettingsForm = struct { rows: []SettingRow, selectable: usize };
 
@@ -2548,6 +2582,9 @@ pub const App = struct {
         } else {
             try info.add(&rows, al, try std.fmt.allocPrint(al, "  {{d}}{s}{{/}}", .{self.music_note}));
         }
+        const look = theme_mod.of(self.theme);
+        try rows.append(al, .{ .key = .theme, .active = true, .text = try std.fmt.allocPrint(al, "  theme        {{a}}{s}{{/}} — {s}", .{ look.name, look.blurb }) });
+        selectable += 1;
         try info.add(&rows, al, "");
         if (self.stateOrNull()) |gs| {
             const cfg = try q.settings(al, gs);
@@ -2593,6 +2630,7 @@ pub const App = struct {
             .soundtrack => {
                 self.openModal(.music);
             },
+            .theme => self.cycleTheme(if (dir > 0) 1 else -1),
             .auto_admit => try self.toggleAutoAdmit(),
             .difficulty => try self.cycleDifficulty(if (dir > 0) 1 else -1),
             .shares => if (self.session != null) {
@@ -4070,7 +4108,7 @@ pub const App = struct {
         const body_rows: usize = if (v.table) |t| (if (t.rows.len == 0) 1 else t.rows.len + 1) else if (v.rows.len == 0) 1 else v.rows.len;
         const want: usize = v.head.len + body_rows + v.foot.len + 2;
         const r = self.modalRect(v.w, @intCast(@min(want, v.max_h)));
-        const inner = self.screen.pane(r, .{ .title = v.title, .double = true, .right_title = v.right_title });
+        const inner = self.screen.pane(r, .{ .title = v.title, .modal = true, .right_title = v.right_title });
         var y: u16 = inner.y;
         var left: u16 = inner.h;
         if (v.head.len > 0) {
@@ -4857,7 +4895,7 @@ pub const App = struct {
         .{ .match = keys.Match.char('q'), .action = .close, .label = "close", .group = .misc, .show_footer = false, .show_help = false },
     };
     /// The settings form's shortcuts, on top of walking its rows.
-    const SettingsShortcut = enum { music, louder, quieter, skip, back, tracks, difficulty, auto_admit };
+    const SettingsShortcut = enum { music, louder, quieter, skip, back, tracks, theme, difficulty, auto_admit };
     pub const settings_bindings = [_]keys.Binding(SettingsShortcut){
         .{ .match = keys.Match.char('m'), .action = .music, .label = "music", .group = .act },
         .{ .match = keys.Match.char('M'), .action = .music, .label = "music", .group = .act, .show_footer = false, .show_help = false },
@@ -4868,6 +4906,8 @@ pub const App = struct {
         .{ .match = keys.Match.char('<'), .action = .back, .label = "previous track", .group = .act, .show_footer = false, .show_help = false },
         .{ .match = keys.Match.char('t'), .action = .tracks, .label = "soundtracks", .group = .act },
         .{ .match = keys.Match.char('T'), .action = .tracks, .label = "soundtracks", .group = .act, .show_footer = false, .show_help = false },
+        .{ .match = keys.Match.char('c'), .action = .theme, .label = "theme", .group = .act },
+        .{ .match = keys.Match.char('C'), .action = .theme, .label = "theme", .group = .act, .show_footer = false, .show_help = false },
         .{ .match = keys.Match.char('d'), .action = .difficulty, .label = "difficulty", .group = .act },
         .{ .match = keys.Match.char('D'), .action = .difficulty, .label = "difficulty", .group = .act, .show_footer = false, .show_help = false },
         .{ .match = keys.Match.char('a'), .action = .auto_admit, .label = "auto-admit", .group = .act },
@@ -5069,6 +5109,7 @@ pub const App = struct {
                         .skip => if (self.music) |*m| m.skip(),
                         .back => if (self.music) |*m| m.back(),
                         .tracks => self.openModal(.music),
+                        .theme => self.cycleTheme(1),
                         .difficulty => try self.cycleDifficulty(1),
                         .auto_admit => try self.toggleAutoAdmit(),
                     }
@@ -5752,6 +5793,99 @@ test "modalRect never covers the footer row" {
         // A modal requesting the full terminal height must not touch the footer.
         const r = c.app.modalRect(60, rows);
         try std.testing.expect(r.y + r.h < rows);
+    }
+}
+
+/// The first cell drawn with `ch`, scanning rows top to bottom.
+fn findCellForTest(s: *const Screen, ch: u21) ?struct { x: u16, y: u16 } {
+    for (0..s.rows) |y| for (0..s.cols) |x| {
+        if (s.get(@intCast(x), @intCast(y)).ch == ch) return .{ .x = @intCast(x), .y = @intCast(y) };
+    };
+    return null;
+}
+
+/// Put the Settings cursor on the theme row.
+fn settingsThemeRowForTest(c: *ClientForTest) !usize {
+    const form = try c.app.settingsRows(c.app.a());
+    for (form.rows, 0..) |row, i| if (row.key == .theme) {
+        c.app.settings_cursor = i;
+        return i;
+    };
+    return error.TestUnexpectedResult;
+}
+
+test "under the standard theme an open modal scrims the screen and casts a shadow, and closing it restores every style" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    try c.app.loadTheme();
+    try std.testing.expectEqual(game.lobby.Theme.standard, c.app.theme);
+    try c.app.draw();
+    // The Desk's first pane corner, far left of the centred modal.
+    const corner = c.app.screen.get(0, 2);
+    try std.testing.expectEqual(@as(u21, '┌'), corner.ch);
+    try std.testing.expectEqual(Style.box, corner.style);
+    try pressForTest(c, .{ .f = 12 });
+    try std.testing.expect(c.app.modal == .settings);
+    try std.testing.expectEqual(screen_mod.Cell{ .ch = '┌', .style = .scrim }, c.app.screen.get(0, 2));
+    const tl = findCellForTest(&c.app.screen, '╔').?;
+    const tr = findCellForTest(&c.app.screen, '╗').?;
+    try std.testing.expectEqual(Style.modal_box, c.app.screen.get(tl.x, tl.y).style);
+    try std.testing.expectEqual(Style.modal_title, c.app.screen.get(tl.x + 1, tl.y).style);
+    try std.testing.expectEqual(screen_mod.Cell{ .ch = '░', .style = .shadow }, c.app.screen.get(tr.x + 1, tr.y + 1));
+    try pressForTest(c, .escape);
+    try std.testing.expect(c.app.modal == .none);
+    try std.testing.expectEqual(corner, c.app.screen.get(0, 2));
+    try std.testing.expect(findCellForTest(&c.app.screen, '░') == null);
+}
+
+test "the Settings theme row steps with left, right, Enter and c, wraps both ways, and the store keeps each step" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    try c.app.loadTheme();
+    try pressForTest(c, .{ .f = 12 });
+    const row = try settingsThemeRowForTest(c);
+    const Step = struct { key: Key, want: game.lobby.Theme, name: []const u8 };
+    for ([_]Step{
+        .{ .key = .right, .want = .classic, .name = "classic" },
+        .{ .key = .right, .want = .high_contrast, .name = "high contrast" },
+        .{ .key = .right, .want = .standard, .name = "standard" },
+        .{ .key = .left, .want = .high_contrast, .name = "high contrast" },
+        .{ .key = .enter, .want = .standard, .name = "standard" },
+        .{ .key = .{ .char = 'c' }, .want = .classic, .name = "classic" },
+    }) |step| {
+        try pressForTest(c, step.key);
+        try std.testing.expect(c.app.modal == .settings);
+        try std.testing.expectEqual(step.want, c.app.theme);
+        try std.testing.expectEqual(step.want, try c.app.store.theme());
+        try std.testing.expectEqual(theme_mod.of(step.want).look, c.app.screen.look);
+        const said = try std.fmt.allocPrint(c.app.a(), "theme: {s} — {s}", .{ step.name, theme_mod.of(step.want).blurb });
+        try std.testing.expectEqualStrings(said, c.app.msg.slice());
+        const form = try c.app.settingsRows(c.app.a());
+        try std.testing.expect(std.mem.indexOf(u8, form.rows[row].text, step.name) != null);
+    }
+    // `c` steps forward from any row.
+    c.app.settings_cursor = 0;
+    try pressForTest(c, .{ .char = 'c' });
+    try std.testing.expectEqual(game.lobby.Theme.high_contrast, try c.app.store.theme());
+}
+
+test "a theme the store cannot keep is never applied, and the status line says why (rule 44)" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    try c.app.loadTheme();
+    try pressForTest(c, .{ .f = 12 });
+    const row = try settingsThemeRowForTest(c);
+    const text_before = try std.testing.allocator.dupe(u8, (try c.app.settingsRows(c.app.a())).rows[row].text);
+    defer std.testing.allocator.free(text_before);
+    try c.app.store.store.db.exec("DELETE FROM setting WHERE key = 'theme'");
+    for ([_]Key{ .{ .char = 'c' }, .right, .left, .enter }) |key| {
+        try pressForTest(c, key);
+        try std.testing.expectEqual(game.lobby.Theme.standard, c.app.theme);
+        try std.testing.expectEqual(theme_mod.of(.standard).look, c.app.screen.look);
+        const want = try std.fmt.allocPrint(c.app.a(), "theme not changed: {s}", .{game.cli.errorText(error.CorruptStore)});
+        try std.testing.expectEqualStrings(want, c.app.msg.slice());
+        try std.testing.expectEqual(Style.crit, c.app.msg_style);
+        try std.testing.expectEqualStrings(text_before, (try c.app.settingsRows(c.app.a())).rows[row].text);
     }
 }
 

@@ -2,7 +2,9 @@
 //! "Rendering"): every frame is composed into a grid of cells by
 //! arithmetic — panes at computed rectangles, text padded or clipped to
 //! its pane — then flushed as ANSI. Styles are semantic (amber, good,
-//! critical, selected, dim) so the client holds on any terminal theme.
+//! critical, selected, dim) so the client holds on any terminal theme;
+//! chrome roles (borders, titles, a modal's frame) take their SGR from the
+//! look's palette (src/tui/theme.zig).
 //! Inline markup `{a}…{/}` uses the tag set of docs/tui_mockup_gen.py so
 //! query text can carry emphasis. Pure: no I/O except `flush`.
 //! No MekHQ counterpart: MekHQ draws with Swing (docs/mekhq-map.md).
@@ -21,8 +23,14 @@ pub const Style = enum(u8) {
     sel, // cursor row / focused pane title
     tab, // active tab
     purple,
+    // Chrome roles: their SGR comes from the screen's palette.
     box, // borders
     focus, // the focused pane's border line
+    pane_title, // an unfocused pane's title
+    modal_box, // a modal's border
+    modal_title, // a modal's title band
+    shadow, // a modal's shadow
+    scrim, // everything beneath an open modal
     // Political colours for the star map.
     blue,
     red,
@@ -33,7 +41,9 @@ pub const Style = enum(u8) {
     white,
     grey,
 
-    fn sgr(self: Style) []const u8 {
+    /// The style's SGR: a chrome role's from `palette`, every other style's
+    /// the same under every palette (rule 43).
+    pub fn sgr(self: Style, palette: *const term.Palette) []const u8 {
         return switch (self) {
             .normal => term.sgr.reset,
             .dim => term.sgr.dim,
@@ -43,8 +53,13 @@ pub const Style = enum(u8) {
             .sel => term.sgr.sel,
             .tab => term.sgr.tab,
             .purple => term.sgr.purple,
-            .box => term.sgr.box,
-            .focus => term.sgr.focus,
+            .box => palette.box,
+            .focus => palette.focus,
+            .pane_title => palette.pane_title,
+            .modal_box => palette.modal_box,
+            .modal_title => palette.modal_title,
+            .shadow => palette.shadow,
+            .scrim => palette.scrim,
             .blue => term.sgr.blue,
             .red => term.sgr.red,
             .yellow => term.sgr.yellow,
@@ -98,6 +113,15 @@ pub const Rect = struct {
     }
 };
 
+/// How chrome is drawn (docs/tui.md "Rendering"): the chrome roles' SGR,
+/// whether an open modal scrims the screen beneath it, and whether a modal
+/// casts a shadow. Semantic styles never depend on it (rule 43).
+pub const Look = struct {
+    palette: *const term.Palette = &term.palette.classic,
+    scrim: bool = false,
+    shadow: bool = false,
+};
+
 pub const Screen = struct {
     alloc: std.mem.Allocator,
     cols: u16,
@@ -107,6 +131,9 @@ pub const Screen = struct {
     truecolor: bool = true,
     /// Replace box-drawing and block glyphs with ASCII (`--ascii`).
     ascii: bool = false,
+    /// The theme's look; the client applies the stored theme before its
+    /// first frame (src/tui/theme.zig).
+    look: Look = .{},
 
     pub fn init(alloc: std.mem.Allocator, cols: u16, rows: u16) !Screen {
         const cells = try alloc.alloc(Cell, @as(usize, cols) * rows);
@@ -196,19 +223,21 @@ pub const Screen = struct {
         title: []const u8 = "",
         right_title: []const u8 = "",
         focused: bool = false,
-        double: bool = false,
+        /// The modal frame, the one every modal draws (rule 36): the double
+        /// rule, the modal border and title roles, and the look's shadow.
+        modal: bool = false,
     };
 
     /// Draw a bordered pane; returns its inner rect.
     pub fn pane(self: *Screen, r: Rect, opts: PaneOpts) Rect {
         if (r.w < 2 or r.h < 2) return r.inner();
         const a = self.ascii;
-        const h: u21 = if (a) (if (opts.double) '=' else '-') else if (opts.double) '═' else '─';
-        const v: u21 = if (a) '|' else if (opts.double) '║' else '│';
-        const tl: u21 = if (a) '+' else if (opts.double) '╔' else '┌';
-        const tr: u21 = if (a) '+' else if (opts.double) '╗' else '┐';
-        const bl: u21 = if (a) '+' else if (opts.double) '╚' else '└';
-        const br: u21 = if (a) '+' else if (opts.double) '╝' else '┘';
+        const h: u21 = if (a) (if (opts.modal) '=' else '-') else if (opts.modal) '═' else '─';
+        const v: u21 = if (a) '|' else if (opts.modal) '║' else '│';
+        const tl: u21 = if (a) '+' else if (opts.modal) '╔' else '┌';
+        const tr: u21 = if (a) '+' else if (opts.modal) '╗' else '┐';
+        const bl: u21 = if (a) '+' else if (opts.modal) '╚' else '└';
+        const br: u21 = if (a) '+' else if (opts.modal) '╝' else '┘';
         const x0: i32 = r.x;
         const y0: i32 = r.y;
         const x1: i32 = r.x + r.w - 1;
@@ -216,22 +245,24 @@ pub const Screen = struct {
         // Clear everything inside the border, padding columns included, so a
         // modal never shows the screen beneath it.
         self.fill(.{ .x = r.x + 1, .y = r.y + 1, .w = r.w - 2, .h = r.h - 2 }, ' ', .normal);
-        const tstyle: Style = if (opts.focused) .sel else .box;
-        const line_style: Style = if (opts.focused) .focus else .box;
+        const border: Style = if (opts.modal) .modal_box else .box;
+        const tstyle: Style = if (opts.modal) .modal_title else if (opts.focused) .sel else .pane_title;
+        const line_style: Style = if (opts.modal) .modal_box else if (opts.focused) .focus else .box;
         var x: i32 = x0 + 1;
         while (x < x1) : (x += 1) {
             self.put(x, y0, h, line_style);
-            self.put(x, y1, h, .box);
+            self.put(x, y1, h, border);
         }
         var y: i32 = y0 + 1;
         while (y < y1) : (y += 1) {
-            self.put(x0, y, v, .box);
-            self.put(x1, y, v, .box);
+            self.put(x0, y, v, border);
+            self.put(x1, y, v, border);
         }
-        self.put(x0, y0, tl, .box);
-        self.put(x1, y0, tr, .box);
-        self.put(x0, y1, bl, .box);
-        self.put(x1, y1, br, .box);
+        self.put(x0, y0, tl, border);
+        self.put(x1, y0, tr, border);
+        self.put(x0, y1, bl, border);
+        self.put(x1, y1, br, border);
+        if (opts.modal and self.look.shadow) self.shadow(r);
         if (opts.title.len > 0 and r.w > 6) {
             const avail: u16 = r.w - 4;
             self.put(x0 + 1, y0, ' ', tstyle);
@@ -248,6 +279,39 @@ pub const Screen = struct {
             }
         }
         return r.inner();
+    }
+
+    /// A modal's one-cell shadow right of and below `r`: `░`, or `.` under
+    /// `--ascii` (docs/tui.md "Boundary rules"). It never takes the last
+    /// row, the status line a modal's actions report on (docs/tui.md "The
+    /// frame"); `put` clips it at the screen's right edge.
+    fn shadow(self: *Screen, r: Rect) void {
+        const g: u21 = if (self.ascii) '.' else '░';
+        const right: i32 = @as(i32, r.x) + r.w;
+        const below: i32 = @as(i32, r.y) + r.h;
+        const status_row: i32 = @as(i32, self.rows) - 1;
+        var y: i32 = @as(i32, r.y) + 1;
+        while (y <= below and y < status_row) : (y += 1) self.put(right, y, g, .shadow);
+        if (below >= status_row) return;
+        var x: i32 = @as(i32, r.x) + 1;
+        while (x < right) : (x += 1) self.put(x, below, g, .shadow);
+    }
+
+    /// Recede everything drawn so far behind a modal about to be drawn over
+    /// it: every text cell takes `.scrim` and every pixel cell drops to half
+    /// intensity. Nothing changes when the look has no scrim.
+    pub fn scrim(self: *Screen) void {
+        if (!self.look.scrim) return;
+        for (self.cells) |*c| {
+            if (c.px) |*p| {
+                p.top = halfIntensity(p.top);
+                p.bottom = halfIntensity(p.bottom);
+            } else c.style = .scrim;
+        }
+    }
+
+    fn halfIntensity(c: Rgb) Rgb {
+        return .{ c[0] / 2, c[1] / 2, c[2] / 2 };
     }
 
     /// Lines into a pane's inner rect, one per row, padded; a cursor row
@@ -408,7 +472,7 @@ pub const Screen = struct {
                     continue;
                 }
                 if (cur == null or cur.? != c.style) {
-                    try out.writeAll(c.style.sgr());
+                    try out.writeAll(c.style.sgr(self.look.palette));
                     cur = c.style;
                 }
                 var buf: [4]u8 = undefined;
@@ -485,6 +549,108 @@ test "pane borders land on the rect's edges" {
     try std.testing.expectEqual(@as(u16, 2), inner.h);
 }
 
+/// A look that scrims and casts shadows, for the frame tests.
+const shadowed: Look = .{ .palette = &term.palette.standard, .scrim = true, .shadow = true };
+
+test "a modal frame draws modal border and title roles and a shadow; an ordinary pane casts none" {
+    var s = try Screen.init(std.testing.allocator, 30, 12);
+    defer s.deinit();
+    s.look = shadowed;
+    _ = s.pane(.{ .x = 0, .y = 0, .w = 10, .h = 4 }, .{ .title = "P" });
+    _ = s.pane(.{ .x = 0, .y = 5, .w = 10, .h = 4 }, .{ .title = "F", .focused = true });
+    _ = s.pane(.{ .x = 12, .y = 1, .w = 10, .h = 5 }, .{ .title = "M", .modal = true });
+    // The ordinary panes: plain borders, the pane-title and selected roles.
+    try std.testing.expectEqual(Style.box, s.get(0, 1).style);
+    try std.testing.expectEqual(Style.pane_title, s.get(2, 0).style);
+    try std.testing.expectEqual(Style.focus, s.get(4, 5).style);
+    try std.testing.expectEqual(Style.box, s.get(0, 6).style);
+    try std.testing.expectEqual(Style.sel, s.get(2, 5).style);
+    // Nothing right of or below them.
+    for (0..9) |y| try std.testing.expectEqual(Cell{}, s.get(10, @intCast(y)));
+    try std.testing.expectEqual(Cell{}, s.get(5, 4));
+    // The modal: the double rule in the modal roles, title band included.
+    try std.testing.expectEqual(Cell{ .ch = '╔', .style = .modal_box }, s.get(12, 1));
+    try std.testing.expectEqual(Cell{ .ch = '║', .style = .modal_box }, s.get(21, 3));
+    try std.testing.expectEqual(Cell{ .ch = '═', .style = .modal_box }, s.get(17, 5));
+    try std.testing.expectEqual(Cell{ .ch = 'M', .style = .modal_title }, s.get(14, 1));
+    try std.testing.expectEqual(Style.modal_title, s.get(13, 1).style);
+    // Its shadow: the column right of it from its second row, and the row
+    // below it from its second column, corner included.
+    try std.testing.expectEqual(Cell{}, s.get(22, 1));
+    for (2..7) |y| try std.testing.expectEqual(Cell{ .ch = '░', .style = .shadow }, s.get(22, @intCast(y)));
+    try std.testing.expectEqual(Cell{}, s.get(12, 6));
+    for (13..23) |x| try std.testing.expectEqual(Cell{ .ch = '░', .style = .shadow }, s.get(@intCast(x), 6));
+}
+
+test "a modal's shadow is a dot under --ascii, clipped at the right edge and kept off the status row" {
+    var s = try Screen.init(std.testing.allocator, 20, 8);
+    defer s.deinit();
+    s.look = shadowed;
+    s.ascii = true;
+    // Flush right and down to the row above the status row: the shadow
+    // column falls off the screen and the shadow row would be the status row.
+    _ = s.pane(.{ .x = 10, .y = 2, .w = 10, .h = 5 }, .{ .title = "M", .modal = true });
+    try std.testing.expectEqual(Cell{ .ch = '+', .style = .modal_box }, s.get(10, 2));
+    try std.testing.expectEqual(Cell{ .ch = '=', .style = .modal_box }, s.get(15, 6));
+    for (0..20) |x| try std.testing.expectEqual(Cell{}, s.get(@intCast(x), 7));
+    // One row higher, the shadow row is drawn, in dots.
+    s.clear();
+    _ = s.pane(.{ .x = 2, .y = 1, .w = 10, .h = 5 }, .{ .title = "M", .modal = true });
+    for (3..13) |x| try std.testing.expectEqual(Cell{ .ch = '.', .style = .shadow }, s.get(@intCast(x), 6));
+    for (2..7) |y| try std.testing.expectEqual(Cell{ .ch = '.', .style = .shadow }, s.get(12, @intCast(y)));
+    for (0..20) |x| try std.testing.expectEqual(Cell{}, s.get(@intCast(x), 7));
+}
+
+test "the scrim restyles every text cell and halves every pixel cell, and the modal drawn after it keeps its styles" {
+    var s = try Screen.init(std.testing.allocator, 20, 6);
+    defer s.deinit();
+    s.look = shadowed;
+    _ = s.text(0, 0, 20, "{a}amber{/} {c}crit{/}", .normal);
+    _ = s.pane(.{ .x = 0, .y = 1, .w = 8, .h = 4 }, .{ .title = "P", .focused = true });
+    s.cells[19] = .{ .px = .{ .top = .{ 200, 101, 0 }, .bottom = .{ 10, 255, 1 } } };
+    s.scrim();
+    for (s.cells, 0..) |c, i| {
+        if (i == 19) {
+            try std.testing.expectEqual(Pixels{ .top = .{ 100, 50, 0 }, .bottom = .{ 5, 127, 0 } }, c.px.?);
+        } else try std.testing.expectEqual(Style.scrim, c.style);
+    }
+    try std.testing.expectEqual(@as(u21, 'a'), s.get(0, 0).ch);
+    const inner = s.pane(.{ .x = 9, .y = 1, .w = 10, .h = 4 }, .{ .title = "M", .modal = true });
+    _ = s.text(inner.x, inner.y, inner.w, "{g}ok{/}", .normal);
+    try std.testing.expectEqual(Style.modal_box, s.get(9, 1).style);
+    try std.testing.expectEqual(Style.modal_title, s.get(11, 1).style);
+    try std.testing.expectEqual(Style.good, s.get(inner.x, inner.y).style);
+    try std.testing.expectEqual(Style.normal, s.get(inner.x + 3, inner.y).style);
+    try std.testing.expectEqual(Style.scrim, s.get(8, 2).style);
+}
+
+test "the default look is classic: no scrim, no shadow, and the base SGR for every style it had" {
+    var s = try Screen.init(std.testing.allocator, 20, 8);
+    defer s.deinit();
+    _ = s.text(0, 0, 20, "{a}amber{/}", .normal);
+    s.scrim();
+    try std.testing.expectEqual(Style.amber, s.get(0, 0).style);
+    _ = s.pane(.{ .x = 2, .y = 1, .w = 10, .h = 4 }, .{ .title = "M", .modal = true });
+    for (0..8) |y| try std.testing.expectEqual(Cell{}, s.get(12, @intCast(y)));
+    // The single-style chrome's bytes, pinned: every style that predates
+    // the chrome roles, and the roles drawn as `box`.
+    const p = s.look.palette;
+    const pinned = [_]struct { style: Style, sgr: []const u8 }{
+        .{ .style = .normal, .sgr = "\x1b[0m" },         .{ .style = .dim, .sgr = "\x1b[0;90m" },
+        .{ .style = .amber, .sgr = "\x1b[0;33m" },       .{ .style = .good, .sgr = "\x1b[0;32m" },
+        .{ .style = .crit, .sgr = "\x1b[0;31m" },        .{ .style = .sel, .sgr = "\x1b[0;30;46m" },
+        .{ .style = .tab, .sgr = "\x1b[0;1;30;43m" },    .{ .style = .purple, .sgr = "\x1b[0;35m" },
+        .{ .style = .box, .sgr = "\x1b[0;37m" },         .{ .style = .focus, .sgr = "\x1b[0;36m" },
+        .{ .style = .blue, .sgr = "\x1b[0;94m" },        .{ .style = .red, .sgr = "\x1b[0;91m" },
+        .{ .style = .yellow, .sgr = "\x1b[0;93m" },      .{ .style = .green, .sgr = "\x1b[0;92m" },
+        .{ .style = .magenta, .sgr = "\x1b[0;95m" },     .{ .style = .cyan, .sgr = "\x1b[0;96m" },
+        .{ .style = .white, .sgr = "\x1b[0;97m" },       .{ .style = .grey, .sgr = "\x1b[0;90m" },
+        .{ .style = .pane_title, .sgr = "\x1b[0;37m" },  .{ .style = .modal_box, .sgr = "\x1b[0;37m" },
+        .{ .style = .modal_title, .sgr = "\x1b[0;37m" },
+    };
+    for (pinned) |want| try std.testing.expectEqualStrings(want.sgr, want.style.sgr(p));
+}
+
 test "blit fits a square image at a 2:1 cell aspect and emits pixel cells" {
     var s = try Screen.init(std.testing.allocator, 20, 6);
     defer s.deinit();
@@ -528,7 +694,7 @@ test "text wrapped to a pane's inner width draws without clipping" {
     const rows = try wrap(a, "{d}d1234{/} {a}alpha bravo charlie delta echo{/}", box.inner().w);
     var s = try Screen.init(std.testing.allocator, box.w, box.h);
     defer s.deinit();
-    const inner = s.pane(box, .{ .title = "LOG ENTRY", .double = true });
+    const inner = s.pane(box, .{ .title = "LOG ENTRY", .modal = true });
     try std.testing.expectEqual(inner.w, box.inner().w);
     s.lines(inner, rows, 0, null);
     try std.testing.expect(rows.len > 1); // it really did wrap

@@ -430,7 +430,12 @@ fatigue, supply state, and pending maintenance.
 
 ![Readiness report](docs/screenshots/readiness.svg)
 
-**`:settings`** or `F12` — global settings (music, difficulty, auto-admit).
+**`:settings`** or `F12` — global settings (music, theme, difficulty,
+auto-admit). The theme sets the look: `standard` (the default) dims the
+screen behind a modal and frames the modal in bright cyan with a shadow,
+`classic` keeps every border one colour, and `high contrast` drops greys for
+light backgrounds and low vision. `c` or ←/→ on the theme row steps it; the
+choice is saved with the store.
 `:settings campaign` opens campaign-specific settings.
 
 ![Settings — global](docs/screenshots/settings.svg)
@@ -816,7 +821,7 @@ officials, their offices, seats and families — are restated in the game's own
 words from [Sarna](https://www.sarna.net/) (BattleTechWiki); no text is
 copied.
 
-Saves from the previous formats (schema 71 through 75) upgrade automatically,
+Saves from the previous formats (schema 71 through 76) upgrade automatically,
 in place, the first time this version opens them.
 
 BattleTech and 'Mech are trademarks of The Topps Company, Inc. This is a fan

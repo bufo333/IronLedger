@@ -8,6 +8,7 @@ test {
     _ = @import("tui/screen.zig");
     _ = @import("tui/layout.zig");
     _ = @import("tui/term.zig");
+    _ = @import("tui/theme.zig");
     _ = @import("tui/app.zig");
     _ = @import("tui/screens/desk.zig");
     _ = @import("tui/screens/map.zig");

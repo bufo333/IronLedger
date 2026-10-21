@@ -546,6 +546,7 @@ filters to the active context (see the Keys description above).
 | `+ -` | volume |
 | `< >` | track |
 | `t` | soundtracks |
+| `c` | theme |
 | `d` | difficulty |
 | `a` | auto-admit |
 
@@ -774,6 +775,15 @@ the after-action; `Esc` leaves it, and the turn waits) ·
 lance's role with the odds recomputed, Enter buys the emergency resupply,
 recalls behind a confirm, or confirms the orders, which clears the
 contact warning; `Esc` closes it with the current settings standing) ·
+**Settings** (F12, `:settings`, or `s` on the welcome screen: the
+store-wide rows — the soundtrack when one is loaded, and the `theme` with
+its one-line blurb — and, in a campaign, the medbay, difficulty and
+shareholders' cut; ←/→ step the row under the cursor both ways with
+wraparound, Enter steps it forward, and the settings shortcuts act from any
+row, `c` stepping the theme. A new theme draws from the next frame once the
+store has kept it, and the status line says `theme: <name> — <blurb>`; a
+store that cannot keep it leaves the theme on screen and says `theme not
+changed:` with the reason) ·
 **Amount forms** (order, ship, sell, transfer, loan, policies: one to
 three numbers held to their ranges; Enter builds a command line for the
 shared parser, and a refusal shows as its sentence, never an error code).
@@ -895,7 +905,35 @@ view model each frame from an arena.
   rebuild; no per-rebuild arena growth occurs.
 - **Colors** are semantic only — amber (attention/active), green (ok),
   red (critical), cyan (cursor/focus), dim (chrome) — on the terminal's own
-  background, so the client holds on any theme.
+  background, so the client holds on any theme
+  ([rule 43](engineering-contract.md#43-colors-are-semantic)).
+- **Themes** (`src/tui/theme.zig`) change chrome only. Chrome is drawn in
+  roles — a pane's border (`box`), the focused pane's top line (`focus`),
+  an unfocused pane's title (`pane_title`), a modal's border and title band
+  (`modal_box`, `modal_title`), a modal's shadow (`shadow`) and the screen
+  beneath an open modal (`scrim`) — and a theme is the palette those roles
+  draw with (`term.palette`), plus whether a modal scrims and casts a
+  shadow. Every semantic colour has the same SGR under every theme. The
+  player picks the theme in Settings; the store keeps it (`setting` row
+  `theme`, from schema v77).
+  - `standard` (the default): dim borders under bold titles, a bold cyan
+    focus; a modal in bold bright cyan under the selection band made bold,
+    over a scrimmed screen, with a shadow.
+  - `classic`: every border and title in one colour, a focused title in
+    the selection band; a modal has only its double rule. No scrim, no
+    shadow.
+  - `high contrast`: for light backgrounds and low vision, no fixed grey:
+    bold borders and titles, a bold bright cyan focus, a reverse-video
+    modal title, a faint scrim and a shadow.
+- **Modal frame** (rule 36: one framing, `PaneOpts.modal`): the double
+  rule, the modal border and title roles, and the theme's shadow — `░`
+  (`.` under `--ascii`) one cell right of and below the frame, kept off
+  the status row so a modal action's report stays readable. While any
+  modal but the command line is open, every cell already drawn is
+  restyled `scrim` and half-block pixel cells drop to half intensity
+  before the modal is drawn over it at full colour. A modal stays distinct
+  without colour: the double rule, its title band, the shadow and the
+  scrim each mark it, and no theme relies on faint (SGR 2) alone.
 
 ## Boundary rules
 

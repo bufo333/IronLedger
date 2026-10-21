@@ -62,8 +62,9 @@ CREATE TABLE player (
     created_seq     INTEGER NOT NULL                 -- lobby order
 );
 
--- Store-wide integer settings: schema_version, and the client's music,
--- music_volume and music_set.
+-- Store-wide integer settings: schema_version; the client's theme, required
+-- from schema v77 (1 standard, 2 classic, 3 high_contrast; tags permanent);
+-- and the client's music, music_volume and music_set.
 CREATE TABLE setting (
     key             TEXT    PRIMARY KEY,
     value           INTEGER NOT NULL

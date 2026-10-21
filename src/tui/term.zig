@@ -37,6 +37,66 @@ pub const sgr = struct {
     pub const grey = "\x1b[0;90m";
 };
 
+/// The SGR of each chrome role under one theme (docs/tui.md "Rendering").
+/// Only chrome varies by theme: every semantic colour is `sgr` (rule 43).
+pub const Palette = struct {
+    /// An unfocused pane's border, and a focused pane's sides and foot.
+    box: []const u8,
+    /// The focused pane's top border.
+    focus: []const u8,
+    /// An unfocused pane's title.
+    pane_title: []const u8,
+    /// A modal's border.
+    modal_box: []const u8,
+    /// A modal's title band.
+    modal_title: []const u8,
+    /// The shadow cells right of and below a modal.
+    shadow: []const u8,
+    /// Every cell beneath an open modal.
+    scrim: []const u8,
+};
+
+const bold = "\x1b[0;1m";
+const bold_cyan = "\x1b[0;1;36m";
+const bold_bright_cyan = "\x1b[0;1;96m";
+
+/// The chrome palettes the themes draw with (src/tui/theme.zig).
+pub const palette = struct {
+    /// Every border and title as the single-style chrome draws it: chrome
+    /// roles take `sgr.box` and `sgr.focus`.
+    pub const classic: Palette = .{
+        .box = sgr.box,
+        .focus = sgr.focus,
+        .pane_title = sgr.box,
+        .modal_box = sgr.box,
+        .modal_title = sgr.box,
+        .shadow = sgr.box,
+        .scrim = sgr.box,
+    };
+    /// Dim borders under bold titles, a bold cyan focus, and a modal in
+    /// bold bright cyan under the selection band made bold.
+    pub const standard: Palette = .{
+        .box = sgr.dim,
+        .focus = bold_cyan,
+        .pane_title = bold,
+        .modal_box = bold_bright_cyan,
+        .modal_title = "\x1b[0;1;30;46m",
+        .shadow = sgr.dim,
+        .scrim = sgr.dim,
+    };
+    /// No fixed grey: bold, reverse and faint over the terminal's own
+    /// foreground, for light backgrounds and low vision.
+    pub const high_contrast: Palette = .{
+        .box = bold,
+        .focus = bold_bright_cyan,
+        .pane_title = bold,
+        .modal_box = bold,
+        .modal_title = "\x1b[0;1;7m",
+        .shadow = bold,
+        .scrim = "\x1b[0;2m",
+    };
+};
+
 pub fn cursorHome(out: *std.Io.Writer) !void {
     try out.writeAll("\x1b[H");
 }

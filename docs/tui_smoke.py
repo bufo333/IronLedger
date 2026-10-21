@@ -136,6 +136,16 @@ def wait_for(text, timeout=6.0, tail=30000):
 assert wait_for("MERCENARY COMMAND CONSOLE", timeout=20), "welcome screen missing: " + plain()[-2000:]   # a cold runner takes a while to first paint
 send("s", 0.8)
 assert "SETTINGS" in plain()[-30000:], plain()[-2000:]
+# The theme steps forward on `c` and the status line names each one; two
+# more steps leave the store on high contrast for the second pass.
+for name in ("classic", "high contrast", "standard", "classic", "high contrast"):
+    mark = len(out)
+    send("c", 0.6)
+    stepped = lambda: re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "replace")
+    end = time.time() + 6
+    while f"theme: {name} —" not in stepped() and time.time() < end:
+        drain(0.2)
+    assert f"theme: {name} —" in stepped(), stepped()[-2000:]
 send("\x1b")
 send("p"); send("John\r")
 assert wait_for("player \"John\" created"), plain()[-3000:]   # the status line can land after the send's pause on a slow runner
@@ -641,6 +651,13 @@ pid, fd = spawn(["--tui", "--ascii", "--no-splash", "--no-music", "--seed", "302
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
 out = b""
 assert wait_for("MERCENARY", timeout=20), plain()[-2000:]
+# The theme the first pass left survives the restart: Settings reads high
+# contrast, and its modal title is drawn in reverse video.
+mark = len(out)
+send("s", 0.8)
+assert wait_for("high contrast", tail=4000), plain()[-2000:]
+assert b"\x1b[0;1;7m" in out[mark:], "high contrast modal title SGR missing after restart"
+send("\x1b", 0.6)
 send("\t"); send("\r", 3.0)
 assert wait_for("F1 Desk", timeout=20) and "+-" in plain(), plain()[-2000:]          # ascii borders
 # The seeded campaign is saved with a decision still in its inbox: the Desk

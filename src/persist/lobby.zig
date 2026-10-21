@@ -12,6 +12,7 @@ const state_mod = @import("../sim/state.zig");
 const GameState = state_mod.GameState;
 
 pub const schema_version = store_mod.schema_version;
+pub const Theme = store_mod.Theme;
 pub const PlayerInfo = store_mod.Store.PlayerInfo;
 pub const CampaignInfo = store_mod.Store.CampaignInfo;
 
@@ -88,6 +89,17 @@ pub const Lobby = struct {
 
     pub fn setSetting(self: Lobby, key: []const u8, value: i64) !void {
         return self.store.setSetting(key, value);
+    }
+
+    /// The client's look as the store holds it; `CorruptStore` when the
+    /// store's theme row is missing or malformed.
+    pub fn theme(self: Lobby) !Theme {
+        return self.store.theme();
+    }
+
+    /// Store the client's look; on any error the stored theme is unchanged.
+    pub fn setTheme(self: Lobby, t: Theme) !void {
+        return self.store.setTheme(t);
     }
 
     /// Save a session under a player (a first save files a new campaign).
