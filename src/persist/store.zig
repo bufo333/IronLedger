@@ -1122,8 +1122,11 @@ pub const Store = struct {
     }
 
     /// Every index that `definitions` (one CREATE INDEX per line) names
-    /// exists on its table with its uniqueness, its key columns in order
-    /// and its WHERE clause, if any; `CorruptStore` otherwise.
+    /// exists on its table with its uniqueness, its key columns in order,
+    /// ascending and BINARY, and its WHERE clause, if any; `CorruptStore`
+    /// otherwise. The stored SQL must equal the definition exactly as SQLite
+    /// keeps it, without IF NOT EXISTS and the semicolon, so a trailing
+    /// comment cannot hide another condition.
     fn validateIndexes(db: sqlite.Db, definitions_text: []const u8) !void {
         const unique_marker = "CREATE UNIQUE INDEX IF NOT EXISTS ";
         const plain_marker = "CREATE INDEX IF NOT EXISTS ";
@@ -1142,12 +1145,12 @@ pub const Store = struct {
             // "" or " WHERE <condition>"; SQLite keeps the statement's text without its semicolon.
             const condition = target[close_paren + 1 ..];
             {
-                const shape = try db.prepare("SELECT count(*) FROM sqlite_master m, pragma_index_list(m.tbl_name) l WHERE m.type = 'index' AND m.name = ?1 AND m.tbl_name = ?2 AND l.name = m.name AND l.\"unique\" = ?3 AND l.partial = ?4 AND substr(m.sql, length(m.sql) - length(?5) + 1) = ?5");
+                const shape = try db.prepare("SELECT count(*) FROM sqlite_master m, pragma_index_list(m.tbl_name) l WHERE m.type = 'index' AND m.name = ?1 AND m.tbl_name = ?2 AND l.name = m.name AND l.\"unique\" = ?3 AND l.partial = ?4 AND m.sql = ?5 || ?6");
                 defer shape.finalize();
-                try shape.bindAll(.{ name, table, unique, condition.len > 0, condition });
+                try shape.bindAll(.{ name, table, unique, condition.len > 0, if (unique) "CREATE UNIQUE INDEX " else "CREATE INDEX ", rest });
                 if (!try shape.next() or shape.int(0) != 1) return error.CorruptStore;
             }
-            const key = try db.prepare("SELECT count(*) FROM pragma_index_info(?1) WHERE seqno = ?2 AND name = ?3");
+            const key = try db.prepare("SELECT count(*) FROM pragma_index_xinfo(?1) WHERE seqno = ?2 AND name = ?3 AND key = 1 AND \"desc\" = 0 AND coll = 'BINARY'");
             defer key.finalize();
             var columns = std.mem.splitScalar(u8, target[open_paren + 1 .. close_paren], ',');
             var count: i64 = 0;
@@ -14442,6 +14445,9 @@ test "a malformed or mixed-version v76 store, and stores outside v71..v77, are r
         .{ .name = "a v76 unique index that is not unique", .sql = "DROP INDEX ux_personage_key; CREATE INDEX ux_personage_key ON personage(cid, key) WHERE key <> ''", .expected = error.CorruptStore },
         .{ .name = "a v76 partial index with another condition", .sql = "DROP INDEX ux_personage_key; CREATE UNIQUE INDEX ux_personage_key ON personage(cid, key) WHERE key > ''", .expected = error.CorruptStore },
         .{ .name = "a v76 index made partial", .sql = "DROP INDEX ix_merc_hull_arrival_cid; CREATE INDEX ix_merc_hull_arrival_cid ON merc_hull_arrival(cid) WHERE cid > 0", .expected = error.CorruptStore },
+        .{ .name = "a v76 partial index whose condition ends in a comment of the frozen one", .sql = "DROP INDEX ux_personage_key; CREATE UNIQUE INDEX ux_personage_key ON personage(cid, key) WHERE 0 -- WHERE key <> ''", .expected = error.CorruptStore },
+        .{ .name = "a v76 index key with another collation", .sql = "DROP INDEX ux_personage_key; CREATE UNIQUE INDEX ux_personage_key ON personage(cid, key COLLATE NOCASE) WHERE key <> ''", .expected = error.CorruptStore },
+        .{ .name = "a v76 index key in descending order", .sql = "DROP INDEX ix_merc_hull_arrival_cid; CREATE INDEX ix_merc_hull_arrival_cid ON merc_hull_arrival(cid DESC)", .expected = error.CorruptStore },
         .{ .name = "a v76 store with a theme already present", .sql = "INSERT INTO setting (key, value) VALUES ('theme', 1)", .expected = error.CorruptStore },
         .{ .name = "a v76 store holding a v75 campaign", .sql = "UPDATE campaign SET schema_version = 75", .expected = error.CorruptStore },
         .{ .name = "a v76 store holding a v77 campaign", .sql = "UPDATE campaign SET schema_version = 77", .expected = error.CorruptStore },
