@@ -901,7 +901,8 @@ v74 → v75 migration (an empty `news_item` table and `next_news_id = 1`):
   its log line;
 - `queries.newsRows` serves the Desk NEWSWIRE pane (its newest
   `newswire_rows`, Enter reads one) and REPL `news [n]`; rows carry their
-  `NewsId` and conflict id. Personage refs and personage-only items are 1n's.
+  `NewsId` and conflict id, and show the calendar date of the derived day
+  (`clock.Clock.dateOf`, so no date is stored). Personage refs and personage-only items are 1n's.
 
 ## §L NPC company operations: base, upkeep, recovery and solvency (D20–D29)
 

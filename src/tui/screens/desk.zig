@@ -70,47 +70,39 @@ pub fn draw(self: *App) anyerror!void {
     self.listPane(.{ .x = x, .y = b.y, .w = ib_w, .h = top_h }, "INBOX", ib_lines, 1, self.paneFocused(1), true);
 
     const co_h: u16 = band.co_h;
-    const co_inner = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = co_h }, .{ .title = "COMPANIES" });
+    // When the table cannot show every company, its title says how many it does.
+    const co_shown = @min(view.companies.len, co_h -| layout.table_chrome_rows);
+    const co_title = if (co_shown < view.companies.len) try std.fmt.allocPrint(al, "COMPANIES · {d} of {d}", .{ co_shown, view.companies.len }) else "COMPANIES";
+    const co_inner = self.screen.pane(.{ .x = b.x, .y = b.y + top_h, .w = b.w, .h = co_h }, .{ .title = co_title });
     // Shares the LOG pane's scroll slot: ←/→ while the log is focused scroll these columns.
     try self.tableOrNote(co_inner, .{ .cols = q.company_cols, .rows = view.companies }, 2, false, "{d}no companies{/}");
     if (self.focus == 2) self.focus_scroll = 2;
 
     const rest_h: u16 = band.rest_h;
-    if (band.panes() > log_pane) {
-        const by: u16 = b.y + top_h + co_h;
-        // The right column holds the reports hub and, when wide, the HQ summaries;
-        // the log and the newswire take the rest. Reports is drawn whenever the
-        // log is, at every width.
-        const right_w: u16 = if (self.narrow()) layout.minor.of(b.w) else (b.w - layout.major.of(b.w));
-        const log_w: u16 = b.w - right_w;
-        // The log over the newswire, each with at least one row, when both fit.
-        const min_h = layout.list_pane_min_rows;
-        const log_h: u16 = if (band.panes() > newswire_pane) @max(min_h, @min(layout.major.of(rest_h), rest_h - min_h)) else rest_h;
-        self.listPane(.{ .x = b.x, .y = by, .w = log_w, .h = log_h }, "LOG", view.log, log_pane, self.paneFocused(log_pane), true);
-        if (band.panes() > newswire_pane) {
-            self.listPane(.{ .x = b.x, .y = by + log_h, .w = log_w, .h = rest_h - log_h }, "NEWSWIRE", try newswireLines(al, view), newswire_pane, self.paneFocused(newswire_pane), true);
-        }
+    const by: u16 = b.y + top_h + co_h;
+    // The right column holds the reports hub and, when wide, the HQ summaries;
+    // the log over the newswire takes the rest, each with at least one row.
+    const right_w: u16 = if (self.narrow()) layout.minor.of(b.w) else (b.w - layout.major.of(b.w));
+    const log_w: u16 = b.w - right_w;
+    const min_h = layout.list_pane_min_rows;
+    const log_h: u16 = @max(min_h, @min(layout.major.of(rest_h), rest_h -| min_h));
+    self.listPane(.{ .x = b.x, .y = by, .w = log_w, .h = log_h }, "LOG", view.log, 2, self.paneFocused(2), true);
+    self.listPane(.{ .x = b.x, .y = by + log_h, .w = log_w, .h = rest_h -| log_h }, "NEWSWIRE", try newswireLines(al, view), 4, self.paneFocused(4), true);
 
-        const rx: u16 = b.x + log_w;
-        const rp_h: u16 = @min(rest_h, @as(u16, @intCast(reports.len + 3)));
-        // HQs below the reports hub when there is room (wide only). Drawn without a
-        // cursor slot (like the emblem fallback) so it does not clamp slot 3, which
-        // the focusable reports pane now owns.
-        if (!self.narrow() and rest_h > rp_h) {
-            const hq_inner = self.screen.pane(.{ .x = rx, .y = by + rp_h, .w = right_w, .h = rest_h - rp_h }, .{ .title = "HQs" });
-            self.screen.lines(hq_inner, view.hqs, 0, null);
-        }
-
-        var rl: std.ArrayListUnmanaged([]const u8) = .empty;
-        for (reports) |r| try rl.append(al, try std.fmt.allocPrint(al, "{s}   {{d}}{s}{{/}}", .{ r.name, r.desc }));
-        self.listPane(.{ .x = rx, .y = by, .w = right_w, .h = rp_h }, "REPORTS", rl.items, 3, self.paneFocused(3), true);
+    const rx: u16 = b.x + log_w;
+    const rp_h: u16 = @min(rest_h, @as(u16, @intCast(reports.len + 3)));
+    // HQs below the reports hub when there is room (wide only). Drawn without a
+    // cursor slot (like the emblem fallback) so it does not clamp slot 3, which
+    // the focusable reports pane now owns.
+    if (!self.narrow() and rest_h > rp_h) {
+        const hq_inner = self.screen.pane(.{ .x = rx, .y = by + rp_h, .w = right_w, .h = rest_h - rp_h }, .{ .title = "HQs" });
+        self.screen.lines(hq_inner, view.hqs, 0, null);
     }
-}
 
-/// Focus indices of the log and the newswire, the first and last panes
-/// below the companies table.
-const log_pane: u8 = 2;
-const newswire_pane: u8 = 4;
+    var rl: std.ArrayListUnmanaged([]const u8) = .empty;
+    for (reports) |r| try rl.append(al, try std.fmt.allocPrint(al, "{s}   {{d}}{s}{{/}}", .{ r.name, r.desc }));
+    self.listPane(.{ .x = rx, .y = by, .w = right_w, .h = rp_h }, "REPORTS", rl.items, 3, self.paneFocused(3), true);
+}
 
 /// The Desk's three bands, top to bottom (rule 38): the checklist and inbox,
 /// the companies table, and the region the log, newswire and reports share.
@@ -118,32 +110,20 @@ const Bands = struct {
     top_h: u16,
     co_h: u16,
     rest_h: u16,
-
-    /// How many panes are drawn, from focus index 0: the checklist and inbox
-    /// always; the log and reports when the region holds one list pane; the
-    /// newswire too when it holds two.
-    fn panes(self: Bands) u8 {
-        if (self.rest_h >= 2 * layout.list_pane_min_rows) return newswire_pane + 1;
-        if (self.rest_h >= layout.list_pane_min_rows) return newswire_pane;
-        return log_pane;
-    }
 };
 
-/// The top band takes its share of the body but yields rows, down to
-/// `layout.desk_top_min_rows`, so the log and the newswire below the
-/// companies each keep `layout.list_pane_min_rows`.
+/// The log and the newswire below the companies each keep
+/// `layout.list_pane_min_rows`. The top band takes its share of the body but
+/// yields rows to the companies, down to `layout.desk_top_min_rows`; the
+/// companies table takes what is left and shows only the rows it fits. At
+/// 80 × 24, the smallest size the client draws, every pane keeps a row.
 fn bands(body_h: u16, companies: usize) Bands {
-    const co_want: u16 = @intCast(@min(companies + 3, body_h));
-    const room = body_h -| co_want -| 2 * layout.list_pane_min_rows;
+    const below = 2 * layout.list_pane_min_rows;
+    const co_want: u16 = @intCast(@min(companies + layout.table_chrome_rows, body_h));
+    const room = body_h -| co_want -| below;
     const top_h: u16 = @min(body_h, @max(layout.desk_top_min_rows, @min(layout.minor.of(body_h), room)));
-    const co_h: u16 = @min(body_h - top_h, co_want);
+    const co_h: u16 = @min(co_want, body_h -| top_h -| below);
     return .{ .top_h = top_h, .co_h = co_h, .rest_h = body_h - top_h - co_h };
-}
-
-/// The panes `draw` lays out at the current size (`App.paneCount`).
-pub fn shownPanes(self: *App) anyerror!u8 {
-    const view = try q.desk(self.a(), self.state(), q.desk_log_rows);
-    return bands(self.body().h, view.companies.len).panes();
 }
 
 /// The INBOX pane's lines, and beside each the decision it belongs to: one
@@ -342,69 +322,69 @@ fn screenRowForTest(al: std.mem.Allocator, c: *app.ClientForTest, y: u16) ![]con
     return std.mem.trimEnd(u8, out.items, " ");
 }
 
-test "at 80x24 five companies leave the newswire rows to read and select; more companies drop panes focus cannot reach" {
-    const c = try app.clientForTest(std.testing.allocator);
-    defer app.deinitForTest(c, std.testing.allocator);
-    _ = try app.game.news.heardForTest(c.app.state(), "skye");
-    _ = try app.game.news.heardForTest(c.app.state(), "tharkad");
-    try app.game.campaign_scripts.companiesForTest(c.app.state(), 5);
-    try c.app.screen.resize(80, 24);
-    try toTab(c, .desk);
-    try std.testing.expectEqual(@as(usize, 5), (try q.desk(c.app.a(), c.app.state(), q.desk_log_rows)).companies.len);
-    // Every pane is drawn, and Tab reaches the newswire.
-    try std.testing.expectEqual(@as(u16, 0b11111), c.app.panes_drawn);
-    c.app.focus = 0;
-    for (0..4) |_| try app.pressForTest(c, .tab);
-    try std.testing.expectEqual(@as(u8, 4), c.app.focus);
-    try app.pressForTest(c, .{ .char = 'j' });
-    try std.testing.expectEqual(@as(usize, 1), c.app.cur(4).*);
-    // On screen, the selected row under the NEWSWIRE title is the second
-    // news row's text.
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
-    const al = arena.allocator();
-    const news = try q.newsRows(al, c.app.state(), q.newswire_rows);
-    const want = try q.stripMarks(al, news[1].text);
+/// The text of the selected row inside the pane titled `title`: the row
+/// between its side borders that the cursor paints, or null.
+fn selectedRowForTest(al: std.mem.Allocator, c: *app.ClientForTest, title: []const u8) !?[]const u8 {
     const title_y: u16 = for (0..c.app.screen.rows) |y| {
-        if (std.mem.indexOf(u8, try screenRowForTest(al, c, @intCast(y)), "NEWSWIRE") != null) break @intCast(y);
-    } else return error.TestUnexpectedResult;
-    var selected: ?[]const u8 = null;
+        if (std.mem.indexOf(u8, try screenRowForTest(al, c, @intCast(y)), title) != null) break @intCast(y);
+    } else return null;
     var y: u16 = title_y + 1;
     while (y < c.app.screen.rows) : (y += 1) {
         const row = try screenRowForTest(al, c, y);
-        if (std.mem.startsWith(u8, row, "└")) break;
-        // The text between the newswire's side borders; the cursor row is
-        // painted selected.
+        if (std.mem.startsWith(u8, row, "└")) return null;
         var cells = std.mem.splitSequence(u8, row, "│");
         _ = cells.next();
         const text = std.mem.trim(u8, cells.next() orelse "", " ");
         for (2..c.app.screen.cols) |x| {
-            if (c.app.screen.get(@intCast(x), y).style == .sel) selected = text;
+            if (c.app.screen.get(@intCast(x), y).style == .sel) return text;
         }
-        if (selected != null) break;
     }
-    try std.testing.expect(selected != null and selected.?.len >= 10);
-    try std.testing.expect(std.mem.startsWith(u8, want, selected.?));
-    try app.pressForTest(c, .enter);
-    try std.testing.expect(c.app.modal == .news_item);
-    try std.testing.expectEqual(news[1].id, c.app.modal.news_item);
-    try app.pressForTest(c, .escape);
-    // A sixth company leaves no room for the newswire: it is not drawn, a
-    // focus on it moves to the reports, and Tab cycles the four drawn panes.
-    try app.game.campaign_scripts.companiesForTest(c.app.state(), 6);
-    try app.pressForTest(c, .none);
-    try std.testing.expectEqual(@as(u16, 0b1111), c.app.panes_drawn);
-    try std.testing.expectEqual(@as(u8, 3), c.app.focus);
-    try app.pressForTest(c, .tab);
-    try std.testing.expectEqual(@as(u8, 0), c.app.focus);
-    // Enough companies to fill the body leave only the checklist and inbox.
-    try app.game.campaign_scripts.companiesForTest(c.app.state(), 12);
-    c.app.focus = 3;
-    try app.pressForTest(c, .none);
-    try std.testing.expectEqual(@as(u16, 0b11), c.app.panes_drawn);
-    try std.testing.expectEqual(@as(u8, 1), c.app.focus);
-    try app.pressForTest(c, .tab);
-    try std.testing.expectEqual(@as(u8, 0), c.app.focus);
+    return null;
+}
+
+test "at 80x24 the newswire keeps a row to read and select however many companies there are" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    _ = try app.game.news.heardForTest(c.app.state(), "skye");
+    _ = try app.game.news.heardForTest(c.app.state(), "tharkad");
+    try c.app.screen.resize(80, 24);
+    try toTab(c, .desk);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const al = arena.allocator();
+    for ([_]usize{ 5, 6, 8, 12, 20 }) |count| {
+        try app.game.campaign_scripts.companiesForTest(c.app.state(), count);
+        try app.pressForTest(c, .none);
+        try std.testing.expectEqual(count, (try q.desk(c.app.a(), c.app.state(), q.desk_log_rows)).companies.len);
+        // Every pane is drawn, and Tab reaches the newswire.
+        try std.testing.expectEqual(@as(u16, 0b11111), c.app.panes_drawn);
+        // The companies table yields rows, and its title counts those it shows.
+        const co_title = if (count > 5) try std.fmt.allocPrint(al, "COMPANIES · 5 of {d}", .{count}) else "COMPANIES ";
+        const titled = for (0..c.app.screen.rows) |y| {
+            if (std.mem.indexOf(u8, try screenRowForTest(al, c, @intCast(y)), co_title) != null) break true;
+        } else false;
+        try std.testing.expect(titled);
+        c.app.focus = 0;
+        c.app.cur(4).* = 0;
+        for (0..4) |_| try app.pressForTest(c, .tab);
+        try std.testing.expectEqual(@as(u8, 4), c.app.focus);
+        try app.pressForTest(c, .{ .char = 'j' });
+        try std.testing.expectEqual(@as(usize, 1), c.app.cur(4).*);
+        // On screen, the selected row under the NEWSWIRE title is the second
+        // news row's text, and Enter opens that item.
+        const news = try q.newsRows(al, c.app.state(), q.newswire_rows);
+        const want = try q.stripMarks(al, news[1].text);
+        const selected = try selectedRowForTest(al, c, "NEWSWIRE");
+        try std.testing.expect(selected != null and selected.?.len >= 10);
+        try std.testing.expect(std.mem.startsWith(u8, want, selected.?));
+        try app.pressForTest(c, .enter);
+        try std.testing.expect(c.app.modal == .news_item);
+        try std.testing.expectEqual(news[1].id, c.app.modal.news_item);
+        try app.pressForTest(c, .escape);
+        // Tab wraps from the newswire to the checklist.
+        try app.pressForTest(c, .tab);
+        try std.testing.expectEqual(@as(u8, 0), c.app.focus);
+    }
 }
 
 fn toTab(c: *app.ClientForTest, tab: app.Tab) !void {

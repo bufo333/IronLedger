@@ -18,6 +18,9 @@ pub const list_pane_min_rows: u16 = 3;
 /// The Desk's checklist and inbox band yields rows to the panes below it,
 /// never past this many.
 pub const desk_top_min_rows: u16 = 7;
+/// The rows of a bordered table pane that hold no table row: its two
+/// borders and its header.
+pub const table_chrome_rows: u16 = 3;
 
 pub fn narrow(cols: u16) bool {
     return cols < narrow_cols;

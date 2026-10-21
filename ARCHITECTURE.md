@@ -408,7 +408,8 @@ cheap, copyable, and impossible to mix up.
   at equal distance, then the lower id; it draws nothing. Reach is fixed on
   the day the news breaks and never back-filled. `news.validate` is the load
   check. `queries.newsRows` lists the newest items, newest first, for the
-  Desk's NEWSWIRE pane and REPL `news [n]`; it formats and never decides
+  Desk's NEWSWIRE pane and REPL `news [n]`, each dated by the calendar
+  date of its day (`clock.Clock.dateOf`); it formats and never decides
   reach.
 - **Actor** — a contract-introduced NPC (liaison, official, enemy commander,
   etc.) that persists across contracts. Each actor carries four relationship

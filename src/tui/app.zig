@@ -496,7 +496,7 @@ pub const App = struct {
             if (self.term.tookResize()) {
                 const size = self.term.size();
                 try self.screen.resize(size.cols, size.rows);
-                try self.clampFocus();
+                self.clampFocus();
             }
             try self.draw();
             // Catalog thumbnails decode between input polls, one per poll, so
@@ -751,10 +751,10 @@ pub const App = struct {
     }
 
     /// Clamp `focus` to the panes actually rendered at the current terminal
-    /// size.  Called in the resize handler and at the top of `drawGame`.
-    fn clampFocus(self: *App) !void {
+    /// width.  Called in the resize handler and at the top of `drawGame`.
+    fn clampFocus(self: *App) void {
         if (self.mode == .game) {
-            const pc = try self.paneCount();
+            const pc = self.paneCount();
             if (pc > 0 and self.focus >= pc) self.focus = pc - 1;
         }
     }
@@ -1160,7 +1160,7 @@ pub const App = struct {
     }
 
     fn drawGame(self: *App) !void {
-        try self.clampFocus();
+        self.clampFocus();
         try self.drawChrome();
         const spec = screenSpec(self.tab);
         try spec.draw(self);
@@ -2307,13 +2307,10 @@ pub const App = struct {
             .screen_market => self.switchTab(.market),
             .settings => self.modal = .settings,
             .next_pane => {
-                if (self.tab == .lab) try screens.lab.navigateLocation(self, 1) else self.focus = (self.focus + 1) % try self.paneCount();
+                if (self.tab == .lab) try screens.lab.navigateLocation(self, 1) else self.focus = (self.focus + 1) % self.paneCount();
             },
             .prev_pane => {
-                if (self.tab == .lab) try screens.lab.navigateLocation(self, -1) else {
-                    const pc = try self.paneCount();
-                    self.focus = (self.focus + pc - 1) % pc;
-                }
+                if (self.tab == .lab) try screens.lab.navigateLocation(self, -1) else self.focus = (self.focus + self.paneCount() - 1) % self.paneCount();
             },
             .cursor_down => try self.screenMove(1),
             .cursor_up => try self.screenMove(-1),
@@ -2345,10 +2342,9 @@ pub const App = struct {
         self.focus = 0;
     }
 
-    fn paneCount(self: *App) !u8 {
+    fn paneCount(self: *App) u8 {
         const spec = screenSpec(self.tab);
-        const by_width = if (self.narrow()) spec.narrow_panes else spec.panes;
-        return if (spec.shown_panes) |shown| @min(by_width, try shown(self)) else by_width;
+        return if (self.narrow()) spec.narrow_panes else spec.panes;
     }
 
     fn screenMove(self: *App, delta: i32) !void {
@@ -2373,10 +2369,6 @@ pub const App = struct {
         /// Panes Tab cycles through, and the count on a narrow terminal.
         panes: u8,
         narrow_panes: u8,
-        /// Optional: how many panes the screen draws at the current size,
-        /// when its height can leave the last ones out; focus and Tab stay
-        /// within them.
-        shown_panes: ?*const fn (*App) anyerror!u8 = null,
         /// Optional horizontal-scroll handler for ←/→ in `runGlobal`.
         scroll_h: ?*const fn (*App, i32) anyerror!void = null,
     };
@@ -2395,7 +2387,7 @@ pub const App = struct {
     };
 
     const screen_table = [_]ScreenSpec{
-        .{ .tab = .desk, .name = "F1 Desk", .draw = screens.desk.draw, .move = screens.desk.move, .handle = screens.desk.handle, .legend = &screens.desk.legend, .pane_names = &.{ "checklist", "inbox", "log", "reports", "newswire" }, .panes = 5, .narrow_panes = 5, .shown_panes = screens.desk.shownPanes },
+        .{ .tab = .desk, .name = "F1 Desk", .draw = screens.desk.draw, .move = screens.desk.move, .handle = screens.desk.handle, .legend = &screens.desk.legend, .pane_names = &.{ "checklist", "inbox", "log", "reports", "newswire" }, .panes = 5, .narrow_panes = 5 },
         .{ .tab = .map, .name = "F2 Map", .draw = screens.map.draw, .move = screens.map.move, .handle = screens.map.handle, .legend = &screens.map.legend, .pane_names = &.{"star map"}, .panes = 1, .narrow_panes = 1, .scroll_h = screens.map.scrollH },
         .{ .tab = .forces, .name = "F3 Forces", .draw = screens.forces.draw, .move = screens.forces.move, .handle = screens.forces.handle, .legend = &screens.forces.legend, .pane_names = &.{ "TO&E", "side pane" }, .panes = 2, .narrow_panes = 1 },
         .{ .tab = .contracts, .name = "F4 Contracts", .draw = screens.contracts.draw, .move = screens.contracts.move, .handle = screens.contracts.handle, .legend = &screens.contracts.legend, .pane_names = &.{ "board", "active", "history" }, .panes = 3, .narrow_panes = 3 },
@@ -5833,7 +5825,7 @@ test "every focusable pane is drawn at each width tier" {
             c.app.switchTab(spec.tab);
             c.app.focus = 0;
             try c.app.draw();
-            const pc = try c.app.paneCount();
+            const pc = c.app.paneCount();
             const want: u16 = (@as(u16, 1) << @intCast(pc)) - 1;
             try std.testing.expectEqual(want, c.app.panes_drawn);
         }
@@ -5848,19 +5840,19 @@ test "a wide-only focus clamps into the narrow panes on resize" {
     // Forces: wide has 2 panes, narrow has 1.
     try c.app.screen.resize(200, 50);
     c.app.switchTab(.forces);
-    const forces_wide_pc = try c.app.paneCount();
+    const forces_wide_pc = c.app.paneCount();
     c.app.focus = forces_wide_pc - 1;
     try c.app.screen.resize(100, 50);
     try c.app.draw();
-    try std.testing.expect(c.app.focus < try c.app.paneCount());
+    try std.testing.expect(c.app.focus < c.app.paneCount());
     // Market: wide has 4 panes, narrow has 2.
     try c.app.screen.resize(200, 50);
     c.app.switchTab(.market);
-    const market_wide_pc = try c.app.paneCount();
+    const market_wide_pc = c.app.paneCount();
     c.app.focus = market_wide_pc - 1;
     try c.app.screen.resize(100, 50);
     try c.app.draw();
-    try std.testing.expect(c.app.focus < try c.app.paneCount());
+    try std.testing.expect(c.app.focus < c.app.paneCount());
 }
 
 test "person-detail modal: pressing m on a wounded un-admitted person admits them (rule 34/86)" {

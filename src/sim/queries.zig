@@ -12051,9 +12051,10 @@ pub const NewsRow = struct {
 };
 
 /// The newest `limit` news items, newest first (rules 29–32;
-/// docs/p5d-conflict-world-design.md §K "News"). A row shows the day the
-/// item tells of, its severity as a mark (amber notable, red major; rule
-/// 43), its text escaped (rule 41), and how far it travelled to the world
+/// docs/p5d-conflict-world-design.md §K "News"). A row shows the calendar
+/// date of the day the item tells of (`Clock.dateOf`), its severity as a
+/// mark (amber notable, red major; rule 43), its text escaped (rule 41),
+/// and how far it travelled to the world
 /// it was heard on, and whether an HQ or a company heard it there. Reach was
 /// decided when the item broke (`news.newsReach`); this only formats.
 /// `CorruptSave` when an item's conflict or a world does not resolve;
@@ -12067,6 +12068,8 @@ pub fn newsRows(alloc: Alloc, gs: *GameState, limit: usize) ![]NewsRow {
         const n = &items[i];
         const c = gs.conflicts.getPtr(n.conflict) orelse return error.CorruptSave;
         const day = news_dom.day(n, c) orelse return error.CorruptSave;
+        const date = gs.clock.dateOf(day) orelse return error.CorruptSave;
+        var date_buf: [10]u8 = undefined;
         const distance = news_dom.reachLy(n, c) orelse return error.CorruptSave;
         const from = planet_mod.find(n.reach_from_planet_key) orelse return error.CorruptSave;
         const mark: []const u8 = switch (news_dom.severity(n.kind)) {
@@ -12078,8 +12081,8 @@ pub fn newsRows(alloc: Alloc, gs: *GameState, limit: usize) ![]NewsRow {
             .hq => "HQ",
             .company => "company",
         };
-        try rows.append(alloc, .{ .id = n.id, .conflict = n.conflict, .text = try std.fmt.allocPrint(alloc, "{{d}}d{d: <4}{{/}} {s} {s}  {{d}}{d} ly from {s} ({s}){{/}}", .{
-            day,
+        try rows.append(alloc, .{ .id = n.id, .conflict = n.conflict, .text = try std.fmt.allocPrint(alloc, "{{d}}{s}{{/}} {s} {s}  {{d}}{d} ly from {s} ({s}){{/}}", .{
+            date.text(&date_buf),
             mark,
             try table.plain(alloc, n.text),
             distance,
@@ -12115,7 +12118,7 @@ test "news rows are the newest items first, cut at the limit, each with its id, 
     }
     const ly = planet_mod.distanceLy(planet_mod.find("skye").?, planet_mod.find("galatea").?);
     try std.testing.expect(std.mem.indexOf(u8, rows[0].text, "{c}!{/}") != null);
-    try std.testing.expect(std.mem.indexOf(u8, rows[0].text, try std.fmt.allocPrint(a, "d{d}", .{c.expires_day.?})) != null);
+    try std.testing.expect(std.mem.indexOf(u8, rows[0].text, "{d}3025-03-15{/}") != null);
     try std.testing.expect(std.mem.indexOf(u8, rows[0].text, try std.fmt.allocPrint(a, "{d} ly from Galatea (HQ)", .{ly})) != null);
     try std.testing.expect(std.mem.indexOf(u8, rows[1].text, "{a}·{/}") != null);
     try std.testing.expect(std.mem.indexOf(u8, rows[2].text, "learns of a threat to Skye") != null);
@@ -12128,6 +12131,35 @@ test "news rows are the newest items first, cut at the limit, each with its id, 
     const view = try desk(a, &gs, desk_log_rows);
     try std.testing.expectEqual(rows.len, view.news.len);
     for (rows, view.news) |r, d| try std.testing.expectEqualStrings(r.text, d.text);
+}
+
+test "a news row shows the calendar date of the day it tells of, after the clock has moved past a month end" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 75303 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    gs.hqs.getPtr(gs.seat()).?.planet_key = "galatea";
+    const id = try politics.openConflictForTest(&gs, "skye", "border_grab");
+    const c = gs.conflicts.get(id).?;
+    // Each item's date is the calendar date on the day it broke.
+    var broke: [3][10]u8 = undefined;
+    for ([_]u32{ c.discovery_day, c.strike_day.?, c.expires_day.? }, &broke) |day, *date| {
+        while (gs.clock.day_index < day) gs.clock.advance();
+        _ = gs.clock.date.text(date);
+        try politics.advanceWorld(&gs);
+    }
+    const month = gs.clock.date.month;
+    while (gs.clock.date.month == month) gs.clock.advance();
+    var today_buf: [10]u8 = undefined;
+    const today = gs.clock.date.text(&today_buf);
+    const rows = try newsRows(a, &gs, newswire_rows);
+    try std.testing.expectEqual(@as(usize, 3), rows.len);
+    for (rows, [_]usize{ 2, 1, 0 }) |r, k| {
+        try std.testing.expect(std.mem.indexOf(u8, r.text, &broke[k]) != null);
+        try std.testing.expect(std.mem.indexOf(u8, r.text, today) == null);
+    }
 }
 
 test "a news row escapes a hostile stored text, and propagates allocation failure and a dangling conflict" {

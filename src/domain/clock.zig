@@ -48,6 +48,23 @@ pub const Date = struct {
         return d;
     }
 
+    /// The day before; the inverse of `next`.
+    pub fn prev(self: Date) Date {
+        var d = self;
+        if (d.day > 1) {
+            d.day -= 1;
+            return d;
+        }
+        if (d.month > 1) {
+            d.month -= 1;
+        } else {
+            d.month = 12;
+            d.year -= 1;
+        }
+        d.day = daysInMonth(d.year, d.month);
+        return d;
+    }
+
     pub fn isPayday(self: Date) bool {
         return self.day == 1;
     }
@@ -101,7 +118,36 @@ pub const Clock = struct {
         self.date = self.date.next();
         self.day_index += 1;
     }
+
+    /// The calendar date of `day`, counted back from today; null for a day
+    /// after today, which has no date yet (rule 55).
+    pub fn dateOf(self: Clock, day: u32) ?Date {
+        if (day > self.day_index) return null;
+        var d = self.date;
+        for (0..self.day_index - day) |_| d = d.prev();
+        return d;
+    }
 };
+
+test "dateOf counts back across month, year and leap-day ends, and has no date for a future day" {
+    var c: Clock = .{ .date = .{ .year = 3024, .month = 2, .day = 27 }, .day_index = 5 };
+    const start = c;
+    // Two years on, past a year end and the 3024 leap day.
+    for (0..730) |_| c.advance();
+    try std.testing.expectEqual(start.date, c.dateOf(start.day_index).?);
+    try std.testing.expectEqual(Date{ .year = 3024, .month = 2, .day = 29 }, c.dateOf(start.day_index + 2).?);
+    try std.testing.expectEqual(Date{ .year = 3024, .month = 3, .day = 1 }, c.dateOf(start.day_index + 3).?);
+    try std.testing.expectEqual(Date{ .year = 3024, .month = 12, .day = 31 }, c.dateOf(start.day_index + 308).?);
+    try std.testing.expectEqual(Date{ .year = 3025, .month = 1, .day = 1 }, c.dateOf(start.day_index + 309).?);
+    try std.testing.expectEqual(c.date, c.dateOf(c.day_index).?);
+    try std.testing.expectEqual(@as(?Date, null), c.dateOf(c.day_index + 1));
+    // Every day back agrees with stepping forward.
+    var d = start.date;
+    for (start.day_index..c.day_index + 1) |day| {
+        try std.testing.expectEqual(d, c.dateOf(@intCast(day)).?);
+        d = d.next();
+    }
+}
 
 /// "today" when `eta_day <= now_day`, else "d{eta} ({N} days)" with
 /// `N = eta_day − now_day` — the one owner for ETA/arrival display
