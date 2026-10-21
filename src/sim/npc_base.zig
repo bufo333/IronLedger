@@ -101,11 +101,14 @@ pub const Source = union(enum) {
 /// listings): a dispersed listing's `planet_key` world; else a
 /// contract-world board's world, its company's running contract's
 /// (`GameState.deploymentContract`); else an HQ board's HQ world; else
-/// wholesale from the capital of the faction named by the open ownership
-/// interval of its hull.
+/// wholesale from the capital of its seller. The seller is `staged_seller`
+/// when given: the faction key of a world-less listing whose ownership
+/// interval its caller has staged but not committed, as for a liquidation
+/// planned earlier in the same lifecycle pass. Otherwise it is the faction
+/// named by the open ownership interval of the listing's hull.
 /// `CorruptSave` when a world, HQ, deployment, hull, open interval or
 /// faction does not resolve (rule 1). Reads only.
-pub fn listingSource(gs: *GameState, listing: market.Listing) error{CorruptSave}!Source {
+pub fn listingSource(gs: *GameState, listing: market.Listing, staged_seller: ?[]const u8) error{CorruptSave}!Source {
     if (listing.planet_key.len > 0) return .{ .located = planet.find(listing.planet_key) orelse return error.CorruptSave };
     // A contract-world listing also names the home HQ whose board shows it;
     // it stands on the contract world.
@@ -119,7 +122,7 @@ pub fn listingSource(gs: *GameState, listing: market.Listing) error{CorruptSave}
     }
     if (listing.hull_instance_id == .none) return error.CorruptSave;
     if (!gs.hull_instances.contains(listing.hull_instance_id)) return error.CorruptSave;
-    const seller = for (gs.hull_ownership_history.items) |entry| {
+    const seller = staged_seller orelse for (gs.hull_ownership_history.items) |entry| {
         if (entry.hull_instance_id == listing.hull_instance_id and entry.isOpen()) break entry.prior_owner_key;
     } else return error.CorruptSave;
     const row = faction.find(seller) orelse return error.CorruptSave;
@@ -128,10 +131,10 @@ pub fn listingSource(gs: *GameState, listing: market.Listing) error{CorruptSave}
 
 /// Whether a company based on `base` can buy `listing` (D21): a wholesale
 /// listing always, a located one only `withinMarketReach`. The black-market
-/// buyer gates (`black_market.buyerEligible`) apply on top. `CorruptSave`
-/// from `listingSource`. Reads only.
-pub fn listingReachable(gs: *GameState, base: *const Planet, listing: market.Listing) error{CorruptSave}!bool {
-    return switch (try listingSource(gs, listing)) {
+/// buyer gates (`black_market.buyerEligible`) apply on top. `staged_seller`
+/// and `CorruptSave` as for `listingSource`. Reads only.
+pub fn listingReachable(gs: *GameState, base: *const Planet, listing: market.Listing, staged_seller: ?[]const u8) error{CorruptSave}!bool {
+    return switch (try listingSource(gs, listing, staged_seller)) {
         .located => |world| withinMarketReach(base, world),
         .wholesale => true,
     };
@@ -266,8 +269,8 @@ test "listingSource locates world, HQ and contract-world listings, sends surplus
     const home_world = planet.find(gs.hqs.get(home).?.planet_key).?;
 
     const dispersed: market.Listing = .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .black_market = true, .planet_key = "skye" };
-    try std.testing.expectEqual(Source{ .located = planet.find("skye").? }, try listingSource(&gs, dispersed));
-    try std.testing.expectEqual(Source{ .located = home_world }, try listingSource(&gs, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hq = home }));
+    try std.testing.expectEqual(Source{ .located = planet.find("skye").? }, try listingSource(&gs, dispersed, null));
+    try std.testing.expectEqual(Source{ .located = home_world }, try listingSource(&gs, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hq = home }, null));
 
     // A contract-world board stands where its deployed company does, though
     // the listing also names the home HQ whose board shows it.
@@ -275,7 +278,7 @@ test "listingSource locates world, HQ and contract-world listings, sends surplus
     const contract_id: types.ContractId = @enumFromInt(5);
     try gs.contracts.put(alloc, contract_id, .{ .id = contract_id, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "PER", .planet_key = "solaris7", .status = .active, .assigned_company = company, .terms = .{ .length_months = 6, .base_pay_month = 400_000 } });
     try std.testing.expect(!std.mem.eql(u8, "solaris7", home_world.key));
-    try std.testing.expectEqual(Source{ .located = planet.find("solaris7").? }, try listingSource(&gs, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hq = home, .company = company }));
+    try std.testing.expectEqual(Source{ .located = planet.find("solaris7").? }, try listingSource(&gs, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hq = home, .company = company }, null));
 
     // Surplus and liquidation: wholesale from the seller's capital.
     const surplus: types.HullInstanceId = @enumFromInt(1);
@@ -285,8 +288,13 @@ test "listingSource locates world, HQ and contract-world listings, sends surplus
     try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = surplus, .acquisition_type = .initial, .prior_owner_key = "DC" });
     try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = liquidated, .from_day = 0, .to_day = 3, .acquisition_type = .initial, .prior_owner_key = "LC" });
     try gs.hull_ownership_history.append(alloc, .{ .hull_instance_id = liquidated, .from_day = 3, .acquisition_type = .transfer, .prior_owner_key = "FS" });
-    try std.testing.expectEqual(Source{ .wholesale = planet.find("luthien").? }, try listingSource(&gs, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = surplus }));
-    try std.testing.expectEqual(Source{ .wholesale = planet.find("new_avalon").? }, try listingSource(&gs, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = liquidated }));
+    try std.testing.expectEqual(Source{ .wholesale = planet.find("luthien").? }, try listingSource(&gs, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = surplus }, null));
+    try std.testing.expectEqual(Source{ .wholesale = planet.find("new_avalon").? }, try listingSource(&gs, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = liquidated }, null));
+    // A staged seller, from a liquidation not yet committed, replaces the
+    // hull's open interval (here FS).
+    try std.testing.expectEqual(Source{ .wholesale = planet.find("tharkad").? }, try listingSource(&gs, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = liquidated }, "LC"));
+    // A staged seller never applies to a listing that stands on a world.
+    try std.testing.expectEqual(Source{ .located = planet.find("skye").? }, try listingSource(&gs, dispersed, "LC"));
 
     // What does not resolve is corruption, never a default world.
     const dangling_hull: types.HullInstanceId = @enumFromInt(9);
@@ -305,14 +313,19 @@ test "listingSource locates world, HQ and contract-world listings, sends surplus
         .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = unknown_seller },
     }, 0..) |listing, i| {
         errdefer std.debug.print("unresolvable listing case {d}\n", .{i});
-        try std.testing.expectError(error.CorruptSave, listingSource(&gs, listing));
+        try std.testing.expectError(error.CorruptSave, listingSource(&gs, listing, null));
     }
+    // A staged seller still needs a known hull and names a known faction.
+    try std.testing.expectError(error.CorruptSave, listingSource(&gs, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = dangling_hull }, "LC"));
+    try std.testing.expectError(error.CorruptSave, listingSource(&gs, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = liquidated }, "XX"));
 
     // Reach: a located listing only within reach of the base, wholesale always.
     const luthien = planet.find("luthien").?;
-    try std.testing.expect(!try listingReachable(&gs, luthien, dispersed));
-    try std.testing.expect(try listingReachable(&gs, planet.find("skye").?, dispersed));
-    try std.testing.expect(try listingReachable(&gs, planet.find("skye").?, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = surplus }));
+    try std.testing.expect(!try listingReachable(&gs, luthien, dispersed, null));
+    try std.testing.expect(try listingReachable(&gs, planet.find("skye").?, dispersed, null));
+    try std.testing.expect(try listingReachable(&gs, planet.find("skye").?, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = surplus }, null));
+    // A hull with no open interval is reachable once its seller is staged.
+    try std.testing.expect(try listingReachable(&gs, luthien, .{ .kind = .unit, .item_key = "LCT-1V", .rarity = .common, .price = 1, .hull_instance_id = no_interval }, "LC"));
 }
 
 test "hullFieldable admits a hull with no arrival or whose arrival day has come" {

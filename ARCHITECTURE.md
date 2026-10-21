@@ -1338,8 +1338,11 @@ listing `npc_base.listingReachable` admits: a listing with a world (an HQ
 board's, a contract world's, a black-market world) only on or within
 `tuning.generation.npc_market_reach_ly` (60 ly, inclusive) of the base; a
 world-less faction-surplus or liquidation listing always, as the seller's
-wholesale offer delivered from the capital of the faction its hull's open
-ownership interval names (`npc_base.listingSource`). A hull bought off the
+wholesale offer delivered from the seller's capital (`npc_base.listingSource`).
+The seller is the faction its hull's open ownership interval names; a
+liquidation listing that later buyers in the same monthly pass plan against
+is sold by the liquidating company's faction before that interval is
+committed. A hull bought off the
 base world arrives after the player's hull-delivery days for that route
 (`npc_base.deliveryArrival`, `logistics.deliveryDays`);
 `GameState.merc_hull_arrivals` records it until then. Owned and fieldable

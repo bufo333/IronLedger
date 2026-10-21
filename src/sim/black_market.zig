@@ -534,7 +534,7 @@ fn planNpcBuyerDraws(
         if (!buyerEligible(gs, l, buyer, day)) continue;
         if (l.kind != .unit) continue;
         if (l.hull_instance_id == .none) continue;
-        if (base) |b| if (!try npc_base.listingReachable(gs, b, l)) continue;
+        if (base) |b| if (!try npc_base.listingReachable(gs, b, l, null)) continue;
         try elig.append(scratch, i);
     }
 
@@ -555,7 +555,7 @@ fn planNpcBuyerDraws(
 
         const idx = candidates.items[rng.random(.market).uintLessThan(usize, candidates.items.len)];
         const l = gs.market_listings.items[idx];
-        const arrive_day: ?u32 = if (base) |b| npc_base.deliveryArrival((try npc_base.listingSource(gs, l)).origin(), b, day) else null;
+        const arrive_day: ?u32 = if (base) |b| npc_base.deliveryArrival((try npc_base.listingSource(gs, l, null)).origin(), b, day) else null;
         try plan.append(scratch, .{ .buyer_idx = buyer_idx, .listing_idx = idx, .price = if (pays) l.price else 0, .arrive_day = arrive_day });
         consumed[idx] = true;
         _ = elig.swapRemove(std.mem.indexOfScalar(usize, elig.items, idx).?);

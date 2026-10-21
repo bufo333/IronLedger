@@ -2290,18 +2290,20 @@ pub const Store = struct {
         }
     }
 
-    /// Decode each arrival row exactly, in stored order: a non-integer or
-    /// out-of-range value, a hull id of none, a duplicate hull or an ordinal
-    /// other than the row's position (`saveMercHullArrivals` writes 0, 1,
-    /// 2, …) is `CorruptSave` (rule 47). `npc_base.validate` then checks
-    /// each hull against its owner.
+    /// Decode each arrival row exactly, in stored order: a value not stored
+    /// as an integer or out of range, a hull id of none, a duplicate hull or
+    /// an ordinal other than the row's position (`saveMercHullArrivals`
+    /// writes 0, 1, 2, …) is `CorruptSave` (rule 47). `npc_base.validate`
+    /// then checks each hull against its owner.
     fn loadMercHullArrivals(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT ord, hull_instance_id, arrive_day FROM merc_hull_arrival WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT ord, hull_instance_id, arrive_day, typeof(ord)='integer' AND typeof(hull_instance_id)='integer' AND typeof(arrive_day)='integer' FROM merc_hull_arrival WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         var expected_ord: i64 = 0;
         while (try st.next()) : (expected_ord += 1) {
+            // SQLite's integer reader would coerce text or a fraction.
+            if (st.int(3) != 1) return error.CorruptSave;
             if (st.int(0) != expected_ord) return error.CorruptSave;
             const hull_id = try toId(types.HullInstanceId, st.int(1));
             if (hull_id == .none) return error.CorruptSave;
@@ -2314,7 +2316,7 @@ pub const Store = struct {
 
     fn loadMercCompanies(self: Store, gs: *GameState, cid: i64) !void {
         const alloc = gs.allocator();
-        const st = try self.db.prepare("SELECT id, archetype_key, commander_first, commander_last, unit_name, faction_key, side, doctrine, cbills, founded_day, dissolved_day, logo_key, band_key, understrength_since, typeof(understrength_since) IN ('null','integer'), home_planet_key, ready_day FROM merc_company WHERE cid = ?1 ORDER BY ord");
+        const st = try self.db.prepare("SELECT id, archetype_key, commander_first, commander_last, unit_name, faction_key, side, doctrine, cbills, founded_day, dissolved_day, logo_key, band_key, understrength_since, typeof(understrength_since) IN ('null','integer'), home_planet_key, ready_day, typeof(home_planet_key)='text' AND typeof(ready_day)='integer' FROM merc_company WHERE cid = ?1 ORDER BY ord");
         defer st.finalize();
         try st.bindAll(.{cid});
         while (try st.next()) {
@@ -2334,7 +2336,10 @@ pub const Store = struct {
             const understrength_since: ?u32 = if (st.optInt(13)) |day| std.math.cast(u32, day) orelse return error.CorruptSave else null;
             if (understrength_since) |day| if (day > gs.clock.day_index) return error.CorruptSave;
             // The base is held in static catalog memory; an unknown world is
-            // corruption, never a default (rule 47).
+            // corruption, never a default (rule 47). The base must be stored
+            // as text and the ready day as an integer, because SQLite's
+            // readers would convert a blob base or a text or fractional day.
+            if (st.int(17) != 1) return error.CorruptSave;
             const home = planet_mod.find(try st.text(15, alloc)) orelse return error.CorruptSave;
             const mc: merc_company_mod.MercCompany = .{
                 .id = try toId(types.MercCompanyId, st.int(0)),
@@ -9852,6 +9857,16 @@ test "a broken merc company base, ready day or hull arrival is refused as corrup
         .{ .name = "an arrival of a dissolved company", .sql = try std.fmt.bufPrintZ(&sql[3], "UPDATE merc_company SET dissolved_day = 1 WHERE id = {d}", .{@intFromEnum(owner)}) },
         .{ .name = "a negative arrival day", .sql = "PRAGMA ignore_check_constraints=ON; UPDATE merc_hull_arrival SET arrive_day = -1" },
         .{ .name = "an arrival out of its order", .sql = "UPDATE merc_hull_arrival SET ord = 5" },
+        // Values SQLite's integer and text readers would coerce into a
+        // valid-looking day, base, ordinal or hull (rule 47).
+        .{ .name = "a text ready day", .sql = "PRAGMA ignore_check_constraints=ON; UPDATE merc_company SET founded_day = 0, ready_day = 'soon' WHERE ord = 0" },
+        .{ .name = "a fractional ready day", .sql = "PRAGMA ignore_check_constraints=ON; UPDATE merc_company SET founded_day = 0, ready_day = 0.5 WHERE ord = 0" },
+        .{ .name = "a base stored as a blob", .sql = "PRAGMA ignore_check_constraints=ON; UPDATE merc_company SET home_planet_key = CAST(home_planet_key AS BLOB) WHERE ord = 0" },
+        .{ .name = "a text arrival ordinal", .sql = "PRAGMA ignore_check_constraints=ON; UPDATE merc_hull_arrival SET ord = 'first'" },
+        .{ .name = "a fractional arrival ordinal", .sql = "PRAGMA ignore_check_constraints=ON; UPDATE merc_hull_arrival SET ord = 0.5" },
+        .{ .name = "a fractional arrival hull", .sql = "PRAGMA foreign_keys=OFF; PRAGMA ignore_check_constraints=ON; UPDATE merc_hull_arrival SET hull_instance_id = hull_instance_id + 0.5" },
+        .{ .name = "a text arrival day", .sql = "PRAGMA ignore_check_constraints=ON; UPDATE merc_hull_arrival SET arrive_day = 'soon'" },
+        .{ .name = "a fractional arrival day", .sql = "PRAGMA ignore_check_constraints=ON; UPDATE merc_hull_arrival SET arrive_day = arrive_day + 0.5" },
     };
     for (cases) |case| {
         errdefer std.debug.print("arrival or base case: {s}\n", .{case.name});

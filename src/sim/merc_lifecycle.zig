@@ -170,7 +170,19 @@ pub fn spawnReplacementCompany(
 const PlannedListing = struct {
     listing: market.Listing,
     available: bool = true,
+    /// The seller of a liquidation listing planned earlier in this pass,
+    /// whose ownership interval is staged but not committed
+    /// (`liquidationSeller`); null for a listing already on the board, whose
+    /// hull's open interval names its seller (`npc_base.listingSource`).
+    staged_seller: ?[]const u8 = null,
 };
+
+/// The faction that sells a liquidated company's hulls, named by each hull's
+/// new open ownership interval: the company's own
+/// (docs/p5d-conflict-world-design.md M1).
+fn liquidationSeller(company: merc_company_mod.MercCompany) []const u8 {
+    return company.faction_key;
+}
 
 const PlannedCompany = struct {
     id: types.MercCompanyId,
@@ -374,7 +386,10 @@ pub fn runMercLifecycle(gs: *GameState) !void {
 
         if (try dissolutionCause(gs, company.id)) |cause| {
             const liquidation_listings = try planLiquidation(scratch, gs, company.id, day, &next_listing_id);
-            for (liquidation_listings) |listing| try listings.append(scratch, .{ .listing = listing });
+            // Later buyers in this pass see these listings before their
+            // seller's interval is committed.
+            const seller = liquidationSeller(gs.merc_companies.get(company.id).?);
+            for (liquidation_listings) |listing| try listings.append(scratch, .{ .listing = listing, .staged_seller = seller });
             company.dissolved_day = day;
 
             const replacement = try planReplacement(
@@ -510,7 +525,7 @@ fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *GameState, listings: *s
             if (chassis.kind != wanted_kind) continue;
             if (wanted_kind == .mek and listing.hull_instance_id == .none) continue;
             if ((wanted_kind == .vehicle or wanted_kind == .aerospace) and !chassis_mod.conventionalMarketEligible(chassis, gs.clock.date.year)) continue;
-            if (!try npc_base.listingReachable(gs, company.base, listing)) continue;
+            if (!try npc_base.listingReachable(gs, company.base, listing, planned.staged_seller)) continue;
             try candidates.append(scratch, i);
         }
         if (candidates.items.len > 0) break :collect;
@@ -527,7 +542,7 @@ fn selectNpcProcurement(scratch: std.mem.Allocator, gs: *GameState, listings: *s
     if (candidates.items.len == 0) return null;
     const listing_index = candidates.items[rng.random(.market).uintLessThan(usize, candidates.items.len)];
     const listing = listings.items[listing_index].listing;
-    const source = try npc_base.listingSource(gs, listing);
+    const source = try npc_base.listingSource(gs, listing, listings.items[listing_index].staged_seller);
     const acquisition: PurchaseAcquisition = if (listing.hull_instance_id == .none) blk: {
         if (next_hull_instance_id.* == std.math.maxInt(u32)) return error.HullInstanceIdExhausted;
         const id: types.HullInstanceId = @enumFromInt(next_hull_instance_id.*);
@@ -657,7 +672,7 @@ fn stageLiquidation(stage: *LifecycleStage, alloc: std.mem.Allocator, company_id
                 .hull_instance_id = hull_id,
                 .from_day = day,
                 .acquisition_type = .transfer,
-                .prior_owner_key = company.faction_key,
+                .prior_owner_key = liquidationSeller(company.*),
             });
             try stage.market_listings.append(alloc, listings[i]);
             // A liquidated hull still travelling to the base is listed where
@@ -2013,6 +2028,9 @@ test "runMercLifecycle: (c) determinism — two same-seed campaigns hash equal a
 /// so its buy clears that record. Half the meks are DC wholesale, half on a
 /// board on a DC world within reach of the companies' base but off it, so
 /// company 2's buy records arrivals; its first hull's arrival is due today.
+/// Company 1 also holds a hull it bought through `buyHullsForCompany`, whose
+/// open ownership interval names the market, so its liquidation listing has
+/// a seller only once the pass stages it.
 fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
     const alloc = gs.allocator();
     _ = try founding.createCommander(gs, "T", .LC, .line_officer);
@@ -2076,6 +2094,15 @@ fn seedLifecycleAtomicityFixture(gs: *GameState) !void {
         }
         try gs.merc_company_rosters.put(alloc, company_id, roster);
     }
+    // Company 1's one C-bill buys the only mek it can afford, then its debts
+    // leave it bankrupt.
+    gs.merc_companies.getPtr(bankrupt).?.cbills = 1;
+    const bought = try listDcSurplusMekForTest(gs, 1);
+    var rng = gs.rng;
+    try buyHullsForCompany(gs, gs.scratch(), bankrupt, gs.clock.day_index, &rng);
+    gs.rng = rng;
+    try std.testing.expectEqual(hull_instance_mod.HullOwner{ .merc_company = bankrupt }, gs.hull_instances.get(bought).?.owner);
+    gs.merc_companies.getPtr(bankrupt).?.cbills = -1;
     try gs.merc_hull_arrivals.put(alloc, gs.merc_company_rosters.get(under_strength).?.items[0], gs.clock.day_index);
     // Enough meks for the first replacement's line and company 2's top-up.
     const nearby = try boardOnForTest(gs, (try worldAtForTest("DC", test_base, 1, tuning.generation.npc_market_reach_ly)).key);
@@ -2425,6 +2452,61 @@ test "liquidating a company lists its hull still en route and drops that hull's 
     try std.testing.expectEqual(hull_instance_mod.HullOwner.market, gs.hull_instances.get(en_route).?.owner);
     try std.testing.expectEqual(@as(usize, 0), gs.merc_hull_arrivals.count());
     try npc_base.validate(&gs);
+}
+
+test "a dissolving company's hulls are offered wholesale from its own faction's capital to buyers later in the same pass" {
+    // docs/p5d-conflict-world-design.md M1: a liquidation listing is the
+    // liquidating company's wholesale offer. An LC company based on its
+    // capital dissolves holding a hull first sold by DC and, in one case, a
+    // hull it bought through `buyHullsForCompany` (open interval: the
+    // market). Its replacement and a DC company based on the DC capital plan
+    // after the liquidation in the same pass, before its LC interval is
+    // committed; whoever buys a listed hull receives it from the LC capital.
+    const a = std.testing.allocator;
+    for ([_]bool{ true, false }) |bought_one| {
+        errdefer std.debug.print("with a bought hull: {}\n", .{bought_one});
+        var gs = GameState.init(a, .{ .seed = 7627 });
+        defer gs.deinit();
+        _ = try founding.createCommander(&gs, "T", .LC, .line_officer);
+        gs.market_listings.clearRetainingCapacity();
+        const lc_capital = planet.find(faction_mod.find("LC").?.capital).?;
+        const folding = try putLifecycleCompany(&gs, 1, "Folding Co", 1, 1, null);
+        gs.merc_companies.getPtr(folding).?.faction_key = "LC";
+        gs.merc_companies.getPtr(folding).?.home_planet_key = lc_capital.key;
+        if (bought_one) {
+            const bought = try listDcSurplusMekForTest(&gs, 1);
+            var rng = gs.rng;
+            try buyHullsForCompany(&gs, a, folding, gs.clock.day_index, &rng);
+            gs.rng = rng;
+            try std.testing.expectEqual(hull_instance_mod.HullOwner{ .merc_company = folding }, gs.hull_instances.get(bought).?.owner);
+        }
+        const hulls = try a.dupe(types.HullInstanceId, gs.merc_company_rosters.get(folding).?.items);
+        defer a.free(hulls);
+        advancePaydays(&gs, 13);
+        gs.merc_companies.getPtr(folding).?.cbills = -1;
+        gs.merc_companies.getPtr(folding).?.understrength_since = dayMonthsBefore(&gs, 12);
+        // A stale DC origin would read as this buyer's own base world.
+        _ = try putLifecycleCompany(&gs, 2, "Buyer Co", testLineTarget() - 1, 1_000_000_000, null);
+        try std.testing.expectEqualStrings(test_base, faction_mod.find("DC").?.capital);
+        try npc_base.validate(&gs);
+        const day = gs.clock.day_index;
+
+        try runMercLifecycle(&gs);
+
+        try std.testing.expectEqual(day, gs.merc_companies.get(folding).?.dissolved_day);
+        var sold: usize = 0;
+        for (hulls) |hull_id| {
+            const owner = switch (gs.hull_instances.get(hull_id).?.owner) {
+                .merc_company => |id| id,
+                else => continue,
+            };
+            sold += 1;
+            const base = try npc_base.companyBase(gs.merc_companies.get(owner).?);
+            try std.testing.expectEqual(npc_base.deliveryArrival(lc_capital, base, day), gs.merc_hull_arrivals.get(hull_id));
+        }
+        try std.testing.expect(sold > 0);
+        try npc_base.validate(&gs);
+    }
 }
 
 test "a replacement is based on a world of its own faction, ready on its founding day, and its founding buy reaches from that base" {
