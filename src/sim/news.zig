@@ -78,13 +78,13 @@ fn consider(best: *?Candidate, c: Candidate) void {
 /// is none, differs from its key, is not above the one before it (items go
 /// in emission order) or is at or past `next_news_id`; a conflict that is
 /// not loaded or is a standing need; an item whose day (the domain's
-/// `day`) is after today; a resolution of an unresolved
+/// `day`) has no calendar date (`Clock.dateOf`: it is after today, or the
+/// clock counts it back before the earliest date); a resolution of an unresolved
 /// conflict; a presence world not in the catalogue, or one beyond reach of
 /// the conflict's world (`withinReach`); empty text or text that is not
 /// UTF-8; or two items of one kind for one conflict.
 pub fn validate(gs: *const GameState) error{CorruptSave}!void {
     if (gs.next_news_id == 0) return error.CorruptSave;
-    const today = gs.clock.day_index;
     var previous: u32 = @intFromEnum(types.NewsId.none);
     const items = gs.news_items.values();
     for (gs.news_items.keys(), items, 0..) |id, *item, i| {
@@ -93,7 +93,7 @@ pub fn validate(gs: *const GameState) error{CorruptSave}!void {
         const c = gs.conflicts.getPtr(item.conflict) orelse return error.CorruptSave;
         if (c.family == .standing) return error.CorruptSave;
         const day = news_dom.day(item, c) orelse return error.CorruptSave;
-        if (day > today) return error.CorruptSave;
+        _ = gs.clock.dateOf(day) catch return error.CorruptSave;
         if (item.kind == .resolution and c.outcome == null) return error.CorruptSave;
         const distance = news_dom.reachLy(item, c) orelse return error.CorruptSave;
         if (!withinReach(distance)) return error.CorruptSave;
@@ -219,4 +219,15 @@ test "a campaign holding two items of one kind for one conflict is corrupt, as t
     gs.news_items.getPtr(again.id).?.kind = .strike;
     gs.clock.day_index = gs.conflicts.get(id).?.strike_day.?;
     try validate(&gs);
+}
+
+test "a campaign whose clock counts its news back before the calendar's first date is corrupt" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 75003 });
+    defer gs.deinit();
+    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    _ = try heardForTest(&gs, "skye");
+    try validate(&gs);
+    // An inconsistent clock: far more days have passed than 3025 holds.
+    gs.clock.day_index = std.math.maxInt(u32);
+    try std.testing.expectError(error.CorruptSave, validate(&gs));
 }

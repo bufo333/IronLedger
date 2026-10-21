@@ -1724,9 +1724,10 @@ and the conflict is tied to a `conflict` row by foreign key. The loader
 decodes each row exactly (tags on their full bytes, checked integers, the
 ordinal equal to the row's position), and `news.validate` refuses a counter
 of 0, an id not above the previous row's or at or above the counter, a
-conflict the campaign does not hold or a standing need, an item whose day is
-after today, a resolution of an unresolved conflict, an unknown presence
-world or one beyond `news_reach_ly` of the conflict's world, empty text or
+conflict the campaign does not hold or a standing need, an item whose day has
+no calendar date (after today, or counted back by an inconsistent clock past
+the earliest date `clock.Clock.dateOf` reaches), a resolution of an
+unresolved conflict, an unknown presence world or one beyond `news_reach_ly` of the conflict's world, empty text or
 text that is not UTF-8, and two items of one kind for one conflict. Stored
 text is reloaded, never regenerated.
 

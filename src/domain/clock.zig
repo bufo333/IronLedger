@@ -48,7 +48,19 @@ pub const Date = struct {
         return d;
     }
 
-    /// The day before; the inverse of `next`.
+    /// Days from 0000-01-01, the earliest date the year holds, to this one:
+    /// how many times `prev` can step back from it. Year 0 is a leap year,
+    /// as every year divisible by 400 is.
+    pub fn daysSinceEarliest(self: Date) u32 {
+        const y: u32 = self.year;
+        const before_year: u32 = if (y == 0) 0 else 365 * y + (y - 1) / 4 - (y - 1) / 100 + (y - 1) / 400 + 1;
+        var before_month: u32 = 0;
+        for (1..self.month) |m| before_month += daysInMonth(self.year, @intCast(m));
+        return before_year + before_month + self.day - 1;
+    }
+
+    /// The day before; the inverse of `next`. 0000-01-01 has none; callers
+    /// bound their steps by `daysSinceEarliest`.
     pub fn prev(self: Date) Date {
         var d = self;
         if (d.day > 1) {
@@ -119,12 +131,17 @@ pub const Clock = struct {
         self.day_index += 1;
     }
 
-    /// The calendar date of `day`, counted back from today; null for a day
-    /// after today, which has no date yet (rule 55).
-    pub fn dateOf(self: Clock, day: u32) ?Date {
-        if (day > self.day_index) return null;
+    /// The calendar date of `day`, counted back from today (rule 55).
+    /// `FutureDay` for a day after today, which has no date yet;
+    /// `BeforeEarliestDate` when more days lie between it and today than
+    /// today's date has since 0000-01-01, which only an inconsistent clock
+    /// asks for.
+    pub fn dateOf(self: Clock, day: u32) error{ FutureDay, BeforeEarliestDate }!Date {
+        if (day > self.day_index) return error.FutureDay;
+        const elapsed = self.day_index - day;
+        if (elapsed > self.date.daysSinceEarliest()) return error.BeforeEarliestDate;
         var d = self.date;
-        for (0..self.day_index - day) |_| d = d.prev();
+        for (0..elapsed) |_| d = d.prev();
         return d;
     }
 };
@@ -134,19 +151,57 @@ test "dateOf counts back across month, year and leap-day ends, and has no date f
     const start = c;
     // Two years on, past a year end and the 3024 leap day.
     for (0..730) |_| c.advance();
-    try std.testing.expectEqual(start.date, c.dateOf(start.day_index).?);
-    try std.testing.expectEqual(Date{ .year = 3024, .month = 2, .day = 29 }, c.dateOf(start.day_index + 2).?);
-    try std.testing.expectEqual(Date{ .year = 3024, .month = 3, .day = 1 }, c.dateOf(start.day_index + 3).?);
-    try std.testing.expectEqual(Date{ .year = 3024, .month = 12, .day = 31 }, c.dateOf(start.day_index + 308).?);
-    try std.testing.expectEqual(Date{ .year = 3025, .month = 1, .day = 1 }, c.dateOf(start.day_index + 309).?);
-    try std.testing.expectEqual(c.date, c.dateOf(c.day_index).?);
-    try std.testing.expectEqual(@as(?Date, null), c.dateOf(c.day_index + 1));
+    try std.testing.expectEqual(start.date, try c.dateOf(start.day_index));
+    try std.testing.expectEqual(Date{ .year = 3024, .month = 2, .day = 29 }, try c.dateOf(start.day_index + 2));
+    try std.testing.expectEqual(Date{ .year = 3024, .month = 3, .day = 1 }, try c.dateOf(start.day_index + 3));
+    try std.testing.expectEqual(Date{ .year = 3024, .month = 12, .day = 31 }, try c.dateOf(start.day_index + 308));
+    try std.testing.expectEqual(Date{ .year = 3025, .month = 1, .day = 1 }, try c.dateOf(start.day_index + 309));
+    try std.testing.expectEqual(c.date, try c.dateOf(c.day_index));
+    try std.testing.expectError(error.FutureDay, c.dateOf(c.day_index + 1));
     // Every day back agrees with stepping forward.
     var d = start.date;
     for (start.day_index..c.day_index + 1) |day| {
-        try std.testing.expectEqual(d, c.dateOf(@intCast(day)).?);
+        try std.testing.expectEqual(d, try c.dateOf(@intCast(day)));
         d = d.next();
     }
+}
+
+test "daysSinceEarliest counts every day stepped forward from 0000-01-01, across leap and century years" {
+    const earliest: Date = .{ .year = 0, .month = 1, .day = 1 };
+    try std.testing.expectEqual(@as(u32, 0), earliest.daysSinceEarliest());
+    // Year 0 is leap (366 days), 1–3 are not, 4 is; 100 is not, 400 is.
+    try std.testing.expectEqual(@as(u32, 366), (Date{ .year = 1, .month = 1, .day = 1 }).daysSinceEarliest());
+    try std.testing.expectEqual(@as(u32, 366 + 3 * 365), (Date{ .year = 4, .month = 1, .day = 1 }).daysSinceEarliest());
+    var d = earliest;
+    var n: u32 = 0;
+    while (d.year < 405) : (n += 1) {
+        try std.testing.expectEqual(n, d.daysSinceEarliest());
+        d = d.next();
+    }
+    // Near the campaign era, against the same stepping.
+    d = .{ .year = 2999, .month = 12, .day = 31 };
+    n = d.daysSinceEarliest();
+    while (d.year < 3101) : (n += 1) {
+        try std.testing.expectEqual(n, d.daysSinceEarliest());
+        d = d.next();
+    }
+}
+
+test "dateOf refuses a day further back than the calendar's earliest date rather than underflow the year" {
+    const today = Date.campaign_default;
+    const back = today.daysSinceEarliest();
+    // Exactly as many days as today has since 0000-01-01 reach it.
+    const exact: Clock = .{ .date = today, .day_index = back };
+    try std.testing.expectEqual(Date{ .year = 0, .month = 1, .day = 1 }, try exact.dateOf(0));
+    // One more has no date.
+    const over: Clock = .{ .date = today, .day_index = back + 1 };
+    try std.testing.expectError(error.BeforeEarliestDate, over.dateOf(0));
+    try std.testing.expectEqual(Date{ .year = 0, .month = 1, .day = 1 }, try over.dateOf(1));
+    // The widest interval a clock can hold.
+    const widest: Clock = .{ .date = today, .day_index = std.math.maxInt(u32) };
+    try std.testing.expectError(error.BeforeEarliestDate, widest.dateOf(1));
+    try std.testing.expectError(error.BeforeEarliestDate, widest.dateOf(0));
+    try std.testing.expectEqual(today, try widest.dateOf(std.math.maxInt(u32)));
 }
 
 /// "today" when `eta_day <= now_day`, else "d{eta} ({N} days)" with

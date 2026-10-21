@@ -12068,7 +12068,7 @@ pub fn newsRows(alloc: Alloc, gs: *GameState, limit: usize) ![]NewsRow {
         const n = &items[i];
         const c = gs.conflicts.getPtr(n.conflict) orelse return error.CorruptSave;
         const day = news_dom.day(n, c) orelse return error.CorruptSave;
-        const date = gs.clock.dateOf(day) orelse return error.CorruptSave;
+        const date = gs.clock.dateOf(day) catch return error.CorruptSave;
         var date_buf: [10]u8 = undefined;
         const distance = news_dom.reachLy(n, c) orelse return error.CorruptSave;
         const from = planet_mod.find(n.reach_from_planet_key) orelse return error.CorruptSave;
@@ -12181,5 +12181,19 @@ test "a news row escapes a hostile stored text, and propagates allocation failur
     try std.testing.expect(std.mem.indexOfScalar(u8, row.text, 0x1b) == null);
     try std.testing.expectError(error.OutOfMemory, newsRows(std.testing.failing_allocator, &gs, newswire_rows));
     item.conflict = @enumFromInt(gs.next_conflict_id + 1);
+    try std.testing.expectError(error.CorruptSave, newsRows(a, &gs, newswire_rows));
+}
+
+test "a news row whose day lies before the calendar's first date is corrupt, not an arithmetic failure" {
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 75304 });
+    defer gs.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    _ = try @import("commands.zig").execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .line_officer } });
+    _ = try @import("news.zig").heardForTest(&gs, "skye");
+    try std.testing.expectEqual(@as(usize, 1), (try newsRows(a, &gs, newswire_rows)).len);
+    // An inconsistent clock: far more days have passed than 3025 holds.
+    gs.clock.day_index = std.math.maxInt(u32);
     try std.testing.expectError(error.CorruptSave, newsRows(a, &gs, newswire_rows));
 }
