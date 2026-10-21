@@ -1564,8 +1564,8 @@ a test that differs names the first value that did not survive
 (`digest.firstStateDifference`).
 
 **Current format boundary.** New empty stores
-initialize schema 76 transactionally. Existing store and campaign versions
-must both be 76 once the store is open; a schema 71 to 75 store is
+initialize schema 77 transactionally. Existing store and campaign versions
+must both be 77 once the store is open; a schema 71 to 76 store is
 migrated on open (below), older formats (70 included) are refused intact and newer
 formats retain their distinct refusal before persistent mutation. A nonempty unversioned
 database is not a new store, and a current store is validated without healing
@@ -1737,7 +1737,10 @@ and the current `ddl` and `index_ddl` are v76's unchanged.
   and its index, and sets every campaign and the store to 76. It reads no seed
   and draws no RNG; every other value, id, counter and stream is unchanged.
 - **v76 → v77** (`migrateV76ToV77`). The source check: every v76 table and
-  column (`ddl_v76`), no `theme` setting, and only v76 campaigns. It inserts
+  column (`ddl_v76`), every v76 index on its table with its uniqueness, key
+  columns in order and `WHERE` clause (`index_ddl_v76`; a missing or
+  malformed index is refused, never recreated), no `theme` setting, and
+  only v76 campaigns. It inserts
   the store-wide `theme` setting at `standard` (`default_theme`, the
   documented compatibility value) and sets every campaign and the store to
   77. No table changes; the theme is client state outside every campaign,

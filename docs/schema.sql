@@ -1,14 +1,15 @@
 -- IRON LEDGER — SQLite save store schema (design document)
 --
--- Matches schema_version 76, the current store and campaign format. Schema
--- 71 is the oldest supported format: a v71, v72, v73, v74 or v75 store
--- reaches 76 on open through each migration in turn, all in one transaction
+-- Matches schema_version 77, the current store and campaign format. Schema
+-- 71 is the oldest supported format: a v71, v72, v73, v74, v75 or v76 store
+-- reaches 77 on open through each migration in turn, all in one transaction
 -- (Store.migrate: v71 → v72 rebuilds `personage`, v72 → v73 adds
 -- `conflict`, v73 → v74 rebuilds `conflict` and `contract`, v74 → v75 adds
 -- `news_item`, v75 → v76 rebuilds `merc_company` and adds
--- `merc_hull_arrival`; see each below). Older and newer formats are refused
--- before persistent mutation under docs/engineering-contract.md rule 51; only
--- empty stores initialize schema 76.
+-- `merc_hull_arrival`, v76 → v77 adds the `theme` setting; see each at its
+-- table).
+-- Older and newer formats are refused before persistent mutation under
+-- docs/engineering-contract.md rule 51; only empty stores initialize schema 77.
 -- The executable DDL and dormant historical migration declarations live in
 -- src/persist/store.zig; this file is the readable reference for
 -- what each table and column means. Column order here is the runtime order.

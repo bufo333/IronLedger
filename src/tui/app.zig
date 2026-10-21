@@ -640,6 +640,9 @@ pub const App = struct {
         self.panes_drawn = 0;
         self.w_thumb_next = 0;
         self.w_thumb_end = 0;
+        // A battle-orders modal with no orders left closes before the frame
+        // decides on a scrim, so no frame dims behind a modal it never draws.
+        if (self.modal == .battle_orders and try self.ordersRows(self.a(), self.modal.battle_orders) == null) self.modal = .none;
         if (self.modal == .none) self.modal_colscroll = 0;
         const too_small = self.screen.cols < 80 or self.screen.rows < 24;
         if (too_small) {
@@ -5833,6 +5836,21 @@ test "under the standard theme an open modal scrims the screen and casts a shado
     try std.testing.expectEqual(Style.modal_title, c.app.screen.get(tl.x + 1, tl.y).style);
     try std.testing.expectEqual(screen_mod.Cell{ .ch = '░', .style = .shadow }, c.app.screen.get(tr.x + 1, tr.y + 1));
     try pressForTest(c, .escape);
+    try std.testing.expect(c.app.modal == .none);
+    try std.testing.expectEqual(corner, c.app.screen.get(0, 2));
+    try std.testing.expect(findCellForTest(&c.app.screen, '░') == null);
+}
+
+test "a battle-orders modal with no orders to give closes without scrimming the frame it would have covered" {
+    const c = try clientForTest(std.testing.allocator);
+    defer deinitForTest(c, std.testing.allocator);
+    try c.app.loadTheme();
+    try c.app.draw();
+    const corner = c.app.screen.get(0, 2);
+    try std.testing.expectEqual(Style.box, corner.style);
+    // No contract has this id, so the orders form is null and the modal closes during the draw.
+    c.app.openModal(.{ .battle_orders = @enumFromInt(std.math.maxInt(u32)) });
+    try c.app.draw();
     try std.testing.expect(c.app.modal == .none);
     try std.testing.expectEqual(corner, c.app.screen.get(0, 2));
     try std.testing.expect(findCellForTest(&c.app.screen, '░') == null);

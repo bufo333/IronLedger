@@ -1061,9 +1061,12 @@ pub const Store = struct {
     /// compatibility value (rule 51). The theme is client state, outside
     /// every campaign: no gameplay value, ID, counter or RNG stream changes,
     /// so a migrated campaign loads and plays on as an ordinary v77 campaign.
+    /// The source check also covers every v76 index (`index_ddl_v76`): v77
+    /// creates none, so a missing or malformed one is refused, never healed.
     fn migrateV76ToV77(db: sqlite.Db, fault: *Fault) !void {
         try fault.before();
         try validateSchema(db, ddl_v76);
+        try validateIndexes(db, index_ddl_v76);
         {
             const present = try db.prepare("SELECT count(*) FROM setting WHERE key = 'theme'");
             defer present.finalize();
@@ -1116,6 +1119,48 @@ pub const Store = struct {
             if (std.mem.eql(u8, name, constraint)) return;
         }
         if (!try hasColumnRt(db, table, name)) return error.CorruptStore;
+    }
+
+    /// Every index that `definitions` (one CREATE INDEX per line) names
+    /// exists on its table with its uniqueness, its key columns in order
+    /// and its WHERE clause, if any; `CorruptStore` otherwise.
+    fn validateIndexes(db: sqlite.Db, definitions_text: []const u8) !void {
+        const unique_marker = "CREATE UNIQUE INDEX IF NOT EXISTS ";
+        const plain_marker = "CREATE INDEX IF NOT EXISTS ";
+        var definitions = std.mem.splitScalar(u8, definitions_text, '\n');
+        while (definitions.next()) |line| {
+            const unique = std.mem.startsWith(u8, line, unique_marker);
+            if (!unique and !std.mem.startsWith(u8, line, plain_marker)) return error.CorruptStore;
+            if (!std.mem.endsWith(u8, line, ";")) return error.CorruptStore;
+            const rest = line[(if (unique) unique_marker.len else plain_marker.len) .. line.len - 1];
+            const name_end = std.mem.indexOf(u8, rest, " ON ") orelse return error.CorruptStore;
+            const name = rest[0..name_end];
+            const target = rest[name_end + " ON ".len ..];
+            const open_paren = std.mem.indexOfScalar(u8, target, '(') orelse return error.CorruptStore;
+            const close_paren = std.mem.indexOfScalarPos(u8, target, open_paren, ')') orelse return error.CorruptStore;
+            const table = target[0..open_paren];
+            // "" or " WHERE <condition>"; SQLite keeps the statement's text without its semicolon.
+            const condition = target[close_paren + 1 ..];
+            {
+                const shape = try db.prepare("SELECT count(*) FROM sqlite_master m, pragma_index_list(m.tbl_name) l WHERE m.type = 'index' AND m.name = ?1 AND m.tbl_name = ?2 AND l.name = m.name AND l.\"unique\" = ?3 AND l.partial = ?4 AND substr(m.sql, length(m.sql) - length(?5) + 1) = ?5");
+                defer shape.finalize();
+                try shape.bindAll(.{ name, table, unique, condition.len > 0, condition });
+                if (!try shape.next() or shape.int(0) != 1) return error.CorruptStore;
+            }
+            const key = try db.prepare("SELECT count(*) FROM pragma_index_info(?1) WHERE seqno = ?2 AND name = ?3");
+            defer key.finalize();
+            var columns = std.mem.splitScalar(u8, target[open_paren + 1 .. close_paren], ',');
+            var count: i64 = 0;
+            while (columns.next()) |column| : (count += 1) {
+                key.reset();
+                try key.bindAll(.{ name, count, std.mem.trim(u8, column, " ") });
+                if (!try key.next() or key.int(0) != 1) return error.CorruptStore;
+            }
+            const width = try db.prepare("SELECT count(*) FROM pragma_index_info(?1)");
+            defer width.finalize();
+            try width.bind(1, name);
+            if (!try width.next() or width.int(0) != count) return error.CorruptStore;
+        }
     }
 
     /// Rebuild every per-cid table to acquire the constraint set declared in
@@ -14388,6 +14433,15 @@ test "a malformed or mixed-version v76 store, and stores outside v71..v77, are r
     const cases = [_]Case{
         .{ .name = "a v76 store missing a table", .sql = "DROP TABLE world_state", .expected = error.CorruptStore },
         .{ .name = "a v76 store missing a column", .sql = "ALTER TABLE event_log DROP COLUMN contract", .expected = error.CorruptStore },
+        .{ .name = "a v76 store missing an index", .sql = "DROP INDEX ix_merc_hull_arrival_cid", .expected = error.CorruptStore },
+        .{ .name = "a v76 store missing its partial unique index", .sql = "DROP INDEX ux_personage_key", .expected = error.CorruptStore },
+        .{ .name = "a v76 index on another table", .sql = "DROP INDEX ix_merc_hull_arrival_cid; CREATE INDEX ix_merc_hull_arrival_cid ON merc_company(cid)", .expected = error.CorruptStore },
+        .{ .name = "a v76 index with its columns reordered", .sql = "DROP INDEX ix_operation_task_cid; CREATE INDEX ix_operation_task_cid ON operation_task(cid, operation_id, contract_id)", .expected = error.CorruptStore },
+        .{ .name = "a v76 index with a column missing", .sql = "DROP INDEX ix_operation_task_cid; CREATE INDEX ix_operation_task_cid ON operation_task(cid, contract_id)", .expected = error.CorruptStore },
+        .{ .name = "a v76 index with an extra column", .sql = "DROP INDEX ix_contract_cid; CREATE INDEX ix_contract_cid ON contract(cid, is_offer)", .expected = error.CorruptStore },
+        .{ .name = "a v76 unique index that is not unique", .sql = "DROP INDEX ux_personage_key; CREATE INDEX ux_personage_key ON personage(cid, key) WHERE key <> ''", .expected = error.CorruptStore },
+        .{ .name = "a v76 partial index with another condition", .sql = "DROP INDEX ux_personage_key; CREATE UNIQUE INDEX ux_personage_key ON personage(cid, key) WHERE key > ''", .expected = error.CorruptStore },
+        .{ .name = "a v76 index made partial", .sql = "DROP INDEX ix_merc_hull_arrival_cid; CREATE INDEX ix_merc_hull_arrival_cid ON merc_hull_arrival(cid) WHERE cid > 0", .expected = error.CorruptStore },
         .{ .name = "a v76 store with a theme already present", .sql = "INSERT INTO setting (key, value) VALUES ('theme', 1)", .expected = error.CorruptStore },
         .{ .name = "a v76 store holding a v75 campaign", .sql = "UPDATE campaign SET schema_version = 75", .expected = error.CorruptStore },
         .{ .name = "a v76 store holding a v77 campaign", .sql = "UPDATE campaign SET schema_version = 77", .expected = error.CorruptStore },
