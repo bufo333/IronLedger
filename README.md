@@ -560,8 +560,12 @@ and wars nobody of yours hears of still run their course.
 
 **Rival companies work the same field.** Rival merc companies come in tiers
 from "1-2 skull" to "5 skull" outfits. Each has a home world in its own
-house's space and buys only within 60 light-years of it, including the wrecks
-left on a lost field when they surface on the black market. A company folds
+house's space and buys from boards, contract worlds and black-market worlds
+only within 60 light-years of it, including the wrecks left on a lost field
+when they surface on the black market. Hulls a house sells wholesale, such as
+its factory surplus, are the exception: any company can order them, and they
+ship from the house capital, so a distant company waits out the travel time
+before the hull arrives and can fight. A company folds
 after a year below strength with no money and no contract, and is replaced the
 same month; the log records both. The Desk's Merc companies leaderboard ranks
 them.
