@@ -3885,6 +3885,8 @@ pub const MapHq = struct {
 };
 
 /// A running contract (`Contract.isRunning`): in transit or on station.
+/// `map` returns `CorruptSave` when its world or assigned company does not
+/// resolve.
 pub const MapContract = struct {
     id: types.ContractId,
     company: types.ForceId,
@@ -3930,9 +3932,9 @@ pub fn map(alloc: Alloc, gs: *GameState) !Map {
     var running: std.ArrayListUnmanaged(MapContract) = .empty;
     for (gs.contracts.values()) |*c| {
         if (!c.isRunning()) continue;
-        const i = catalogIndex(c.planet_key) orelse continue;
-        const name: []const u8 = if (gs.forces.getPtr(c.assigned_company)) |f| f.name else "";
-        try running.append(alloc, .{ .id = c.id, .company = c.assigned_company, .company_name = .{ .raw = name }, .world = i, .status = c.status });
+        const i = catalogIndex(c.planet_key) orelse return error.CorruptSave;
+        const f = gs.forces.getPtr(c.assigned_company) orelse return error.CorruptSave;
+        try running.append(alloc, .{ .id = c.id, .company = c.assigned_company, .company_name = .{ .raw = f.name }, .world = i, .status = c.status });
     }
     std.mem.sort(MapContract, running.items, {}, struct {
         fn lt(_: void, a: MapContract, b: MapContract) bool {
@@ -4047,6 +4049,28 @@ test "the map lists running contracts and HQs by id with their world indices, an
     try std.testing.expect(view.worlds[galatea].great_house);
     try std.testing.expect(!view.worlds[catalogIndex("terra").?].great_house);
     try std.testing.expect(!view.worlds[catalogIndex("canopus4").?].great_house);
+}
+
+test "the map refuses a running contract whose world or assigned company does not resolve" {
+    const commands = @import("commands.zig");
+    const gen = @import("starter_company.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 72 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const alpha = try gen.generateInto(&gs, "Alpha");
+    const terms: contract_mod.Terms = .{ .length_months = 3, .base_pay_month = 100_000 };
+    const id: types.ContractId = @enumFromInt(1);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const cases = [_]struct { planet: []const u8, company: types.ForceId }{
+        .{ .planet = "no-such-world", .company = alpha },
+        .{ .planet = "galatea", .company = @enumFromInt(9_999) },
+        .{ .planet = "galatea", .company = .none },
+    };
+    for (cases) |r| {
+        try gs.contracts.put(gs.allocator(), id, .{ .id = id, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "DC", .planet_key = r.planet, .status = .active, .assigned_company = r.company, .terms = terms });
+        try std.testing.expectError(error.CorruptSave, map(arena.allocator(), &gs));
+    }
 }
 
 pub const HistoryRow = struct {
