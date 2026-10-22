@@ -183,10 +183,12 @@ fn drawWorlds(self: *App, view: q.Map, geom: App.MapGeom) u32 {
         if (self.map_zoom > 1 or marked or is_cursor) {
             const nst: Style = if (is_cursor) .sel else if (w.band == .dark) .dim else lens;
             const nw: u16 = @intCast(@max(0, @min(@as(i32, @intCast(w.name.len)), inner.x + inner.w - c[0] - 2)));
-            // The name stands clear of the territory wash on both sides.
-            s.put(c[0] + 1, c[1], ' ', .normal);
+            // The name stands clear of the territory wash on both sides,
+            // inside the map so the pane's chrome survives.
+            for ([_]i32{ c[0] + 1, c[0] + 2 + @as(i32, nw) }) |x| {
+                if (geom.inside(.{ x, c[1] })) s.put(x, c[1], ' ', .normal);
+            }
             _ = s.text(c[0] + 2, c[1], nw, w.name, nst);
-            s.put(c[0] + 2 + @as(i32, nw), c[1], ' ', .normal);
             if (w.worked > 0 and w.hq_here == .none) s.put(c[0] + 3 + @as(i32, nw), c[1], '=', .purple);
             if (w.offers_here > 0) s.put(c[0] + 3 + @as(i32, nw), c[1], '^', .amber);
             if (w.companies_here > 0 and w.hq_here == .none) s.put(c[0] + 3 + @as(i32, nw), c[1], '+', .good);
@@ -561,6 +563,35 @@ test "territory marks every rim cell and the interior lattice, leaves space beyo
         washed += 1;
     };
     try std.testing.expect(washed >= 1);
+}
+
+test "a world in the last map column keeps the map's right border in both lenses" {
+    const c = try app.clientForTest(std.testing.allocator);
+    defer app.deinitForTest(c, std.testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const view = try q.map(arena.allocator(), c.app.state());
+    try c.app.screen.resize(170, 45);
+    c.app.map_framed = true;
+    c.app.map_cursor = worldForTest(view, "chara");
+    c.app.map_zoom = focus_zoom;
+    try toTab(c, .map);
+    const outer = mapRect(&c.app);
+    const s = &c.app.screen;
+    for ([_]@TypeOf(c.app.map_color){ .faction, .industry }) |lens| {
+        if (c.app.map_color != lens) try app.pressForTest(c, .{ .char = 'c' });
+        try std.testing.expectEqual(lens, c.app.map_color);
+        // Buckminster sits in the last inner column, with no room for its name.
+        const inner = outer.inner();
+        const cw = view.worlds[c.app.map_cursor];
+        const edge = view.worlds[worldForTest(view, "buckminster")];
+        const at = App.mapGeom(view, inner, c.app.map_zoom, .{ cw.x, cw.y }).cell(edge.x, edge.y);
+        try std.testing.expectEqual(@as(i32, inner.x + inner.w - 1), at[0]);
+        try std.testing.expectEqual(@as(u21, 'o'), s.get(@intCast(at[0]), @intCast(at[1])).ch);
+        for (outer.y + 1..outer.y + outer.h - 1) |y| {
+            try std.testing.expectEqual(@as(u21, '│'), s.get(outer.x + outer.w - 1, @intCast(y)).ch);
+        }
+    }
 }
 
 test "the faction lens draws territory under the worlds, the other lenses draw none, and a modal scrims it" {
