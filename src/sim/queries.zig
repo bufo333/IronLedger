@@ -12,6 +12,7 @@ const logistics_mod = @import("../econ/logistics.zig");
 const person_mod = @import("../domain/person.zig");
 const unit_mod = @import("../domain/unit.zig");
 const contract_mod = @import("../domain/contract.zig");
+const commander_mod = @import("../domain/commander.zig");
 const situation_mod = @import("../domain/situation.zig");
 const chassis_mod = @import("../domain/chassis.zig");
 const force_dom = @import("../domain/force.zig");
@@ -1077,7 +1078,7 @@ pub fn standings(alloc: Alloc, gs: *GameState) ![]const []const u8 {
         if (!fr.hires) continue;
         const f = .{ .name = fr.key };
         const s = gs.standing(f.name);
-        if (s == 0 and !@import("../domain/commander.zig").Faction.isHouse(fr.key)) continue; // periphery rows appear once they matter
+        if (s == 0 and !commander_mod.Faction.isHouse(fr.key)) continue; // periphery rows appear once they matter
         const bp = cm.standingPayBp(s);
         const mk: []const u8 = if (s <= -t.standing_shun_depth) "{c}" else if (s < 0) "{a}" else if (s >= 25) "{g}" else "";
         const note: []const u8 = if (gs.factionCooling(f.name)) " · {c}cooling after a breach{/}" else if (s <= -t.standing_shun_depth) " · {c}shunned: half their offers{/}" else if (s >= 25) " · {g}favoured{/}" else "";
@@ -3869,6 +3870,8 @@ pub const World = struct {
     standing: i32,
     /// Read-only world-state summary (P4h.4); empty if no state has been recorded.
     world_state_summary: []const u8,
+    /// The world's owner is a Great House (`commander.Faction.isHouse`).
+    great_house: bool,
 };
 
 pub const MapHq = struct {
@@ -3877,25 +3880,65 @@ pub const MapHq = struct {
     x: i32,
     y: i32,
     ring_ly: u32,
+    /// The HQ's world: an index into `Map.worlds`.
+    world: usize,
+};
+
+/// A running contract (`Contract.isRunning`): in transit or on station.
+pub const MapContract = struct {
+    id: types.ContractId,
+    company: types.ForceId,
+    company_name: table.Raw,
+    /// The contract's world: an index into `Map.worlds`.
+    world: usize,
+    status: contract_mod.ContractStatus,
 };
 
 pub const Map = struct {
+    /// Every catalogue world, in catalogue order.
     worlds: []World,
+    /// Sorted by id.
     hqs: []MapHq,
+    /// Every running contract, sorted by id.
+    contracts: []MapContract,
     in_ring: u32,
     in_band: u32,
     dark: u32,
     band_ly: u32,
 };
 
+/// A world's index in `planet_mod.catalog`, which is `Map.worlds` order.
+fn catalogIndex(key: []const u8) ?usize {
+    for (planet_mod.catalog, 0..) |p, i| if (std.mem.eql(u8, p.key, key)) return i;
+    return null;
+}
+
 pub fn map(alloc: Alloc, gs: *GameState) !Map {
     var hqs: std.ArrayListUnmanaged(MapHq) = .empty;
     var hit = gs.hqs.iterator();
     while (hit.next()) |e| {
         const h = e.value_ptr;
-        const p = planet_mod.find(h.planet_key) orelse continue;
-        try hqs.append(alloc, .{ .id = h.id, .name = .{ .raw = h.name }, .x = p.x, .y = p.y, .ring_ly = h.influenceLy() });
+        const i = catalogIndex(h.planet_key) orelse continue;
+        const p = &planet_mod.catalog[i];
+        try hqs.append(alloc, .{ .id = h.id, .name = .{ .raw = h.name }, .x = p.x, .y = p.y, .ring_ly = h.influenceLy(), .world = i });
     }
+    std.mem.sort(MapHq, hqs.items, {}, struct {
+        fn lt(_: void, a: MapHq, b: MapHq) bool {
+            return @intFromEnum(a.id) < @intFromEnum(b.id);
+        }
+    }.lt);
+    var running: std.ArrayListUnmanaged(MapContract) = .empty;
+    for (gs.contracts.values()) |*c| {
+        if (!c.isRunning()) continue;
+        const i = catalogIndex(c.planet_key) orelse continue;
+        const name: []const u8 = if (gs.forces.getPtr(c.assigned_company)) |f| f.name else "";
+        try running.append(alloc, .{ .id = c.id, .company = c.assigned_company, .company_name = .{ .raw = name }, .world = i, .status = c.status });
+    }
+    std.mem.sort(MapContract, running.items, {}, struct {
+        fn lt(_: void, a: MapContract, b: MapContract) bool {
+            return @intFromEnum(a.id) < @intFromEnum(b.id);
+        }
+    }.lt);
     var worlds: std.ArrayListUnmanaged(World) = .empty;
     var in_ring: u32 = 0;
     var in_band: u32 = 0;
@@ -3951,9 +3994,59 @@ pub fn map(alloc: Alloc, gs: *GameState) !Map {
             .worked = contractsWorkedAt(gs, p.key),
             .standing = gs.standing(p.faction),
             .world_state_summary = try worldStateSummary(alloc, gs, p.key),
+            .great_house = commander_mod.Faction.isHouse(p.faction),
         });
     }
-    return .{ .worlds = try worlds.toOwnedSlice(alloc), .hqs = try hqs.toOwnedSlice(alloc), .in_ring = in_ring, .in_band = in_band, .dark = dark, .band_ly = market_mod.beachhead_band_ly };
+    return .{ .worlds = try worlds.toOwnedSlice(alloc), .hqs = try hqs.toOwnedSlice(alloc), .contracts = try running.toOwnedSlice(alloc), .in_ring = in_ring, .in_band = in_band, .dark = dark, .band_ly = market_mod.beachhead_band_ly };
+}
+
+test "the map lists running contracts and HQs by id with their world indices, and marks Great House worlds" {
+    const commands = @import("commands.zig");
+    const gen = @import("starter_company.zig");
+    var gs = GameState.init(std.testing.allocator, .{ .seed = 72 });
+    defer gs.deinit();
+    _ = try commands.execute(&gs, .{ .create_commander = .{ .name = "T", .origin = .LC, .profession = .paymaster } });
+    const alpha = try gen.generateInto(&gs, "Alpha");
+    const bravo = try gen.generateInto(&gs, "Bravo");
+    const charlie = try gen.generateInto(&gs, "Charlie");
+    const terms: contract_mod.Terms = .{ .length_months = 3, .base_pay_month = 100_000 };
+    // Inserted out of id order; two running contracts share Galatea.
+    const rows = [_]struct { id: u32, planet: []const u8, status: contract_mod.ContractStatus, company: types.ForceId }{
+        .{ .id = 5, .planet = "galatea", .status = .transit, .company = alpha },
+        .{ .id = 3, .planet = "tharkad", .status = .active, .company = bravo },
+        .{ .id = 4, .planet = "galatea", .status = .offer, .company = .none },
+        .{ .id = 7, .planet = "galatea", .status = .active, .company = charlie },
+        .{ .id = 6, .planet = "tharkad", .status = .completed, .company = bravo },
+    };
+    for (rows) |r| {
+        const id: types.ContractId = @enumFromInt(r.id);
+        try gs.contracts.put(gs.allocator(), id, .{ .id = id, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "DC", .planet_key = r.planet, .status = r.status, .assigned_company = r.company, .terms = terms });
+    }
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const view = try map(arena.allocator(), &gs);
+    const galatea = catalogIndex("galatea").?;
+    const tharkad = catalogIndex("tharkad").?;
+    try std.testing.expectEqual(@as(usize, 3), view.contracts.len);
+    const want = [_]struct { id: u32, world: usize, company: types.ForceId, name: []const u8, status: contract_mod.ContractStatus }{
+        .{ .id = 3, .world = tharkad, .company = bravo, .name = "Bravo", .status = .active },
+        .{ .id = 5, .world = galatea, .company = alpha, .name = "Alpha", .status = .transit },
+        .{ .id = 7, .world = galatea, .company = charlie, .name = "Charlie", .status = .active },
+    };
+    for (want, view.contracts) |w, got| {
+        try std.testing.expectEqual(@as(types.ContractId, @enumFromInt(w.id)), got.id);
+        try std.testing.expectEqual(w.world, got.world);
+        try std.testing.expectEqual(w.company, got.company);
+        try std.testing.expectEqualStrings(w.name, got.company_name.raw);
+        try std.testing.expectEqual(w.status, got.status);
+    }
+    try std.testing.expectEqual(@as(usize, 1), view.hqs.len);
+    const hq = gs.hqs.values()[0];
+    try std.testing.expectEqualStrings(hq.planet_key, view.worlds[view.hqs[0].world].key);
+    try std.testing.expectEqual(hq.id, view.worlds[view.hqs[0].world].hq_here);
+    try std.testing.expect(view.worlds[galatea].great_house);
+    try std.testing.expect(!view.worlds[catalogIndex("terra").?].great_house);
+    try std.testing.expect(!view.worlds[catalogIndex("canopus4").?].great_house);
 }
 
 pub const HistoryRow = struct {

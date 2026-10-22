@@ -21,6 +21,11 @@ PALETTE = {  # SGR fg/bg codes → hex (a dark terminal theme)
 }
 FG_DEFAULT, BG_DEFAULT = "#c8d3c5", "#0b0f0d"
 
+def faint(fg):
+    """SGR 2 as a terminal draws it: the foreground halfway to the background."""
+    a, b = int(fg[1:], 16), int(BG_DEFAULT[1:], 16)
+    return "#" + "".join("%02x" % ((((a >> s) & 255) + ((b >> s) & 255)) // 2) for s in (16, 8, 0))
+
 out = b""
 fd = None
 
@@ -126,12 +131,16 @@ def parse(frame):
             j = 0
             px = None
             fg, bg = FG_DEFAULT, BG_DEFAULT
+            dimmed = False
             while j < len(codes):
                 c = codes[j]
                 if c == "0":
                     fg, bg = FG_DEFAULT, BG_DEFAULT
+                    dimmed = False
                 elif c == "1":
                     pass
+                elif c == "2":
+                    dimmed = True
                 elif c in ("38", "48") and j + 4 < len(codes) and codes[j + 1] == "2":
                     col = "#%02x%02x%02x" % tuple(int(v) for v in codes[j + 2:j + 5])
                     if c == "38":
@@ -147,6 +156,8 @@ def parse(frame):
                     else:
                         fg = PALETTE[c]
                 j += 1
+            if dimmed:
+                fg = faint(fg)
             i = m.end()
             continue
         if data[i] == 0x1b:  # any other escape: skip to its final byte

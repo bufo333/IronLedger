@@ -137,6 +137,29 @@ pub fn companiesForTest(gs: *GameState, count: usize) !void {
     while (have < count) : (have += 1) _ = try gs.createForce("Test Company", .company, .none);
 }
 
+/// A contract a client test puts on a world.
+pub const ContractForTest = struct { id: u32, planet_key: []const u8, status: contract_mod.ContractStatus };
+
+/// Garrison contracts for the campaign's first company with these ids,
+/// worlds and statuses, for client tests that need companies on contract.
+pub fn contractsForTest(gs: *GameState, specs: []const ContractForTest) !void {
+    const co = for (gs.forces.values()) |f| {
+        if (f.echelon == .company) break f.id;
+    } else return error.NoCompany;
+    for (specs) |s| {
+        const id: types.ContractId = @enumFromInt(s.id);
+        try gs.contracts.put(gs.allocator(), id, .{ .id = id, .kind = .garrison_duty, .employer_key = "LC", .enemy_key = "DC", .planet_key = s.planet_key, .status = s.status, .assigned_company = co, .terms = .{ .length_months = 3, .base_pay_month = 100_000 } });
+    }
+}
+
+/// A field HQ named "Local" on `planet_key` under the next HQ id, for client
+/// tests that need a second HQ.
+pub fn hqForTest(gs: *GameState, planet_key: []const u8) !types.HqId {
+    try gs.checkNextHqId();
+    try gs.hqs.ensureUnusedCapacity(gs.allocator(), 1);
+    return gs.commitHq(.{ .id = .none, .name = "Local", .tier = .field, .planet_key = planet_key, .funds = 0 });
+}
+
 /// Twelve reachable wrecks: a salvage decision long enough to scroll in the
 /// smallest supported modal.
 const many_wrecks = blk: {

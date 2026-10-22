@@ -40,6 +40,12 @@ pub const Style = enum(u8) {
     cyan,
     white,
     grey,
+    // Great House territory on the star map, faint.
+    blue_land,
+    red_land,
+    yellow_land,
+    green_land,
+    magenta_land,
 
     /// The style's SGR: a chrome role's from `palette`, every other style's
     /// the same under every palette (rule 43).
@@ -68,6 +74,11 @@ pub const Style = enum(u8) {
             .cyan => term.sgr.cyan,
             .white => term.sgr.white,
             .grey => term.sgr.grey,
+            .blue_land => term.sgr.blue_land,
+            .red_land => term.sgr.red_land,
+            .yellow_land => term.sgr.yellow_land,
+            .green_land => term.sgr.green_land,
+            .magenta_land => term.sgr.magenta_land,
         };
     }
 
@@ -649,6 +660,17 @@ test "the default look is classic: no scrim, no shadow, and the base SGR for eve
         .{ .style = .modal_title, .sgr = "\x1b[0;37m" },
     };
     for (pinned) |want| try std.testing.expectEqualStrings(want.sgr, want.style.sgr(p));
+}
+
+test "the territory styles are faint normal-intensity house colours" {
+    const pinned = [_]struct { style: Style, sgr: []const u8 }{
+        .{ .style = .blue_land, .sgr = "\x1b[0;2;34m" },
+        .{ .style = .red_land, .sgr = "\x1b[0;2;31m" },
+        .{ .style = .yellow_land, .sgr = "\x1b[0;2;33m" },
+        .{ .style = .green_land, .sgr = "\x1b[0;2;32m" },
+        .{ .style = .magenta_land, .sgr = "\x1b[0;2;35m" },
+    };
+    for (pinned) |want| try std.testing.expectEqualStrings(want.sgr, want.style.sgr(&term.palette.classic));
 }
 
 test "blit fits a square image at a 2:1 cell aspect and emits pixel cells" {

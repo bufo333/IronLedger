@@ -441,6 +441,9 @@ pub const App = struct {
     /// Star map zoom: 1 = every world fitted into the pane; 2/4/8 = that
     /// many times closer, centred on the cursor world.
     map_zoom: u8 = 1,
+    /// The Map has framed this campaign's first HQ (`map.frameDefault`):
+    /// cleared when a campaign opens, so the first Map draw frames it once.
+    map_framed: bool = false,
     /// Star-map colouring: by faction, industry, standing, or activity.
     map_color: enum { faction, industry, standing, activity } = .faction,
     lab_sel: usize = 0,
@@ -1305,6 +1308,14 @@ pub const App = struct {
         pub fn inside(self: MapGeom, c: [2]i32) bool {
             return c[0] >= self.inner.x and c[0] < self.inner.x + self.inner.w and c[1] >= self.inner.y and c[1] < self.inner.y + self.inner.h;
         }
+
+        /// The map point at a cell's centre, rounded to whole LY: the
+        /// inverse of `cell` wherever a cell spans more than one LY.
+        pub fn ly(self: MapGeom, c: [2]i32) [2]i32 {
+            const x = @as(f64, @floatFromInt(self.min_x)) + (@as(f64, @floatFromInt(c[0] - @as(i32, self.inner.x))) + 0.5) * self.sx;
+            const y = @as(f64, @floatFromInt(self.max_y)) - (@as(f64, @floatFromInt(c[1] - @as(i32, self.inner.y))) + 0.5) * self.sy;
+            return .{ @intFromFloat(@round(x)), @intFromFloat(@round(y)) };
+        }
     };
 
     pub fn mapGeom(view: q.Map, inner: Rect, zoom: u8, center: ?[2]i32) MapGeom {
@@ -1341,16 +1352,23 @@ pub const App = struct {
         return .{ .inner = inner, .min_x = min_x, .max_y = max_y, .sx = sx, .sy = sy };
     }
 
-    pub fn factionStyle(key: []const u8) Style {
+    /// What a faction colour paints: a world glyph or name, or territory.
+    pub const FactionUse = enum { world, territory };
+
+    /// A faction's Map style (rule 43): its bright colour on a world, its
+    /// faint territory colour on land. Only the Great House colours have
+    /// territory; every other faction's is null.
+    pub fn factionStyle(key: []const u8, use: FactionUse) ?Style {
+        const land = use == .territory;
         return switch (q.factionColour(key)) {
-            .blue => .blue,
-            .red => .red,
-            .yellow => .yellow,
-            .green => .green,
-            .magenta => .magenta,
-            .cyan => .cyan,
-            .white => .white,
-            .grey => .grey,
+            .blue => if (land) .blue_land else .blue,
+            .red => if (land) .red_land else .red,
+            .yellow => if (land) .yellow_land else .yellow,
+            .green => if (land) .green_land else .green,
+            .magenta => if (land) .magenta_land else .magenta,
+            .cyan => if (land) null else .cyan,
+            .white => if (land) null else .white,
+            .grey => if (land) null else .grey,
         };
     }
 
@@ -1855,6 +1873,7 @@ pub const App = struct {
         self.mode = .game;
         self.tab = .desk;
         self.focus = 0;
+        self.map_framed = false;
         self.refreshEmblem();
         const st = try q.status(self.a(), self.state());
         self.say(.good, "loaded \"{s}\" at day {d}", .{ try st.outfit_name.markup(self.a()), st.day });
@@ -2171,6 +2190,7 @@ pub const App = struct {
         self.mode = .game;
         self.tab = .desk;
         self.focus = 0;
+        self.map_framed = false;
         self.refreshEmblem();
         self.say(.good, "campaign \"{s}\" begins — day 0. Press ? for help.", .{try (try q.status(self.a(), self.state())).outfit_name.markup(self.a())});
     }
@@ -5489,6 +5509,33 @@ pub fn pressForTest(c: *ClientForTest, key: Key) !void {
     _ = c.app.frame.reset(.retain_capacity);
     try c.app.handleKey(key);
     try c.app.draw();
+}
+
+/// Reopen the client's campaign from its store, as Enter on the welcome
+/// screen's campaign list does, then draw a frame.
+pub fn reopenCampaignForTest(c: *ClientForTest) !void {
+    _ = c.app.frame.reset(.retain_capacity);
+    const campaigns = try c.app.store.campaigns(c.app.a(), c.app.player_id);
+    try c.app.loadCampaign(campaigns[0].id);
+    try c.app.draw();
+}
+
+test "a map cell's centre point maps back to that cell at the widest and the closest zoom" {
+    const client = try clientForTest(std.testing.allocator);
+    defer deinitForTest(client, std.testing.allocator);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const view = try q.map(arena.allocator(), client.app.state());
+    for ([_]Rect{ .{ .x = 2, .y = 4, .w = 146, .h = 44 }, .{ .x = 2, .y = 3, .w = 76, .h = 16 } }) |inner| {
+        for ([_]u8{ 1, 8 }) |zoom| {
+            const geom = App.mapGeom(view, inner, zoom, .{ view.worlds[0].x, view.worlds[0].y });
+            for (0..inner.h) |dy| for (0..inner.w) |dx| {
+                const c: [2]i32 = .{ inner.x + @as(i32, @intCast(dx)), inner.y + @as(i32, @intCast(dy)) };
+                const p = geom.ly(c);
+                try std.testing.expectEqual(c, geom.cell(p[0], p[1]));
+            };
+        }
+    }
 }
 
 test "every screen draws at full size and at 80x24, and the cursor clamps after a resize" {

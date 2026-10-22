@@ -255,10 +255,15 @@ end-turn checklist opens first).
 <img align="right" width="110" src="data/logos/emberguard_mercenary_company.png" alt="">
 
 The star map of the Inner Sphere and near Periphery — 234 systems with faction
-ownership, your HQ network, and deployed companies marked. `h`/`j`/`k`/`l` and
-the arrows pan; `+`/`-` zoom (system names appear at ×2). `c` cycles the colour
-mode: faction, industry, standing, or activity. `f` pre-fills a `found` command
-for the world under the cursor; `o` opens the contract board.
+ownership, your HQ network, and deployed companies marked. It opens on your
+first HQ, close enough to show its whole ring and beachhead band.
+`h`/`j`/`k`/`l` and the arrows pan; `+`/`-` zoom from the whole map (×1) to ×8
+(system names appear at ×2). `w` steps through the worlds where a company is
+on contract, and `H` through your HQs. `c` cycles the colour mode: faction,
+industry, standing, or activity. Under the faction colour, Great House space
+is shaded with a faint dotted wash in the house colour, edged where it meets
+another house or empty space. `f` pre-fills a `found` command for the world
+under the cursor; `o` opens the contract board.
 
 ![Map — faction colour](docs/screenshots/map.svg)
 

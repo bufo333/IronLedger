@@ -183,10 +183,26 @@ p = plain()
 assert "F1 Desk" in p and "END-TURN CHECKLIST" in p, p[-4000:]
 if b"38;2;" in out:
     print("emblem: half-block colour cells emitted")
-send("2"); send("+", 0.6)       # map: zoom in twice, then back out
-assert "zoom ×2" in plain()[-30000:], plain()[-3000:]
-send("+", 0.6); send("-", 0.6); send("-", 0.6)
-assert "zoom ×1" in plain()[-30000:], plain()[-3000:]
+def map_zoom():
+    """The zoom the star map's title shows last (the legend's "names show
+    at zoom ×2" is not it)."""
+    found = re.findall(r"dark · zoom ×(\d)", plain()[-30000:])
+    return int(found[-1]) if found else None
+
+mark = len(out)
+send("2", 0.8)                 # map: it opens framed on the first HQ, closer than the whole map
+framed = map_zoom()
+assert framed in (2, 4, 8), plain()[-3000:]
+# The faction lens washes Great House space in faint house colours.
+assert re.search(rb"\x1b\[0;2;3[1-5]m", out[mark:]), "territory SGR missing on the map"
+while map_zoom() != 1:          # - halves the zoom down to the whole map …
+    before = map_zoom()
+    send("-", 0.6)
+    assert map_zoom() == before // 2, plain()[-3000:]
+while map_zoom() != framed:     # … and + doubles it back
+    before = map_zoom()
+    send("+", 0.6)
+    assert map_zoom() == before * 2, plain()[-3000:]
 send("4")                      # contracts tab
 assert "CONTRACT BOARD" in plain() and "HISTORY" in plain(), plain()[-3000:]
 send("b", 0.8)                 # bargain: negotiation term picker on the offer under the cursor
@@ -277,6 +293,10 @@ send("2")                      # map
 assert "Lyran Commonwealth" in plain()[-30000:], plain()[-3000:]   # faction legend in the side pane
 p = plain()
 assert "STAR MAP" in p and "REACH" in p, p[-3000:]
+send("H", 0.6)                 # the one HQ
+assert wait_for("HQ 1 of 1: ", tail=1500), plain()[-1500:]
+send("w", 0.6)                 # no offer has been accepted, so no company is on contract
+assert wait_for("no company is on contract", tail=1500), plain()[-1500:]
 send("l"); send("j"); send("h"); send("k")
 send("9")                      # people
 p = plain()
@@ -671,7 +691,10 @@ narrow = re.sub(rb"\x1b\[[0-9;?]*[A-Za-z]", b"", out[mark:]).decode("utf-8", "re
 assert "DECISION · [" in narrow and "decide later" in narrow, narrow[-2000:]
 send("\x1b", 0.6)              # decide later: the decision stays in the inbox
 print("decision at 80x24 --ascii OK")
-for k in "234567891":
+mark = len(out)
+send("2", 0.6)                 # the map under high contrast, --ascii, 80x24: the wash draws there too
+assert re.search(rb"\x1b\[0;2;3[1-5]m", out[mark:]), "territory SGR missing on the 80x24 --ascii map"
+for k in "34567891":
     send(k, 0.6)
 send("4"); send("\x1b[C", 0.6); send("\x1b[C", 0.6)        # contracts board at 80 wide: what cannot drop scrolls
 assert re.search(r"< \d", plain()[-30000:]), plain()[-3000:]

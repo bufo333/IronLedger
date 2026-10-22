@@ -35,6 +35,15 @@ pub const sgr = struct {
     pub const cyan = "\x1b[0;96m";
     pub const white = "\x1b[0;97m";
     pub const grey = "\x1b[0;90m";
+    // Great House territory on the star map: faint plus the house's
+    // normal-intensity colour, under its bright world colour above. Semantic,
+    // so the same under every theme; where faint is ignored the intensity
+    // still differs (rule 43).
+    pub const blue_land = "\x1b[0;2;34m";
+    pub const red_land = "\x1b[0;2;31m";
+    pub const yellow_land = "\x1b[0;2;33m";
+    pub const green_land = "\x1b[0;2;32m";
+    pub const magenta_land = "\x1b[0;2;35m";
 };
 
 /// The SGR of each chrome role under one theme (docs/tui.md "Rendering").

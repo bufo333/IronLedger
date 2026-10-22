@@ -208,6 +208,8 @@ filters to the active context (see the Keys description above).
 | `h l` | any | pan the map west / east (j k and the arrows pan too) |
 | `+ -` | any | zoom in / out (names show at zoom ×2) |
 | `c` | any | colour the map by faction, industry, standing or activity |
+| `w` | any | move to the next world where a company is on contract |
+| `H` | any | move to the next HQ |
 | `f` | any | found an HQ on the world under the cursor (fills the command line) |
 | `o` | any | open the contract board |
 
@@ -906,7 +908,13 @@ view model each frame from an arena.
 - **Colors** are semantic only — amber (attention/active), green (ok),
   red (critical), cyan (cursor/focus), dim (chrome) — on the terminal's own
   background, so the client holds on any theme
-  ([rule 43](engineering-contract.md#43-colors-are-semantic)).
+  ([rule 43](engineering-contract.md#43-colors-are-semantic)). Under the
+  faction lens the Map washes Great House space with a sparse faint `·` in
+  the house's normal-intensity colour, with a dot on every rim cell where
+  one house's space meets another's or empty space. Worlds are `o` in the
+  bright house colour. The wash is semantic, so it is the same under every
+  theme, and it does not rely on faint alone: the glyph and the intensity
+  also differ from a world's.
 - **Themes** (`src/tui/theme.zig`) change chrome only. Chrome is drawn in
   roles — a pane's border (`box`), the focused pane's top line (`focus`),
   an unfocused pane's title (`pane_title`), a modal's border and title band
